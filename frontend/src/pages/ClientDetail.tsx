@@ -6,6 +6,7 @@ import {
   type Job,
   type ServiceCatalogueItem,
   type CommunicationRecord,
+  type PortfolioPhoto,
   ApiError,
   JOB_STATUS_LABELS,
   COMMUNICATION_CHANNEL_LABELS,
@@ -18,6 +19,7 @@ export function ClientDetail() {
   const [error, setError] = useState<string | null>(null);
   const [showJobForm, setShowJobForm] = useState(false);
   const [communications, setCommunications] = useState<CommunicationRecord[]>([]);
+  const [photos, setPhotos] = useState<PortfolioPhoto[]>([]);
 
   function loadClient() {
     if (!id) return;
@@ -37,10 +39,16 @@ export function ClientDetail() {
     api.communications.list({ clientId: id }).then(setCommunications).catch(() => {});
   }
 
+  function loadPhotos() {
+    if (!id) return;
+    api.portfolio.list({ clientId: id }).then(setPhotos).catch(() => {});
+  }
+
   useEffect(() => {
     loadClient();
     loadJobs();
     loadCommunications();
+    loadPhotos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -128,6 +136,33 @@ export function ClientDetail() {
                 <td>{COMMUNICATION_CHANNEL_LABELS[c.channel]}</td>
                 <td>{c.summary}</td>
                 <td>{c.followUpNeeded ? "Needed" : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <div className="page-header">
+        <h2>Photos</h2>
+        {id && <Link to={`/portfolio?client_id=${id}`}>Log photo</Link>}
+      </div>
+      {photos.length === 0 ? (
+        <p className="hint">No photos logged for this client yet.</p>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Filename</th>
+              <th>Caption</th>
+              <th>Marketing</th>
+            </tr>
+          </thead>
+          <tbody>
+            {photos.slice(0, 5).map((p) => (
+              <tr key={p.id}>
+                <td>{p.filename}</td>
+                <td>{p.caption ?? "—"}</td>
+                <td>{p.usableForMarketing ? "Yes" : "No"}</td>
               </tr>
             ))}
           </tbody>

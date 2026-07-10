@@ -12,6 +12,7 @@ import * as learningService from "../services/learningService.js";
 import * as communicationService from "../services/communicationService.js";
 import * as notificationService from "../services/notificationService.js";
 import * as dataQualityService from "../services/dataQualityService.js";
+import * as portfolioService from "../services/portfolioService.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -396,6 +397,95 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
         }
       } else {
         const data = await communicationService.listCommunicationRecords(user, {});
+        response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
+      }
+      break;
+    }
+
+    case "log_portfolio_photo": {
+      let clientId: string | undefined;
+      if (command.entities.client_name) {
+        const matches = await leadService.findClientsByName(user, command.entities.client_name);
+        if (matches.length === 0) {
+          response = {
+            intent: command.intent,
+            interpreted: command.entities,
+            ok: false,
+            httpStatus: 404,
+            error: "CLIENT_NOT_FOUND",
+            message: `No client matching "${command.entities.client_name}".`,
+          };
+          break;
+        } else if (matches.length > 1) {
+          response = {
+            intent: command.intent,
+            interpreted: command.entities,
+            ok: false,
+            httpStatus: 409,
+            error: "AMBIGUOUS_REFERENCE",
+            message: `Multiple clients match "${command.entities.client_name}" — be more specific.`,
+            data: matches.map((c) => ({ id: c.id, displayName: c.displayName })),
+          };
+          break;
+        }
+        clientId = matches[0].id;
+      }
+
+      const result = await portfolioService.createPortfolioPhoto(user, {
+        client_id: clientId,
+        filename: command.entities.filename,
+        caption: command.entities.caption,
+        // The Voice/Text Command Layer does not yet capture a source word —
+        // "other" is a reasonable deterministic default the user can always
+        // correct via the form/API, matching the log_communication pattern
+        // of inferring a default rather than blocking on a missing field.
+        source: command.entities.source ?? "other",
+      });
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? undefined : result.message,
+      };
+      break;
+    }
+
+    case "list_portfolio_photos": {
+      if (command.entities.client_name) {
+        const matches = await leadService.findClientsByName(user, command.entities.client_name);
+        if (matches.length === 0) {
+          response = {
+            intent: command.intent,
+            interpreted: command.entities,
+            ok: false,
+            httpStatus: 404,
+            error: "CLIENT_NOT_FOUND",
+            message: `No client matching "${command.entities.client_name}".`,
+          };
+        } else if (matches.length > 1) {
+          response = {
+            intent: command.intent,
+            interpreted: command.entities,
+            ok: false,
+            httpStatus: 409,
+            error: "AMBIGUOUS_REFERENCE",
+            message: `Multiple clients match "${command.entities.client_name}" — be more specific.`,
+            data: matches.map((c) => ({ id: c.id, displayName: c.displayName })),
+          };
+        } else {
+          const data = await portfolioService.listPortfolioPhotos(user, {
+            clientId: matches[0].id,
+            usableForMarketing: command.entities.usable_for_marketing,
+          });
+          response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
+        }
+      } else {
+        const data = await portfolioService.listPortfolioPhotos(user, {
+          usableForMarketing: command.entities.usable_for_marketing,
+        });
         response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
       }
       break;

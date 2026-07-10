@@ -24,6 +24,7 @@ import { LeadDetail } from "./pages/LeadDetail";
 import { CommunicationLog } from "./pages/CommunicationLog";
 import { Notifications } from "./pages/Notifications";
 import { DataQuality } from "./pages/DataQuality";
+import { Portfolio } from "./pages/Portfolio";
 
 export default function App() {
   return (
@@ -61,6 +62,7 @@ export default function App() {
             <Route path="/communications" element={<CommunicationLog />} />
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/data-quality" element={<DataQuality />} />
+            <Route path="/portfolio" element={<Portfolio />} />
           </Route>
         </Routes>
       </BrowserRouter>

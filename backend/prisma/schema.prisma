@@ -29,6 +29,7 @@ model Company {
   learningRules       LearningRule[]
   communicationRecords CommunicationRecord[]
   notificationAcknowledgements NotificationAcknowledgement[]
+  portfolioPhotos     PortfolioPhoto[]
 
   @@map("companies")
 }
@@ -79,6 +80,7 @@ model Client {
   jobs    Job[]
   quotes  Quote[]
   communicationRecords CommunicationRecord[]
+  portfolioPhotos      PortfolioPhoto[]
 
   @@index([companyId])
   @@map("clients")
@@ -116,6 +118,7 @@ model Job {
   serviceCatalogueItem ServiceCatalogueItem? @relation(fields: [serviceCatalogueItemId], references: [id])
   quotes              Quote[]
   communicationRecords CommunicationRecord[]
+  portfolioPhotos      PortfolioPhoto[]
 
   @@index([companyId])
   @@index([clientId])
@@ -423,6 +426,44 @@ model NotificationAcknowledgement {
   @@unique([companyId, notificationKey])
   @@index([companyId])
   @@map("notification_acknowledgements")
+}
+
+
+// Portfolio and Photo Intelligence Module — the manual-entry foundation of a
+// future automated photo-selection/website-publishing workflow. See VCUF
+// master documentation and the vcubf-programmer-skill "Photo and portfolio
+// rule": every selected photograph must have a source, an optional link to
+// the client/job it relates to, and an explicit public-use status. This
+// slice deliberately does not store or move actual image files — there is
+// no upload/storage connector yet — `filename` is just the literal
+// filename/reference the user typed in, never invented. `usableForMarketing`
+// is only an internal tag reviewed by the user; it does not publish
+// anything to a website or social channel by itself (no connector exists
+// for that yet, and publishing is a separate, higher-risk future action).
+model PortfolioPhoto {
+  id                        String    @id @default(uuid())
+  companyId                 String    @map("company_id")
+  clientId                  String?   @map("client_id")
+  jobId                     String?   @map("job_id")
+  filename                  String
+  caption                   String?
+  tags                      String[]  @default([])
+  takenAt                   DateTime? @map("taken_at")
+  source                    String
+  usableForMarketing        Boolean   @default(false) @map("usable_for_marketing")
+  usableForMarketingNotes   String?   @map("usable_for_marketing_notes")
+  createdBy                 String?   @map("created_by")
+  createdAt                 DateTime  @default(now()) @map("created_at")
+  updatedAt                 DateTime  @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  client  Client?  @relation(fields: [clientId], references: [id])
+  job     Job?     @relation(fields: [jobId], references: [id])
+
+  @@index([companyId])
+  @@index([clientId])
+  @@index([jobId])
+  @@map("portfolio_photos")
 }
 
 

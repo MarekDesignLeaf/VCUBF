@@ -492,6 +492,44 @@ export interface DataQualityReport {
   missingContactIssues: MissingContactIssue[];
 }
 
+// Portfolio and Photo Intelligence Module — the manual-entry foundation of a
+// future automated photo-selection/website-publishing workflow. There is no
+// image upload/storage connector yet: `filename` is just the literal
+// filename/reference the user typed in, and `source` is always a value the
+// user picked from this fixed list, never guessed. Flipping
+// usableForMarketing is only an internal review tag — it does not publish
+// anything to a website or social channel by itself.
+export const PORTFOLIO_PHOTO_SOURCES = [
+  "employee_upload",
+  "client_provided",
+  "before_after",
+  "other",
+] as const;
+export type PortfolioPhotoSource = (typeof PORTFOLIO_PHOTO_SOURCES)[number];
+
+export const PORTFOLIO_PHOTO_SOURCE_LABELS: Record<PortfolioPhotoSource, string> = {
+  employee_upload: "Employee upload",
+  client_provided: "Client provided",
+  before_after: "Before/after set",
+  other: "Other",
+};
+
+export interface PortfolioPhoto {
+  id: string;
+  clientId?: string | null;
+  jobId?: string | null;
+  filename: string;
+  caption?: string | null;
+  tags: string[];
+  takenAt?: string | null;
+  source: PortfolioPhotoSource;
+  usableForMarketing: boolean;
+  usableForMarketingNotes?: string | null;
+  createdAt: string;
+  client?: { id: string; displayName: string } | null;
+  job?: { id: string; jobTitle: string } | null;
+}
+
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -686,6 +724,23 @@ export const api = {
   },
   dataQuality: {
     report: () => request<DataQualityReport>("/data-quality"),
+  },
+  portfolio: {
+    list: (params?: { clientId?: string; jobId?: string; tag?: string; usableForMarketing?: boolean; source?: string }) => {
+      const qs = new URLSearchParams();
+      if (params?.clientId) qs.set("client_id", params.clientId);
+      if (params?.jobId) qs.set("job_id", params.jobId);
+      if (params?.tag) qs.set("tag", params.tag);
+      if (params?.usableForMarketing !== undefined) qs.set("usable_for_marketing", String(params.usableForMarketing));
+      if (params?.source) qs.set("source", params.source);
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request<PortfolioPhoto[]>(`/portfolio${suffix}`);
+    },
+    get: (id: string) => request<PortfolioPhoto>(`/portfolio/${id}`),
+    create: (data: Record<string, unknown>) =>
+      request<PortfolioPhoto>("/portfolio", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<PortfolioPhoto>(`/portfolio/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   },
   command: {
     text: (text: string) =>

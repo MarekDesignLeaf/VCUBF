@@ -5,6 +5,7 @@ import {
   type Job,
   type Employee,
   type CommunicationRecord,
+  type PortfolioPhoto,
   JOB_STATUSES,
   JOB_STATUS_LABELS,
   COMMUNICATION_CHANNEL_LABELS,
@@ -20,6 +21,7 @@ export function JobDetail() {
   const [assignWarning, setAssignWarning] = useState<string | null>(null);
   const [missingSkills, setMissingSkills] = useState<string[]>([]);
   const [communications, setCommunications] = useState<CommunicationRecord[]>([]);
+  const [photos, setPhotos] = useState<PortfolioPhoto[]>([]);
 
   function load() {
     if (!id) return;
@@ -36,6 +38,10 @@ export function JobDetail() {
   useEffect(() => {
     if (!id) return;
     api.communications.list({ jobId: id }).then(setCommunications).catch(() => undefined);
+  }, [id]);
+  useEffect(() => {
+    if (!id) return;
+    api.portfolio.list({ jobId: id }).then(setPhotos).catch(() => undefined);
   }, [id]);
 
   async function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -178,6 +184,33 @@ export function JobDetail() {
                 <td>{COMMUNICATION_CHANNEL_LABELS[c.channel]}</td>
                 <td>{c.summary}</td>
                 <td>{c.followUpNeeded ? "Needed" : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <div className="page-header">
+        <h2>Photos</h2>
+        <Link to={`/portfolio?client_id=${job.clientId}&job_id=${job.id}`}>Log photo</Link>
+      </div>
+      {photos.length === 0 ? (
+        <p className="hint">No photos logged for this job yet.</p>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Filename</th>
+              <th>Caption</th>
+              <th>Marketing</th>
+            </tr>
+          </thead>
+          <tbody>
+            {photos.slice(0, 5).map((p) => (
+              <tr key={p.id}>
+                <td>{p.filename}</td>
+                <td>{p.caption ?? "—"}</td>
+                <td>{p.usableForMarketing ? "Yes" : "No"}</td>
               </tr>
             ))}
           </tbody>

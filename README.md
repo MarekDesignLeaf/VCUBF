@@ -387,11 +387,43 @@ npm run dev                 # http://localhost:5173
   a table of clients missing a contact method — plus the same findings surfacing in the
   Notifications feed for acknowledgement.
 
-Backend: 166/166 tests passing across 17 suites (auth, CRM clients, CRM jobs, CRM leads,
+- **Portfolio and Photo Intelligence Module**: `POST /portfolio`, `PUT /portfolio/:id`,
+  `GET /portfolio`, `GET /portfolio/:id` (Action Contracts `log_portfolio_photo`,
+  `update_portfolio_photo`) are the manual-entry foundation of a future automated
+  photo-selection/website-publishing workflow. A record is a real photo reference only —
+  `filename` is exactly the literal filename/reference the user typed in, `source` is
+  always one of a fixed set of user-selected values (`employee_upload`, `client_provided`,
+  `before_after`, `other`) never guessed — optionally linked to a client and/or job
+  (both optional, but each is validated against the company's real records before a
+  record is created, matching the dual-optional-FK pattern in `communicationService.ts`).
+  There is no image upload/storage connector yet, so no actual image file is stored,
+  moved, or served by this module. `usableForMarketing` (+ optional
+  `usableForMarketingNotes`) is an internal review tag only, reviewed by a human — it does
+  not publish anything to a website or social channel by itself, since no such connector
+  exists yet; that remains a separate, higher-risk future action. Both actions are risk
+  level 1 (draft/internal-tag only, the same level used for `draft_job_advert`), lower
+  than the risk level 2 used for CRM record creation like `log_communication`, because
+  nothing here changes a core CRM fact or triggers any external effect. Listing supports
+  filtering by client, job, tag, source, and usable-for-marketing. Text commands: "log
+  photo <filename> for <client>: <caption>" / "log photo <filename>: <caption>" (source
+  defaults to "other" when not specified via text, the same deterministic-default pattern
+  used for `log_communication`'s channel/direction), "list photos" / "list photos for
+  <client>" / "show marketing photos". This module is deliberately generic and CRM-linked
+  so a future automated photo-selection/AI-tagging/website-publishing workflow can write
+  into this exact same table and linkage instead of being a second, disconnected photo
+  store.
+- **Frontend — Portfolio**: new Portfolio page (linked in the sidebar as "Photos") — a
+  filterable list (by tag, source, marketing-usable) and a "Log photo" quick-entry form
+  (filename, caption, tags, client picker, source select, usable-for-marketing checkbox +
+  notes). Client detail and job detail pages each gained a "Photos" section showing the
+  five most recent photos for that client/job plus a "Log photo" link that prefills
+  `client_id` (and `job_id` from the job page).
+
+Backend: 180/180 tests passing across 18 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, employee/permission management, service catalogue, quotes,
-recruitment, playbooks, learning, communication log, notifications/escalation, and data
-quality) —
+recruitment, playbooks, learning, communication log, notifications/escalation, data
+quality, and portfolio/photo) —
 covering permissions, validation, duplicate
 detection, cross-tenant checks, status-transition validation, lead conversion and
 duplicate-client reuse, command parsing for every supported intent, ambiguous-reference
@@ -417,7 +449,13 @@ proving an unrelated client is never flagged, missing-contact-method detection (
 a client with either an email or phone is not flagged), additive integration into the
 unified notification feed, acknowledging a data-quality finding via the existing
 notification mechanism without touching the underlying client record, and the "check
-data quality" text command — against a real Postgres instance.
+data quality" text command — against a real Postgres instance. The Portfolio and Photo
+Intelligence Module — permission checks, validation errors (including an unknown
+`source` value), CLIENT_NOT_FOUND/JOB_NOT_FOUND on invalid links, successful create with
+risk-level and audit before/after assertions, creating a photo with no client or job at
+all, list filtering by client/job/tag/source/usable-for-marketing, update, single-record
+get, and a company-scoping test proving a company B photo is never visible, listed, or
+updatable by company A.
 
 Frontend: `npm run build` and `npm run dev` both verified working (clean production
 build, dev server responds 200).
@@ -463,9 +501,7 @@ analysis layer only: it does not merge, edit, or delete client records, and ther
 manually on the two client records after a human reviews it; it also only compares
 Client records within CRM Core (email/phone/name), not leads, jobs, or cross-entity
 matches, and there is no configurable similarity threshold (the Levenshtein cutoff and
-phone-normalization rule are fixed in code, not a per-company setting). Also still
-missing: website/photo modules, business growth content generation, and a real voice
-(speech) front-end (the Voice and Text Command Layer currently accepts typed text only).
+phone-normalization rule are fixed in code, not a per-company setting). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, or serving (a `filename` is just a typed-in reference, not a stored file), no AI-assisted photo selection or auto-tagging, and no website/social publishing — flipping `usableForMarketing` only sets an internal review tag, it never publishes anything anywhere, since no such connector exists yet. Also still missing: website content modules, business growth content generation, and a real voice (speech) front-end (the Voice and Text Command Layer currently accepts typed text only).
 Build order should follow the roadmap in the master documentation (Phase 1 → Phase 2 →
 …), not be improvised per-feature.
 

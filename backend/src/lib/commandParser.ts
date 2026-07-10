@@ -34,6 +34,11 @@ export type ParsedCommand =
       entities: { client_name: string; channel: string; direction: string; summary: string };
     }
   | { intent: "list_communications"; entities: { client_name?: string } }
+  | {
+      intent: "log_portfolio_photo";
+      entities: { filename: string; client_name?: string; caption?: string; source?: string };
+    }
+  | { intent: "list_portfolio_photos"; entities: { client_name?: string; usable_for_marketing?: boolean } }
   | { intent: "list_follow_ups"; entities: Record<string, never> }
   | { intent: "list_notifications"; entities: Record<string, never> }
   | { intent: "list_data_quality"; entities: Record<string, never> }
@@ -170,6 +175,31 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     if (!clientName || !summary) return { intent: "unrecognized", entities: {} };
     return { intent: "log_communication", entities: { client_name: clientName, channel, direction, summary } };
   }
+
+  // Portfolio and Photo Intelligence Module — manual-entry foundation.
+  // "log photo IMG_001.jpg for Jane Smith: kitchen after refit"
+  // "log photo IMG_002.jpg: site visit" (no client)
+  m = text.match(/^log\s+photo\s+(\S+)\s+for\s+(.+?)\s*:\s*(.+)$/i);
+  if (m) {
+    const filename = m[1].trim();
+    const clientName = m[2].trim();
+    const caption = m[3].trim();
+    if (!filename || !caption) return { intent: "unrecognized", entities: {} };
+    return { intent: "log_portfolio_photo", entities: { filename, client_name: clientName, caption } };
+  }
+  m = text.match(/^log\s+photo\s+(\S+)\s*:\s*(.+)$/i);
+  if (m) {
+    const filename = m[1].trim();
+    const caption = m[2].trim();
+    if (!filename || !caption) return { intent: "unrecognized", entities: {} };
+    return { intent: "log_portfolio_photo", entities: { filename, caption } };
+  }
+
+  // "list photos for Jane Smith" / "show marketing photos" / "list photos"
+  if (/^(?:list|show)\s+marketing\s+photos?$/i.test(text))
+    return { intent: "list_portfolio_photos", entities: { usable_for_marketing: true } };
+  m = text.match(/^(?:list|show)\s+photos?(?:\s+for\s+(.+))?$/i);
+  if (m) return { intent: "list_portfolio_photos", entities: { client_name: m[1]?.trim() } };
 
   if (/^(?:list|show)\s+follow[\s-]?ups?$/i.test(text)) return { intent: "list_follow_ups", entities: {} };
 

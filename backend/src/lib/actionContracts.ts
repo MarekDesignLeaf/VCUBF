@@ -555,3 +555,47 @@ export const ANALYZE_DATA_QUALITY_ACTION: ActionContract = {
   dataSources: ["crm.clients"],
   possibleErrors: ["MISSING_PERMISSION"],
 };
+
+// Portfolio and Photo Intelligence Module — the manual-entry foundation of a
+// future automated photo-selection/website-publishing workflow (see
+// prisma/schema.prisma PortfolioPhoto and the vcubf-programmer-skill "Photo
+// and portfolio rule"). Logging a photo record is a real CRM-adjacent fact
+// (a real photo reference, optionally linked to a client/job) but nothing
+// here stores, moves, or publishes an actual image file, and there is no
+// upload/storage or website/social connector yet — so this is deliberately
+// kept at risk level 1 (draft/internal-tag only), the same level used for
+// draft_job_advert, not the level 2 used for CRM record creation like
+// log_communication/create_job. Flipping usableForMarketing to true is
+// still only an internal review tag reviewed by a human before any future
+// separate, connector-dependent publishing action — it does not publish
+// anything itself, so it does not warrant a higher risk level than a normal
+// update.
+export const PORTFOLIO_PHOTO_SOURCES = [
+  "employee_upload",
+  "client_provided",
+  "before_after",
+  "other",
+] as const;
+export type PortfolioPhotoSource = (typeof PORTFOLIO_PHOTO_SOURCES)[number];
+
+export const LOG_PORTFOLIO_PHOTO_ACTION: ActionContract = {
+  actionName: "log_portfolio_photo",
+  purpose:
+    "Record a real photograph reference (filename, caption, tags, source) optionally linked to a client and/or job, from user-entered details only — no image file is stored or uploaded by this action.",
+  requiredPermission: "crm.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.clients", "crm.jobs"],
+  possibleErrors: ["MISSING_PERMISSION", "MISSING_DATA", "VALIDATION_FAILED", "CLIENT_NOT_FOUND", "JOB_NOT_FOUND"],
+};
+
+export const UPDATE_PORTFOLIO_PHOTO_ACTION: ActionContract = {
+  actionName: "update_portfolio_photo",
+  purpose:
+    "Update a previously logged photo record's caption, tags, source, or marketing-usable review tag and notes.",
+  requiredPermission: "crm.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.portfolio_photos"],
+  possibleErrors: ["MISSING_PERMISSION", "PORTFOLIO_PHOTO_NOT_FOUND", "VALIDATION_FAILED"],
+};
