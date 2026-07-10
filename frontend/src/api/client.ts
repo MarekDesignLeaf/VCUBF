@@ -94,6 +94,33 @@ export interface Job {
   client?: { id: string; displayName: string };
 }
 
+
+export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
+export type LeadStatus = (typeof LEAD_STATUSES)[number];
+
+export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
+  new: "New",
+  contacted: "Contacted",
+  qualified: "Qualified",
+  converted: "Converted",
+  lost: "Lost",
+};
+
+export interface Lead {
+  id: string;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  serviceRequested?: string | null;
+  location?: string | null;
+  source?: string | null;
+  urgency?: string | null;
+  leadStatus: LeadStatus;
+  notes?: string | null;
+  convertedClientId?: string | null;
+  createdAt: string;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
@@ -118,6 +145,19 @@ export const api = {
       request<Job>("/crm/jobs", { method: "POST", body: JSON.stringify(data) }),
     changeStatus: (id: string, jobStatus: JobStatus) =>
       request<Job>(`/crm/jobs/${id}`, { method: "PUT", body: JSON.stringify({ job_status: jobStatus }) }),
+  },
+  leads: {
+    list: (params?: { status?: string }) => {
+      const qs = new URLSearchParams();
+      if (params?.status) qs.set("status", params.status);
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request<Lead[]>(`/crm/leads${suffix}`);
+    },
+    get: (id: string) => request<Lead>(`/crm/leads/${id}`),
+    create: (data: Record<string, unknown>) =>
+      request<Lead>("/crm/leads", { method: "POST", body: JSON.stringify(data) }),
+    convert: (id: string) =>
+      request<{ lead: Lead; client: Client }>(`/crm/leads/${id}/convert`, { method: "POST" }),
   },
 };
 

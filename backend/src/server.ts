@@ -4,6 +4,7 @@ import cors from "cors";
 import { authRouter } from "./modules/auth/routes.js";
 import { clientsRouter } from "./modules/crm/clients.js";
 import { jobsRouter } from "./modules/crm/jobs.js";
+import { leadsRouter } from "./modules/crm/leads.js";
 import { auditRouter } from "./modules/audit/routes.js";
 
 export function createServer() {
@@ -16,6 +17,7 @@ export function createServer() {
   app.use("/auth", authRouter);
   app.use("/crm/clients", clientsRouter);
   app.use("/crm/jobs", jobsRouter);
+  app.use("/crm/leads", leadsRouter);
   app.use("/audit", auditRouter);
 
   // Fallback error handler — the system must fail safely, never crash silently.

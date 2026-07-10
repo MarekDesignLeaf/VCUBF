@@ -5,8 +5,8 @@ Web frontend + backend for **VCUF (VoiceControl Universal Framework)**, built ar
 project folder (`VCUF_Master_Documentation_Secretary_Voice_Control_EN.docx`) for the full
 architecture.
 
-This repo covers the first two vertical slices of the MVP: **Secretary Core** (auth,
-permissions, audit log) + **CRM Core** (clients, jobs).
+This repo covers three vertical slices of the MVP: **Secretary Core** (auth,
+permissions, audit log), **CRM Core** (clients, jobs), and **Lead Intake Module** (leads).
 
 ## Structure
 
@@ -76,10 +76,19 @@ npm run dev                 # http://localhost:5173
 - **Frontend**: login, dashboard shell, clients list/detail/create, jobs list/detail
   with a status-change dropdown, "new job" form embedded on the client detail page
   (a job cannot be created without picking an existing client — no orphan jobs).
+- **Lead Intake Module — Leads**: create (manual entry), list (filterable by status),
+  get, and **convert to client** — creates a real CRM Core client from the lead's
+  contact details (or reuses an existing client with a matching email, so conversion
+  never forks a duplicate), links the lead to the resulting client, and marks the
+  lead `converted`. A lead cannot be converted twice (409 `UNSUPPORTED_ACTION`).
+  Action Contracts: `create_lead`, `convert_lead_to_client`.
+- **Frontend — Leads**: leads list with inline "new lead" form, lead detail page
+  with a "Convert to client" button that redirects straight to the new client record.
 
-Backend: 18/18 tests passing (auth + permissions + validation + duplicate detection +
+Backend: 26/26 tests passing (auth + permissions + validation + duplicate detection +
 cross-tenant client check + status-transition validation + audit-entry assertions,
-including before/after state on status changes) against a real Postgres instance.
+including before/after state on status changes, lead conversion and duplicate-
+client reuse on conversion) against a real Postgres instance.
 
 Frontend: `npm run build` and `npm run dev` both verified working (clean production
 build, dev server responds 200).

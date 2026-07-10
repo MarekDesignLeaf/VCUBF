@@ -61,3 +61,32 @@ export const CHANGE_JOB_STATUS_ACTION: ActionContract = {
   dataSources: ["user_input", "crm.jobs"],
   possibleErrors: ["MISSING_PERMISSION", "MISSING_DATA", "VALIDATION_FAILED", "JOB_NOT_FOUND", "UNSUPPORTED_ACTION"],
 };
+
+// Lead Intake Module — statuses for the lead lifecycle before conversion to a
+// real CRM client. See VCUF master documentation section 24 (Lead Intake Module).
+export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
+export type LeadStatus = (typeof LEAD_STATUSES)[number];
+
+export const CREATE_LEAD_ACTION: ActionContract = {
+  actionName: "create_lead",
+  purpose: "Create a new lead record from an enquiry source (manual entry in this slice).",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input"],
+  possibleErrors: ["MISSING_PERMISSION", "MISSING_DATA", "VALIDATION_FAILED"],
+};
+
+// Converting a lead creates a real CRM client record. This is still an internal
+// data change (risk level 2), not external communication — no message is sent
+// to anyone as part of conversion. The system must not silently convert an
+// already-converted lead twice.
+export const CONVERT_LEAD_ACTION: ActionContract = {
+  actionName: "convert_lead_to_client",
+  purpose: "Convert a qualified lead into a CRM Core client record, preserving the lead as its origin.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["crm.leads"],
+  possibleErrors: ["MISSING_PERMISSION", "LEAD_NOT_FOUND", "UNSUPPORTED_ACTION", "DUPLICATE_CLIENT_POSSIBLE"],
+};

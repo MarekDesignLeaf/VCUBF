@@ -18,6 +18,7 @@ model Company {
   users     User[]
   clients   Client[]
   jobs      Job[]
+  leads     Lead[]
   auditLogs AuditLog[]
 
   @@map("companies")
@@ -87,6 +88,30 @@ model Job {
   @@index([companyId])
   @@index([clientId])
   @@map("jobs")
+}
+
+
+model Lead {
+  id                String    @id @default(uuid())
+  companyId         String    @map("company_id")
+  name              String
+  phone             String?
+  email             String?
+  serviceRequested  String?   @map("service_requested")
+  location          String?
+  source            String?
+  urgency           String?
+  leadStatus        String    @default("new") @map("lead_status")
+  notes             String?
+  convertedClientId String?   @map("converted_client_id")
+  createdBy         String?   @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+  @@map("leads")
 }
 
 model AuditLog {
