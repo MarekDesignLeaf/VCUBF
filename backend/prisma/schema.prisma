@@ -22,6 +22,8 @@ model Company {
   auditLogs           AuditLog[]
   serviceCatalogueItems ServiceCatalogueItem[]
   quotes              Quote[]
+  jobOpenings         JobOpening[]
+  candidates          Candidate[]
 
   @@map("companies")
 }
@@ -216,6 +218,64 @@ model QuoteItem {
   @@index([quoteId])
   @@index([serviceCatalogueItemId])
   @@map("quote_items")
+}
+
+
+// Recruitment and Workforce Expansion Module — see project instructions
+// section 6. Every field here is what the user entered: reason, urgency,
+// required skills, experience and language requirements are never invented,
+// and the module never legally hires anyone, sets a wage, or confirms
+// employment terms — it only tracks openings and candidates and drafts
+// content for the user to review and use elsewhere.
+model JobOpening {
+  id                        String   @id @default(uuid())
+  companyId                 String   @map("company_id")
+  title                     String
+  reason                    String?
+  urgency                   String   @default("medium")
+  openingStatus             String   @default("draft") @map("opening_status")
+  skillsRequired            String[] @default([]) @map("skills_required")
+  expectedTasks             String?  @map("expected_tasks")
+  minExperienceYears        Float?   @map("min_experience_years")
+  preferredExperienceYears  Float?   @map("preferred_experience_years")
+  languageRequirements      String[] @default([]) @map("language_requirements")
+  availabilityRequirements  String?  @map("availability_requirements")
+  description               String?
+  // The generated advert is stored so it can be reviewed and reused, but it
+  // is only ever built from the real fields above — see
+  // recruitmentService.buildAdvertText. Nothing is published automatically;
+  // there is no job-board connector.
+  draftAdvertText           String?  @map("draft_advert_text")
+  createdBy                 String?  @map("created_by")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  company    Company     @relation(fields: [companyId], references: [id])
+  candidates Candidate[]
+
+  @@index([companyId])
+  @@map("job_openings")
+}
+
+model Candidate {
+  id           String   @id @default(uuid())
+  companyId    String   @map("company_id")
+  jobOpeningId String   @map("job_opening_id")
+  name         String
+  email        String?
+  phone        String?
+  stage        String   @default("new")
+  notes        String?
+  createdBy    String?  @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  company    Company    @relation(fields: [companyId], references: [id])
+  jobOpening JobOpening @relation(fields: [jobOpeningId], references: [id])
+
+  @@index([companyId])
+  @@index([jobOpeningId])
+  @@map("candidates")
 }
 
 model AuditLog {

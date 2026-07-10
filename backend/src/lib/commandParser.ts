@@ -26,6 +26,7 @@ export type ParsedCommand =
   | { intent: "detect_overload"; entities: Record<string, never> }
   | { intent: "create_service"; entities: { name: string; category?: string } }
   | { intent: "list_quotes"; entities: { client_name?: string } }
+  | { intent: "list_job_openings"; entities: Record<string, never> }
   | { intent: "list_clients"; entities: Record<string, never> }
   | { intent: "list_jobs"; entities: Record<string, never> }
   | { intent: "list_leads"; entities: Record<string, never> }
@@ -118,6 +119,8 @@ export function parseTextCommand(rawText: string): ParsedCommand {
 
   m = text.match(/^(?:list|show)\s+quotes(?:\s+for\s+(.+))?$/i);
   if (m) return { intent: "list_quotes", entities: { client_name: m[1]?.trim() } };
+
+  if (/^(?:list|show)\s+job\s+openings?$/i.test(text)) return { intent: "list_job_openings", entities: {} };
 
   if (/^(?:list|show)\s+clients?$/i.test(text)) return { intent: "list_clients", entities: {} };
   if (/^(?:list|show)\s+jobs?$/i.test(text)) return { intent: "list_jobs", entities: {} };

@@ -106,6 +106,12 @@ describe("commandParser", () => {
     if (scoped.intent === "list_quotes") assert.equal(scoped.entities.client_name, "Quote Test Client");
   });
 
+  it("parses 'list job openings'", () => {
+    const result = parseTextCommand("list job openings");
+    assert.equal(result.intent, "list_job_openings");
+    assert.equal(parseTextCommand("show job opening").intent, "list_job_openings");
+  });
+
   it("returns unrecognized for gibberish instead of guessing", () => {
     const result = parseTextCommand("please make the weather nicer today");
     assert.equal(result.intent, "unrecognized");

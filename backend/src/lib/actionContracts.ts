@@ -197,7 +197,14 @@ export const UPDATE_EMPLOYEE_ACTION: ActionContract = {
 // The fixed set of permission strings the system understands. Kept as
 // structured data (not invented per-request) so the UI can offer exactly
 // these as checkboxes and the backend can validate against exactly these.
-export const KNOWN_PERMISSIONS = ["crm.read", "crm.manage", "users.manage", "audit.read", "voice.execute"] as const;
+export const KNOWN_PERMISSIONS = [
+  "crm.read",
+  "crm.manage",
+  "users.manage",
+  "audit.read",
+  "voice.execute",
+  "recruitment.manage",
+] as const;
 export type KnownPermission = (typeof KNOWN_PERMISSIONS)[number];
 
 // Service Catalogue Module — see VCUF master documentation section 24C.
@@ -265,4 +272,88 @@ export const CHANGE_QUOTE_STATUS_ACTION: ActionContract = {
   confirmationRequired: false,
   dataSources: ["user_input", "crm.quotes"],
   possibleErrors: ["MISSING_PERMISSION", "QUOTE_NOT_FOUND", "VALIDATION_FAILED"],
+};
+
+// Recruitment and Workforce Expansion Module — see project instructions
+// section 6. This module tracks openings and candidates and drafts content
+// for the user to review; it never legally hires anyone, sets a wage, or
+// confirms employment terms, per the explicit "do not legally hire anyone...
+// without explicit user approval" rule.
+export const JOB_OPENING_STATUSES = ["draft", "open", "closed"] as const;
+export type JobOpeningStatus = (typeof JOB_OPENING_STATUSES)[number];
+
+export const JOB_OPENING_URGENCY_LEVELS = ["low", "medium", "high"] as const;
+export type JobOpeningUrgency = (typeof JOB_OPENING_URGENCY_LEVELS)[number];
+
+export const CANDIDATE_STAGES = [
+  "new",
+  "screening",
+  "interview",
+  "trial_day",
+  "offer",
+  "hired",
+  "rejected",
+] as const;
+export type CandidateStage = (typeof CANDIDATE_STAGES)[number];
+
+export const CREATE_JOB_OPENING_ACTION: ActionContract = {
+  actionName: "create_job_opening",
+  purpose:
+    "Record a real hiring need — role, required skills, reason, urgency, and requirements — as a structured job opening.",
+  requiredPermission: "recruitment.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
+export const UPDATE_JOB_OPENING_ACTION: ActionContract = {
+  actionName: "update_job_opening",
+  purpose: "Update a job opening's details or move it through its status (draft, open, closed).",
+  requiredPermission: "recruitment.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.job_openings"],
+  possibleErrors: ["MISSING_PERMISSION", "JOB_OPENING_NOT_FOUND", "VALIDATION_FAILED"],
+};
+
+// Drafting only — see project instructions section 9 ("Drafting can usually
+// run without confirmation"). The advert text is built exclusively from the
+// job opening's own fields (title, required skills, description, experience
+// and language requirements) — no wage, no invented perks, no company claims
+// that were not entered elsewhere. There is no job-board connector, so this
+// action never publishes anything; the result is stored for the user to
+// copy or edit.
+export const DRAFT_JOB_ADVERT_ACTION: ActionContract = {
+  actionName: "draft_job_advert",
+  purpose: "Generate a draft job advert from a job opening's real, user-entered fields only, for the user to review and place manually.",
+  requiredPermission: "recruitment.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["crm.job_openings"],
+  possibleErrors: ["MISSING_PERMISSION", "JOB_OPENING_NOT_FOUND"],
+};
+
+export const CREATE_CANDIDATE_ACTION: ActionContract = {
+  actionName: "create_candidate",
+  purpose: "Add a candidate to a job opening's pipeline from user-entered contact details.",
+  requiredPermission: "recruitment.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.job_openings"],
+  possibleErrors: ["MISSING_PERMISSION", "JOB_OPENING_NOT_FOUND", "VALIDATION_FAILED"],
+};
+
+// Moving a candidate to "hired" is still only an internal pipeline record —
+// it does not create an employee account, set a wage, or confirm employment
+// terms. Turning a hired candidate into a real system user (Employee and
+// Permission Model) remains a separate, explicit action the user takes.
+export const UPDATE_CANDIDATE_ACTION: ActionContract = {
+  actionName: "update_candidate",
+  purpose: "Update a candidate's stage or notes within a job opening's pipeline.",
+  requiredPermission: "recruitment.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.candidates"],
+  possibleErrors: ["MISSING_PERMISSION", "CANDIDATE_NOT_FOUND", "VALIDATION_FAILED"],
 };

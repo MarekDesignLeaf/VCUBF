@@ -195,6 +195,21 @@ describe("command/text", () => {
     assert.equal(res.body.error, "AMBIGUOUS_REFERENCE");
   });
 
+  it("lists job openings via a text command", async () => {
+    await request(app)
+      .post("/recruitment/job-openings")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ title: "Text Command Opening" });
+
+    const res = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "list job openings" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.intent, "list_job_openings");
+    assert.ok(res.body.data.some((o: any) => o.title === "Text Command Opening"));
+  });
+
   it("lists clients via a text command", async () => {
     const res = await request(app)
       .post("/command/text")

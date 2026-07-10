@@ -225,17 +225,47 @@ npm run dev                 # http://localhost:5173
   backend, and a status dropdown on existing quotes. "New quote" links were added from
   both the client detail page and the job detail page, prefilling the client/job.
 
-Backend: 92/92 tests passing across 11 suites (auth, CRM clients, CRM jobs, CRM leads,
+- **Recruitment and Workforce Expansion Module**: `POST /recruitment/job-openings`,
+  `PUT /recruitment/job-openings/:id`, `POST /recruitment/job-openings/:id/draft-advert`,
+  `POST /recruitment/job-openings/:id/candidates`, `PUT /recruitment/candidates/:id` (Action
+  Contracts `create_job_opening`, `update_job_opening`, `draft_job_advert`,
+  `create_candidate`, `update_candidate`) track a real hiring need — role, reason,
+  urgency, required skills, expected tasks, experience and language requirements, all
+  exactly what the user entered — through to real candidates moving through a fixed
+  pipeline (`new → screening → interview → trial_day → offer → hired / rejected`).
+  `draft_job_advert` (risk 1, drafting-only per project instructions section 9) builds
+  advert text using `backend/src/services/recruitmentService.ts#buildAdvertText`, a pure
+  template that only ever reads the opening's own fields — pay, benefits and employment
+  terms are deliberately never included, and there is no job-board connector, so nothing
+  is ever published automatically; the draft is stored on the opening for the user to
+  copy or edit. Moving a candidate to `hired` is still only a pipeline record — it does
+  not create a user account, set a wage, or confirm employment terms (covered explicitly
+  by a test); turning a hired candidate into real system access remains a separate,
+  deliberate step on the Employees page. A new fixed permission, `recruitment.manage`,
+  was added to `KNOWN_PERMISSIONS` and gates every route in this module. Text command:
+  "list job openings".
+- **Frontend — Recruitment**: new Recruitment page (visible in navigation only to users
+  holding `recruitment.manage`, matching the Employee-management gating pattern) listing
+  openings with status/urgency/skills/candidate count and a "New job opening" form; a job
+  opening detail page with a status dropdown, a "Generate/Regenerate draft" button showing
+  the exact advert text the backend produced, an "Add candidate" form, and a per-candidate
+  stage dropdown — with a standing note that a "Hired" candidate still needs a real
+  employee account created deliberately from the Employees page.
+
+Backend: 109/109 tests passing across 12 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
-calendar/scheduling, employee/permission management, service catalogue, and quotes) —
-covering permissions, validation, duplicate detection, cross-tenant checks,
-status-transition validation, lead conversion and duplicate-client reuse, command parsing
-for every supported intent, ambiguous-reference handling, capacity/overload computation,
-skill-gap detection, calendar date-range queries, upcoming overload detection,
-employee-suggestion ranking, the confirm-before-write flow (nothing changes until
-`confirmed: true`), deactivation, catalogue CRUD and job-to-catalogue linking, quote
-line-item totals/margin computation (including the "unknown margin" case), quote status
-transitions, and audit-entry assertions — against a real Postgres instance.
+calendar/scheduling, employee/permission management, service catalogue, quotes, and
+recruitment) — covering permissions, validation, duplicate detection, cross-tenant
+checks, status-transition validation, lead conversion and duplicate-client reuse,
+command parsing for every supported intent, ambiguous-reference handling,
+capacity/overload computation, skill-gap detection, calendar date-range queries,
+upcoming overload detection, employee-suggestion ranking, the confirm-before-write flow
+(nothing changes until `confirmed: true`), deactivation, catalogue CRUD and
+job-to-catalogue linking, quote line-item totals/margin computation (including the
+"unknown margin" case), quote status transitions, job-opening/candidate CRUD, advert
+drafting content assertions, candidate pipeline transitions (including that "hired"
+never creates a user account), and audit-entry assertions — against a real Postgres
+instance.
 
 Frontend: `npm run build` and `npm run dev` both verified working (clean production
 build, dev server responds 200).
@@ -248,12 +278,15 @@ granularity, matching the capacity engine underneath it. Employee creation issue
 invitation email and generates no temporary password reset flow — an admin sets the
 initial password directly, since there is no email connector yet. Quotes have no PDF
 export or "send to client" action — status is tracked internally only, since no
-communication connector exists yet to actually deliver anything. Also still missing from
+communication connector exists yet to actually deliver anything. Recruitment adverts are
+drafted text only — there is no job-board connector to place them, no candidate-sourcing
+integration, and no trial-day scheduling tie-in to the calendar module yet; a hired
+candidate must still be turned into an employee account manually. Also still missing from
 MVP scope: communication intelligence (email/WhatsApp enquiry extraction), website/photo
-modules, recruitment workflow (job adverts, candidate tracking), playbooks, and a real
-voice (speech) front-end (the Voice and Text Command Layer currently accepts typed text
-only). Build order should follow the roadmap in the master documentation (Phase 1 →
-Phase 2 → …), not be improvised per-feature.
+modules, business growth content generation, playbooks, and a real voice (speech)
+front-end (the Voice and Text Command Layer currently accepts typed text only). Build
+order should follow the roadmap in the master documentation (Phase 1 → Phase 2 → …), not
+be improvised per-feature.
 
 ## Deployment
 

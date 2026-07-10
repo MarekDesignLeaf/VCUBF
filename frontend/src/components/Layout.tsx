@@ -3,6 +3,7 @@ import { useAuth } from "../context/AuthContext";
 
 export function Layout() {
   const { user, logout } = useAuth();
+  const canRecruit = user?.permissions?.includes("recruitment.manage") ?? false;
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -16,6 +17,7 @@ export function Layout() {
           <NavLink to="/calendar">Calendar</NavLink>
           <NavLink to="/services">Services</NavLink>
           <NavLink to="/quotes">Quotes</NavLink>
+          {canRecruit && <NavLink to="/recruitment">Recruitment</NavLink>}
         </nav>
         <div className="sidebar-footer">
           <div className="user-name">{user?.displayName}</div>

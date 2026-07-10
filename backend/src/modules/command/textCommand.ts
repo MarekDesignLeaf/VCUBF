@@ -12,6 +12,7 @@ import * as employeeService from "../../services/employeeService.js";
 import * as calendarService from "../../services/calendarService.js";
 import * as serviceCatalogueService from "../../services/serviceCatalogueService.js";
 import * as quoteService from "../../services/quoteService.js";
+import * as recruitmentService from "../../services/recruitmentService.js";
 
 export const commandRouter = Router();
 
@@ -305,6 +306,12 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
         const data = await quoteService.listQuotes(user, {});
         response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
       }
+      break;
+    }
+
+    case "list_job_openings": {
+      const data = await recruitmentService.listJobOpenings(user, {});
+      response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
       break;
     }
 

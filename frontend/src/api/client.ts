@@ -128,7 +128,14 @@ export interface Employee {
 
 // Employee and Permission Model — the fuller shape used by management
 // screens (create/edit), which also exposes permissions and active status.
-export const KNOWN_PERMISSIONS = ["crm.read", "crm.manage", "users.manage", "audit.read", "voice.execute"] as const;
+export const KNOWN_PERMISSIONS = [
+  "crm.read",
+  "crm.manage",
+  "users.manage",
+  "audit.read",
+  "voice.execute",
+  "recruitment.manage",
+] as const;
 export type KnownPermission = (typeof KNOWN_PERMISSIONS)[number];
 
 export interface ManagedEmployee {
@@ -247,6 +254,66 @@ export interface Quote {
   job?: { id: string; jobTitle: string } | null;
 }
 
+// Recruitment and Workforce Expansion Module. Every field is what the user
+// typed in — this module never legally hires anyone, sets a wage, or
+// confirms employment terms; it only tracks openings/candidates and drafts
+// content for the user to review and place manually.
+export const JOB_OPENING_STATUSES = ["draft", "open", "closed"] as const;
+export type JobOpeningStatus = (typeof JOB_OPENING_STATUSES)[number];
+
+export const JOB_OPENING_URGENCY_LEVELS = ["low", "medium", "high"] as const;
+export type JobOpeningUrgency = (typeof JOB_OPENING_URGENCY_LEVELS)[number];
+
+export const CANDIDATE_STAGES = [
+  "new",
+  "screening",
+  "interview",
+  "trial_day",
+  "offer",
+  "hired",
+  "rejected",
+] as const;
+export type CandidateStage = (typeof CANDIDATE_STAGES)[number];
+
+export const CANDIDATE_STAGE_LABELS: Record<CandidateStage, string> = {
+  new: "New",
+  screening: "Screening",
+  interview: "Interview",
+  trial_day: "Trial day",
+  offer: "Offer",
+  hired: "Hired",
+  rejected: "Rejected",
+};
+
+export interface Candidate {
+  id: string;
+  jobOpeningId: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  stage: CandidateStage;
+  notes?: string | null;
+  createdAt: string;
+}
+
+export interface JobOpening {
+  id: string;
+  title: string;
+  reason?: string | null;
+  urgency: JobOpeningUrgency;
+  openingStatus: JobOpeningStatus;
+  skillsRequired: string[];
+  expectedTasks?: string | null;
+  minExperienceYears?: number | null;
+  preferredExperienceYears?: number | null;
+  languageRequirements: string[];
+  availabilityRequirements?: string | null;
+  description?: string | null;
+  draftAdvertText?: string | null;
+  createdAt: string;
+  candidates: Candidate[];
+}
+
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -357,6 +424,24 @@ export const api = {
     ) => request<Quote>(`/quotes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     changeStatus: (id: string, quoteStatus: QuoteStatus) =>
       request<Quote>(`/quotes/${id}/status`, { method: "PUT", body: JSON.stringify({ quote_status: quoteStatus }) }),
+  },
+  recruitment: {
+    listJobOpenings: (status?: string) =>
+      request<JobOpening[]>(`/recruitment/job-openings${status ? `?status=${status}` : ""}`),
+    getJobOpening: (id: string) => request<JobOpening>(`/recruitment/job-openings/${id}`),
+    createJobOpening: (data: Record<string, unknown>) =>
+      request<JobOpening>("/recruitment/job-openings", { method: "POST", body: JSON.stringify(data) }),
+    updateJobOpening: (id: string, data: Record<string, unknown>) =>
+      request<JobOpening>(`/recruitment/job-openings/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    draftAdvert: (id: string) =>
+      request<JobOpening>(`/recruitment/job-openings/${id}/draft-advert`, { method: "POST" }),
+    createCandidate: (jobOpeningId: string, data: Record<string, unknown>) =>
+      request<Candidate>(`/recruitment/job-openings/${jobOpeningId}/candidates`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    updateCandidate: (id: string, data: Record<string, unknown>) =>
+      request<Candidate>(`/recruitment/candidates/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   },
   leads: {
     list: (params?: { status?: string }) => {
