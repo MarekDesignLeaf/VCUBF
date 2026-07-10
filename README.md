@@ -418,12 +418,46 @@ npm run dev                 # http://localhost:5173
   notes). Client detail and job detail pages each gained a "Photos" section showing the
   five most recent photos for that client/job plus a "Log photo" link that prefills
   `client_id` (and `job_id` from the job page).
+- **Notification and Escalation Module — Portfolio marketing-readiness gap source**: a
+  fifth `buildXItems` source function (`buildPortfolioGapItems`) added to the existing
+  unified feed. Purely structural and count-based: completed jobs (`Job.jobStatus ===
+  "dokonceno"`, the same canonical completed-status value used everywhere else, now
+  exposed as `JOB_STATUS_COMPLETED`) that have zero linked `PortfolioPhoto` records are
+  surfaced as an info-severity "no photos logged" item — never a judgement about photo
+  quality, and a job with even one photo logged never appears here. Reuses the existing
+  acknowledge/unacknowledge mechanism; no new Prisma model. The Notifications feed now
+  has five real sources: overdue follow-ups, capacity overload, expiring quotes, data
+  quality findings, and this portfolio gap.
+- **Memory Model — Pattern Detection (read-only foundation)**: a new, deliberately
+  read-only module, `memoryModelService.detectRepeatedActionPatterns`, distinct from the
+  Learning Engine's explicit-correction-only rules. It scans the company's own AuditLog
+  over the last 30 days (`PATTERN_DETECTION_WINDOW_DAYS`, a fixed constant matching the
+  short rolling-window convention already used for quote-expiry warnings), groups entries
+  per user, and looks at every consecutive pair of distinct `actionName`s that user
+  performed. A pair recurring at least `MIN_PATTERN_OCCURRENCES` (3, a fixed conservative
+  starting threshold, deliberately not user-configurable yet) times is returned as a
+  candidate `{ actionSequence, occurrenceCount, exampleTimestamps }`. Action Contract
+  `detect_action_patterns` (`GET /memory-model/patterns`, risk 0, gated by the previously
+  unused `audit.read` permission since it is derived from the same raw audit data).
+  Wired into the Voice/Text Command Layer ("show patterns" / "detect action patterns" /
+  "list repeated patterns"). This **never** auto-creates a Playbook, a LearningRule, or
+  any other record — it is candidate analysis for a human to review only, matching the
+  Learning Engine's "do not create permanent rules from one weak signal" rule.
+- **Frontend — Memory Model**: new Memory Model page (linked in the sidebar, gated on
+  `audit.read` like Recruitment is gated on `recruitment.manage`) listing every detected
+  pattern with its occurrence count and example timestamps, a clear "candidate patterns —
+  review only, nothing created automatically" message, and a "Build a playbook from this"
+  link per pattern. That link never creates anything itself — it navigates to the
+  existing Playbooks page with `prefill_name`/`prefill_steps` query params (the same
+  `useSearchParams` prefill convention `QuoteEdit.tsx` uses for `client_id`/`job_id`),
+  which now pre-opens and pre-fills the real "New playbook" form for the user to review
+  and explicitly save.
 
-Backend: 180/180 tests passing across 18 suites (auth, CRM clients, CRM jobs, CRM leads,
+Backend: 188/188 tests passing across 20 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, employee/permission management, service catalogue, quotes,
 recruitment, playbooks, learning, communication log, notifications/escalation, data
-quality, and portfolio/photo) —
+quality, portfolio/photo, and memory model/pattern-detection) —
 covering permissions, validation, duplicate
 detection, cross-tenant checks, status-transition validation, lead conversion and
 duplicate-client reuse, command parsing for every supported intent, ambiguous-reference
@@ -455,7 +489,12 @@ Intelligence Module — permission checks, validation errors (including an unkno
 risk-level and audit before/after assertions, creating a photo with no client or job at
 all, list filtering by client/job/tag/source/usable-for-marketing, update, single-record
 get, and a company-scoping test proving a company B photo is never visible, listed, or
-updatable by company A.
+updatable by company A. The Memory Model — a fixture seeding a real sequence of
+AuditLog entries recurring 3 times (detected, with the correct occurrence count and
+example timestamps), a fixture with the same sequence occurring only 2 times (correctly
+not flagged, below threshold), permission checks (401 unauthenticated, 403 without
+`audit.read`), and a cross-tenant test proving company A's detected pattern never
+appears in company B's results.
 
 Frontend: `npm run build` and `npm run dev` both verified working (clean production
 build, dev server responds 200).
@@ -474,9 +513,16 @@ integration, and no trial-day scheduling tie-in to the calendar module yet; a hi
 candidate must still be turned into an employee account manually. Playbooks are limited
 to the intents the deterministic command parser already understands, and a playbook step
 can't branch on a previous step's result, only run in a fixed order and stop on first
-failure — there is still no automatic step that proposes a playbook from a repeated
-sequence of manual actions (a genuine Memory Model / pattern-detection layer, beyond the
-explicit-correction rules the Learning Engine now handles). Learning rules are
+failure. The Memory Model / pattern-detection layer is now foundational-only: it detects
+and surfaces repeated 2-action AuditLog sequences for human review
+(`detect_action_patterns`, `GET /memory-model/patterns`, the Memory Model frontend page),
+but it deliberately stops there — there is still no automatic step that creates a
+Playbook, a LearningRule, or any other record from a detected pattern; a human must
+always review a candidate pattern and explicitly save it via the real Playbook creation
+form (the "Build a playbook from this" link only prefills that form). It also only looks
+at 2-action sequences from a single AuditLog table over a fixed 30-day window with a
+fixed occurrence threshold of 3 — longer sequences, a configurable window/threshold, and
+cross-user pattern detection are not implemented. Learning rules are
 whole-term substitutions only — a rule can't yet rewrite part of a sentence based on
 context (e.g. it can't tell "old client" apart in "call the old client" vs. "he's quite
 old" — it just doesn't fire on any term it wasn't taught verbatim, matching the "must
@@ -491,11 +537,12 @@ extraction work writes into this same table instead of creating a second, discon
 communication store. The Notification and Escalation Module's feed is pull-only (a
 page you open, or a text command you run) — there is no push delivery yet: no email
 digest, no SMS/WhatsApp alert, and no in-app real-time badge/websocket, since no
-notification-delivery connector exists. It also only aggregates three real signal types
-(overdue follow-ups, capacity overload, expiring quotes); it does not yet cover other
-escalation-worthy conditions the architecture lists (e.g. a lead sitting unconverted too
-long, a job stuck in one status too long) — extending coverage means adding another
-`buildXItems` source function, not a new module. The Data Quality Engine is a read-only
+notification-delivery connector exists. It now aggregates five real signal types
+(overdue follow-ups, capacity overload, expiring quotes, data quality findings, and the
+portfolio marketing-readiness gap); it does not yet cover every escalation-worthy
+condition the architecture lists (e.g. a lead sitting unconverted too long, a job stuck
+in one status too long) — extending coverage means adding another `buildXItems` source
+function, not a new module. The Data Quality Engine is a read-only
 analysis layer only: it does not merge, edit, or delete client records, and there is no
 "merge these clients" action yet — a possible duplicate must currently be resolved
 manually on the two client records after a human reviews it; it also only compares

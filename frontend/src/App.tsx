@@ -25,6 +25,7 @@ import { CommunicationLog } from "./pages/CommunicationLog";
 import { Notifications } from "./pages/Notifications";
 import { DataQuality } from "./pages/DataQuality";
 import { Portfolio } from "./pages/Portfolio";
+import { MemoryModel } from "./pages/MemoryModel";
 
 export default function App() {
   return (
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/data-quality" element={<DataQuality />} />
             <Route path="/portfolio" element={<Portfolio />} />
+            <Route path="/memory-model" element={<MemoryModel />} />
           </Route>
         </Routes>
       </BrowserRouter>

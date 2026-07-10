@@ -4,6 +4,7 @@ import { recordAudit } from "../lib/audit.js";
 import {
   ACKNOWLEDGE_NOTIFICATION_ACTION,
   UNACKNOWLEDGE_NOTIFICATION_ACTION,
+  JOB_STATUS_COMPLETED,
   type NotificationSeverity,
   type NotificationType,
 } from "../lib/actionContracts.js";
@@ -29,6 +30,11 @@ import { buildDataQualityItems } from "./dataQualityService.js";
 //     contact method, computed structurally over real CRM Core client data
 //     (dataQualityService.buildDataQualityItems) — never a merge, never an
 //     automatic edit, always presented for a human to review.
+//   - Portfolio and Photo Intelligence Module: completed jobs (Job.jobStatus
+//     === "dokonceno") that have zero linked PortfolioPhoto records — a
+//     structural, count-based "you finished this job and never logged any
+//     photos for it" gap. This never judges photo quality and never flags a
+//     job that already has at least one photo logged.
 // Nothing here is invented — severity is derived directly from real dates
 // and percentages already stored elsewhere, never guessed. The only state
 // this module persists is which computed item a user has explicitly
@@ -119,6 +125,35 @@ async function buildQuoteExpiryItems(user: AuthedUser): Promise<AttentionItemBas
   });
 }
 
+// Portfolio marketing-readiness gap — completed jobs (Job.jobStatus ===
+// JOB_STATUS_COMPLETED, i.e. "dokonceno") that have zero linked
+// PortfolioPhoto rows. This is a real, structural, count-based signal only:
+// "job finished, zero photos logged" — never a judgement about photo
+// quality, and a job with at least one photo logged never appears here,
+// regardless of that photo's usableForMarketing/approval status. Matches
+// the "buildXItems" source-function pattern used by every other feed
+// source in this module.
+async function buildPortfolioGapItems(user: AuthedUser): Promise<AttentionItemBase[]> {
+  const completedJobsWithoutPhotos = await prisma.job.findMany({
+    where: {
+      companyId: user.companyId,
+      jobStatus: JOB_STATUS_COMPLETED,
+      portfolioPhotos: { none: {} },
+    },
+    include: { client: { select: { id: true, displayName: true } } },
+  });
+
+  return completedJobsWithoutPhotos.map((j) => ({
+    key: `portfolio_gap:${j.id}`,
+    type: "portfolio_gap",
+    severity: "info",
+    title: `No portfolio photos logged for completed job "${j.jobTitle}"`,
+    message: `Job for ${j.client?.displayName ?? "client"} is marked complete but has no PortfolioPhoto records — it cannot be used for marketing or case studies until photos are logged.`,
+    dueAt: null,
+    entity: { type: "job", id: j.id, label: j.jobTitle },
+  }));
+}
+
 const severityRank: Record<NotificationSeverity, number> = { urgent: 0, warning: 1, info: 2 };
 
 // get_attention_feed — read-only. By default, already-acknowledged items are
@@ -128,14 +163,21 @@ export async function getAttentionFeed(
   user: AuthedUser,
   options: { includeAcknowledged?: boolean } = {}
 ): Promise<AttentionItem[]> {
-  const [followUps, overloads, expiringQuotes, dataQualityItems] = await Promise.all([
+  const [followUps, overloads, expiringQuotes, dataQualityItems, portfolioGapItems] = await Promise.all([
     buildFollowUpItems(user),
     buildOverloadItems(user),
     buildQuoteExpiryItems(user),
     buildDataQualityItems(user),
+    buildPortfolioGapItems(user),
   ]);
 
-  const items: AttentionItemBase[] = [...followUps, ...overloads, ...expiringQuotes, ...dataQualityItems];
+  const items: AttentionItemBase[] = [
+    ...followUps,
+    ...overloads,
+    ...expiringQuotes,
+    ...dataQualityItems,
+    ...portfolioGapItems,
+  ];
 
   const acks = await prisma.notificationAcknowledgement.findMany({
     where: { companyId: user.companyId },

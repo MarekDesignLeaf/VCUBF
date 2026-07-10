@@ -42,6 +42,7 @@ export type ParsedCommand =
   | { intent: "list_follow_ups"; entities: Record<string, never> }
   | { intent: "list_notifications"; entities: Record<string, never> }
   | { intent: "list_data_quality"; entities: Record<string, never> }
+  | { intent: "detect_action_patterns"; entities: Record<string, never> }
   | { intent: "list_clients"; entities: Record<string, never> }
   | { intent: "list_jobs"; entities: Record<string, never> }
   | { intent: "list_leads"; entities: Record<string, never> }
@@ -214,6 +215,12 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     return { intent: "list_data_quality", entities: {} };
   if (/^(?:list|show)\s+(?:possible\s+)?duplicate\s+clients?$/i.test(text))
     return { intent: "list_data_quality", entities: {} };
+
+  // Memory Model — Pattern Detection: read-only analysis of the AuditLog for
+  // repeated manual action sequences. Never creates a Playbook itself; see
+  // memoryModelService.ts.
+  if (/^(?:show|detect|list)\s+(?:repeated\s+)?(?:action\s+)?patterns?$/i.test(text))
+    return { intent: "detect_action_patterns", entities: {} };
 
   m = text.match(/^(?:list|show)\s+communications?(?:\s+for\s+(.+))?$/i);
   if (m) return { intent: "list_communications", entities: { client_name: m[1]?.trim() } };

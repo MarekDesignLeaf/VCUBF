@@ -38,6 +38,12 @@ export const JOB_STATUSES = [
 ] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
+// The single canonical "job finished" status value, reused wherever a
+// service needs to check "is this job done" (e.g. the Portfolio Marketing
+// Readiness Gap notification source) instead of re-typing the literal
+// string "dokonceno" in multiple places.
+export const JOB_STATUS_COMPLETED: JobStatus = "dokonceno";
+
 export const CREATE_JOB_ACTION: ActionContract = {
   actionName: "create_job",
   purpose: "Create a new job record in CRM Core, linked to an existing client.",
@@ -493,6 +499,7 @@ export const NOTIFICATION_TYPES = [
   "quote_expiring",
   "duplicate_client_possible",
   "missing_client_contact_info",
+  "portfolio_gap",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -502,11 +509,11 @@ export type NotificationSeverity = (typeof NOTIFICATION_SEVERITIES)[number];
 export const GET_ATTENTION_FEED_ACTION: ActionContract = {
   actionName: "get_attention_feed",
   purpose:
-    "Aggregate overdue communication follow-ups, capacity overload weeks, and expiring quotes into a single, real, unified feed of things needing attention.",
+    "Aggregate overdue communication follow-ups, capacity overload weeks, expiring quotes, data quality findings, and completed jobs missing portfolio photos into a single, real, unified feed of things needing attention.",
   requiredPermission: "crm.read",
   riskLevel: 0,
   confirmationRequired: false,
-  dataSources: ["crm.communication_records", "crm.jobs", "crm.users", "crm.quotes"],
+  dataSources: ["crm.communication_records", "crm.jobs", "crm.users", "crm.quotes", "crm.clients", "crm.portfolio_photos"],
   possibleErrors: ["MISSING_PERMISSION"],
 };
 
@@ -598,4 +605,24 @@ export const UPDATE_PORTFOLIO_PHOTO_ACTION: ActionContract = {
   confirmationRequired: false,
   dataSources: ["user_input", "crm.portfolio_photos"],
   possibleErrors: ["MISSING_PERMISSION", "PORTFOLIO_PHOTO_NOT_FOUND", "VALIDATION_FAILED"],
+};
+
+// Memory Model — Pattern Detection. See memoryModelService.ts for the full
+// rationale: this is a strictly read-only analysis over the company's own
+// AuditLog, looking for repeated manual action sequences. It is explicitly
+// NOT the Learning Engine (which only ever acts on an explicit user
+// correction) and it never creates a Playbook, a LearningRule, or any other
+// record — candidate patterns are returned for human review only. Gated by
+// "audit.read" (the same permission class as reading raw audit data,
+// because that is exactly what this analysis is derived from) rather than
+// a general CRM permission.
+export const DETECT_ACTION_PATTERNS_ACTION: ActionContract = {
+  actionName: "detect_action_patterns",
+  purpose:
+    "Analyse the company's own AuditLog for repeated consecutive action sequences performed by the same user, as candidate patterns for a human to optionally turn into a real Playbook. Never creates a Playbook or any other record itself.",
+  requiredPermission: "audit.read",
+  riskLevel: 0,
+  confirmationRequired: false,
+  dataSources: ["audit.log"],
+  possibleErrors: ["MISSING_PERMISSION"],
 };

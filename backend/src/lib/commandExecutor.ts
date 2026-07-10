@@ -13,6 +13,7 @@ import * as communicationService from "../services/communicationService.js";
 import * as notificationService from "../services/notificationService.js";
 import * as dataQualityService from "../services/dataQualityService.js";
 import * as portfolioService from "../services/portfolioService.js";
+import * as memoryModelService from "../services/memoryModelService.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -505,6 +506,12 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
 
     case "list_data_quality": {
       const data = await dataQualityService.getDataQualityReport(user);
+      response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "detect_action_patterns": {
+      const data = await memoryModelService.detectRepeatedActionPatterns(user);
       response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
       break;
     }

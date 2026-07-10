@@ -199,4 +199,74 @@ describe("Notification and Escalation Module", () => {
       .set("Authorization", `Bearer ${adminToken}`);
     assert.equal(res.status, 200);
   });
+
+  describe("Portfolio marketing-readiness gap source", () => {
+    let completedJobNoPhotosId: string;
+    let completedJobWithPhotoId: string;
+    let notCompletedJobId: string;
+
+    before(async () => {
+      const jobNoPhotos = await request(app)
+        .post("/crm/jobs")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ client_id: clientId, job_title: "Finished job, no photos" });
+      completedJobNoPhotosId = jobNoPhotos.body.id;
+      await request(app)
+        .put(`/crm/jobs/${completedJobNoPhotosId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ job_status: "dokonceno" });
+
+      const jobWithPhoto = await request(app)
+        .post("/crm/jobs")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ client_id: clientId, job_title: "Finished job, has a photo" });
+      completedJobWithPhotoId = jobWithPhoto.body.id;
+      await request(app)
+        .put(`/crm/jobs/${completedJobWithPhotoId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ job_status: "dokonceno" });
+      await request(app)
+        .post("/portfolio")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({
+          job_id: completedJobWithPhotoId,
+          filename: "after.jpg",
+          source: "employee_upload",
+        });
+
+      const notCompletedJob = await request(app)
+        .post("/crm/jobs")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ client_id: clientId, job_title: "Still in progress, no photos" });
+      notCompletedJobId = notCompletedJob.body.id;
+      await request(app)
+        .put(`/crm/jobs/${notCompletedJobId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ job_status: "v_realizaci" });
+    });
+
+    it("surfaces a completed job with zero logged photos as an info-severity portfolio gap", async () => {
+      const res = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+      assert.equal(res.status, 200);
+      const item = res.body.find((n: any) => n.key === `portfolio_gap:${completedJobNoPhotosId}`);
+      assert.ok(item, "expected the completed job with no photos to appear as a portfolio gap");
+      assert.equal(item.type, "portfolio_gap");
+      assert.equal(item.severity, "info");
+      assert.equal(item.entity.id, completedJobNoPhotosId);
+    });
+
+    it("does not flag a completed job that already has at least one logged photo", async () => {
+      const res = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+      assert.equal(res.status, 200);
+      const item = res.body.find((n: any) => n.key === `portfolio_gap:${completedJobWithPhotoId}`);
+      assert.ok(!item, "did not expect a portfolio gap for a completed job that already has a photo");
+    });
+
+    it("never flags a job that is not marked completed, regardless of photo count", async () => {
+      const res = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+      assert.equal(res.status, 200);
+      const item = res.body.find((n: any) => n.key === `portfolio_gap:${notCompletedJobId}`);
+      assert.ok(!item, "did not expect a portfolio gap for a job that is not marked complete");
+    });
+  });
 });

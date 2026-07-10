@@ -492,6 +492,16 @@ export interface DataQualityReport {
   missingContactIssues: MissingContactIssue[];
 }
 
+// Memory Model — Pattern Detection (read-only). See
+// backend/src/services/memoryModelService.ts: candidate patterns are surfaced
+// for human review only and never auto-create a Playbook, matching the
+// Learning Engine's explicit-correction-only rule.
+export interface RepeatedActionPattern {
+  actionSequence: string[];
+  occurrenceCount: number;
+  exampleTimestamps: string[];
+}
+
 // Portfolio and Photo Intelligence Module — the manual-entry foundation of a
 // future automated photo-selection/website-publishing workflow. There is no
 // image upload/storage connector yet: `filename` is just the literal
@@ -724,6 +734,9 @@ export const api = {
   },
   dataQuality: {
     report: () => request<DataQualityReport>("/data-quality"),
+  },
+  memoryModel: {
+    patterns: () => request<RepeatedActionPattern[]>("/memory-model/patterns"),
   },
   portfolio: {
     list: (params?: { clientId?: string; jobId?: string; tag?: string; usableForMarketing?: boolean; source?: string }) => {

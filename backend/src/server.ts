@@ -18,6 +18,7 @@ import { communicationsRouter } from "./modules/communications/routes.js";
 import { notificationsRouter } from "./modules/notifications/routes.js";
 import { dataQualityRouter } from "./modules/data-quality/routes.js";
 import { portfolioRouter } from "./modules/portfolio/routes.js";
+import { memoryModelRouter } from "./modules/memory-model/routes.js";
 
 export function createServer() {
   const app = express();
@@ -43,6 +44,7 @@ export function createServer() {
   app.use("/notifications", notificationsRouter);
   app.use("/data-quality", dataQualityRouter);
   app.use("/portfolio", portfolioRouter);
+  app.use("/memory-model", memoryModelRouter);
 
   // Fallback error handler — the system must fail safely, never crash silently.
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

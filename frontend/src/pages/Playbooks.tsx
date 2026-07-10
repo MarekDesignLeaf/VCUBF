@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, ApiError, type Playbook } from "../api/client";
 
 // Playbook Engine — a saved, reusable sequence of Voice/Text Command Layer
@@ -9,7 +9,14 @@ import { api, ApiError, type Playbook } from "../api/client";
 export function Playbooks() {
   const [playbooks, setPlaybooks] = useState<Playbook[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
+  const [searchParams] = useSearchParams();
+  // Prefill support (e.g. from the Memory Model page's "use this pattern as
+  // a playbook" link): a candidate pattern can prefill the name/steps for
+  // human review here, but nothing is ever created without the user
+  // explicitly clicking Save on this form.
+  const prefillName = searchParams.get("prefill_name") ?? "";
+  const prefillSteps = searchParams.get("prefill_steps") ?? "";
+  const [showForm, setShowForm] = useState(Boolean(prefillName || prefillSteps));
 
   function load() {
     api.playbooks
@@ -36,6 +43,8 @@ export function Playbooks() {
       </p>
       {showForm && (
         <NewPlaybookForm
+          initialName={prefillName}
+          initialStepsText={prefillSteps}
           onCreated={() => {
             setShowForm(false);
             load();
@@ -71,10 +80,18 @@ export function Playbooks() {
   );
 }
 
-function NewPlaybookForm({ onCreated }: { onCreated: () => void }) {
-  const [name, setName] = useState("");
+function NewPlaybookForm({
+  onCreated,
+  initialName = "",
+  initialStepsText = "",
+}: {
+  onCreated: () => void;
+  initialName?: string;
+  initialStepsText?: string;
+}) {
+  const [name, setName] = useState(initialName);
   const [description, setDescription] = useState("");
-  const [stepsText, setStepsText] = useState("");
+  const [stepsText, setStepsText] = useState(initialStepsText);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
