@@ -11,6 +11,7 @@ import { JobDetail } from "./pages/JobDetail";
 import { Employees } from "./pages/Employees";
 import { EmployeeEdit } from "./pages/EmployeeEdit";
 import { Calendar } from "./pages/Calendar";
+import { ServiceCatalogue } from "./pages/ServiceCatalogue";
 import { Leads } from "./pages/Leads";
 import { LeadDetail } from "./pages/LeadDetail";
 
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="/employees/new" element={<EmployeeEdit />} />
             <Route path="/employees/:id/edit" element={<EmployeeEdit />} />
             <Route path="/calendar" element={<Calendar />} />
+            <Route path="/services" element={<ServiceCatalogue />} />
             <Route path="/leads" element={<Leads />} />
             <Route path="/leads/:id" element={<LeadDetail />} />
           </Route>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { api, type Client, type Job, ApiError, JOB_STATUS_LABELS } from "../api/client";
+import { api, type Client, type Job, type ServiceCatalogueItem, ApiError, JOB_STATUS_LABELS } from "../api/client";
 
 export function ClientDetail() {
   const { id } = useParams<{ id: string }>();
@@ -90,6 +90,8 @@ export function ClientDetail() {
 }
 
 function NewJobForm({ clientId, onCreated }: { clientId: string; onCreated: () => void }) {
+  const [services, setServices] = useState<ServiceCatalogueItem[]>([]);
+  const [serviceId, setServiceId] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [address, setAddress] = useState("");
   const [plannedStart, setPlannedStart] = useState("");
@@ -97,6 +99,23 @@ function NewJobForm({ clientId, onCreated }: { clientId: string; onCreated: () =
   const [requiredSkills, setRequiredSkills] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    api.catalogue.list(true).then(setServices).catch(() => undefined);
+  }, []);
+
+  function handleServiceSelect(id: string) {
+    setServiceId(id);
+    const service = services.find((s) => s.id === id);
+    if (!service) return;
+    if (!jobTitle) setJobTitle(service.name);
+    if (!estimatedHours && service.defaultDurationHours != null) {
+      setEstimatedHours(String(service.defaultDurationHours));
+    }
+    if (!requiredSkills && service.defaultRequiredSkills.length > 0) {
+      setRequiredSkills(service.defaultRequiredSkills.join(", "));
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -112,12 +131,14 @@ function NewJobForm({ clientId, onCreated }: { clientId: string; onCreated: () =
         required_skills: requiredSkills
           ? requiredSkills.split(",").map((s) => s.trim()).filter(Boolean)
           : undefined,
+        service_catalogue_item_id: serviceId || undefined,
       });
       setJobTitle("");
       setAddress("");
       setPlannedStart("");
       setEstimatedHours("");
       setRequiredSkills("");
+      setServiceId("");
       onCreated();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not create job.");
@@ -128,6 +149,16 @@ function NewJobForm({ clientId, onCreated }: { clientId: string; onCreated: () =
 
   return (
     <form className="inline-form" onSubmit={handleSubmit}>
+      {services.length > 0 && (
+        <select value={serviceId} onChange={(e) => handleServiceSelect(e.target.value)}>
+          <option value="">— Based on a service (optional) —</option>
+          {services.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      )}
       <input placeholder="Job title" value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} required />
       <input placeholder="Property address" value={address} onChange={(e) => setAddress(e.target.value)} />
       <input type="datetime-local" value={plannedStart} onChange={(e) => setPlannedStart(e.target.value)} />

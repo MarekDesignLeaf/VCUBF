@@ -14,6 +14,7 @@ export function Layout() {
           <NavLink to="/jobs">Jobs</NavLink>
           <NavLink to="/employees">Employees</NavLink>
           <NavLink to="/calendar">Calendar</NavLink>
+          <NavLink to="/services">Services</NavLink>
         </nav>
         <div className="sidebar-footer">
           <div className="user-name">{user?.displayName}</div>

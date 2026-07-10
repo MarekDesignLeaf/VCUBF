@@ -24,6 +24,7 @@ export type ParsedCommand =
   | { intent: "convert_lead"; entities: { lead_name: string } }
   | { intent: "assign_job"; entities: { job_title: string; employee_name: string } }
   | { intent: "detect_overload"; entities: Record<string, never> }
+  | { intent: "create_service"; entities: { name: string; category?: string } }
   | { intent: "list_clients"; entities: Record<string, never> }
   | { intent: "list_jobs"; entities: Record<string, never> }
   | { intent: "list_leads"; entities: Record<string, never> }
@@ -103,6 +104,16 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   }
 
   if (/^(?:show|check)\s+overload$/i.test(text)) return { intent: "detect_overload", entities: {} };
+
+  m = text.match(/^(?:create|add|new)\s+service\s+(.+)$/i);
+  if (m) {
+    let rest = m[1];
+    const category = extractLabelled(rest, "category");
+    rest = category.rest;
+    const name = rest.replace(/,\s*$/, "").trim();
+    if (!name) return { intent: "unrecognized", entities: {} };
+    return { intent: "create_service", entities: { name, category: category.value } };
+  }
 
   if (/^(?:list|show)\s+clients?$/i.test(text)) return { intent: "list_clients", entities: {} };
   if (/^(?:list|show)\s+jobs?$/i.test(text)) return { intent: "list_jobs", entities: {} };

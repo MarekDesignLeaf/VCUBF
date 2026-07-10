@@ -10,6 +10,7 @@ import * as jobService from "../../services/jobService.js";
 import * as leadService from "../../services/leadService.js";
 import * as employeeService from "../../services/employeeService.js";
 import * as calendarService from "../../services/calendarService.js";
+import * as serviceCatalogueService from "../../services/serviceCatalogueService.js";
 
 export const commandRouter = Router();
 
@@ -253,6 +254,23 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
     case "detect_overload": {
       const data = await calendarService.detectUpcomingOverload(user);
       response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "create_service": {
+      const result = await serviceCatalogueService.createService(user, {
+        name: command.entities.name,
+        category: command.entities.category,
+      });
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? undefined : result.message,
+      };
       break;
     }
 

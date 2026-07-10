@@ -4,9 +4,12 @@ import { prisma } from "../src/db.js";
 export const TEST_COMPANY_ID = "10000000-0000-0000-0000-000000000001";
 
 export async function resetDb() {
-  // Delete in FK-dependency order: audit log, jobs and leads reference clients/users.
+  // Delete in FK-dependency order: audit log and jobs reference clients/users/
+  // service catalogue items; jobs must go before the catalogue items they
+  // may reference.
   await prisma.auditLog.deleteMany({});
   await prisma.job.deleteMany({});
+  await prisma.serviceCatalogueItem.deleteMany({});
   await prisma.lead.deleteMany({});
   await prisma.client.deleteMany({});
   await prisma.user.deleteMany({});

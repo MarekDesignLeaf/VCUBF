@@ -15,11 +15,12 @@ model Company {
   name      String
   createdAt DateTime @default(now()) @map("created_at")
 
-  users     User[]
-  clients   Client[]
-  jobs      Job[]
-  leads     Lead[]
-  auditLogs AuditLog[]
+  users               User[]
+  clients             Client[]
+  jobs                Job[]
+  leads               Lead[]
+  auditLogs           AuditLog[]
+  serviceCatalogueItems ServiceCatalogueItem[]
 
   @@map("companies")
 }
@@ -87,6 +88,11 @@ model Job {
   // this data is missing (the system must say what is missing, not guess).
   estimatedDurationHours Float?    @map("estimated_duration_hours")
   requiredSkills         String[]  @default([]) @map("required_skills")
+  // Service Catalogue Module — optional link back to the catalogue entry
+  // this job was based on, so pricing/duration data entered once in the
+  // catalogue can be reused (and later rolled up for profitability),
+  // without forcing every job to originate from a catalogue item.
+  serviceCatalogueItemId String?   @map("service_catalogue_item_id")
   plannedStartAt         DateTime? @map("planned_start_at")
   plannedEndAt            DateTime? @map("planned_end_at")
   notes                  String?
@@ -94,13 +100,15 @@ model Job {
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
 
-  company      Company @relation(fields: [companyId], references: [id])
-  client       Client  @relation(fields: [clientId], references: [id])
-  assignedUser User?   @relation("AssignedJobs", fields: [assignedUserId], references: [id])
+  company             Company              @relation(fields: [companyId], references: [id])
+  client              Client               @relation(fields: [clientId], references: [id])
+  assignedUser        User?                @relation("AssignedJobs", fields: [assignedUserId], references: [id])
+  serviceCatalogueItem ServiceCatalogueItem? @relation(fields: [serviceCatalogueItemId], references: [id])
 
   @@index([companyId])
   @@index([clientId])
   @@index([assignedUserId])
+  @@index([serviceCatalogueItemId])
   @@map("jobs")
 }
 
@@ -126,6 +134,34 @@ model Lead {
 
   @@index([companyId])
   @@map("leads")
+}
+
+// Service Catalogue Module — the company's real, user-entered menu of
+// services. Nothing here is invented by the system: name, description,
+// pricing and duration are entered by the user and are used later to
+// prefill jobs and (eventually) quotes and website content, so the same
+// real facts propagate everywhere instead of being retyped or guessed.
+model ServiceCatalogueItem {
+  id                     String   @id @default(uuid())
+  companyId              String   @map("company_id")
+  name                   String
+  description            String?
+  category               String?
+  basePriceMin           Float?   @map("base_price_min")
+  basePriceMax           Float?   @map("base_price_max")
+  priceUnit              String?  @map("price_unit")
+  defaultDurationHours   Float?   @map("default_duration_hours")
+  defaultRequiredSkills  String[] @default([]) @map("default_required_skills")
+  isActive               Boolean  @default(true) @map("is_active")
+  createdBy              String?  @map("created_by")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  jobs    Job[]
+
+  @@index([companyId])
+  @@map("service_catalogue_items")
 }
 
 model AuditLog {

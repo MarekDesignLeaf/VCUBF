@@ -199,3 +199,27 @@ export const UPDATE_EMPLOYEE_ACTION: ActionContract = {
 // these as checkboxes and the backend can validate against exactly these.
 export const KNOWN_PERMISSIONS = ["crm.read", "crm.manage", "users.manage", "audit.read", "voice.execute"] as const;
 export type KnownPermission = (typeof KNOWN_PERMISSIONS)[number];
+
+// Service Catalogue Module — see VCUF master documentation section 24C.
+// Entries here are entered by the user, never invented ("no fake facts"
+// rule). Later modules (quoting, website content) must read from this
+// catalogue rather than re-typing or guessing service names/prices.
+export const CREATE_SERVICE_ACTION: ActionContract = {
+  actionName: "create_service_catalogue_item",
+  purpose: "Add a service to the company's real service catalogue (name, description, pricing, default duration and skills).",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
+export const UPDATE_SERVICE_ACTION: ActionContract = {
+  actionName: "update_service_catalogue_item",
+  purpose: "Update or deactivate an existing service catalogue entry.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.service_catalogue"],
+  possibleErrors: ["MISSING_PERMISSION", "SERVICE_NOT_FOUND", "VALIDATION_FAILED"],
+};

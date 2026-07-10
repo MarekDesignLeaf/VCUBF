@@ -92,12 +92,14 @@ export interface Job {
   assignedUserId?: string | null;
   estimatedDurationHours?: number | null;
   requiredSkills?: string[];
+  serviceCatalogueItemId?: string | null;
   plannedStartAt?: string | null;
   plannedEndAt?: string | null;
   notes?: string | null;
   createdAt: string;
   client?: { id: string; displayName: string };
   assignedUser?: { id: string; displayName: string } | null;
+  serviceCatalogueItem?: { id: string; name: string } | null;
 }
 
 // Job Allocation and Capacity Management Module.
@@ -172,6 +174,21 @@ export interface SuggestedEmployee {
   earliestAvailableWeekStart: string | null;
   earliestAvailableWeekLoadHours: number | null;
   weeklyCapacityHours: number;
+}
+
+// Service Catalogue Module.
+export interface ServiceCatalogueItem {
+  id: string;
+  name: string;
+  description?: string | null;
+  category?: string | null;
+  basePriceMin?: number | null;
+  basePriceMax?: number | null;
+  priceUnit?: string | null;
+  defaultDurationHours?: number | null;
+  defaultRequiredSkills: string[];
+  isActive: boolean;
+  createdAt: string;
 }
 
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
@@ -256,6 +273,15 @@ export const api = {
       const suffix = qs.toString() ? `?${qs.toString()}` : "";
       return request<SuggestedEmployee[]>(`/calendar/suggest${suffix}`);
     },
+  },
+  catalogue: {
+    list: (activeOnly?: boolean) =>
+      request<ServiceCatalogueItem[]>(`/service-catalogue${activeOnly ? "?active_only=true" : ""}`),
+    get: (id: string) => request<ServiceCatalogueItem>(`/service-catalogue/${id}`),
+    create: (data: Record<string, unknown>) =>
+      request<ServiceCatalogueItem>("/service-catalogue", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<ServiceCatalogueItem>(`/service-catalogue/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   },
   leads: {
     list: (params?: { status?: string }) => {

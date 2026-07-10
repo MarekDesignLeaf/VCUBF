@@ -78,6 +78,24 @@ describe("commandParser", () => {
     assert.equal(parseTextCommand("check overload").intent, "detect_overload");
   });
 
+  it("parses 'create service X, category Y'", () => {
+    const result = parseTextCommand("create service Fence repair, category Fencing");
+    assert.equal(result.intent, "create_service");
+    if (result.intent === "create_service") {
+      assert.equal(result.entities.name, "Fence repair");
+      assert.equal(result.entities.category, "Fencing");
+    }
+  });
+
+  it("parses a bare 'create service X' with no category", () => {
+    const result = parseTextCommand("create service Hedge trim");
+    assert.equal(result.intent, "create_service");
+    if (result.intent === "create_service") {
+      assert.equal(result.entities.name, "Hedge trim");
+      assert.equal(result.entities.category, undefined);
+    }
+  });
+
   it("returns unrecognized for gibberish instead of guessing", () => {
     const result = parseTextCommand("please make the weather nicer today");
     assert.equal(result.intent, "unrecognized");

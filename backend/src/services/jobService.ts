@@ -16,6 +16,7 @@ export const createJobSchema = z.object({
   notes: z.string().optional(),
   estimated_duration_hours: z.number().positive().optional(),
   required_skills: z.array(z.string()).optional(),
+  service_catalogue_item_id: z.string().uuid().optional(),
 });
 
 export const assignJobSchema = z.object({
@@ -35,7 +36,10 @@ export async function listJobs(user: AuthedUser, filters: { clientId?: string; s
       ...(filters.clientId ? { clientId: filters.clientId } : {}),
       ...(filters.status ? { jobStatus: filters.status } : {}),
     },
-    include: { client: { select: { id: true, displayName: true } } },
+    include: {
+      client: { select: { id: true, displayName: true } },
+      serviceCatalogueItem: { select: { id: true, name: true } },
+    },
     orderBy: { createdAt: "desc" },
   });
 }
@@ -43,7 +47,10 @@ export async function listJobs(user: AuthedUser, filters: { clientId?: string; s
 export async function getJob(user: AuthedUser, id: string) {
   return prisma.job.findFirst({
     where: { id, companyId: user.companyId },
-    include: { client: { select: { id: true, displayName: true } } },
+    include: {
+      client: { select: { id: true, displayName: true } },
+      serviceCatalogueItem: { select: { id: true, name: true } },
+    },
   });
 }
 
@@ -92,6 +99,7 @@ export async function createJob(user: AuthedUser, rawInput: unknown): Promise<Se
       notes: data.notes,
       estimatedDurationHours: data.estimated_duration_hours,
       requiredSkills: data.required_skills ?? [],
+      serviceCatalogueItemId: data.service_catalogue_item_id,
       createdBy: user.id,
     },
   });

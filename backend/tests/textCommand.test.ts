@@ -141,6 +141,17 @@ describe("command/text", () => {
     assert.ok(Array.isArray(res.body.data.overloadedWeeks));
   });
 
+  it("creates a service catalogue item via a text command", async () => {
+    const res = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "create service Gutter cleaning, category Roofing" });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.intent, "create_service");
+    assert.equal(res.body.data.name, "Gutter cleaning");
+    assert.equal(res.body.data.category, "Roofing");
+  });
+
   it("lists clients via a text command", async () => {
     const res = await request(app)
       .post("/command/text")
