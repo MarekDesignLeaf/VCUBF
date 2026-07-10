@@ -26,6 +26,7 @@ model Company {
   candidates          Candidate[]
   playbooks           Playbook[]
   playbookRuns        PlaybookRun[]
+  learningRules       LearningRule[]
 
   @@map("companies")
 }
@@ -325,6 +326,35 @@ model PlaybookRun {
   @@index([companyId])
   @@index([playbookId])
   @@map("playbook_runs")
+}
+
+
+// Learning Engine — see project instructions section 11 and the MVP
+// priority list ("basic learning of aliases and workflows"). The strongest
+// learning signal is explicit user correction/teaching, never an inferred
+// guess — so every rule here is created deliberately by a user, is visible,
+// editable and reversible (archive, don't hard-delete-and-forget), and
+// nothing here silently overrides system behaviour on a single weak signal.
+// A rule with aliasFor set is also used as a real text-substitution step
+// (LearningEngine#resolveLearningAliases) applied before the Voice/Text
+// Command Layer parses a command, so a learned alias actually changes how
+// commands and playbook steps are interpreted — not just a static glossary.
+model LearningRule {
+  id         String   @id @default(uuid())
+  companyId  String   @map("company_id")
+  term       String
+  meaning    String
+  aliasFor   String?  @map("alias_for")
+  category   String?
+  status     String   @default("active")
+  createdBy  String?  @map("created_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+  @@map("learning_rules")
 }
 
 model AuditLog {

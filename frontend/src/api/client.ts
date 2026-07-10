@@ -360,6 +360,24 @@ export interface PlaybookRun {
   createdAt: string;
 }
 
+// Learning Engine. Every rule is created from an explicit user statement —
+// never inferred — and stays visible, editable and reversible (archive, not
+// delete). A rule with aliasFor set is also applied as a real text
+// substitution before a command is parsed, so it changes actual behaviour,
+// not just a glossary entry.
+export const LEARNING_RULE_STATUSES = ["active", "archived"] as const;
+export type LearningRuleStatus = (typeof LEARNING_RULE_STATUSES)[number];
+
+export interface LearningRule {
+  id: string;
+  term: string;
+  meaning: string;
+  aliasFor?: string | null;
+  category?: string | null;
+  status: LearningRuleStatus;
+  createdAt: string;
+}
+
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -502,6 +520,14 @@ export const api = {
         body: JSON.stringify({ variables, confirmed }),
       }),
     runs: (id: string) => request<PlaybookRun[]>(`/playbooks/${id}/runs`),
+  },
+  learningRules: {
+    list: (status?: string) => request<LearningRule[]>(`/learning-rules${status ? `?status=${status}` : ""}`),
+    get: (id: string) => request<LearningRule>(`/learning-rules/${id}`),
+    create: (data: { term: string; meaning: string; alias_for?: string; category?: string }) =>
+      request<LearningRule>("/learning-rules", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<LearningRule>(`/learning-rules/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   },
   leads: {
     list: (params?: { status?: string }) => {

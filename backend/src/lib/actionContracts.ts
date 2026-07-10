@@ -405,3 +405,31 @@ export const RUN_PLAYBOOK_ACTION: ActionContract = {
   dataSources: ["user_input", "crm.playbooks"],
   possibleErrors: ["MISSING_PERMISSION", "PLAYBOOK_NOT_FOUND", "VALIDATION_FAILED", "CONFIRMATION_REQUIRED", "MISSING_VARIABLE"],
 };
+
+// Learning Engine — see project instructions section 11. Recording a rule is
+// low risk and fully reversible (archive, edit), so neither action requires
+// confirmation — but every rule is only ever created from an explicit user
+// statement, never inferred automatically from one weak signal.
+export const LEARNING_RULE_STATUSES = ["active", "archived"] as const;
+export type LearningRuleStatus = (typeof LEARNING_RULE_STATUSES)[number];
+
+export const CREATE_LEARNING_RULE_ACTION: ActionContract = {
+  actionName: "create_learning_rule",
+  purpose:
+    "Record an explicit, user-stated meaning or correction (e.g. 'when I say X I mean Y'), optionally as a text-substitution alias applied before commands are parsed.",
+  requiredPermission: "voice.execute",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["user_input"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
+export const UPDATE_LEARNING_RULE_ACTION: ActionContract = {
+  actionName: "update_learning_rule",
+  purpose: "Edit or archive a previously recorded learning rule — learning must stay visible, editable and reversible.",
+  requiredPermission: "voice.execute",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.learning_rules"],
+  possibleErrors: ["MISSING_PERMISSION", "LEARNING_RULE_NOT_FOUND", "VALIDATION_FAILED"],
+};

@@ -18,6 +18,7 @@ import { Recruitment } from "./pages/Recruitment";
 import { JobOpeningDetail } from "./pages/JobOpeningDetail";
 import { Playbooks } from "./pages/Playbooks";
 import { PlaybookDetail } from "./pages/PlaybookDetail";
+import { LearningRules } from "./pages/LearningRules";
 import { Leads } from "./pages/Leads";
 import { LeadDetail } from "./pages/LeadDetail";
 
@@ -51,6 +52,7 @@ export default function App() {
             <Route path="/recruitment/:id" element={<JobOpeningDetail />} />
             <Route path="/playbooks" element={<Playbooks />} />
             <Route path="/playbooks/:id" element={<PlaybookDetail />} />
+            <Route path="/learning" element={<LearningRules />} />
             <Route path="/leads" element={<Leads />} />
             <Route path="/leads/:id" element={<LeadDetail />} />
           </Route>

@@ -285,21 +285,50 @@ npm run dev                 # http://localhost:5173
   and run history. Visible to all users with `voice.execute` (the same permission the
   command bar already requires).
 
-Backend: 120/120 tests passing across 13 suites (auth, CRM clients, CRM jobs, CRM leads,
+- **Learning Engine**: `POST /learning-rules`, `PUT /learning-rules/:id`, `GET
+  /learning-rules`, `GET /learning-rules/:id` (Action Contracts `create_learning_rule`,
+  `update_learning_rule`) implement the MVP-required "basic learning of aliases and
+  workflows" (project instructions section 12) and the explicit-correction rule from
+  section 11 — every rule is created deliberately by a user (e.g. "when I say old client
+  I mean a client who had work done in the last two years"), never inferred from one
+  weak signal, and stays visible, editable and reversible (archive, not delete). A rule
+  can optionally set `alias_for`, turning it into a real text-substitution step —
+  `backend/src/services/learningService.ts#resolveLearningAliases(user, text)` is applied
+  before `parseTextCommand` in **both** `POST /command/text` and each resolved Playbook
+  step, so a learned alias genuinely changes how a command is interpreted rather than
+  sitting in an unused glossary (e.g. teach "RAL" → "Riverside Apartments Ltd" once, and
+  every future "for RAL" resolves to the real client before entity matching runs).
+  Substitution uses a single left-to-right pass with terms ordered longest-first, so a
+  more specific alias ("Oak Home") wins over a shorter one it contains ("Oak") without
+  ever re-scanning already-substituted text. `POST /command/text` now returns
+  `appliedAliases` alongside the usual response, and the audit entry records the raw
+  text, the resolved text, and which aliases fired, so the interpretation stays fully
+  traceable. Text commands: "when I say X I mean Y", "teach me: X means Y", "list
+  learning rules".
+- **Frontend — Learning**: new Learning page ("Teach a rule" form — term, meaning, an
+  optional "Use as text substitution" field, and category), an active/archived list with
+  an Archive/Reactivate toggle per rule, and a note explaining that a rule only changes
+  command interpretation once the substitution field is filled in.
+
+Backend: 132/132 tests passing across 14 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, employee/permission management, service catalogue, quotes,
-recruitment, and playbooks) — covering permissions, validation, duplicate detection,
-cross-tenant checks, status-transition validation, lead conversion and duplicate-client
-reuse, command parsing for every supported intent, ambiguous-reference handling,
-capacity/overload computation, skill-gap detection, calendar date-range queries,
-upcoming overload detection, employee-suggestion ranking, the confirm-before-write flow
-(nothing changes until `confirmed: true`), deactivation, catalogue CRUD and
+recruitment, playbooks, and learning) — covering permissions, validation, duplicate
+detection, cross-tenant checks, status-transition validation, lead conversion and
+duplicate-client reuse, command parsing for every supported intent, ambiguous-reference
+handling, capacity/overload computation, skill-gap detection, calendar date-range
+queries, upcoming overload detection, employee-suggestion ranking, the confirm-before-
+write flow (nothing changes until `confirmed: true`), deactivation, catalogue CRUD and
 job-to-catalogue linking, quote line-item totals/margin computation (including the
 "unknown margin" case), quote status transitions, job-opening/candidate CRUD, advert
 drafting content assertions, candidate pipeline transitions (including that "hired"
 never creates a user account), playbook CRUD, missing-variable and confirm-preview
 handling, successful multi-step execution creating real records, stop-on-first-failure
-behaviour, and audit-entry assertions — against a real Postgres instance.
+behaviour, learning-rule CRUD, that an unconfirmed alias (no `alias_for` set) does not
+change interpretation, that a confirmed alias resolves before parsing and is reflected in
+both the response and the audit log, that archiving a rule stops it applying, longest-
+term-wins precedence for overlapping aliases, and audit-entry assertions — against a real
+Postgres instance.
 
 Frontend: `npm run build` and `npm run dev` both verified working (clean production
 build, dev server responds 200).
@@ -316,15 +345,20 @@ communication connector exists yet to actually deliver anything. Recruitment adv
 drafted text only — there is no job-board connector to place them, no candidate-sourcing
 integration, and no trial-day scheduling tie-in to the calendar module yet; a hired
 candidate must still be turned into an employee account manually. Playbooks are limited
-to the intents the deterministic command parser already understands — there is no
-learning step that proposes a playbook automatically from a repeated sequence of manual
-actions yet (that belongs to the separate Learning Engine, not built), and a playbook
-step can't branch on a previous step's result, only run in a fixed order and stop on
-first failure. Also still missing from MVP scope: communication intelligence
-(email/WhatsApp enquiry extraction), website/photo modules, business growth content
-generation, and a real voice (speech) front-end (the Voice and Text Command Layer
-currently accepts typed text only). Build order should follow the roadmap in the master
-documentation (Phase 1 → Phase 2 → …), not be improvised per-feature.
+to the intents the deterministic command parser already understands, and a playbook step
+can't branch on a previous step's result, only run in a fixed order and stop on first
+failure — there is still no automatic step that proposes a playbook from a repeated
+sequence of manual actions (a genuine Memory Model / pattern-detection layer, beyond the
+explicit-correction rules the Learning Engine now handles). Learning rules are
+whole-term substitutions only — a rule can't yet rewrite part of a sentence based on
+context (e.g. it can't tell "old client" apart in "call the old client" vs. "he's quite
+old" — it just doesn't fire on any term it wasn't taught verbatim, matching the "must
+not guess" rule rather than trying to be clever about it). Also still missing from MVP
+scope: communication intelligence (email/WhatsApp enquiry extraction), website/photo
+modules, business growth content generation, and a real voice (speech) front-end (the
+Voice and Text Command Layer currently accepts typed text only). Build order should
+follow the roadmap in the master documentation (Phase 1 → Phase 2 → …), not be
+improvised per-feature.
 
 ## Deployment
 

@@ -4,6 +4,7 @@ import { recordAudit } from "../lib/audit.js";
 import { CREATE_PLAYBOOK_ACTION, UPDATE_PLAYBOOK_ACTION, RUN_PLAYBOOK_ACTION } from "../lib/actionContracts.js";
 import { parseTextCommand } from "../lib/commandParser.js";
 import { dispatchParsedCommand, type CommandResponse } from "../lib/commandExecutor.js";
+import { resolveLearningAliases } from "./learningService.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -218,7 +219,11 @@ export async function runPlaybook(user: AuthedUser, playbookId: string, rawInput
     if (result.missing.length > 0) {
       result.missing.forEach((m) => allMissing.add(m));
     } else {
-      resolved.push({ template, text: result.text! });
+      // Learning Engine aliases apply here too, so a playbook step is
+      // interpreted exactly the way typing the same resolved text into the
+      // command bar would be — same preprocessing, same Action Engine call.
+      const alias = await resolveLearningAliases(user, result.text!);
+      resolved.push({ template, text: alias.resolvedText });
     }
   }
   if (allMissing.size > 0) {

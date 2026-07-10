@@ -27,6 +27,8 @@ export type ParsedCommand =
   | { intent: "create_service"; entities: { name: string; category?: string } }
   | { intent: "list_quotes"; entities: { client_name?: string } }
   | { intent: "list_job_openings"; entities: Record<string, never> }
+  | { intent: "create_learning_rule"; entities: { term: string; meaning: string } }
+  | { intent: "list_learning_rules"; entities: Record<string, never> }
   | { intent: "list_clients"; entities: Record<string, never> }
   | { intent: "list_jobs"; entities: Record<string, never> }
   | { intent: "list_leads"; entities: Record<string, never> }
@@ -121,6 +123,14 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (m) return { intent: "list_quotes", entities: { client_name: m[1]?.trim() } };
 
   if (/^(?:list|show)\s+job\s+openings?$/i.test(text)) return { intent: "list_job_openings", entities: {} };
+
+  m = text.match(/^when\s+i\s+say\s+(.+?)\s+i\s+mean\s+(.+)$/i);
+  if (m) return { intent: "create_learning_rule", entities: { term: m[1].trim(), meaning: m[2].trim() } };
+
+  m = text.match(/^(?:teach\s+me|remember)[:,]?\s+(.+?)\s+means\s+(.+)$/i);
+  if (m) return { intent: "create_learning_rule", entities: { term: m[1].trim(), meaning: m[2].trim() } };
+
+  if (/^(?:list|show)\s+learning\s+rules?$/i.test(text)) return { intent: "list_learning_rules", entities: {} };
 
   if (/^(?:list|show)\s+clients?$/i.test(text)) return { intent: "list_clients", entities: {} };
   if (/^(?:list|show)\s+jobs?$/i.test(text)) return { intent: "list_jobs", entities: {} };

@@ -8,6 +8,7 @@ import * as calendarService from "../services/calendarService.js";
 import * as serviceCatalogueService from "../services/serviceCatalogueService.js";
 import * as quoteService from "../services/quoteService.js";
 import * as recruitmentService from "../services/recruitmentService.js";
+import * as learningService from "../services/learningService.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -295,6 +296,29 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
 
     case "list_job_openings": {
       const data = await recruitmentService.listJobOpenings(user, {});
+      response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "create_learning_rule": {
+      const result = await learningService.createLearningRule(user, {
+        term: command.entities.term,
+        meaning: command.entities.meaning,
+      });
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? undefined : result.message,
+      };
+      break;
+    }
+
+    case "list_learning_rules": {
+      const data = await learningService.listLearningRules(user, {});
       response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
       break;
     }

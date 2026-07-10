@@ -112,6 +112,27 @@ describe("commandParser", () => {
     assert.equal(parseTextCommand("show job opening").intent, "list_job_openings");
   });
 
+  it("parses 'when I say X I mean Y' and 'teach me X means Y'", () => {
+    const r1 = parseTextCommand("when I say old client I mean a client from the last two years");
+    assert.equal(r1.intent, "create_learning_rule");
+    if (r1.intent === "create_learning_rule") {
+      assert.equal(r1.entities.term, "old client");
+      assert.equal(r1.entities.meaning, "a client from the last two years");
+    }
+
+    const r2 = parseTextCommand("teach me: Riverside means Riverside Apartments Ltd");
+    assert.equal(r2.intent, "create_learning_rule");
+    if (r2.intent === "create_learning_rule") {
+      assert.equal(r2.entities.term, "Riverside");
+      assert.equal(r2.entities.meaning, "Riverside Apartments Ltd");
+    }
+  });
+
+  it("parses 'list learning rules'", () => {
+    assert.equal(parseTextCommand("list learning rules").intent, "list_learning_rules");
+    assert.equal(parseTextCommand("show learning rule").intent, "list_learning_rules");
+  });
+
   it("returns unrecognized for gibberish instead of guessing", () => {
     const result = parseTextCommand("please make the weather nicer today");
     assert.equal(result.intent, "unrecognized");
