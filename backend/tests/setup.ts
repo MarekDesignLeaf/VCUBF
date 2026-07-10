@@ -25,7 +25,7 @@ export async function seedCompanyAndAdmin() {
       passwordHash,
       displayName: "Test Admin",
       role: "admin",
-      permissions: ["crm.read", "crm.manage", "users.manage", "audit.read"],
+      permissions: ["crm.read", "crm.manage", "users.manage", "audit.read", "voice.execute"],
     },
   });
   const worker = await prisma.user.create({

@@ -159,6 +159,17 @@ export const api = {
     convert: (id: string) =>
       request<{ lead: Lead; client: Client }>(`/crm/leads/${id}/convert`, { method: "POST" }),
   },
+  command: {
+    text: (text: string) =>
+      request<{
+        intent: string;
+        interpreted: unknown;
+        ok: boolean;
+        data?: unknown;
+        error?: string;
+        message?: string;
+      }>("/command/text", { method: "POST", body: JSON.stringify({ text }) }),
+  },
 };
 
 export { getToken };

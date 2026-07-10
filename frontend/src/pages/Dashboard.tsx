@@ -1,4 +1,5 @@
 import { useAuth } from "../context/AuthContext";
+import { CommandBar } from "../components/CommandBar";
 
 export function Dashboard() {
   const { user } = useAuth();
@@ -8,9 +9,12 @@ export function Dashboard() {
       <p>
         Signed in as <strong>{user?.displayName}</strong> ({user?.role}).
       </p>
+      <h2>Command</h2>
       <p className="hint">
-        This is the Secretary Core dashboard shell. Capacity, jobs and voice command widgets land here next.
+        Type a command instead of clicking through forms. Every command is interpreted
+        deterministically (no guessing) and fully audited.
       </p>
+      <CommandBar />
     </div>
   );
 }

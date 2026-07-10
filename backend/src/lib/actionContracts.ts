@@ -90,3 +90,18 @@ export const CONVERT_LEAD_ACTION: ActionContract = {
   dataSources: ["crm.leads"],
   possibleErrors: ["MISSING_PERMISSION", "LEAD_NOT_FOUND", "UNSUPPORTED_ACTION", "DUPLICATE_CLIENT_POSSIBLE"],
 };
+
+// Voice and Text Command Layer — the top-level action wrapping any parsed
+// text command. Risk level matches the worst case among the intents it can
+// dispatch to (internal data change); each underlying action (create_client,
+// create_job, ...) still records its own detailed audit entry in addition to
+// this one, which captures how the raw text was interpreted.
+export const EXECUTE_TEXT_COMMAND_ACTION: ActionContract = {
+  actionName: "execute_text_command",
+  purpose: "Interpret a natural-language text command and dispatch it to the matching Action Contract.",
+  requiredPermission: "voice.execute",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input"],
+  possibleErrors: ["MISSING_PERMISSION", "UNSUPPORTED_ACTION", "AMBIGUOUS_REFERENCE", "NOT_FOUND"],
+};
