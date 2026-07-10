@@ -1,10 +1,16 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, type Employee } from "../api/client";
+import { useAuth } from "../context/AuthContext";
 
 // Job Allocation and Capacity Management Module — read-only view of who
 // exists and their real current-week workload, computed from actual job
-// data (not from whether their calendar looks empty).
+// data (not from whether their calendar looks empty). Also the entry point
+// into the Employee and Permission Model's create/edit screens, for users
+// who hold users.manage.
 export function Employees() {
+  const { user } = useAuth();
+  const canManage = user?.permissions?.includes("users.manage") ?? false;
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,6 +28,7 @@ export function Employees() {
     <div>
       <div className="page-header">
         <h1>Employees</h1>
+        {canManage && <Link to="/employees/new">New employee</Link>}
       </div>
       <p className="hint">
         Workload is computed from jobs assigned to each person this week (with a planned date and an
@@ -34,6 +41,7 @@ export function Employees() {
             <th>Role</th>
             <th>Skills</th>
             <th>This week's load</th>
+            {canManage && <th></th>}
           </tr>
         </thead>
         <tbody>
@@ -75,6 +83,11 @@ export function Employees() {
                     <span className="hint">—</span>
                   )}
                 </td>
+                {canManage && (
+                  <td>
+                    <Link to={`/employees/${e.id}/edit`}>Manage</Link>
+                  </td>
+                )}
               </tr>
             );
           })}

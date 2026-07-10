@@ -3,10 +3,12 @@ const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 export class ApiError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string, message?: string) {
+  details?: Record<string, unknown>;
+  constructor(status: number, code: string, message?: string, details?: Record<string, unknown>) {
     super(message ?? code);
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -29,7 +31,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const body = isJson ? await res.json() : undefined;
 
   if (!res.ok) {
-    throw new ApiError(res.status, body?.error ?? "UNKNOWN_ERROR", body?.message);
+    throw new ApiError(res.status, body?.error ?? "UNKNOWN_ERROR", body?.message, body);
   }
   return body as T;
 }
@@ -120,6 +122,22 @@ export interface Employee {
   skills: string[];
   weeklyCapacityHours: number;
   capacity: CapacityResult | null;
+}
+
+// Employee and Permission Model — the fuller shape used by management
+// screens (create/edit), which also exposes permissions and active status.
+export const KNOWN_PERMISSIONS = ["crm.read", "crm.manage", "users.manage", "audit.read", "voice.execute"] as const;
+export type KnownPermission = (typeof KNOWN_PERMISSIONS)[number];
+
+export interface ManagedEmployee {
+  id: string;
+  displayName: string;
+  email: string;
+  role: string;
+  permissions: string[];
+  skills: string[];
+  weeklyCapacityHours: number;
+  isActive: boolean;
 }
 
 export interface AssignJobResult {
@@ -217,6 +235,12 @@ export const api = {
     get: (id: string) => request<Employee>(`/crm/employees/${id}`),
     capacity: (id: string, week?: string) =>
       request<CapacityResult>(`/crm/employees/${id}/capacity${week ? `?week=${encodeURIComponent(week)}` : ""}`),
+    getManaged: (id: string) => request<ManagedEmployee>(`/crm/employees/${id}/manage`),
+    permissions: () => request<string[]>("/crm/employees/meta/permissions"),
+    create: (data: Record<string, unknown>) =>
+      request<ManagedEmployee>("/crm/employees", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<ManagedEmployee>(`/crm/employees/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   },
   calendar: {
     jobs: (from: string, to: string) =>

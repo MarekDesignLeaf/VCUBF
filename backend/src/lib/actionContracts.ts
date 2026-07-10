@@ -166,3 +166,36 @@ export const SUGGEST_SCHEDULE_ACTION: ActionContract = {
   dataSources: ["crm.jobs", "crm.users"],
   possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
 };
+
+// Employee and Permission Model — creating or changing a user's role,
+// permissions, skills or active status is an access-control decision, not a
+// routine CRM edit. These are the first Action Contracts in this codebase
+// with confirmationRequired: true — see the generic confirm-preview flow in
+// employeeService (a request without `confirmed: true` returns a preview of
+// exactly what would change instead of applying it, per the "fail safely,
+// ask before risky actions" rule in section 9 of the project instructions).
+export const CREATE_EMPLOYEE_ACTION: ActionContract = {
+  actionName: "create_employee",
+  purpose: "Create a new employee/user account with a role, permission set, skills and weekly capacity.",
+  requiredPermission: "users.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "EMAIL_ALREADY_EXISTS", "CONFIRMATION_REQUIRED"],
+};
+
+export const UPDATE_EMPLOYEE_ACTION: ActionContract = {
+  actionName: "update_employee",
+  purpose: "Change an employee's role, permissions, skills, weekly capacity, or active status.",
+  requiredPermission: "users.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.users"],
+  possibleErrors: ["MISSING_PERMISSION", "EMPLOYEE_NOT_FOUND", "VALIDATION_FAILED", "CONFIRMATION_REQUIRED"],
+};
+
+// The fixed set of permission strings the system understands. Kept as
+// structured data (not invented per-request) so the UI can offer exactly
+// these as checkboxes and the backend can validate against exactly these.
+export const KNOWN_PERMISSIONS = ["crm.read", "crm.manage", "users.manage", "audit.read", "voice.execute"] as const;
+export type KnownPermission = (typeof KNOWN_PERMISSIONS)[number];
