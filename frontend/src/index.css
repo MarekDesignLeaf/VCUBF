@@ -126,3 +126,27 @@ button:disabled { opacity: 0.6; cursor: default; }
 .detail-list dd { margin: 0; }
 
 .hint { color: var(--muted); }
+
+select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+h2 { font-size: 1.1rem; margin-top: 24px; }
+
+.status-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  background: #eef0f3;
+  color: var(--text);
+}
+.status-nova { background: #e5edff; color: #2c4a9a; }
+.status-naplanovano { background: #fff3cd; color: #8a6a00; }
+.status-v_realizaci { background: #d9f2e3; color: var(--accent-dark); }
+.status-ceka_na_material, .status-ceka_na_klienta { background: #fde8d8; color: #9a4b1f; }
+.status-dokonceno { background: #d9f2e3; color: var(--accent-dark); }
+.status-zruseno { background: #f1f1f1; color: var(--muted); }

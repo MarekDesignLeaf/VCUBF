@@ -10,6 +10,7 @@ export function Layout() {
         <nav>
           <NavLink to="/" end>Dashboard</NavLink>
           <NavLink to="/clients">Clients</NavLink>
+          <NavLink to="/jobs">Jobs</NavLink>
         </nav>
         <div className="sidebar-footer">
           <div className="user-name">{user?.displayName}</div>

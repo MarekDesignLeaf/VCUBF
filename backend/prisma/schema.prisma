@@ -17,6 +17,7 @@ model Company {
 
   users     User[]
   clients   Client[]
+  jobs      Job[]
   auditLogs AuditLog[]
 
   @@map("companies")
@@ -28,8 +29,8 @@ model User {
   email        String   @unique
   passwordHash String   @map("password_hash")
   displayName  String   @map("display_name")
-  role         String   @default("worker") // owner | admin | manager | worker | sales | accountant | marketing | external_contractor
-  permissions  String[] // e.g. crm.read, crm.manage, users.manage, audit.read
+  role         String   @default("worker")
+  permissions  String[]
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
 
@@ -40,43 +41,67 @@ model User {
 }
 
 model Client {
-  id            String   @id @default(uuid())
-  companyId     String   @map("company_id")
-  displayName   String   @map("display_name")
-  firstName     String?  @map("first_name")
-  lastName      String?  @map("last_name")
-  companyName   String?  @map("company_name")
-  emailPrimary  String?  @map("email_primary")
-  phonePrimary  String?  @map("phone_primary")
-  clientType    String?  @map("client_type") // private | commercial
-  billingLine1  String?  @map("billing_address_line1")
-  billingCity   String?  @map("billing_city")
-  billingPostcode String? @map("billing_postcode")
-  notes         String?
-  source        String?  // e.g. manual, email, whatsapp, web_form — traceable origin
-  createdBy     String?  @map("created_by")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(uuid())
+  companyId       String   @map("company_id")
+  displayName     String   @map("display_name")
+  firstName       String?  @map("first_name")
+  lastName        String?  @map("last_name")
+  companyName     String?  @map("company_name")
+  emailPrimary    String?  @map("email_primary")
+  phonePrimary    String?  @map("phone_primary")
+  clientType      String?  @map("client_type")
+  billingLine1    String?  @map("billing_address_line1")
+  billingCity     String?  @map("billing_city")
+  billingPostcode String?  @map("billing_postcode")
+  notes           String?
+  source          String?
+  createdBy       String?  @map("created_by")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   company Company @relation(fields: [companyId], references: [id])
+  jobs    Job[]
 
   @@index([companyId])
   @@map("clients")
 }
 
+model Job {
+  id              String    @id @default(uuid())
+  companyId       String    @map("company_id")
+  clientId        String    @map("client_id")
+  jobTitle        String    @map("job_title")
+  jobStatus       String    @default("nova") @map("job_status")
+  propertyAddress String?   @map("property_address")
+  assignedUserId  String?   @map("assigned_user_id")
+  plannedStartAt  DateTime? @map("planned_start_at")
+  plannedEndAt    DateTime? @map("planned_end_at")
+  notes           String?
+  createdBy       String?   @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  client  Client  @relation(fields: [clientId], references: [id])
+
+  @@index([companyId])
+  @@index([clientId])
+  @@map("jobs")
+}
+
 model AuditLog {
-  id                  String   @id @default(uuid())
-  companyId           String   @map("company_id")
-  userId              String?  @map("user_id")
-  actionName          String   @map("action_name")
+  id                   String   @id @default(uuid())
+  companyId            String   @map("company_id")
+  userId               String?  @map("user_id")
+  actionName           String   @map("action_name")
   interpretedIntent    String?  @map("interpreted_intent")
-  inputPayload        Json?    @map("input_payload")
+  inputPayload         Json?    @map("input_payload")
   dataBefore           Json?    @map("data_before")
   dataAfter            Json?    @map("data_after")
   riskLevel            Int      @map("risk_level")
   confirmationRequired Boolean  @default(false) @map("confirmation_required")
   confirmed            Boolean  @default(false)
-  result               String   // success | error | rejected
+  result               String
   errorMessage         String?  @map("error_message")
   createdAt            DateTime @default(now()) @map("created_at")
 

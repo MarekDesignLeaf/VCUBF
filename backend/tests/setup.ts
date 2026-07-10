@@ -4,7 +4,9 @@ import { prisma } from "../src/db.js";
 export const TEST_COMPANY_ID = "10000000-0000-0000-0000-000000000001";
 
 export async function resetDb() {
+  // Delete in FK-dependency order: audit log and jobs reference clients/users.
   await prisma.auditLog.deleteMany({});
+  await prisma.job.deleteMany({});
   await prisma.client.deleteMany({});
   await prisma.user.deleteMany({});
   await prisma.company.deleteMany({});
@@ -32,7 +34,7 @@ export async function seedCompanyAndAdmin() {
       passwordHash,
       displayName: "Test Worker",
       role: "worker",
-      permissions: [], // no crm permissions — used for permission-denied tests
+      permissions: [],
     },
   });
   return { company, admin, worker };

@@ -59,6 +59,41 @@ export interface Client {
   createdAt: string;
 }
 
+// Keep in sync with backend/src/lib/actionContracts.ts JOB_STATUSES.
+export const JOB_STATUSES = [
+  "nova",
+  "naplanovano",
+  "v_realizaci",
+  "ceka_na_material",
+  "ceka_na_klienta",
+  "dokonceno",
+  "zruseno",
+] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
+
+export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
+  nova: "New",
+  naplanovano: "Scheduled",
+  v_realizaci: "In progress",
+  ceka_na_material: "Waiting for material",
+  ceka_na_klienta: "Waiting for client",
+  dokonceno: "Completed",
+  zruseno: "Cancelled",
+};
+
+export interface Job {
+  id: string;
+  clientId: string;
+  jobTitle: string;
+  jobStatus: JobStatus;
+  propertyAddress?: string | null;
+  plannedStartAt?: string | null;
+  plannedEndAt?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  client?: { id: string; displayName: string };
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
@@ -69,6 +104,20 @@ export const api = {
     create: (data: Record<string, unknown>) =>
       request<Client>("/crm/clients", { method: "POST", body: JSON.stringify(data) }),
     search: (q: string) => request<Client[]>(`/crm/clients/search?q=${encodeURIComponent(q)}`),
+  },
+  jobs: {
+    list: (params?: { clientId?: string; status?: string }) => {
+      const qs = new URLSearchParams();
+      if (params?.clientId) qs.set("client_id", params.clientId);
+      if (params?.status) qs.set("status", params.status);
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request<Job[]>(`/crm/jobs${suffix}`);
+    },
+    get: (id: string) => request<Job>(`/crm/jobs/${id}`),
+    create: (data: Record<string, unknown>) =>
+      request<Job>("/crm/jobs", { method: "POST", body: JSON.stringify(data) }),
+    changeStatus: (id: string, jobStatus: JobStatus) =>
+      request<Job>(`/crm/jobs/${id}`, { method: "PUT", body: JSON.stringify({ job_status: jobStatus }) }),
   },
 };
 
