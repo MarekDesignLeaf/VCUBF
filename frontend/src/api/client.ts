@@ -427,6 +427,36 @@ export interface CommunicationRecord {
   job?: { id: string; jobTitle: string } | null;
 }
 
+// Notification and Escalation Module — a unified, read-only "things needing
+// attention" feed computed from real data already owned by other modules
+// (overdue Communication Log follow-ups, capacity overload weeks, expiring
+// quotes). Nothing here is invented; acknowledging an item only records
+// that it was seen/handled and is fully reversible — it never changes the
+// underlying record it points to.
+export const NOTIFICATION_TYPES = ["follow_up_due", "capacity_overload", "quote_expiring"] as const;
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
+  follow_up_due: "Follow-up due",
+  capacity_overload: "Capacity overload",
+  quote_expiring: "Quote expiring",
+};
+
+export const NOTIFICATION_SEVERITIES = ["info", "warning", "urgent"] as const;
+export type NotificationSeverity = (typeof NOTIFICATION_SEVERITIES)[number];
+
+export interface AttentionItem {
+  key: string;
+  type: NotificationType;
+  severity: NotificationSeverity;
+  title: string;
+  message: string;
+  dueAt?: string | null;
+  entity: { type: string; id: string; label?: string };
+  acknowledged: boolean;
+  acknowledgedAt?: string | null;
+}
+
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -607,6 +637,17 @@ export const api = {
     update: (id: string, data: Record<string, unknown>) =>
       request<CommunicationRecord>(`/communications/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     followUpsDue: () => request<CommunicationRecord[]>("/communications/follow-ups-due"),
+  },
+  notifications: {
+    feed: (includeAcknowledged?: boolean) =>
+      request<AttentionItem[]>(`/notifications${includeAcknowledged ? "?include_acknowledged=true" : ""}`),
+    acknowledge: (notificationKey: string) =>
+      request<unknown>("/notifications/acknowledge", {
+        method: "POST",
+        body: JSON.stringify({ notification_key: notificationKey }),
+      }),
+    unacknowledge: (notificationKey: string) =>
+      request<unknown>(`/notifications/${encodeURIComponent(notificationKey)}/unacknowledge`, { method: "POST" }),
   },
   command: {
     text: (text: string) =>

@@ -9,6 +9,7 @@ export async function resetDb() {
   // catalogue items; jobs must go before the catalogue items they may
   // reference.
   await prisma.auditLog.deleteMany({});
+  await prisma.notificationAcknowledgement.deleteMany({});
   await prisma.learningRule.deleteMany({});
   await prisma.playbookRun.deleteMany({});
   await prisma.playbook.deleteMany({});

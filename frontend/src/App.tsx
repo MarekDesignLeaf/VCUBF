@@ -22,6 +22,7 @@ import { LearningRules } from "./pages/LearningRules";
 import { Leads } from "./pages/Leads";
 import { LeadDetail } from "./pages/LeadDetail";
 import { CommunicationLog } from "./pages/CommunicationLog";
+import { Notifications } from "./pages/Notifications";
 
 export default function App() {
   return (
@@ -57,6 +58,7 @@ export default function App() {
             <Route path="/leads" element={<Leads />} />
             <Route path="/leads/:id" element={<LeadDetail />} />
             <Route path="/communications" element={<CommunicationLog />} />
+            <Route path="/notifications" element={<Notifications />} />
           </Route>
         </Routes>
       </BrowserRouter>

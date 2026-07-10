@@ -28,6 +28,7 @@ model Company {
   playbookRuns        PlaybookRun[]
   learningRules       LearningRule[]
   communicationRecords CommunicationRecord[]
+  notificationAcknowledgements NotificationAcknowledgement[]
 
   @@map("companies")
 }
@@ -394,6 +395,34 @@ model CommunicationRecord {
   @@index([clientId])
   @@index([jobId])
   @@map("communication_records")
+}
+
+
+// Notification and Escalation Module — a unified "things needing attention"
+// feed. This module deliberately stores no duplicate business facts: every
+// item on the feed is computed fresh, on read, from real existing data
+// already owned by other modules (overdue Communication Log follow-ups,
+// Job Allocation/Capacity Management overload weeks, quotes approaching or
+// past their valid_until date) — see notificationService.ts. The only thing
+// persisted here is which computed item a user has explicitly acknowledged
+// (marked as seen/handled), keyed by a deterministic notificationKey (e.g.
+// "follow_up:<communicationRecordId>") so the same underlying fact does not
+// keep resurfacing once handled, without ever deleting or altering the
+// underlying record it points to. Acknowledging is reversible (delete the
+// row = unacknowledge), matching the Learning Engine's
+// visible/editable/reversible standard for low-risk state changes.
+model NotificationAcknowledgement {
+  id               String   @id @default(uuid())
+  companyId        String   @map("company_id")
+  notificationKey  String   @map("notification_key")
+  acknowledgedBy   String?  @map("acknowledged_by")
+  acknowledgedAt   DateTime @default(now()) @map("acknowledged_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, notificationKey])
+  @@index([companyId])
+  @@map("notification_acknowledgements")
 }
 
 

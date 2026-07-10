@@ -339,10 +339,37 @@ npm run dev                 # http://localhost:5173
   five most recent records for that client/job plus a "Log communication" link that
   prefills `client_id` (and `job_id` from the job page).
 
-Backend: 145/145 tests passing across 15 suites (auth, CRM clients, CRM jobs, CRM leads,
+- **Notification and Escalation Module**: `GET /notifications` (Action Contract
+  `get_attention_feed`, risk 0, read-only) builds a single, unified "things needing
+  attention" feed by computing it fresh, on every read, from real data already owned by
+  other modules — it stores no duplicate business facts. Sources: overdue Communication
+  Log follow-ups (`communicationService.listFollowUpsDue`), real capacity overload weeks
+  from the Job Allocation/Calendar module (`calendarService.detectUpcomingOverload`,
+  including the same real mitigation menu), and draft/sent quotes whose `valid_until`
+  date has passed or is within 7 days (`backend/src/services/notificationService.ts`).
+  Severity (`urgent`/`warning`) is derived directly from real dates and utilisation
+  percentages already stored elsewhere — nothing is invented or guessed. The only new
+  persisted state is which computed item a user has explicitly acknowledged
+  (`NotificationAcknowledgement`, keyed by a deterministic `notificationKey` such as
+  `follow_up:<id>`), so a handled item stops resurfacing without ever touching the
+  underlying communication record, overload finding, or quote it points to.
+  `POST /notifications/acknowledge` (Action Contract `acknowledge_notification`, risk 1)
+  and `POST /notifications/:key/unacknowledge` (Action Contract
+  `unacknowledge_notification`, risk 1) are both idempotent and fully reversible — no
+  confirmation is required since nothing but a "seen" marker changes, matching the
+  Learning Engine's visible/editable/reversible standard for low-risk state. Text
+  commands: "list notifications" / "show notifications" / "what needs attention".
+- **Frontend — Notifications**: new Notifications page (linked in the sidebar right
+  under Dashboard) listing every attention-feed item with a severity badge, type, title,
+  message, and due date, an "Acknowledge"/"Unacknowledge" button per row, and a "show
+  acknowledged items too" toggle so a handled item can still be reviewed rather than
+  disappearing for good.
+
+Backend: 155/155 tests passing across 16 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, employee/permission management, service catalogue, quotes,
-recruitment, playbooks, and learning) — covering permissions, validation, duplicate
+recruitment, playbooks, learning, communication log, and notifications/escalation) —
+covering permissions, validation, duplicate
 detection, cross-tenant checks, status-transition validation, lead conversion and
 duplicate-client reuse, command parsing for every supported intent, ambiguous-reference
 handling, capacity/overload computation, skill-gap detection, calendar date-range
@@ -394,8 +421,15 @@ entry), duplicate/near-duplicate detection across channels, and AI-assisted
 summarisation of a raw thread into a structured record are still not implemented; the
 data model and CRM linkage are deliberately built so that future connector-driven
 extraction work writes into this same table instead of creating a second, disconnected
-communication store. Also still missing: website/photo modules, business growth content
-generation, and a real voice (speech) front-end (the
+communication store. The Notification and Escalation Module's feed is pull-only (a
+page you open, or a text command you run) — there is no push delivery yet: no email
+digest, no SMS/WhatsApp alert, and no in-app real-time badge/websocket, since no
+notification-delivery connector exists. It also only aggregates three real signal types
+(overdue follow-ups, capacity overload, expiring quotes); it does not yet cover other
+escalation-worthy conditions the architecture lists (e.g. a lead sitting unconverted too
+long, a job stuck in one status too long) — extending coverage means adding another
+`buildXItems` source function, not a new module. Also still missing: website/photo
+modules, business growth content generation, and a real voice (speech) front-end (the
 Voice and Text Command Layer currently accepts typed text only). Build order should
 follow the roadmap in the master documentation (Phase 1 → Phase 2 → …), not be
 improvised per-feature.

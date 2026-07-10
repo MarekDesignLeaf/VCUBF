@@ -10,6 +10,7 @@ import * as quoteService from "../services/quoteService.js";
 import * as recruitmentService from "../services/recruitmentService.js";
 import * as learningService from "../services/learningService.js";
 import * as communicationService from "../services/communicationService.js";
+import * as notificationService from "../services/notificationService.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -401,6 +402,12 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
 
     case "list_follow_ups": {
       const data = await communicationService.listFollowUpsDue(user);
+      response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "list_notifications": {
+      const data = await notificationService.getAttentionFeed(user);
       response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
       break;
     }

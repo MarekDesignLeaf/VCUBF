@@ -10,6 +10,7 @@ export function Layout() {
         <div className="brand">VCUF Secretary</div>
         <nav>
           <NavLink to="/" end>Dashboard</NavLink>
+          <NavLink to="/notifications">Notifications</NavLink>
           <NavLink to="/leads">Leads</NavLink>
           <NavLink to="/clients">Clients</NavLink>
           <NavLink to="/jobs">Jobs</NavLink>

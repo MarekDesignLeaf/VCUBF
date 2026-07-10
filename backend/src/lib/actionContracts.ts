@@ -478,3 +478,55 @@ export const UPDATE_COMMUNICATION_RECORD_ACTION: ActionContract = {
   dataSources: ["user_input", "crm.communication_records"],
   possibleErrors: ["MISSING_PERMISSION", "COMMUNICATION_RECORD_NOT_FOUND", "VALIDATION_FAILED"],
 };
+
+// Notification and Escalation Module — a unified, read-only "things needing
+// attention" feed computed from real data already owned by other modules:
+// overdue Communication Log follow-ups (log_communication /
+// listFollowUpsDue), Job Allocation/Capacity Management overload weeks
+// (detect_overload), and quotes approaching or past their valid_until date.
+// It never invents an item and never fabricates urgency — severity is
+// derived directly from real dates/percentages already stored elsewhere.
+// See notificationService.ts.
+export const NOTIFICATION_TYPES = ["follow_up_due", "capacity_overload", "quote_expiring"] as const;
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+export const NOTIFICATION_SEVERITIES = ["info", "warning", "urgent"] as const;
+export type NotificationSeverity = (typeof NOTIFICATION_SEVERITIES)[number];
+
+export const GET_ATTENTION_FEED_ACTION: ActionContract = {
+  actionName: "get_attention_feed",
+  purpose:
+    "Aggregate overdue communication follow-ups, capacity overload weeks, and expiring quotes into a single, real, unified feed of things needing attention.",
+  requiredPermission: "crm.read",
+  riskLevel: 0,
+  confirmationRequired: false,
+  dataSources: ["crm.communication_records", "crm.jobs", "crm.users", "crm.quotes"],
+  possibleErrors: ["MISSING_PERMISSION"],
+};
+
+// Acknowledging only records that a user has seen/handled a computed
+// notification item (by its deterministic key) — it never deletes or
+// changes the underlying business record (the communication record, the
+// overload finding, or the quote) that the notification points to, and it
+// is fully reversible via unacknowledge_notification. Low risk (1): it is a
+// personal/company "seen" marker, not a business data change, so it does
+// not require confirmation.
+export const ACKNOWLEDGE_NOTIFICATION_ACTION: ActionContract = {
+  actionName: "acknowledge_notification",
+  purpose: "Mark a surfaced attention-feed item as seen/handled so it stops resurfacing, without altering the underlying record it points to.",
+  requiredPermission: "crm.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["user_input"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
+export const UNACKNOWLEDGE_NOTIFICATION_ACTION: ActionContract = {
+  actionName: "unacknowledge_notification",
+  purpose: "Reverse a previous acknowledgement so an attention-feed item resurfaces again.",
+  requiredPermission: "crm.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["user_input"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};

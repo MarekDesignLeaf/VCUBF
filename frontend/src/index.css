@@ -127,6 +127,19 @@ button:disabled { opacity: 0.6; cursor: default; }
 .detail-list dt { color: var(--muted); }
 .detail-list dd { margin: 0; }
 
+/* Notification and Escalation Module — severity badges on the attention feed. */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.badge-urgent { background: var(--error-bg); color: var(--error-text); }
+.badge-warning { background: #fff4e0; color: #8a5a00; }
+.badge-info { background: #eef0f3; color: var(--muted); }
+
 .hint { color: var(--muted); }
 
 select {
