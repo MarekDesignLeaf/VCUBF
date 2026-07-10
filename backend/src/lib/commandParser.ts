@@ -216,6 +216,18 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (/^(?:list|show)\s+(?:possible\s+)?duplicate\s+clients?$/i.test(text))
     return { intent: "list_data_quality", entities: {} };
 
+  // merge_clients (the confirmation-gated Data Quality Engine action — see
+  // dataQualityService.mergeClients) deliberately has NO text-command intent
+  // here. Same judgment call the README already documents for prepare_quote
+  // ("a real, multi-line-item form, so it isn't a one-line voice command in
+  // this slice"): merging picks two specific client ids out of a possible
+  // duplicate pair and re-links four different record types, which is not
+  // safely expressible or reviewable as a single typed sentence. It stays a
+  // dedicated form/API flow (POST /data-quality/merge-clients) that always
+  // goes through the same confirmationRequired preview before anything
+  // changes, whether called from the REST route or (in a future slice) a
+  // playbook step — never a one-line command, even a confirmed one.
+
   // Memory Model — Pattern Detection: read-only analysis of the AuditLog for
   // repeated manual action sequences. Never creates a Playbook itself; see
   // memoryModelService.ts.

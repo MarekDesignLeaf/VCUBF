@@ -5,6 +5,7 @@ import {
   ACKNOWLEDGE_NOTIFICATION_ACTION,
   UNACKNOWLEDGE_NOTIFICATION_ACTION,
   JOB_STATUS_COMPLETED,
+  CHANGE_JOB_STATUS_ACTION,
   type NotificationSeverity,
   type NotificationType,
 } from "../lib/actionContracts.js";
@@ -35,6 +36,21 @@ import { buildDataQualityItems } from "./dataQualityService.js";
 //     structural, count-based "you finished this job and never logged any
 //     photos for it" gap. This never judges photo quality and never flags a
 //     job that already has at least one photo logged.
+//   - Lead Intake Module: leads still open (leadStatus not "converted" and
+//     not "lost") whose Lead.createdAt is older than
+//     STALE_LEAD_THRESHOLD_DAYS — a real, count-of-days signal that a lead
+//     has not been progressed, never a guess about why.
+//   - Job Allocation and Capacity Management Module: jobs not in a terminal
+//     status ("dokonceno"/"zruseno") whose status has not changed in more
+//     than STUCK_JOB_THRESHOLD_DAYS. This deliberately queries the AuditLog
+//     for the job's most recent "change_job_status" entry rather than using
+//     Job.updatedAt, because updatedAt is a generic Prisma @updatedAt
+//     timestamp bumped by any field write (e.g. assign_job re-assigning the
+//     job) — using it directly would under-report "stuck" jobs whenever an
+//     unrelated field changed more recently than the actual status. A job
+//     that has never had a change_job_status audit entry is measured from
+//     Job.createdAt instead (it has been sitting in its initial status
+//     since creation, which is exactly the same "stuck" signal).
 // Nothing here is invented — severity is derived directly from real dates
 // and percentages already stored elsewhere, never guessed. The only state
 // this module persists is which computed item a user has explicitly
@@ -57,6 +73,20 @@ export interface AttentionItem extends AttentionItemBase {
 }
 
 const QUOTE_EXPIRY_WARNING_WINDOW_DAYS = 7;
+
+// Lead Intake Module — a lead still open (not converted, not lost) this many
+// days after creation is considered stale and surfaced for attention. A
+// fixed, documented constant, matching the convention already used for
+// QUOTE_EXPIRY_WARNING_WINDOW_DAYS and PATTERN_DETECTION_WINDOW_DAYS.
+const STALE_LEAD_THRESHOLD_DAYS = 14;
+const OPEN_LEAD_STATUSES = ["new", "contacted", "qualified"] as const;
+
+// Job Allocation and Capacity Management Module — a non-terminal job whose
+// status has not changed in this many days is considered stuck. See the
+// module-level comment above for why this is measured from the AuditLog
+// change_job_status trail rather than Job.updatedAt.
+const STUCK_JOB_THRESHOLD_DAYS = 10;
+const TERMINAL_JOB_STATUSES = ["dokonceno", "zruseno"] as const;
 
 function daysBetween(a: Date, b: Date): number {
   return (a.getTime() - b.getTime()) / (1000 * 60 * 60 * 24);
@@ -154,6 +184,99 @@ async function buildPortfolioGapItems(user: AuthedUser): Promise<AttentionItemBa
   }));
 }
 
+// Stale lead — a lead still open (leadStatus not "converted" and not
+// "lost") whose Lead.createdAt is older than STALE_LEAD_THRESHOLD_DAYS.
+// Matches the "buildXItems" source-function pattern used by every other
+// feed source in this module. Real data only: no invented "reason it went
+// stale", just the real elapsed days since creation.
+async function buildStaleLeadItems(user: AuthedUser): Promise<AttentionItemBase[]> {
+  const now = new Date();
+  const threshold = new Date(now.getTime() - STALE_LEAD_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
+
+  const staleLeads = await prisma.lead.findMany({
+    where: {
+      companyId: user.companyId,
+      leadStatus: { in: [...OPEN_LEAD_STATUSES] },
+      createdAt: { lte: threshold },
+    },
+  });
+
+  return staleLeads.map((l) => {
+    const ageDays = Math.floor(daysBetween(now, l.createdAt));
+    const severity: NotificationSeverity = ageDays >= STALE_LEAD_THRESHOLD_DAYS * 2 ? "urgent" : "warning";
+    return {
+      key: `stale_lead:${l.id}`,
+      type: "stale_lead",
+      severity,
+      title: `Lead "${l.name}" has been open for ${ageDays} days`,
+      message: `Status is still "${l.leadStatus}" — created ${l.createdAt.toISOString().slice(0, 10)} and never converted or marked lost.`,
+      dueAt: null,
+      entity: { type: "lead", id: l.id, label: l.name },
+    };
+  });
+}
+
+// Stuck job — a job not in a terminal status whose status has not changed in
+// more than STUCK_JOB_THRESHOLD_DAYS, using the AuditLog change_job_status
+// trail (see module-level comment for why, not Job.updatedAt). The AuditLog
+// does not have a jobId column — the job id lives inside the JSON
+// inputPayload written by jobService.changeJobStatus — so this reads every
+// successful change_job_status entry for the company once and reduces it to
+// "latest status-change timestamp per job id" in memory, which is cheap at
+// this data scale and avoids a second, duplicated business-fact store.
+async function buildStuckJobItems(user: AuthedUser): Promise<AttentionItemBase[]> {
+  const now = new Date();
+
+  const activeJobs = await prisma.job.findMany({
+    where: {
+      companyId: user.companyId,
+      jobStatus: { notIn: [...TERMINAL_JOB_STATUSES] },
+    },
+    include: { client: { select: { id: true, displayName: true } } },
+  });
+  if (activeJobs.length === 0) return [];
+
+  const statusChangeAudits = await prisma.auditLog.findMany({
+    where: {
+      companyId: user.companyId,
+      actionName: CHANGE_JOB_STATUS_ACTION.actionName,
+      result: "success",
+    },
+    select: { inputPayload: true, createdAt: true },
+  });
+
+  const lastStatusChangeByJobId = new Map<string, Date>();
+  for (const audit of statusChangeAudits) {
+    const payload = audit.inputPayload as { jobId?: unknown } | null;
+    const jobId = payload && typeof payload.jobId === "string" ? payload.jobId : null;
+    if (!jobId) continue;
+    const existing = lastStatusChangeByJobId.get(jobId);
+    if (!existing || audit.createdAt > existing) {
+      lastStatusChangeByJobId.set(jobId, audit.createdAt);
+    }
+  }
+
+  const stuckJobs: AttentionItemBase[] = [];
+  for (const j of activeJobs) {
+    const lastChangeAt = lastStatusChangeByJobId.get(j.id) ?? j.createdAt;
+    const daysSinceChange = daysBetween(now, lastChangeAt);
+    if (daysSinceChange < STUCK_JOB_THRESHOLD_DAYS) continue;
+
+    const roundedDays = Math.floor(daysSinceChange);
+    const severity: NotificationSeverity = daysSinceChange >= STUCK_JOB_THRESHOLD_DAYS * 2 ? "urgent" : "warning";
+    stuckJobs.push({
+      key: `stuck_job:${j.id}`,
+      type: "stuck_job",
+      severity,
+      title: `Job "${j.jobTitle}" has been "${j.jobStatus}" for ${roundedDays} days`,
+      message: `No change_job_status action recorded in the last ${roundedDays} days for ${j.client?.displayName ?? "client"}'s job — status is still "${j.jobStatus}".`,
+      dueAt: null,
+      entity: { type: "job", id: j.id, label: j.jobTitle },
+    });
+  }
+  return stuckJobs;
+}
+
 const severityRank: Record<NotificationSeverity, number> = { urgent: 0, warning: 1, info: 2 };
 
 // get_attention_feed — read-only. By default, already-acknowledged items are
@@ -163,13 +286,16 @@ export async function getAttentionFeed(
   user: AuthedUser,
   options: { includeAcknowledged?: boolean } = {}
 ): Promise<AttentionItem[]> {
-  const [followUps, overloads, expiringQuotes, dataQualityItems, portfolioGapItems] = await Promise.all([
-    buildFollowUpItems(user),
-    buildOverloadItems(user),
-    buildQuoteExpiryItems(user),
-    buildDataQualityItems(user),
-    buildPortfolioGapItems(user),
-  ]);
+  const [followUps, overloads, expiringQuotes, dataQualityItems, portfolioGapItems, staleLeads, stuckJobs] =
+    await Promise.all([
+      buildFollowUpItems(user),
+      buildOverloadItems(user),
+      buildQuoteExpiryItems(user),
+      buildDataQualityItems(user),
+      buildPortfolioGapItems(user),
+      buildStaleLeadItems(user),
+      buildStuckJobItems(user),
+    ]);
 
   const items: AttentionItemBase[] = [
     ...followUps,
@@ -177,6 +303,8 @@ export async function getAttentionFeed(
     ...expiringQuotes,
     ...dataQualityItems,
     ...portfolioGapItems,
+    ...staleLeads,
+    ...stuckJobs,
   ];
 
   const acks = await prisma.notificationAcknowledgement.findMany({

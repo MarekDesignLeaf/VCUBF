@@ -500,6 +500,8 @@ export const NOTIFICATION_TYPES = [
   "duplicate_client_possible",
   "missing_client_contact_info",
   "portfolio_gap",
+  "stale_lead",
+  "stuck_job",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -509,11 +511,20 @@ export type NotificationSeverity = (typeof NOTIFICATION_SEVERITIES)[number];
 export const GET_ATTENTION_FEED_ACTION: ActionContract = {
   actionName: "get_attention_feed",
   purpose:
-    "Aggregate overdue communication follow-ups, capacity overload weeks, expiring quotes, data quality findings, and completed jobs missing portfolio photos into a single, real, unified feed of things needing attention.",
+    "Aggregate overdue communication follow-ups, capacity overload weeks, expiring quotes, data quality findings, completed jobs missing portfolio photos, stale open leads, and jobs stuck in one status too long into a single, real, unified feed of things needing attention.",
   requiredPermission: "crm.read",
   riskLevel: 0,
   confirmationRequired: false,
-  dataSources: ["crm.communication_records", "crm.jobs", "crm.users", "crm.quotes", "crm.clients", "crm.portfolio_photos"],
+  dataSources: [
+    "crm.communication_records",
+    "crm.jobs",
+    "crm.users",
+    "crm.quotes",
+    "crm.clients",
+    "crm.portfolio_photos",
+    "crm.leads",
+    "audit_log",
+  ],
   possibleErrors: ["MISSING_PERMISSION"],
 };
 
@@ -561,6 +572,43 @@ export const ANALYZE_DATA_QUALITY_ACTION: ActionContract = {
   confirmationRequired: false,
   dataSources: ["crm.clients"],
   possibleErrors: ["MISSING_PERMISSION"],
+};
+
+// merge_clients — the confirmation-gated action closing the "no merge these
+// clients action yet" gap documented in README.md. This is deliberately the
+// highest-risk action in the Data Quality Engine so far: it re-links real,
+// already-linked business records (Job, Quote, CommunicationRecord,
+// PortfolioPhoto) from a duplicate client onto a primary client, and
+// archives (never hard-deletes) the duplicate. Follows the exact same
+// confirmationRequired: true / 409 CONFIRMATION_REQUIRED preview pattern as
+// create_employee / update_employee / run_playbook — see employeeService.ts
+// and dataQualityService.mergeClients. requiredPermission matches the
+// permission already used for every other client-management action
+// (crm.manage), since this is fundamentally a CRM Core write, not an
+// access-control change like the employee actions (which is why those use
+// users.manage instead). risk 3, same as create_employee/update_employee/
+// run_playbook: an internal data change with real, multi-record
+// consequences, but not external communication (4) or a financial/legal/
+// irreversible action (5) — the merge is reversible in the sense that the
+// duplicate client is archived, not deleted, and its own record (and its
+// own audit history) still exists and can be manually un-archived by a
+// human; there is no automatic "undo merge" action that reverses the FK
+// re-linking itself.
+export const MERGE_CLIENTS_ACTION: ActionContract = {
+  actionName: "merge_clients",
+  purpose:
+    "Re-link a duplicate client's Job, Quote, CommunicationRecord, and PortfolioPhoto records onto a primary client, then archive (never delete) the duplicate — always previewed before anything changes.",
+  requiredPermission: "crm.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.clients", "crm.jobs", "crm.quotes", "crm.communication_records", "crm.portfolio_photos"],
+  possibleErrors: [
+    "MISSING_PERMISSION",
+    "VALIDATION_FAILED",
+    "CLIENT_NOT_FOUND",
+    "SAME_CLIENT",
+    "CONFIRMATION_REQUIRED",
+  ],
 };
 
 // Portfolio and Photo Intelligence Module — the manual-entry foundation of a

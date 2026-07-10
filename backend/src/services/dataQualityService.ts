@@ -1,5 +1,9 @@
+import { z } from "zod";
 import { prisma } from "../db.js";
+import { recordAudit } from "../lib/audit.js";
+import { MERGE_CLIENTS_ACTION } from "../lib/actionContracts.js";
 import type { AuthedUser } from "../middleware/auth.js";
+import { fail, ok, type ServiceResult } from "./result.js";
 
 // Data Quality Engine — see vcubf-programmer-skill "Data Quality Engine" /
 // "CRM rule". This module is read-only and purely structural: every finding
@@ -105,8 +109,12 @@ const MIN_NAME_LENGTH_FOR_EXACT_MATCH = 3;
 // other service in this codebase) for possible duplicates and clients
 // missing a usable contact method.
 export async function getDataQualityReport(user: AuthedUser): Promise<DataQualityReport> {
+  // Archived (merged-away) clients are excluded from the scan — otherwise a
+  // duplicate that has already been merged via merge_clients would keep
+  // reappearing as a "possible duplicate" of the client it was merged into,
+  // forever, since its own email/phone/name fields are untouched by a merge.
   const clients = await prisma.client.findMany({
-    where: { companyId: user.companyId },
+    where: { companyId: user.companyId, isActive: true },
     orderBy: { createdAt: "asc" },
   });
 
@@ -225,4 +233,180 @@ export async function buildDataQualityItems(user: AuthedUser): Promise<DataQuali
   }
 
   return items;
+}
+
+// --- merge_clients (confirmation-gated, risk 3) ---
+//
+// Closes the "no merge these clients action yet" gap documented in
+// README.md. This is the highest-risk action in the Data Quality Engine so
+// far because, unlike everything else in this module, it *does* change real
+// linked business records — so it follows the exact same
+// confirmationRequired: true / 409 CONFIRMATION_REQUIRED preview pattern
+// already used by employeeService.createEmployee/updateEmployee and
+// playbookService's run_playbook: a request without `confirmed: true`
+// validates and returns a preview of exactly what would change (with real
+// counts) and writes nothing; only a second request with `confirmed: true`
+// performs the re-linking, inside a single Prisma $transaction so a
+// failure partway through rolls back every table's change, never leaving a
+// partial merge. The duplicate client is archived (isActive: false), never
+// hard-deleted — its own row, and its own AuditLog history, remain in the
+// database untouched; only its Job/Quote/CommunicationRecord/PortfolioPhoto
+// foreign keys move to the primary client.
+
+export const mergeClientsSchema = z.object({
+  primary_client_id: z.string().min(1, "primary_client_id is required"),
+  duplicate_client_id: z.string().min(1, "duplicate_client_id is required"),
+  confirmed: z.boolean().optional(),
+});
+
+interface MergeCounts {
+  jobs: number;
+  quotes: number;
+  communicationRecords: number;
+  portfolioPhotos: number;
+}
+
+async function countDuplicateLinkedRecords(companyId: string, duplicateClientId: string): Promise<MergeCounts> {
+  const [jobs, quotes, communicationRecords, portfolioPhotos] = await Promise.all([
+    prisma.job.count({ where: { companyId, clientId: duplicateClientId } }),
+    prisma.quote.count({ where: { companyId, clientId: duplicateClientId } }),
+    prisma.communicationRecord.count({ where: { companyId, clientId: duplicateClientId } }),
+    prisma.portfolioPhoto.count({ where: { companyId, clientId: duplicateClientId } }),
+  ]);
+  return { jobs, quotes, communicationRecords, portfolioPhotos };
+}
+
+export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
+  const parsed = mergeClientsSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: MERGE_CLIENTS_ACTION.actionName,
+      inputPayload: rawInput,
+      riskLevel: MERGE_CLIENTS_ACTION.riskLevel,
+      confirmationRequired: MERGE_CLIENTS_ACTION.confirmationRequired,
+      result: "error",
+      errorMessage: "VALIDATION_FAILED",
+    });
+    return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  }
+  const { primary_client_id, duplicate_client_id, confirmed } = parsed.data;
+
+  if (primary_client_id === duplicate_client_id) {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: MERGE_CLIENTS_ACTION.actionName,
+      inputPayload: parsed.data,
+      riskLevel: MERGE_CLIENTS_ACTION.riskLevel,
+      confirmationRequired: MERGE_CLIENTS_ACTION.confirmationRequired,
+      result: "error",
+      errorMessage: "SAME_CLIENT",
+    });
+    return fail(400, "SAME_CLIENT", "primary_client_id and duplicate_client_id must be different clients.");
+  }
+
+  // Scoped to user.companyId — this is what makes a cross-tenant client id
+  // resolve to "not found" rather than leaking another company's data, the
+  // same multi-tenant guard used by every other service in this codebase.
+  const [primary, duplicate] = await Promise.all([
+    prisma.client.findFirst({ where: { id: primary_client_id, companyId: user.companyId } }),
+    prisma.client.findFirst({ where: { id: duplicate_client_id, companyId: user.companyId } }),
+  ]);
+
+  if (!primary || !duplicate) {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: MERGE_CLIENTS_ACTION.actionName,
+      inputPayload: parsed.data,
+      riskLevel: MERGE_CLIENTS_ACTION.riskLevel,
+      confirmationRequired: MERGE_CLIENTS_ACTION.confirmationRequired,
+      result: "error",
+      errorMessage: "CLIENT_NOT_FOUND",
+    });
+    return fail(404, "CLIENT_NOT_FOUND", "primary_client_id and duplicate_client_id must both belong to your company.");
+  }
+
+  const counts = await countDuplicateLinkedRecords(user.companyId, duplicate.id);
+
+  const preview = {
+    primaryClientId: primary.id,
+    primaryClientLabel: primary.displayName,
+    duplicateClientId: duplicate.id,
+    duplicateClientLabel: duplicate.displayName,
+    recordsToRelink: counts,
+    duplicateWillBeArchived: true,
+  };
+
+  if (!confirmed) {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: MERGE_CLIENTS_ACTION.actionName,
+      inputPayload: parsed.data,
+      dataBefore: preview,
+      riskLevel: MERGE_CLIENTS_ACTION.riskLevel,
+      confirmationRequired: MERGE_CLIENTS_ACTION.confirmationRequired,
+      result: "error",
+      errorMessage: "CONFIRMATION_REQUIRED",
+    });
+    return fail(409, "CONFIRMATION_REQUIRED", "Review the preview and resubmit with confirmed: true.", { preview });
+  }
+
+  // Single Prisma $transaction — every updateMany plus the duplicate's
+  // isActive flip either all succeed or all roll back together. There is no
+  // partial-merge state: a job either still points at the duplicate, or the
+  // whole merge (all four record types + archive) has completed.
+  const [jobsRelinked, quotesRelinked, communicationRecordsRelinked, portfolioPhotosRelinked, archivedDuplicate] =
+    await prisma.$transaction([
+      prisma.job.updateMany({
+        where: { companyId: user.companyId, clientId: duplicate.id },
+        data: { clientId: primary.id },
+      }),
+      prisma.quote.updateMany({
+        where: { companyId: user.companyId, clientId: duplicate.id },
+        data: { clientId: primary.id },
+      }),
+      prisma.communicationRecord.updateMany({
+        where: { companyId: user.companyId, clientId: duplicate.id },
+        data: { clientId: primary.id },
+      }),
+      prisma.portfolioPhoto.updateMany({
+        where: { companyId: user.companyId, clientId: duplicate.id },
+        data: { clientId: primary.id },
+      }),
+      prisma.client.update({
+        where: { id: duplicate.id },
+        data: { isActive: false },
+      }),
+    ]);
+
+  const result = {
+    primaryClientId: primary.id,
+    duplicateClientId: duplicate.id,
+    relinked: {
+      jobs: jobsRelinked.count,
+      quotes: quotesRelinked.count,
+      communicationRecords: communicationRecordsRelinked.count,
+      portfolioPhotos: portfolioPhotosRelinked.count,
+    },
+    duplicateClient: { id: archivedDuplicate.id, isActive: archivedDuplicate.isActive },
+  };
+
+  await recordAudit({
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: MERGE_CLIENTS_ACTION.actionName,
+    inputPayload: parsed.data,
+    dataBefore: preview,
+    dataAfter: result,
+    riskLevel: MERGE_CLIENTS_ACTION.riskLevel,
+    confirmationRequired: MERGE_CLIENTS_ACTION.confirmationRequired,
+    confirmed: true,
+    result: "success",
+  });
+
+  return ok(200, result);
 }

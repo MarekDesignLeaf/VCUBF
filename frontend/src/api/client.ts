@@ -492,6 +492,36 @@ export interface DataQualityReport {
   missingContactIssues: MissingContactIssue[];
 }
 
+// merge_clients — confirmation-gated (risk 3). A request without
+// confirmed:true returns a 409 CONFIRMATION_REQUIRED with this preview
+// shape (thrown as ApiError, details.preview); a request with
+// confirmed:true performs the merge and returns MergeClientsResult.
+export interface MergeClientsPreview {
+  primaryClientId: string;
+  primaryClientLabel: string;
+  duplicateClientId: string;
+  duplicateClientLabel: string;
+  recordsToRelink: {
+    jobs: number;
+    quotes: number;
+    communicationRecords: number;
+    portfolioPhotos: number;
+  };
+  duplicateWillBeArchived: boolean;
+}
+
+export interface MergeClientsResult {
+  primaryClientId: string;
+  duplicateClientId: string;
+  relinked: {
+    jobs: number;
+    quotes: number;
+    communicationRecords: number;
+    portfolioPhotos: number;
+  };
+  duplicateClient: { id: string; isActive: boolean };
+}
+
 // Memory Model — Pattern Detection (read-only). See
 // backend/src/services/memoryModelService.ts: candidate patterns are surfaced
 // for human review only and never auto-create a Playbook, matching the
@@ -734,6 +764,19 @@ export const api = {
   },
   dataQuality: {
     report: () => request<DataQualityReport>("/data-quality"),
+    // Same confirm-preview pattern as employees.create/update: call without
+    // confirmed (or confirmed:false) first — the backend throws ApiError
+    // with code CONFIRMATION_REQUIRED and details.preview; call again with
+    // confirmed:true to actually perform the merge.
+    mergeClients: (primaryClientId: string, duplicateClientId: string, confirmed: boolean) =>
+      request<MergeClientsResult>("/data-quality/merge-clients", {
+        method: "POST",
+        body: JSON.stringify({
+          primary_client_id: primaryClientId,
+          duplicate_client_id: duplicateClientId,
+          confirmed,
+        }),
+      }),
   },
   memoryModel: {
     patterns: () => request<RepeatedActionPattern[]>("/memory-model/patterns"),

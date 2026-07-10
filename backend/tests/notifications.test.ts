@@ -269,4 +269,166 @@ describe("Notification and Escalation Module", () => {
       assert.ok(!item, "did not expect a portfolio gap for a job that is not marked complete");
     });
   });
+
+  describe("Stale lead source", () => {
+    let staleOpenLeadId: string;
+    let freshOpenLeadId: string;
+    let staleConvertedLeadId: string;
+    let staleLostLeadId: string;
+
+    before(async () => {
+      const STALE_LEAD_THRESHOLD_DAYS = 14;
+      const longAgo = new Date(Date.now() - (STALE_LEAD_THRESHOLD_DAYS + 5) * 24 * 60 * 60 * 1000);
+      const recently = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000);
+
+      const staleOpen = await request(app)
+        .post("/crm/leads")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ name: "Stale Open Lead" });
+      staleOpenLeadId = staleOpen.body.id;
+      await prisma.lead.update({ where: { id: staleOpenLeadId }, data: { createdAt: longAgo } });
+
+      const freshOpen = await request(app)
+        .post("/crm/leads")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ name: "Fresh Open Lead" });
+      freshOpenLeadId = freshOpen.body.id;
+      await prisma.lead.update({ where: { id: freshOpenLeadId }, data: { createdAt: recently } });
+
+      const staleConverted = await request(app)
+        .post("/crm/leads")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ name: "Stale Converted Lead" });
+      staleConvertedLeadId = staleConverted.body.id;
+      await prisma.lead.update({
+        where: { id: staleConvertedLeadId },
+        data: { createdAt: longAgo, leadStatus: "converted" },
+      });
+
+      const staleLost = await request(app)
+        .post("/crm/leads")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ name: "Stale Lost Lead" });
+      staleLostLeadId = staleLost.body.id;
+      await prisma.lead.update({
+        where: { id: staleLostLeadId },
+        data: { createdAt: longAgo, leadStatus: "lost" },
+      });
+    });
+
+    it("surfaces a lead still open long past the threshold as a stale_lead item", async () => {
+      const res = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+      assert.equal(res.status, 200);
+      const item = res.body.find((n: any) => n.key === `stale_lead:${staleOpenLeadId}`);
+      assert.ok(item, "expected the stale open lead to appear in the feed");
+      assert.equal(item.type, "stale_lead");
+      assert.equal(item.entity.id, staleOpenLeadId);
+    });
+
+    it("does not flag a recently created open lead", async () => {
+      const res = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+      const item = res.body.find((n: any) => n.key === `stale_lead:${freshOpenLeadId}`);
+      assert.ok(!item, "did not expect a fresh lead to be flagged as stale");
+    });
+
+    it("never flags a converted lead as stale, regardless of age", async () => {
+      const res = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+      const item = res.body.find((n: any) => n.key === `stale_lead:${staleConvertedLeadId}`);
+      assert.ok(!item, "did not expect a converted lead to be flagged as stale");
+    });
+
+    it("never flags a lost lead as stale, regardless of age", async () => {
+      const res = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+      const item = res.body.find((n: any) => n.key === `stale_lead:${staleLostLeadId}`);
+      assert.ok(!item, "did not expect a lost lead to be flagged as stale");
+    });
+  });
+
+  describe("Stuck job source", () => {
+    let stuckJobId: string;
+    let recentlyChangedJobId: string;
+    let doneStuckJobId: string;
+    let cancelledStuckJobId: string;
+
+    before(async () => {
+      const STUCK_JOB_THRESHOLD_DAYS = 10;
+      const longAgo = new Date(Date.now() - (STUCK_JOB_THRESHOLD_DAYS + 5) * 24 * 60 * 60 * 1000);
+
+      // A job with no change_job_status audit entry at all — measured from
+      // Job.createdAt, which is backdated past the threshold.
+      const stuckJob = await request(app)
+        .post("/crm/jobs")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ client_id: clientId, job_title: "Stuck job, never changed" });
+      stuckJobId = stuckJob.body.id;
+      await prisma.job.update({ where: { id: stuckJobId }, data: { createdAt: longAgo } });
+
+      // A job that was created long ago but had its status changed just now
+      // via a real change_job_status call — must NOT be flagged, proving the
+      // source reads the AuditLog trail rather than just Job.createdAt.
+      const recentlyChangedJob = await request(app)
+        .post("/crm/jobs")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ client_id: clientId, job_title: "Old job, recently changed status" });
+      recentlyChangedJobId = recentlyChangedJob.body.id;
+      await prisma.job.update({ where: { id: recentlyChangedJobId }, data: { createdAt: longAgo } });
+      await request(app)
+        .put(`/crm/jobs/${recentlyChangedJobId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ job_status: "naplanovano" });
+
+      // A completed job, backdated past the threshold — terminal status,
+      // must never be flagged regardless of age.
+      const doneJob = await request(app)
+        .post("/crm/jobs")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ client_id: clientId, job_title: "Done long ago" });
+      doneStuckJobId = doneJob.body.id;
+      await request(app)
+        .put(`/crm/jobs/${doneStuckJobId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ job_status: "dokonceno" });
+      await prisma.job.update({ where: { id: doneStuckJobId }, data: { createdAt: longAgo } });
+
+      // A cancelled job, backdated past the threshold — terminal status,
+      // must never be flagged regardless of age.
+      const cancelledJob = await request(app)
+        .post("/crm/jobs")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ client_id: clientId, job_title: "Cancelled long ago" });
+      cancelledStuckJobId = cancelledJob.body.id;
+      await request(app)
+        .put(`/crm/jobs/${cancelledStuckJobId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ job_status: "zruseno" });
+      await prisma.job.update({ where: { id: cancelledStuckJobId }, data: { createdAt: longAgo } });
+    });
+
+    it("surfaces a non-terminal job with no recent status change as a stuck_job item", async () => {
+      const res = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+      assert.equal(res.status, 200);
+      const item = res.body.find((n: any) => n.key === `stuck_job:${stuckJobId}`);
+      assert.ok(item, "expected the stuck job to appear in the feed");
+      assert.equal(item.type, "stuck_job");
+      assert.equal(item.entity.id, stuckJobId);
+    });
+
+    it("does not flag a job whose status was changed recently, even if the job itself is old", async () => {
+      const res = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+      const item = res.body.find((n: any) => n.key === `stuck_job:${recentlyChangedJobId}`);
+      assert.ok(!item, "did not expect a recently status-changed job to be flagged as stuck");
+    });
+
+    it("never flags a done (terminal-status) job as stuck, regardless of age", async () => {
+      const res = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+      const item = res.body.find((n: any) => n.key === `stuck_job:${doneStuckJobId}`);
+      assert.ok(!item, "did not expect a completed job to be flagged as stuck");
+    });
+
+    it("never flags a cancelled (terminal-status) job as stuck, regardless of age", async () => {
+      const res = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+      const item = res.body.find((n: any) => n.key === `stuck_job:${cancelledStuckJobId}`);
+      assert.ok(!item, "did not expect a cancelled job to be flagged as stuck");
+    });
+  });
 });

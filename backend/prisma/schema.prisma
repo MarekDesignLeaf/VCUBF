@@ -72,6 +72,12 @@ model Client {
   billingPostcode String?  @map("billing_postcode")
   notes           String?
   source          String?
+  // Data Quality Engine — merge_clients archives a duplicate client instead
+  // of hard-deleting it (see dataQualityService.mergeClients), reusing the
+  // same isActive soft-delete pattern already used by User/ServiceCatalogueItem
+  // rather than inventing a new "archived" concept. Defaults to true so
+  // every existing client remains active without a data migration.
+  isActive        Boolean  @default(true) @map("is_active")
   createdBy       String?  @map("created_by")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")

@@ -428,6 +428,53 @@ npm run dev                 # http://localhost:5173
   acknowledge/unacknowledge mechanism; no new Prisma model. The Notifications feed now
   has five real sources: overdue follow-ups, capacity overload, expiring quotes, data
   quality findings, and this portfolio gap.
+- **Notification and Escalation Module — stale lead and stuck job sources**: two more
+  `buildXItems` source functions, bringing the unified feed to seven real signal types.
+  `buildStaleLeadItems` flags a `Lead` still open (`leadStatus` not `"converted"` and not
+  `"lost"`) whose `Lead.createdAt` is older than a fixed, documented
+  `STALE_LEAD_THRESHOLD_DAYS` (14) — the same "fixed constant, not a guess" convention
+  already used for `QUOTE_EXPIRY_WARNING_WINDOW_DAYS`. `buildStuckJobItems` flags a `Job`
+  not in a terminal status (`"dokonceno"`/`"zruseno"`) whose status has not changed in
+  more than `STUCK_JOB_THRESHOLD_DAYS` (10). This one deliberately reads the `AuditLog`
+  for the job's most recent `change_job_status` entry rather than trusting
+  `Job.updatedAt` — `updatedAt` is a generic Prisma timestamp bumped by *any* field write
+  (e.g. `assign_job` re-assigning the job touches it without the status changing at all),
+  so using it directly would under-report stuck jobs; a job with no `change_job_status`
+  audit entry yet is measured from `Job.createdAt` instead, since it has been sitting in
+  its initial status since creation. Both reuse the existing acknowledge/unacknowledge
+  mechanism; no new Prisma model. The Notifications feed now has seven real sources:
+  overdue follow-ups, capacity overload, expiring quotes, data quality findings, the
+  portfolio marketing-readiness gap, stale open leads, and stuck jobs.
+- **Data Quality Engine — `merge_clients` (confirmation-gated, risk 3)**: closes the
+  previously-documented "no merge these clients action yet" gap. Follows the exact same
+  `confirmationRequired: true` / 409 `CONFIRMATION_REQUIRED` preview pattern already used
+  by `create_employee`/`update_employee` and `run_playbook`: `POST
+  /data-quality/merge-clients` without `confirmed: true` validates that both clients
+  exist, belong to the caller's own company, and are actually different clients, then
+  returns a preview with real counts of the `Job`/`Quote`/`CommunicationRecord`/
+  `PortfolioPhoto` records currently linked to the duplicate that would be re-linked to
+  the primary — nothing is written yet. Only a second call with `confirmed: true`
+  performs the merge, inside a single Prisma `$transaction`
+  (`backend/src/services/dataQualityService.mergeClients`): the four record types' FKs
+  are re-pointed from the duplicate to the primary, and the duplicate client is
+  **archived, never hard-deleted** — a new `Client.isActive` column (defaulting to
+  `true`), reusing the same soft-delete pattern already used by `User`/
+  `ServiceCatalogueItem` rather than inventing a new concept. A full before/after audit
+  entry is recorded. Archived clients are excluded from the Data Quality Engine's own
+  duplicate scan, so a merged-away duplicate does not keep resurfacing as a "possible
+  duplicate" of the client it was merged into. There is deliberately **no text-command
+  intent** for `merge_clients` — the same judgment call the README already documents for
+  `prepare_quote` ("a real, multi-line-item form, so it isn't a one-line voice command in
+  this slice"): merging picks two specific client ids and re-links four different record
+  types, which is not safely expressible as a single typed sentence, so it stays a
+  dedicated form/API flow that always goes through the confirmation preview.
+- **Frontend — Data Quality merge UI**: the Data Quality page's duplicate-pair table
+  gained a "Merge…" action per row, mirroring the exact two-step confirm UI pattern
+  already used on the Employee edit page (`EmployeeEdit.tsx`): choosing which of the two
+  clients to keep and clicking "Preview merge" requests the confirmation-gated preview
+  (nothing changes yet) and shows the real counts of records that would be re-linked;
+  only an explicit "Confirm merge" click performs the real merge, after which the row is
+  marked "Merged" and the report reloads.
 - **Memory Model — Pattern Detection (read-only foundation)**: a new, deliberately
   read-only module, `memoryModelService.detectRepeatedActionPatterns`, distinct from the
   Learning Engine's explicit-correction-only rules. It scans the company's own AuditLog
@@ -453,7 +500,7 @@ npm run dev                 # http://localhost:5173
   which now pre-opens and pre-fills the real "New playbook" form for the user to review
   and explicitly save.
 
-Backend: 188/188 tests passing across 20 suites (auth, CRM clients, CRM jobs, CRM leads,
+Backend: 204/204 tests passing across 23 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, employee/permission management, service catalogue, quotes,
 recruitment, playbooks, learning, communication log, notifications/escalation, data
@@ -494,7 +541,21 @@ AuditLog entries recurring 3 times (detected, with the correct occurrence count 
 example timestamps), a fixture with the same sequence occurring only 2 times (correctly
 not flagged, below threshold), permission checks (401 unauthenticated, 403 without
 `audit.read`), and a cross-tenant test proving company A's detected pattern never
-appears in company B's results.
+appears in company B's results. The Notification and Escalation Module's two new
+sources — a stale open lead appearing once past `STALE_LEAD_THRESHOLD_DAYS` and never
+appearing while still fresh or once converted/lost regardless of age; a stuck job
+appearing once past `STUCK_JOB_THRESHOLD_DAYS` with no recent `change_job_status` audit
+entry, not flagged when its status was changed recently even if the job itself is old
+(proving the source reads the AuditLog trail, not just `Job.updatedAt`), and never
+flagged once done or cancelled regardless of age. The Data Quality Engine's new
+`merge_clients` action — permission check, same-client rejection, nonexistent-client
+rejection, cross-tenant client rejection, an unconfirmed preview with accurate real
+counts that changes nothing, a confirmed merge that correctly re-links all four record
+types and leaves the duplicate archived (`isActive: false`) with its own row and prior
+audit history intact, the archived duplicate no longer resurfacing in the duplicate scan,
+and an atomicity test proving a merge that fails validation (a client id that no longer
+exists at confirm time) leaves no partial state — against a real Postgres instance, run
+twice to rule out flakiness in the merge-transaction tests specifically.
 
 Frontend: `npm run build` and `npm run dev` both verified working (clean production
 build, dev server responds 200).
@@ -537,18 +598,29 @@ extraction work writes into this same table instead of creating a second, discon
 communication store. The Notification and Escalation Module's feed is pull-only (a
 page you open, or a text command you run) — there is no push delivery yet: no email
 digest, no SMS/WhatsApp alert, and no in-app real-time badge/websocket, since no
-notification-delivery connector exists. It now aggregates five real signal types
-(overdue follow-ups, capacity overload, expiring quotes, data quality findings, and the
-portfolio marketing-readiness gap); it does not yet cover every escalation-worthy
-condition the architecture lists (e.g. a lead sitting unconverted too long, a job stuck
-in one status too long) — extending coverage means adding another `buildXItems` source
-function, not a new module. The Data Quality Engine is a read-only
-analysis layer only: it does not merge, edit, or delete client records, and there is no
-"merge these clients" action yet — a possible duplicate must currently be resolved
-manually on the two client records after a human reviews it; it also only compares
-Client records within CRM Core (email/phone/name), not leads, jobs, or cross-entity
-matches, and there is no configurable similarity threshold (the Levenshtein cutoff and
-phone-normalization rule are fixed in code, not a per-company setting). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, or serving (a `filename` is just a typed-in reference, not a stored file), no AI-assisted photo selection or auto-tagging, and no website/social publishing — flipping `usableForMarketing` only sets an internal review tag, it never publishes anything anywhere, since no such connector exists yet. Also still missing: website content modules, business growth content generation, and a real voice (speech) front-end (the Voice and Text Command Layer currently accepts typed text only).
+notification-delivery connector exists. It now aggregates seven real signal types
+(overdue follow-ups, capacity overload, expiring quotes, data quality findings, the
+portfolio marketing-readiness gap, stale open leads, and stuck jobs); it does not yet
+cover every escalation-worthy condition the architecture lists (e.g. an employee
+approaching their weekly capacity across *multiple* future weeks at once rather than one
+at a time, or a quote sitting in "sent" for a long time without a follow-up) — extending
+coverage means adding another `buildXItems` source function, not a new module. The Data
+Quality Engine can now merge two clients (`merge_clients`, confirmation-gated, risk 3),
+closing the earlier "no merge action" gap, but it is still deliberately limited: merging
+only re-links `Job`/`Quote`/`CommunicationRecord`/`PortfolioPhoto` foreign keys and
+archives the duplicate (`Client.isActive = false`) — it never hard-deletes a client row,
+never touches the `AuditLog` (the duplicate's own prior audit history, and the primary's,
+are both left completely intact), and there is currently **no "un-merge" or reactivate
+action** — a human would have to manually flip `isActive` back to `true` directly in the
+database to reverse the archive step, and there is no automatic way to reverse the FK
+re-linking itself (a human would have to manually move records back one by one). The
+similarity scan itself is unchanged: it still only compares Client records within CRM
+Core (email/phone/name), not leads, jobs, or cross-entity matches, and there is no
+configurable similarity threshold (the Levenshtein cutoff and phone-normalization rule
+are fixed in code, not a per-company setting). There is also no text-command intent for
+`merge_clients` — the same judgment already applied to `prepare_quote` (real, multi-field
+actions with material consequences stay a dedicated form/API flow, never a one-line
+command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, or serving (a `filename` is just a typed-in reference, not a stored file), no AI-assisted photo selection or auto-tagging, and no website/social publishing — flipping `usableForMarketing` only sets an internal review tag, it never publishes anything anywhere, since no such connector exists yet. Also still missing: website content modules, business growth content generation, and a real voice (speech) front-end (the Voice and Text Command Layer currently accepts typed text only).
 Build order should follow the roadmap in the master documentation (Phase 1 → Phase 2 →
 …), not be improvised per-feature.
 
