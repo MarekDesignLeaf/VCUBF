@@ -73,6 +73,11 @@ describe("commandParser", () => {
     }
   });
 
+  it("parses 'show overload'", () => {
+    assert.equal(parseTextCommand("show overload").intent, "detect_overload");
+    assert.equal(parseTextCommand("check overload").intent, "detect_overload");
+  });
+
   it("returns unrecognized for gibberish instead of guessing", () => {
     const result = parseTextCommand("please make the weather nicer today");
     assert.equal(result.intent, "unrecognized");

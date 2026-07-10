@@ -95,6 +95,7 @@ export interface Job {
   notes?: string | null;
   createdAt: string;
   client?: { id: string; displayName: string };
+  assignedUser?: { id: string; displayName: string } | null;
 }
 
 // Job Allocation and Capacity Management Module.
@@ -125,6 +126,34 @@ export interface AssignJobResult {
   job: Job;
   capacityWarning: { type: string; message?: string; [key: string]: unknown } | null;
   missingSkills: string[];
+}
+
+// Calendar and Scheduling Intelligence Module.
+export interface OverloadFinding {
+  employeeId: string;
+  employeeName: string;
+  weekStart: string;
+  weekEnd: string;
+  weeklyCapacityHours: number;
+  currentLoadHours: number;
+  utilizationPct: number;
+}
+
+export interface OverloadReport {
+  generatedAt: string;
+  weeksAhead: number;
+  overloadedWeeks: OverloadFinding[];
+  suggestions: string[];
+}
+
+export interface SuggestedEmployee {
+  employeeId: string;
+  employeeName: string;
+  hasAllRequiredSkills: boolean;
+  missingSkills: string[];
+  earliestAvailableWeekStart: string | null;
+  earliestAvailableWeekLoadHours: number | null;
+  weeklyCapacityHours: number;
 }
 
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
@@ -188,6 +217,21 @@ export const api = {
     get: (id: string) => request<Employee>(`/crm/employees/${id}`),
     capacity: (id: string, week?: string) =>
       request<CapacityResult>(`/crm/employees/${id}/capacity${week ? `?week=${encodeURIComponent(week)}` : ""}`),
+  },
+  calendar: {
+    jobs: (from: string, to: string) =>
+      request<Job[]>(`/calendar/jobs?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+    overload: (weeksAhead?: number) =>
+      request<OverloadReport>(`/calendar/overload${weeksAhead ? `?weeks_ahead=${weeksAhead}` : ""}`),
+    suggest: (params: { estimatedDurationHours?: number; requiredSkills?: string[]; weeksAhead?: number }) => {
+      const qs = new URLSearchParams();
+      if (params.estimatedDurationHours) qs.set("estimated_duration_hours", String(params.estimatedDurationHours));
+      if (params.requiredSkills && params.requiredSkills.length > 0)
+        qs.set("required_skills", params.requiredSkills.join(","));
+      if (params.weeksAhead) qs.set("weeks_ahead", String(params.weeksAhead));
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request<SuggestedEmployee[]>(`/calendar/suggest${suffix}`);
+    },
   },
   leads: {
     list: (params?: { status?: string }) => {

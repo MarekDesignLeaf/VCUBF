@@ -26,7 +26,7 @@ export function getWeekRange(reference: Date = new Date()): WeekRange {
   return { weekStart, weekEnd };
 }
 
-const ACTIVE_JOB_STATUSES = ["nova", "naplanovano", "v_realizaci", "ceka_na_material", "ceka_na_klienta"];
+export const ACTIVE_JOB_STATUSES = ["nova", "naplanovano", "v_realizaci", "ceka_na_material", "ceka_na_klienta"];
 
 export interface CapacityResult {
   employeeId: string;

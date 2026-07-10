@@ -131,6 +131,16 @@ describe("command/text", () => {
     assert.equal(res.body.error, "EMPLOYEE_NOT_FOUND");
   });
 
+  it("detects overload via a text command", async () => {
+    const res = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "show overload" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.intent, "detect_overload");
+    assert.ok(Array.isArray(res.body.data.overloadedWeeks));
+  });
+
   it("lists clients via a text command", async () => {
     const res = await request(app)
       .post("/command/text")

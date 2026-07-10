@@ -140,3 +140,29 @@ export const CHECK_CAPACITY_ACTION: ActionContract = {
   dataSources: ["crm.jobs", "crm.users"],
   possibleErrors: ["MISSING_PERMISSION", "EMPLOYEE_NOT_FOUND"],
 };
+
+// Calendar and Scheduling Intelligence Module — see VCUF master documentation
+// section 25/26. Both actions here are read-only decision support: they
+// compute recommendations from real job/employee data, they never invent
+// business facts, and they never publish or change anything by themselves.
+export const DETECT_OVERLOAD_ACTION: ActionContract = {
+  actionName: "detect_overload",
+  purpose:
+    "Detect upcoming weeks where an employee's real computed workload would exceed their declared weekly capacity, and attach the standard set of realistic mitigation options for the user to consider.",
+  requiredPermission: "crm.read",
+  riskLevel: 0,
+  confirmationRequired: false,
+  dataSources: ["crm.jobs", "crm.users"],
+  possibleErrors: ["MISSING_PERMISSION"],
+};
+
+export const SUGGEST_SCHEDULE_ACTION: ActionContract = {
+  actionName: "suggest_schedule",
+  purpose:
+    "Rank employees for a new job by real spare capacity and skill fit across upcoming weeks, instead of offering a date only because a calendar slot looks empty.",
+  requiredPermission: "crm.read",
+  riskLevel: 0,
+  confirmationRequired: false,
+  dataSources: ["crm.jobs", "crm.users"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};

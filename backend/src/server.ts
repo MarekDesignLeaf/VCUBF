@@ -8,6 +8,7 @@ import { leadsRouter } from "./modules/crm/leads.js";
 import { auditRouter } from "./modules/audit/routes.js";
 import { commandRouter } from "./modules/command/textCommand.js";
 import { employeesRouter } from "./modules/crm/employees.js";
+import { calendarRouter } from "./modules/calendar/routes.js";
 
 export function createServer() {
   const app = express();
@@ -23,6 +24,7 @@ export function createServer() {
   app.use("/audit", auditRouter);
   app.use("/command", commandRouter);
   app.use("/crm/employees", employeesRouter);
+  app.use("/calendar", calendarRouter);
 
   // Fallback error handler — the system must fail safely, never crash silently.
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

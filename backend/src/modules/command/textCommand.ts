@@ -9,6 +9,7 @@ import * as clientService from "../../services/clientService.js";
 import * as jobService from "../../services/jobService.js";
 import * as leadService from "../../services/leadService.js";
 import * as employeeService from "../../services/employeeService.js";
+import * as calendarService from "../../services/calendarService.js";
 
 export const commandRouter = Router();
 
@@ -246,6 +247,12 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
           message: result.ok ? undefined : result.message,
         };
       }
+      break;
+    }
+
+    case "detect_overload": {
+      const data = await calendarService.detectUpcomingOverload(user);
+      response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
       break;
     }
 
