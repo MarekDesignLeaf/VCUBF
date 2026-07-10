@@ -1,0 +1,15 @@
+# Local Postgres for development. Not required if you use `npm run test:embedded`.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vcuf
+      POSTGRES_PASSWORD: vcuf
+      POSTGRES_DB: vcuf
+    ports:
+      - "5432:5432"
+    volumes:
+      - vcuf_pg_data:/var/lib/postgresql/data
+volumes:
+  vcuf_pg_data:

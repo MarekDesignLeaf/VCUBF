@@ -1,0 +1,32 @@
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import { authRouter } from "./modules/auth/routes.js";
+import { clientsRouter } from "./modules/crm/clients.js";
+import { auditRouter } from "./modules/audit/routes.js";
+
+export function createServer() {
+  const app = express();
+  app.use(cors());
+  app.use(express.json());
+
+  app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
+  app.use("/auth", authRouter);
+  app.use("/crm/clients", clientsRouter);
+  app.use("/audit", auditRouter);
+
+  // Fallback error handler — the system must fail safely, never crash silently.
+  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error(err);
+    res.status(500).json({ error: "INTERNAL_ERROR" });
+  });
+
+  return app;
+}
+
+if (process.env.NODE_ENV !== "test") {
+  const app = createServer();
+  const port = process.env.PORT ?? 4000;
+  app.listen(port, () => console.log(`VCUF Secretary backend listening on :${port}`));
+}

@@ -1,0 +1,88 @@
+// Secretary Core data model — VCUF backend
+// Every table belongs to a company (multi-tenant from day one).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users     User[]
+  clients   Client[]
+  auditLogs AuditLog[]
+
+  @@map("companies")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  companyId    String   @map("company_id")
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  displayName  String   @map("display_name")
+  role         String   @default("worker") // owner | admin | manager | worker | sales | accountant | marketing | external_contractor
+  permissions  String[] // e.g. crm.read, crm.manage, users.manage, audit.read
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  company   Company    @relation(fields: [companyId], references: [id])
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+model Client {
+  id            String   @id @default(uuid())
+  companyId     String   @map("company_id")
+  displayName   String   @map("display_name")
+  firstName     String?  @map("first_name")
+  lastName      String?  @map("last_name")
+  companyName   String?  @map("company_name")
+  emailPrimary  String?  @map("email_primary")
+  phonePrimary  String?  @map("phone_primary")
+  clientType    String?  @map("client_type") // private | commercial
+  billingLine1  String?  @map("billing_address_line1")
+  billingCity   String?  @map("billing_city")
+  billingPostcode String? @map("billing_postcode")
+  notes         String?
+  source        String?  // e.g. manual, email, whatsapp, web_form — traceable origin
+  createdBy     String?  @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+  @@map("clients")
+}
+
+model AuditLog {
+  id                  String   @id @default(uuid())
+  companyId           String   @map("company_id")
+  userId              String?  @map("user_id")
+  actionName          String   @map("action_name")
+  interpretedIntent    String?  @map("interpreted_intent")
+  inputPayload        Json?    @map("input_payload")
+  dataBefore           Json?    @map("data_before")
+  dataAfter            Json?    @map("data_after")
+  riskLevel            Int      @map("risk_level")
+  confirmationRequired Boolean  @default(false) @map("confirmation_required")
+  confirmed            Boolean  @default(false)
+  result               String   // success | error | rejected
+  errorMessage         String?  @map("error_message")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  user    User?   @relation(fields: [userId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@map("audit_log")
+}
