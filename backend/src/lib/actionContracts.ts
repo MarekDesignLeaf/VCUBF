@@ -487,7 +487,13 @@ export const UPDATE_COMMUNICATION_RECORD_ACTION: ActionContract = {
 // It never invents an item and never fabricates urgency — severity is
 // derived directly from real dates/percentages already stored elsewhere.
 // See notificationService.ts.
-export const NOTIFICATION_TYPES = ["follow_up_due", "capacity_overload", "quote_expiring"] as const;
+export const NOTIFICATION_TYPES = [
+  "follow_up_due",
+  "capacity_overload",
+  "quote_expiring",
+  "duplicate_client_possible",
+  "missing_client_contact_info",
+] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 export const NOTIFICATION_SEVERITIES = ["info", "warning", "urgent"] as const;
@@ -529,4 +535,23 @@ export const UNACKNOWLEDGE_NOTIFICATION_ACTION: ActionContract = {
   confirmationRequired: false,
   dataSources: ["user_input"],
   possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+// Data Quality Engine — read-only, structural analysis over real CRM Core
+// Client data already entered by the user (email, phone, display name). It
+// never invents an identity match: duplicates are surfaced as *possible*
+// matches for a human to confirm (per the CRM rule — "uncertain identity
+// matches must be presented for confirmation"), and this module never
+// merges, deletes, or edits a client record itself. Findings are additive
+// into the same unified Notification feed (see dataQualityService.ts /
+// buildDataQualityItems), reusing the existing acknowledge/unacknowledge
+// mechanism rather than inventing a second "dismiss" concept.
+export const ANALYZE_DATA_QUALITY_ACTION: ActionContract = {
+  actionName: "analyze_data_quality",
+  purpose:
+    "Scan real CRM Core client records for possible duplicate clients (matching email, phone, or name) and clients missing a contact method, without merging or changing any record.",
+  requiredPermission: "crm.read",
+  riskLevel: 0,
+  confirmationRequired: false,
+  dataSources: ["crm.clients"],
+  possibleErrors: ["MISSING_PERMISSION"],
 };

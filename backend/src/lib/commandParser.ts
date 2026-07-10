@@ -36,6 +36,7 @@ export type ParsedCommand =
   | { intent: "list_communications"; entities: { client_name?: string } }
   | { intent: "list_follow_ups"; entities: Record<string, never> }
   | { intent: "list_notifications"; entities: Record<string, never> }
+  | { intent: "list_data_quality"; entities: Record<string, never> }
   | { intent: "list_clients"; entities: Record<string, never> }
   | { intent: "list_jobs"; entities: Record<string, never> }
   | { intent: "list_leads"; entities: Record<string, never> }
@@ -176,6 +177,13 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   // feed (overdue follow-ups, capacity overload, expiring quotes).
   if (/^(?:list|show)\s+notifications?$/i.test(text)) return { intent: "list_notifications", entities: {} };
   if (/^what\s+needs\s+attention\??$/i.test(text)) return { intent: "list_notifications", entities: {} };
+
+  // Data Quality Engine — read-only, structural duplicate/missing-contact
+  // analysis over real CRM Core client data.
+  if (/^(?:list|show|check)\s+data\s+quality(?:\s+issues?)?$/i.test(text))
+    return { intent: "list_data_quality", entities: {} };
+  if (/^(?:list|show)\s+(?:possible\s+)?duplicate\s+clients?$/i.test(text))
+    return { intent: "list_data_quality", entities: {} };
 
   m = text.match(/^(?:list|show)\s+communications?(?:\s+for\s+(.+))?$/i);
   if (m) return { intent: "list_communications", entities: { client_name: m[1]?.trim() } };

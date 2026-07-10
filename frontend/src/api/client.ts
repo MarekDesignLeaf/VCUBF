@@ -433,13 +433,21 @@ export interface CommunicationRecord {
 // quotes). Nothing here is invented; acknowledging an item only records
 // that it was seen/handled and is fully reversible — it never changes the
 // underlying record it points to.
-export const NOTIFICATION_TYPES = ["follow_up_due", "capacity_overload", "quote_expiring"] as const;
+export const NOTIFICATION_TYPES = [
+  "follow_up_due",
+  "capacity_overload",
+  "quote_expiring",
+  "duplicate_client_possible",
+  "missing_client_contact_info",
+] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   follow_up_due: "Follow-up due",
   capacity_overload: "Capacity overload",
   quote_expiring: "Quote expiring",
+  duplicate_client_possible: "Possible duplicate client",
+  missing_client_contact_info: "Missing contact info",
 };
 
 export const NOTIFICATION_SEVERITIES = ["info", "warning", "urgent"] as const;
@@ -455,6 +463,33 @@ export interface AttentionItem {
   entity: { type: string; id: string; label?: string };
   acknowledged: boolean;
   acknowledgedAt?: string | null;
+}
+
+// Data Quality Engine — read-only, structural duplicate-client and
+// missing-contact-info findings computed over real CRM Core client data.
+// Nothing here is invented and nothing is ever merged/edited automatically
+// — see backend/src/services/dataQualityService.ts.
+export type DuplicateMatchReason = "email_match" | "phone_match" | "name_match" | "name_similar";
+
+export interface DuplicateClientGroup {
+  clientAId: string;
+  clientBId: string;
+  clientALabel: string;
+  clientBLabel: string;
+  reason: DuplicateMatchReason;
+  detail: string;
+}
+
+export interface MissingContactIssue {
+  clientId: string;
+  clientLabel: string;
+  issue: "missing_contact_method";
+  detail: string;
+}
+
+export interface DataQualityReport {
+  duplicateClientGroups: DuplicateClientGroup[];
+  missingContactIssues: MissingContactIssue[];
 }
 
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
@@ -648,6 +683,9 @@ export const api = {
       }),
     unacknowledge: (notificationKey: string) =>
       request<unknown>(`/notifications/${encodeURIComponent(notificationKey)}/unacknowledge`, { method: "POST" }),
+  },
+  dataQuality: {
+    report: () => request<DataQualityReport>("/data-quality"),
   },
   command: {
     text: (text: string) =>

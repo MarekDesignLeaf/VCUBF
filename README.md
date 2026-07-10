@@ -365,10 +365,33 @@ npm run dev                 # http://localhost:5173
   acknowledged items too" toggle so a handled item can still be reviewed rather than
   disappearing for good.
 
-Backend: 155/155 tests passing across 16 suites (auth, CRM clients, CRM jobs, CRM leads,
+- **Data Quality Engine**: `GET /data-quality` (Action Contract `analyze_data_quality`,
+  risk 0, read-only) is a purely structural, rule-based scan of real CRM Core client
+  records — `backend/src/services/dataQualityService.ts` flags **possible** duplicate
+  clients by exact (case-insensitive) email match, digit-normalized phone match (also
+  normalizing the UK "+44"/"0" prefix so "+44 7700 900123" and "07700900123" compare
+  equal), exact display-name match, or a small Levenshtein edit distance on the name for
+  obvious typo duplicates — and flags clients with neither an email nor a phone number on
+  file as missing a contact method. Nothing is invented and nothing is ever merged,
+  edited, or deleted automatically — per the CRM rule, an uncertain identity match is only
+  ever presented for a human to review on the real client record. This module adds no new
+  persisted state: findings feed additively into the existing Notification and Escalation
+  Module feed via a new `buildDataQualityItems` source function (matching the extension
+  point that module was explicitly designed for), reusing its existing
+  acknowledge/unacknowledge mechanism rather than inventing a second "dismiss" concept.
+  Text commands: "check data quality" / "show data quality issues" / "show duplicate
+  clients".
+- **Frontend — Data Quality**: new Data Quality page (linked in the sidebar next to
+  Notifications) showing the full structural report — a table of possible duplicate
+  client pairs (with the matched reason and detail, and links to both client records) and
+  a table of clients missing a contact method — plus the same findings surfacing in the
+  Notifications feed for acknowledgement.
+
+Backend: 166/166 tests passing across 17 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, employee/permission management, service catalogue, quotes,
-recruitment, playbooks, learning, communication log, and notifications/escalation) —
+recruitment, playbooks, learning, communication log, notifications/escalation, and data
+quality) —
 covering permissions, validation, duplicate
 detection, cross-tenant checks, status-transition validation, lead conversion and
 duplicate-client reuse, command parsing for every supported intent, ambiguous-reference
@@ -383,12 +406,18 @@ handling, successful multi-step execution creating real records, stop-on-first-f
 behaviour, learning-rule CRUD, that an unconfirmed alias (no `alias_for` set) does not
 change interpretation, that a confirmed alias resolves before parsing and is reflected in
 both the response and the audit log, that archiving a rule stops it applying, longest-
-term-wins precedence for overlapping aliases, and audit-entry assertions; and the
+term-wins precedence for overlapping aliases, and audit-entry assertions; the
 Communication Log Module — permission checks, validation errors, CLIENT_NOT_FOUND/
 JOB_NOT_FOUND on invalid links, successful create with audit before/after assertions,
 list filtering by client/job/channel/follow-up-needed, the follow-ups-due view, update,
 single-record get, and a company-scoping test proving a company B record is never
-visible, listed, or updatable by company A — against a real Postgres instance.
+visible, listed, or updatable by company A; and the Data Quality Engine — email/phone/
+name duplicate detection (including UK phone-prefix normalization), a negative case
+proving an unrelated client is never flagged, missing-contact-method detection (and that
+a client with either an email or phone is not flagged), additive integration into the
+unified notification feed, acknowledging a data-quality finding via the existing
+notification mechanism without touching the underlying client record, and the "check
+data quality" text command — against a real Postgres instance.
 
 Frontend: `npm run build` and `npm run dev` both verified working (clean production
 build, dev server responds 200).
@@ -428,11 +457,17 @@ notification-delivery connector exists. It also only aggregates three real signa
 (overdue follow-ups, capacity overload, expiring quotes); it does not yet cover other
 escalation-worthy conditions the architecture lists (e.g. a lead sitting unconverted too
 long, a job stuck in one status too long) — extending coverage means adding another
-`buildXItems` source function, not a new module. Also still missing: website/photo
-modules, business growth content generation, and a real voice (speech) front-end (the
-Voice and Text Command Layer currently accepts typed text only). Build order should
-follow the roadmap in the master documentation (Phase 1 → Phase 2 → …), not be
-improvised per-feature.
+`buildXItems` source function, not a new module. The Data Quality Engine is a read-only
+analysis layer only: it does not merge, edit, or delete client records, and there is no
+"merge these clients" action yet — a possible duplicate must currently be resolved
+manually on the two client records after a human reviews it; it also only compares
+Client records within CRM Core (email/phone/name), not leads, jobs, or cross-entity
+matches, and there is no configurable similarity threshold (the Levenshtein cutoff and
+phone-normalization rule are fixed in code, not a per-company setting). Also still
+missing: website/photo modules, business growth content generation, and a real voice
+(speech) front-end (the Voice and Text Command Layer currently accepts typed text only).
+Build order should follow the roadmap in the master documentation (Phase 1 → Phase 2 →
+…), not be improvised per-feature.
 
 ## Deployment
 

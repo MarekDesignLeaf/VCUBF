@@ -11,6 +11,7 @@ import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 import { listFollowUpsDue } from "./communicationService.js";
 import { detectUpcomingOverload } from "./calendarService.js";
+import { buildDataQualityItems } from "./dataQualityService.js";
 
 // Notification and Escalation Module — see VCUF master documentation and the
 // vcubf-programmer-skill module list. This module stores no duplicate
@@ -24,6 +25,10 @@ import { detectUpcomingOverload } from "./calendarService.js";
 //     detectUpcomingOverload), including the same real mitigation options.
 //   - Quote, Pricing and Profitability Module: draft/sent quotes whose
 //     valid_until date has passed or is about to.
+//   - Data Quality Engine: possible duplicate clients and clients missing a
+//     contact method, computed structurally over real CRM Core client data
+//     (dataQualityService.buildDataQualityItems) — never a merge, never an
+//     automatic edit, always presented for a human to review.
 // Nothing here is invented — severity is derived directly from real dates
 // and percentages already stored elsewhere, never guessed. The only state
 // this module persists is which computed item a user has explicitly
@@ -123,13 +128,14 @@ export async function getAttentionFeed(
   user: AuthedUser,
   options: { includeAcknowledged?: boolean } = {}
 ): Promise<AttentionItem[]> {
-  const [followUps, overloads, expiringQuotes] = await Promise.all([
+  const [followUps, overloads, expiringQuotes, dataQualityItems] = await Promise.all([
     buildFollowUpItems(user),
     buildOverloadItems(user),
     buildQuoteExpiryItems(user),
+    buildDataQualityItems(user),
   ]);
 
-  const items: AttentionItemBase[] = [...followUps, ...overloads, ...expiringQuotes];
+  const items: AttentionItemBase[] = [...followUps, ...overloads, ...expiringQuotes, ...dataQualityItems];
 
   const acks = await prisma.notificationAcknowledgement.findMany({
     where: { companyId: user.companyId },
