@@ -82,7 +82,10 @@ export function JobDetail() {
   return (
     <div>
       <Link to="/jobs">← Back to jobs</Link>
-      <h1>{job.jobTitle}</h1>
+      <div className="page-header">
+        <h1>{job.jobTitle}</h1>
+        <Link to={`/quotes/new?client_id=${job.clientId}&job_id=${job.id}`}>New quote for this job</Link>
+      </div>
       {error && <div className="error-banner">{error}</div>}
       {assignWarning && <div className="warning-banner">{assignWarning}</div>}
       {missingSkills.length > 0 && (

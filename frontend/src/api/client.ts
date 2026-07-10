@@ -191,6 +191,62 @@ export interface ServiceCatalogueItem {
   createdAt: string;
 }
 
+// Quote, Pricing and Profitability Module. Every price/cost is either typed
+// in directly or pulled from a service catalogue entry the user created —
+// never invented. Margin is computed on the backend from what was actually
+// entered; a null margin means at least one line item has no cost entered
+// yet, not that margin is zero.
+export const QUOTE_STATUSES = ["draft", "sent", "accepted", "rejected", "expired"] as const;
+export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
+
+export const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
+  draft: "Draft",
+  sent: "Sent",
+  accepted: "Accepted",
+  rejected: "Rejected",
+  expired: "Expired",
+};
+
+export interface QuoteItem {
+  id: string;
+  serviceCatalogueItemId?: string | null;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  unitCost?: number | null;
+}
+
+export interface QuoteItemInput {
+  service_catalogue_item_id?: string;
+  description: string;
+  quantity?: number;
+  unit_price: number;
+  unit_cost?: number;
+}
+
+export interface QuoteTotals {
+  subtotal: number;
+  costTotal: number;
+  costKnown: boolean;
+  marginAmount: number | null;
+  marginPct: number | null;
+}
+
+export interface Quote {
+  id: string;
+  clientId: string;
+  jobId?: string | null;
+  title: string;
+  quoteStatus: QuoteStatus;
+  notes?: string | null;
+  validUntil?: string | null;
+  createdAt: string;
+  items: QuoteItem[];
+  totals: QuoteTotals;
+  client?: { id: string; displayName: string };
+  job?: { id: string; jobTitle: string } | null;
+}
+
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -282,6 +338,25 @@ export const api = {
       request<ServiceCatalogueItem>("/service-catalogue", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Record<string, unknown>) =>
       request<ServiceCatalogueItem>(`/service-catalogue/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  },
+  quotes: {
+    list: (params?: { clientId?: string; jobId?: string; status?: string }) => {
+      const qs = new URLSearchParams();
+      if (params?.clientId) qs.set("client_id", params.clientId);
+      if (params?.jobId) qs.set("job_id", params.jobId);
+      if (params?.status) qs.set("status", params.status);
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request<Quote[]>(`/quotes${suffix}`);
+    },
+    get: (id: string) => request<Quote>(`/quotes/${id}`),
+    create: (data: { client_id: string; job_id?: string; title: string; notes?: string; valid_until?: string; items: QuoteItemInput[] }) =>
+      request<Quote>("/quotes", { method: "POST", body: JSON.stringify(data) }),
+    update: (
+      id: string,
+      data: { title?: string; notes?: string; valid_until?: string | null; items?: QuoteItemInput[] }
+    ) => request<Quote>(`/quotes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    changeStatus: (id: string, quoteStatus: QuoteStatus) =>
+      request<Quote>(`/quotes/${id}/status`, { method: "PUT", body: JSON.stringify({ quote_status: quoteStatus }) }),
   },
   leads: {
     list: (params?: { status?: string }) => {

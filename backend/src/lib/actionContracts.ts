@@ -223,3 +223,46 @@ export const UPDATE_SERVICE_ACTION: ActionContract = {
   dataSources: ["user_input", "crm.service_catalogue"],
   possibleErrors: ["MISSING_PERMISSION", "SERVICE_NOT_FOUND", "VALIDATION_FAILED"],
 };
+
+// Quote, Pricing and Profitability Module — turns real service-catalogue
+// prices (or directly typed prices) and real entered costs into an itemised
+// quote and a computed margin. The system never assumes a margin: if a line
+// has no entered cost, its margin contribution is reported as unknown rather
+// than zero or maximal, so profitability numbers are never fabricated.
+export const QUOTE_STATUSES = ["draft", "sent", "accepted", "rejected", "expired"] as const;
+export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
+
+export const CREATE_QUOTE_ACTION: ActionContract = {
+  actionName: "prepare_quote",
+  purpose:
+    "Create a draft quote for a client (optionally linked to a job) from real, itemised line items with user-entered prices and costs, computing subtotal, cost total and margin.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.clients", "crm.jobs", "crm.service_catalogue"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CLIENT_NOT_FOUND", "JOB_NOT_FOUND"],
+};
+
+export const UPDATE_QUOTE_ACTION: ActionContract = {
+  actionName: "update_quote",
+  purpose: "Update a quote's line items, title, notes or validity, recomputing subtotal, cost total and margin.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.quotes"],
+  possibleErrors: ["MISSING_PERMISSION", "QUOTE_NOT_FOUND", "VALIDATION_FAILED", "UNSUPPORTED_ACTION"],
+};
+
+// A status change here is an internal record only — no email, message or
+// document is sent to the client as part of this action (no connector
+// exists for that yet). "sent" only means the owner has marked it as having
+// been given to the client through some other channel.
+export const CHANGE_QUOTE_STATUS_ACTION: ActionContract = {
+  actionName: "change_quote_status",
+  purpose: "Change a quote's status along its lifecycle (draft, sent, accepted, rejected, expired).",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.quotes"],
+  possibleErrors: ["MISSING_PERMISSION", "QUOTE_NOT_FOUND", "VALIDATION_FAILED"],
+};

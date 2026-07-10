@@ -152,6 +152,49 @@ describe("command/text", () => {
     assert.equal(res.body.data.category, "Roofing");
   });
 
+  it("lists quotes for a specific client via a text command", async () => {
+    const clientRes = await request(app)
+      .post("/crm/clients")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ display_name: "Text Command Quote Client" });
+    const clientId = clientRes.body.id;
+    await request(app)
+      .post("/quotes")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        client_id: clientId,
+        title: "Voice quote",
+        items: [{ description: "Job", unit_price: 100, unit_cost: 60 }],
+      });
+
+    const res = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "list quotes for Text Command Quote Client" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.intent, "list_quotes");
+    assert.ok(res.body.data.length >= 1);
+    assert.ok(res.body.data.every((q: any) => q.clientId === clientId));
+  });
+
+  it("returns AMBIGUOUS_REFERENCE when 'list quotes for X' matches multiple clients", async () => {
+    await request(app)
+      .post("/crm/clients")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ display_name: "Ambiguous Quote Co" });
+    await request(app)
+      .post("/crm/clients")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ display_name: "Ambiguous Quote Co Ltd" });
+
+    const res = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "list quotes for Ambiguous Quote Co" });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.error, "AMBIGUOUS_REFERENCE");
+  });
+
   it("lists clients via a text command", async () => {
     const res = await request(app)
       .post("/command/text")

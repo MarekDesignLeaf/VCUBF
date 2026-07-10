@@ -25,6 +25,7 @@ export type ParsedCommand =
   | { intent: "assign_job"; entities: { job_title: string; employee_name: string } }
   | { intent: "detect_overload"; entities: Record<string, never> }
   | { intent: "create_service"; entities: { name: string; category?: string } }
+  | { intent: "list_quotes"; entities: { client_name?: string } }
   | { intent: "list_clients"; entities: Record<string, never> }
   | { intent: "list_jobs"; entities: Record<string, never> }
   | { intent: "list_leads"; entities: Record<string, never> }
@@ -114,6 +115,9 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     if (!name) return { intent: "unrecognized", entities: {} };
     return { intent: "create_service", entities: { name, category: category.value } };
   }
+
+  m = text.match(/^(?:list|show)\s+quotes(?:\s+for\s+(.+))?$/i);
+  if (m) return { intent: "list_quotes", entities: { client_name: m[1]?.trim() } };
 
   if (/^(?:list|show)\s+clients?$/i.test(text)) return { intent: "list_clients", entities: {} };
   if (/^(?:list|show)\s+jobs?$/i.test(text)) return { intent: "list_jobs", entities: {} };

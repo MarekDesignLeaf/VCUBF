@@ -12,6 +12,8 @@ import { Employees } from "./pages/Employees";
 import { EmployeeEdit } from "./pages/EmployeeEdit";
 import { Calendar } from "./pages/Calendar";
 import { ServiceCatalogue } from "./pages/ServiceCatalogue";
+import { Quotes } from "./pages/Quotes";
+import { QuoteEdit } from "./pages/QuoteEdit";
 import { Leads } from "./pages/Leads";
 import { LeadDetail } from "./pages/LeadDetail";
 
@@ -38,6 +40,9 @@ export default function App() {
             <Route path="/employees/:id/edit" element={<EmployeeEdit />} />
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/services" element={<ServiceCatalogue />} />
+            <Route path="/quotes" element={<Quotes />} />
+            <Route path="/quotes/new" element={<QuoteEdit />} />
+            <Route path="/quotes/:id" element={<QuoteEdit />} />
             <Route path="/leads" element={<Leads />} />
             <Route path="/leads/:id" element={<LeadDetail />} />
           </Route>

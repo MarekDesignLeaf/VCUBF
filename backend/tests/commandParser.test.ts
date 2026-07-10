@@ -96,6 +96,16 @@ describe("commandParser", () => {
     }
   });
 
+  it("parses 'list quotes' and 'list quotes for X'", () => {
+    const bare = parseTextCommand("list quotes");
+    assert.equal(bare.intent, "list_quotes");
+    if (bare.intent === "list_quotes") assert.equal(bare.entities.client_name, undefined);
+
+    const scoped = parseTextCommand("show quotes for Quote Test Client");
+    assert.equal(scoped.intent, "list_quotes");
+    if (scoped.intent === "list_quotes") assert.equal(scoped.entities.client_name, "Quote Test Client");
+  });
+
   it("returns unrecognized for gibberish instead of guessing", () => {
     const result = parseTextCommand("please make the weather nicer today");
     assert.equal(result.intent, "unrecognized");

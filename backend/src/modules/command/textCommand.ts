@@ -11,6 +11,7 @@ import * as leadService from "../../services/leadService.js";
 import * as employeeService from "../../services/employeeService.js";
 import * as calendarService from "../../services/calendarService.js";
 import * as serviceCatalogueService from "../../services/serviceCatalogueService.js";
+import * as quoteService from "../../services/quoteService.js";
 
 export const commandRouter = Router();
 
@@ -271,6 +272,39 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
         error: result.ok ? undefined : result.error,
         message: result.ok ? undefined : result.message,
       };
+      break;
+    }
+
+    case "list_quotes": {
+      if (command.entities.client_name) {
+        const matches = await leadService.findClientsByName(user, command.entities.client_name);
+        if (matches.length === 0) {
+          response = {
+            intent: command.intent,
+            interpreted: command.entities,
+            ok: false,
+            httpStatus: 404,
+            error: "CLIENT_NOT_FOUND",
+            message: `No client matching "${command.entities.client_name}".`,
+          };
+        } else if (matches.length > 1) {
+          response = {
+            intent: command.intent,
+            interpreted: command.entities,
+            ok: false,
+            httpStatus: 409,
+            error: "AMBIGUOUS_REFERENCE",
+            message: `Multiple clients match "${command.entities.client_name}" — be more specific.`,
+            data: matches.map((c) => ({ id: c.id, displayName: c.displayName })),
+          };
+        } else {
+          const data = await quoteService.listQuotes(user, { clientId: matches[0].id });
+          response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
+        }
+      } else {
+        const data = await quoteService.listQuotes(user, {});
+        response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
+      }
       break;
     }
 

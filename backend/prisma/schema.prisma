@@ -21,6 +21,7 @@ model Company {
   leads               Lead[]
   auditLogs           AuditLog[]
   serviceCatalogueItems ServiceCatalogueItem[]
+  quotes              Quote[]
 
   @@map("companies")
 }
@@ -69,6 +70,7 @@ model Client {
 
   company Company @relation(fields: [companyId], references: [id])
   jobs    Job[]
+  quotes  Quote[]
 
   @@index([companyId])
   @@map("clients")
@@ -104,6 +106,7 @@ model Job {
   client              Client               @relation(fields: [clientId], references: [id])
   assignedUser        User?                @relation("AssignedJobs", fields: [assignedUserId], references: [id])
   serviceCatalogueItem ServiceCatalogueItem? @relation(fields: [serviceCatalogueItemId], references: [id])
+  quotes              Quote[]
 
   @@index([companyId])
   @@index([clientId])
@@ -159,9 +162,60 @@ model ServiceCatalogueItem {
 
   company Company @relation(fields: [companyId], references: [id])
   jobs    Job[]
+  quoteItems QuoteItem[]
 
   @@index([companyId])
   @@map("service_catalogue_items")
+}
+
+
+// Quote, Pricing and Profitability Module — turns real service-catalogue
+// prices and real job data into a real, itemised quote for a client, and
+// computes actual margin from real entered costs. Nothing here is invented:
+// unit prices and unit costs are either pulled from a service catalogue
+// entry the user created, or typed in directly. If a cost is not entered,
+// margin is left unknown for that line rather than assumed to be 100%.
+model Quote {
+  id          String   @id @default(uuid())
+  companyId   String   @map("company_id")
+  clientId    String   @map("client_id")
+  jobId       String?  @map("job_id")
+  title       String
+  quoteStatus String   @default("draft") @map("quote_status")
+  notes       String?
+  validUntil  DateTime? @map("valid_until")
+  createdBy   String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company Company     @relation(fields: [companyId], references: [id])
+  client  Client      @relation(fields: [clientId], references: [id])
+  job     Job?        @relation(fields: [jobId], references: [id])
+  items   QuoteItem[]
+
+  @@index([companyId])
+  @@index([clientId])
+  @@index([jobId])
+  @@map("quotes")
+}
+
+model QuoteItem {
+  id                     String   @id @default(uuid())
+  quoteId                String   @map("quote_id")
+  serviceCatalogueItemId String?  @map("service_catalogue_item_id")
+  description            String
+  quantity                Float   @default(1)
+  unitPrice               Float   @map("unit_price")
+  unitCost                Float?  @map("unit_cost")
+  sortOrder               Int     @default(0) @map("sort_order")
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  quote                Quote                 @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  serviceCatalogueItem ServiceCatalogueItem? @relation(fields: [serviceCatalogueItemId], references: [id])
+
+  @@index([quoteId])
+  @@index([serviceCatalogueItemId])
+  @@map("quote_items")
 }
 
 model AuditLog {

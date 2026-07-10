@@ -50,7 +50,10 @@ export function ClientDetail() {
 
       <div className="page-header">
         <h2>Jobs</h2>
-        <button onClick={() => setShowJobForm((v) => !v)}>{showJobForm ? "Cancel" : "New job"}</button>
+        <div style={{ display: "flex", gap: 12 }}>
+          {id && <Link to={`/quotes/new?client_id=${id}`}>New quote</Link>}
+          <button onClick={() => setShowJobForm((v) => !v)}>{showJobForm ? "Cancel" : "New job"}</button>
+        </div>
       </div>
       {showJobForm && id && (
         <NewJobForm
