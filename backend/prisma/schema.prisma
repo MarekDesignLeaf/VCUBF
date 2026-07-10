@@ -27,6 +27,7 @@ model Company {
   playbooks           Playbook[]
   playbookRuns        PlaybookRun[]
   learningRules       LearningRule[]
+  communicationRecords CommunicationRecord[]
 
   @@map("companies")
 }
@@ -76,6 +77,7 @@ model Client {
   company Company @relation(fields: [companyId], references: [id])
   jobs    Job[]
   quotes  Quote[]
+  communicationRecords CommunicationRecord[]
 
   @@index([companyId])
   @@map("clients")
@@ -112,6 +114,7 @@ model Job {
   assignedUser        User?                @relation("AssignedJobs", fields: [assignedUserId], references: [id])
   serviceCatalogueItem ServiceCatalogueItem? @relation(fields: [serviceCatalogueItemId], references: [id])
   quotes              Quote[]
+  communicationRecords CommunicationRecord[]
 
   @@index([companyId])
   @@index([clientId])
@@ -356,6 +359,43 @@ model LearningRule {
   @@index([companyId])
   @@map("learning_rules")
 }
+
+// Communication Log Module — the manual-entry foundation of the
+// Communication Intelligence Module. See VCUF master documentation and the
+// vcubf-programmer-skill CRM rule: a communication must never live only in
+// an external inbox/chat app — it belongs on the CRM record it relates to.
+// Automated extraction from email/WhatsApp/SMS connectors is out of scope
+// for this slice (no connector exists yet); every field here is exactly
+// what the user typed in, never invented. This model is deliberately
+// generic (channel/direction/summary/fullText) so a future connector-driven
+// extraction workflow can write into the same table and CRM linkage instead
+// of being a disconnected system.
+model CommunicationRecord {
+  id              String    @id @default(uuid())
+  companyId       String    @map("company_id")
+  clientId        String    @map("client_id")
+  jobId           String?   @map("job_id")
+  channel         String
+  direction       String
+  summary         String
+  fullText        String?   @map("full_text")
+  occurredAt      DateTime  @map("occurred_at")
+  followUpNeeded  Boolean   @default(false) @map("follow_up_needed")
+  followUpDueAt   DateTime? @map("follow_up_due_at")
+  createdBy       String?   @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  client  Client  @relation(fields: [clientId], references: [id])
+  job     Job?    @relation(fields: [jobId], references: [id])
+
+  @@index([companyId])
+  @@index([clientId])
+  @@index([jobId])
+  @@map("communication_records")
+}
+
 
 model AuditLog {
   id                   String   @id @default(uuid())

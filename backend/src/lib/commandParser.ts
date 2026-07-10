@@ -29,6 +29,12 @@ export type ParsedCommand =
   | { intent: "list_job_openings"; entities: Record<string, never> }
   | { intent: "create_learning_rule"; entities: { term: string; meaning: string } }
   | { intent: "list_learning_rules"; entities: Record<string, never> }
+  | {
+      intent: "log_communication";
+      entities: { client_name: string; channel: string; direction: string; summary: string };
+    }
+  | { intent: "list_communications"; entities: { client_name?: string } }
+  | { intent: "list_follow_ups"; entities: Record<string, never> }
   | { intent: "list_clients"; entities: Record<string, never> }
   | { intent: "list_jobs"; entities: Record<string, never> }
   | { intent: "list_leads"; entities: Record<string, never> }
@@ -131,6 +137,42 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (m) return { intent: "create_learning_rule", entities: { term: m[1].trim(), meaning: m[2].trim() } };
 
   if (/^(?:list|show)\s+learning\s+rules?$/i.test(text)) return { intent: "list_learning_rules", entities: {} };
+
+  // "log call with Jane Smith: discussed timeline, promised quote by Friday"
+  // "log email from Jane Smith: sent quote"
+  // Channel word maps to a real COMMUNICATION_CHANNELS entry; direction is
+  // inferred from "with"/"to" (outbound) vs "from" (inbound) — a reasonable
+  // deterministic default the user can always correct via the form/API.
+  m = text.match(
+    /^log\s+(call|phone call|email|whatsapp|sms|text|messenger|message|meeting|visit)\s+(with|to|from)\s+(.+?)\s*:\s*(.+)$/i
+  );
+  if (m) {
+    const channelWord = m[1].toLowerCase();
+    const directionWord = m[2].toLowerCase();
+    const clientName = m[3].trim();
+    const summary = m[4].trim();
+    const channelMap: Record<string, string> = {
+      call: "phone_call",
+      "phone call": "phone_call",
+      email: "email",
+      whatsapp: "whatsapp",
+      sms: "sms",
+      text: "sms",
+      messenger: "messenger",
+      message: "messenger",
+      meeting: "in_person",
+      visit: "in_person",
+    };
+    const channel = channelMap[channelWord] ?? "other";
+    const direction = directionWord === "from" ? "inbound" : "outbound";
+    if (!clientName || !summary) return { intent: "unrecognized", entities: {} };
+    return { intent: "log_communication", entities: { client_name: clientName, channel, direction, summary } };
+  }
+
+  if (/^(?:list|show)\s+follow[\s-]?ups?$/i.test(text)) return { intent: "list_follow_ups", entities: {} };
+
+  m = text.match(/^(?:list|show)\s+communications?(?:\s+for\s+(.+))?$/i);
+  if (m) return { intent: "list_communications", entities: { client_name: m[1]?.trim() } };
 
   if (/^(?:list|show)\s+clients?$/i.test(text)) return { intent: "list_clients", entities: {} };
   if (/^(?:list|show)\s+jobs?$/i.test(text)) return { intent: "list_jobs", entities: {} };

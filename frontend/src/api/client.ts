@@ -378,6 +378,55 @@ export interface LearningRule {
   createdAt: string;
 }
 
+// Communication Log Module — the manual-entry foundation of the
+// Communication Intelligence Module. Every field is exactly what the user
+// typed in; there is no email/WhatsApp/SMS connector yet, so nothing here
+// is auto-extracted.
+export const COMMUNICATION_CHANNELS = [
+  "email",
+  "whatsapp",
+  "sms",
+  "phone_call",
+  "messenger",
+  "in_person",
+  "other",
+] as const;
+export type CommunicationChannel = (typeof COMMUNICATION_CHANNELS)[number];
+
+export const COMMUNICATION_CHANNEL_LABELS: Record<CommunicationChannel, string> = {
+  email: "Email",
+  whatsapp: "WhatsApp",
+  sms: "SMS",
+  phone_call: "Phone call",
+  messenger: "Messenger",
+  in_person: "In person",
+  other: "Other",
+};
+
+export const COMMUNICATION_DIRECTIONS = ["inbound", "outbound"] as const;
+export type CommunicationDirection = (typeof COMMUNICATION_DIRECTIONS)[number];
+
+export const COMMUNICATION_DIRECTION_LABELS: Record<CommunicationDirection, string> = {
+  inbound: "Inbound",
+  outbound: "Outbound",
+};
+
+export interface CommunicationRecord {
+  id: string;
+  clientId: string;
+  jobId?: string | null;
+  channel: CommunicationChannel;
+  direction: CommunicationDirection;
+  summary: string;
+  fullText?: string | null;
+  occurredAt: string;
+  followUpNeeded: boolean;
+  followUpDueAt?: string | null;
+  createdAt: string;
+  client?: { id: string; displayName: string };
+  job?: { id: string; jobTitle: string } | null;
+}
+
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -541,6 +590,23 @@ export const api = {
       request<Lead>("/crm/leads", { method: "POST", body: JSON.stringify(data) }),
     convert: (id: string) =>
       request<{ lead: Lead; client: Client }>(`/crm/leads/${id}/convert`, { method: "POST" }),
+  },
+  communications: {
+    list: (params?: { clientId?: string; jobId?: string; channel?: string; followUpNeeded?: boolean }) => {
+      const qs = new URLSearchParams();
+      if (params?.clientId) qs.set("client_id", params.clientId);
+      if (params?.jobId) qs.set("job_id", params.jobId);
+      if (params?.channel) qs.set("channel", params.channel);
+      if (params?.followUpNeeded !== undefined) qs.set("follow_up_needed", String(params.followUpNeeded));
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request<CommunicationRecord[]>(`/communications${suffix}`);
+    },
+    get: (id: string) => request<CommunicationRecord>(`/communications/${id}`),
+    create: (data: Record<string, unknown>) =>
+      request<CommunicationRecord>("/communications", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<CommunicationRecord>(`/communications/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    followUpsDue: () => request<CommunicationRecord[]>("/communications/follow-ups-due"),
   },
   command: {
     text: (text: string) =>

@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { api, type Client, type Job, type ServiceCatalogueItem, ApiError, JOB_STATUS_LABELS } from "../api/client";
+import {
+  api,
+  type Client,
+  type Job,
+  type ServiceCatalogueItem,
+  type CommunicationRecord,
+  ApiError,
+  JOB_STATUS_LABELS,
+  COMMUNICATION_CHANNEL_LABELS,
+} from "../api/client";
 
 export function ClientDetail() {
   const { id } = useParams<{ id: string }>();
@@ -8,6 +17,7 @@ export function ClientDetail() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [showJobForm, setShowJobForm] = useState(false);
+  const [communications, setCommunications] = useState<CommunicationRecord[]>([]);
 
   function loadClient() {
     if (!id) return;
@@ -22,9 +32,15 @@ export function ClientDetail() {
     api.jobs.list({ clientId: id }).then(setJobs).catch(() => {});
   }
 
+  function loadCommunications() {
+    if (!id) return;
+    api.communications.list({ clientId: id }).then(setCommunications).catch(() => {});
+  }
+
   useEffect(() => {
     loadClient();
     loadJobs();
+    loadCommunications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -83,6 +99,35 @@ export function ClientDetail() {
                 </td>
                 <td>{JOB_STATUS_LABELS[j.jobStatus]}</td>
                 <td>{j.propertyAddress ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <div className="page-header">
+        <h2>Communications</h2>
+        {id && <Link to={`/communications?client_id=${id}`}>Log communication</Link>}
+      </div>
+      {communications.length === 0 ? (
+        <p className="hint">No communications logged for this client yet.</p>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Channel</th>
+              <th>Summary</th>
+              <th>Follow-up</th>
+            </tr>
+          </thead>
+          <tbody>
+            {communications.slice(0, 5).map((c) => (
+              <tr key={c.id}>
+                <td>{new Date(c.occurredAt).toLocaleString()}</td>
+                <td>{COMMUNICATION_CHANNEL_LABELS[c.channel]}</td>
+                <td>{c.summary}</td>
+                <td>{c.followUpNeeded ? "Needed" : "—"}</td>
               </tr>
             ))}
           </tbody>

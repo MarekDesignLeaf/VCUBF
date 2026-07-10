@@ -433,3 +433,48 @@ export const UPDATE_LEARNING_RULE_ACTION: ActionContract = {
   dataSources: ["user_input", "crm.learning_rules"],
   possibleErrors: ["MISSING_PERMISSION", "LEARNING_RULE_NOT_FOUND", "VALIDATION_FAILED"],
 };
+
+// Communication Log Module — the manual-entry foundation of the
+// Communication Intelligence Module (project instructions section 3). A
+// communication record is a real CRM fact (what was discussed/promised,
+// when, with whom) — same class of action as create_lead/create_job: an
+// internal data change to a structured CRM record, not merely a draft or
+// suggestion, so it matches those actions' risk level (2) rather than the
+// lower "draft only" level used for advert drafting. It never sends,
+// publishes, or contacts anyone by itself (no connector exists yet) — it
+// only logs a communication that already happened, always from user-entered
+// data, never invented.
+export const COMMUNICATION_CHANNELS = [
+  "email",
+  "whatsapp",
+  "sms",
+  "phone_call",
+  "messenger",
+  "in_person",
+  "other",
+] as const;
+export type CommunicationChannel = (typeof COMMUNICATION_CHANNELS)[number];
+
+export const COMMUNICATION_DIRECTIONS = ["inbound", "outbound"] as const;
+export type CommunicationDirection = (typeof COMMUNICATION_DIRECTIONS)[number];
+
+export const CREATE_COMMUNICATION_RECORD_ACTION: ActionContract = {
+  actionName: "log_communication",
+  purpose:
+    "Record a real communication (email, WhatsApp, SMS, phone call, messenger, in-person or other) with a client, optionally linked to a job, from user-entered details only.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.clients", "crm.jobs"],
+  possibleErrors: ["MISSING_PERMISSION", "MISSING_DATA", "VALIDATION_FAILED", "CLIENT_NOT_FOUND", "JOB_NOT_FOUND"],
+};
+
+export const UPDATE_COMMUNICATION_RECORD_ACTION: ActionContract = {
+  actionName: "update_communication_record",
+  purpose: "Update a previously logged communication record, including marking follow-up as needed or done.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.communication_records"],
+  possibleErrors: ["MISSING_PERMISSION", "COMMUNICATION_RECORD_NOT_FOUND", "VALIDATION_FAILED"],
+};

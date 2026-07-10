@@ -310,7 +310,36 @@ npm run dev                 # http://localhost:5173
   an Archive/Reactivate toggle per rule, and a note explaining that a rule only changes
   command interpretation once the substitution field is filled in.
 
-Backend: 132/132 tests passing across 14 suites (auth, CRM clients, CRM jobs, CRM leads,
+- **Communication Log Module**: `POST /communications`, `PUT /communications/:id`,
+  `GET /communications`, `GET /communications/:id`, `GET /communications/follow-ups-due`
+  (Action Contracts `log_communication`, `update_communication_record`) are the
+  manual-entry foundation of the Communication Intelligence Module — a real record of
+  what was discussed or promised with a client (optionally linked to a job), channel
+  (email/whatsapp/sms/phone_call/messenger/in_person/other), direction (inbound/
+  outbound), a required summary, an optional full-text capture, and when it actually
+  happened (`occurred_at`, not necessarily "now" — a call from yesterday can be logged
+  today). Every field is exactly what the user typed in; there is no email/WhatsApp/SMS
+  connector in this slice, so nothing is auto-extracted. A referenced `client_id` (and
+  `job_id` if given) is validated against the company's real records before a record is
+  created, matching the FK-validation pattern in `quoteService.ts`. Follow-up tracking
+  is a first-class field (`follow_up_needed` + optional `follow_up_due_at`);
+  `listFollowUpsDue` (company-scoped) returns every record still needing follow-up
+  whose due date has arrived or was never set, so a follow-up never silently falls off
+  the list just because a date wasn't entered. Text commands: "log call with <client>:
+  <summary>" / "log email from <client>: <summary>" (channel word and with/from
+  direction are mapped deterministically to the real channel/direction values), "list
+  communications" / "list communications for <client>", "show follow ups". This module
+  is deliberately generic and CRM-linked so a future connector-driven extraction
+  workflow (reading real email/WhatsApp/SMS threads) can write into this exact same
+  table and linkage instead of being a second, disconnected communication store.
+- **Frontend — Communications**: new Communications page (list with channel and
+  follow-up-needed filters, and a "Log communication" quick-entry form — client picker,
+  channel/direction selects, summary, occurred-at, and a follow-up checkbox + due date).
+  Client detail and job detail pages each gained a "Communications" section showing the
+  five most recent records for that client/job plus a "Log communication" link that
+  prefills `client_id` (and `job_id` from the job page).
+
+Backend: 145/145 tests passing across 15 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, employee/permission management, service catalogue, quotes,
 recruitment, playbooks, and learning) — covering permissions, validation, duplicate
@@ -327,8 +356,12 @@ handling, successful multi-step execution creating real records, stop-on-first-f
 behaviour, learning-rule CRUD, that an unconfirmed alias (no `alias_for` set) does not
 change interpretation, that a confirmed alias resolves before parsing and is reflected in
 both the response and the audit log, that archiving a rule stops it applying, longest-
-term-wins precedence for overlapping aliases, and audit-entry assertions — against a real
-Postgres instance.
+term-wins precedence for overlapping aliases, and audit-entry assertions; and the
+Communication Log Module — permission checks, validation errors, CLIENT_NOT_FOUND/
+JOB_NOT_FOUND on invalid links, successful create with audit before/after assertions,
+list filtering by client/job/channel/follow-up-needed, the follow-ups-due view, update,
+single-record get, and a company-scoping test proving a company B record is never
+visible, listed, or updatable by company A — against a real Postgres instance.
 
 Frontend: `npm run build` and `npm run dev` both verified working (clean production
 build, dev server responds 200).
@@ -354,8 +387,15 @@ whole-term substitutions only — a rule can't yet rewrite part of a sentence ba
 context (e.g. it can't tell "old client" apart in "call the old client" vs. "he's quite
 old" — it just doesn't fire on any term it wasn't taught verbatim, matching the "must
 not guess" rule rather than trying to be clever about it). Also still missing from MVP
-scope: communication intelligence (email/WhatsApp enquiry extraction), website/photo
-modules, business growth content generation, and a real voice (speech) front-end (the
+scope: automated communication intelligence — the Communication Log Module now gives
+every communication a real, CRM-linked, auditable home, but extracting new
+communications automatically from an email/WhatsApp/SMS connector (rather than manual
+entry), duplicate/near-duplicate detection across channels, and AI-assisted
+summarisation of a raw thread into a structured record are still not implemented; the
+data model and CRM linkage are deliberately built so that future connector-driven
+extraction work writes into this same table instead of creating a second, disconnected
+communication store. Also still missing: website/photo modules, business growth content
+generation, and a real voice (speech) front-end (the
 Voice and Text Command Layer currently accepts typed text only). Build order should
 follow the roadmap in the master documentation (Phase 1 → Phase 2 → …), not be
 improvised per-feature.

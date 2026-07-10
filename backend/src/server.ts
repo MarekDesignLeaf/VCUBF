@@ -14,6 +14,7 @@ import { quotesRouter } from "./modules/quotes/routes.js";
 import { recruitmentRouter } from "./modules/recruitment/routes.js";
 import { playbooksRouter } from "./modules/playbooks/routes.js";
 import { learningRouter } from "./modules/learning/routes.js";
+import { communicationsRouter } from "./modules/communications/routes.js";
 
 export function createServer() {
   const app = express();
@@ -35,6 +36,7 @@ export function createServer() {
   app.use("/recruitment", recruitmentRouter);
   app.use("/playbooks", playbooksRouter);
   app.use("/learning-rules", learningRouter);
+  app.use("/communications", communicationsRouter);
 
   // Fallback error handler — the system must fail safely, never crash silently.
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

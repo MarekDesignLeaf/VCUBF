@@ -21,6 +21,7 @@ import { PlaybookDetail } from "./pages/PlaybookDetail";
 import { LearningRules } from "./pages/LearningRules";
 import { Leads } from "./pages/Leads";
 import { LeadDetail } from "./pages/LeadDetail";
+import { CommunicationLog } from "./pages/CommunicationLog";
 
 export default function App() {
   return (
@@ -55,6 +56,7 @@ export default function App() {
             <Route path="/learning" element={<LearningRules />} />
             <Route path="/leads" element={<Leads />} />
             <Route path="/leads/:id" element={<LeadDetail />} />
+            <Route path="/communications" element={<CommunicationLog />} />
           </Route>
         </Routes>
       </BrowserRouter>

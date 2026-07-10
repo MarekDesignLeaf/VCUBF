@@ -9,6 +9,7 @@ import * as serviceCatalogueService from "../services/serviceCatalogueService.js
 import * as quoteService from "../services/quoteService.js";
 import * as recruitmentService from "../services/recruitmentService.js";
 import * as learningService from "../services/learningService.js";
+import * as communicationService from "../services/communicationService.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -319,6 +320,87 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
 
     case "list_learning_rules": {
       const data = await learningService.listLearningRules(user, {});
+      response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "log_communication": {
+      const matches = await leadService.findClientsByName(user, command.entities.client_name);
+      if (matches.length === 0) {
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: false,
+          httpStatus: 404,
+          error: "CLIENT_NOT_FOUND",
+          message: `No client matching "${command.entities.client_name}".`,
+        };
+      } else if (matches.length > 1) {
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: false,
+          httpStatus: 409,
+          error: "AMBIGUOUS_REFERENCE",
+          message: `Multiple clients match "${command.entities.client_name}" — be more specific.`,
+          data: matches.map((c) => ({ id: c.id, displayName: c.displayName })),
+        };
+      } else {
+        const result = await communicationService.createCommunicationRecord(user, {
+          client_id: matches[0].id,
+          channel: command.entities.channel,
+          direction: command.entities.direction,
+          summary: command.entities.summary,
+          occurred_at: new Date().toISOString(),
+        });
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: result.ok,
+          httpStatus: result.httpStatus,
+          data: result.ok ? result.data : undefined,
+          error: result.ok ? undefined : result.error,
+          message: result.ok ? undefined : result.message,
+        };
+      }
+      break;
+    }
+
+    case "list_communications": {
+      if (command.entities.client_name) {
+        const matches = await leadService.findClientsByName(user, command.entities.client_name);
+        if (matches.length === 0) {
+          response = {
+            intent: command.intent,
+            interpreted: command.entities,
+            ok: false,
+            httpStatus: 404,
+            error: "CLIENT_NOT_FOUND",
+            message: `No client matching "${command.entities.client_name}".`,
+          };
+        } else if (matches.length > 1) {
+          response = {
+            intent: command.intent,
+            interpreted: command.entities,
+            ok: false,
+            httpStatus: 409,
+            error: "AMBIGUOUS_REFERENCE",
+            message: `Multiple clients match "${command.entities.client_name}" — be more specific.`,
+            data: matches.map((c) => ({ id: c.id, displayName: c.displayName })),
+          };
+        } else {
+          const data = await communicationService.listCommunicationRecords(user, { clientId: matches[0].id });
+          response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
+        }
+      } else {
+        const data = await communicationService.listCommunicationRecords(user, {});
+        response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
+      }
+      break;
+    }
+
+    case "list_follow_ups": {
+      const data = await communicationService.listFollowUpsDue(user);
       response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
       break;
     }

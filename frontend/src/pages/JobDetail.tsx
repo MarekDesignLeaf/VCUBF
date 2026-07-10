@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { api, type Job, type Employee, JOB_STATUSES, JOB_STATUS_LABELS, ApiError } from "../api/client";
+import {
+  api,
+  type Job,
+  type Employee,
+  type CommunicationRecord,
+  JOB_STATUSES,
+  JOB_STATUS_LABELS,
+  COMMUNICATION_CHANNEL_LABELS,
+  ApiError,
+} from "../api/client";
 
 export function JobDetail() {
   const { id } = useParams<{ id: string }>();
@@ -10,6 +19,7 @@ export function JobDetail() {
   const [updating, setUpdating] = useState(false);
   const [assignWarning, setAssignWarning] = useState<string | null>(null);
   const [missingSkills, setMissingSkills] = useState<string[]>([]);
+  const [communications, setCommunications] = useState<CommunicationRecord[]>([]);
 
   function load() {
     if (!id) return;
@@ -23,6 +33,10 @@ export function JobDetail() {
   useEffect(() => {
     api.employees.list().then(setEmployees).catch(() => undefined);
   }, []);
+  useEffect(() => {
+    if (!id) return;
+    api.communications.list({ jobId: id }).then(setCommunications).catch(() => undefined);
+  }, [id]);
 
   async function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
     if (!job) return;
@@ -140,6 +154,35 @@ export function JobDetail() {
         <dt>Notes</dt>
         <dd>{job.notes ?? "—"}</dd>
       </dl>
+
+      <div className="page-header">
+        <h2>Communications</h2>
+        <Link to={`/communications?client_id=${job.clientId}&job_id=${job.id}`}>Log communication</Link>
+      </div>
+      {communications.length === 0 ? (
+        <p className="hint">No communications logged for this job yet.</p>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Channel</th>
+              <th>Summary</th>
+              <th>Follow-up</th>
+            </tr>
+          </thead>
+          <tbody>
+            {communications.slice(0, 5).map((c) => (
+              <tr key={c.id}>
+                <td>{new Date(c.occurredAt).toLocaleString()}</td>
+                <td>{COMMUNICATION_CHANNEL_LABELS[c.channel]}</td>
+                <td>{c.summary}</td>
+                <td>{c.followUpNeeded ? "Needed" : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
