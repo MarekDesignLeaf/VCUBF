@@ -252,20 +252,54 @@ npm run dev                 # http://localhost:5173
   stage dropdown — with a standing note that a "Hired" candidate still needs a real
   employee account created deliberately from the Employees page.
 
-Backend: 109/109 tests passing across 12 suites (auth, CRM clients, CRM jobs, CRM leads,
+- **Playbook Engine**: `POST /playbooks`, `PUT /playbooks/:id`, `POST /playbooks/:id/run`,
+  `GET /playbooks`, `GET /playbooks/:id`, `GET /playbooks/:id/runs` (Action Contracts
+  `create_playbook`, `update_playbook`, `run_playbook`) implement "save the workflow as a
+  reusable playbook" from project instructions section 2. A playbook is just an ordered
+  list of Voice/Text Command Layer templates with `{placeholder}` variables — the exact
+  same syntax a user could type into the command bar. The switch-statement dispatch logic
+  that used to live inside the `/command/text` route was extracted into
+  `backend/src/lib/commandExecutor.ts#dispatchParsedCommand(user, command)`, a pure
+  Action Engine entry point with no HTTP or audit concerns of its own; both the text
+  command route and `run_playbook` now call this exact same function, so a playbook step
+  behaves identically to typing the same text by hand — there is no second, divergent
+  execution path (verified: all 109 pre-existing tests still passed unchanged after the
+  refactor, before any playbook code was added). `run_playbook` is
+  `confirmationRequired: true` (risk level 3, since one call can chain several mutating
+  actions — the "no uncontrolled automation" rule): a request without `confirmed: true`
+  resolves every step's variables and returns a `409 CONFIRMATION_REQUIRED` preview
+  showing the exact resolved text and interpreted intent for every step, and changes
+  nothing; a request with an unresolvable `{placeholder}` (no matching variable supplied)
+  fails with `400 MISSING_VARIABLE` naming exactly what's missing, before anything runs.
+  Only a second request with `confirmed: true` executes the steps, in order, through
+  `dispatchParsedCommand` — and execution **stops at the first failing step** rather than
+  continuing silently (covered by a test with a two-step playbook where step one
+  references a nonexistent client: only one step result is recorded, and step two never
+  ran). Every run is stored as a `PlaybookRun` (variables, full per-step results,
+  `overallOk`) for later review, in addition to the run's own audit entry.
+- **Frontend — Playbooks**: new Playbooks page (list, "New playbook" form with one
+  template per line) and a playbook detail page that auto-detects `{placeholder}` names
+  from the step templates via regex and renders an input for each, a "Preview steps"
+  button that shows the resolved text and interpreted intent per step before anything
+  runs, a "Confirm and run" button that only appears after a preview, a run-result table,
+  and run history. Visible to all users with `voice.execute` (the same permission the
+  command bar already requires).
+
+Backend: 120/120 tests passing across 13 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
-calendar/scheduling, employee/permission management, service catalogue, quotes, and
-recruitment) — covering permissions, validation, duplicate detection, cross-tenant
-checks, status-transition validation, lead conversion and duplicate-client reuse,
-command parsing for every supported intent, ambiguous-reference handling,
+calendar/scheduling, employee/permission management, service catalogue, quotes,
+recruitment, and playbooks) — covering permissions, validation, duplicate detection,
+cross-tenant checks, status-transition validation, lead conversion and duplicate-client
+reuse, command parsing for every supported intent, ambiguous-reference handling,
 capacity/overload computation, skill-gap detection, calendar date-range queries,
 upcoming overload detection, employee-suggestion ranking, the confirm-before-write flow
 (nothing changes until `confirmed: true`), deactivation, catalogue CRUD and
 job-to-catalogue linking, quote line-item totals/margin computation (including the
 "unknown margin" case), quote status transitions, job-opening/candidate CRUD, advert
 drafting content assertions, candidate pipeline transitions (including that "hired"
-never creates a user account), and audit-entry assertions — against a real Postgres
-instance.
+never creates a user account), playbook CRUD, missing-variable and confirm-preview
+handling, successful multi-step execution creating real records, stop-on-first-failure
+behaviour, and audit-entry assertions — against a real Postgres instance.
 
 Frontend: `npm run build` and `npm run dev` both verified working (clean production
 build, dev server responds 200).
@@ -281,12 +315,16 @@ export or "send to client" action — status is tracked internally only, since n
 communication connector exists yet to actually deliver anything. Recruitment adverts are
 drafted text only — there is no job-board connector to place them, no candidate-sourcing
 integration, and no trial-day scheduling tie-in to the calendar module yet; a hired
-candidate must still be turned into an employee account manually. Also still missing from
-MVP scope: communication intelligence (email/WhatsApp enquiry extraction), website/photo
-modules, business growth content generation, playbooks, and a real voice (speech)
-front-end (the Voice and Text Command Layer currently accepts typed text only). Build
-order should follow the roadmap in the master documentation (Phase 1 → Phase 2 → …), not
-be improvised per-feature.
+candidate must still be turned into an employee account manually. Playbooks are limited
+to the intents the deterministic command parser already understands — there is no
+learning step that proposes a playbook automatically from a repeated sequence of manual
+actions yet (that belongs to the separate Learning Engine, not built), and a playbook
+step can't branch on a previous step's result, only run in a fixed order and stop on
+first failure. Also still missing from MVP scope: communication intelligence
+(email/WhatsApp enquiry extraction), website/photo modules, business growth content
+generation, and a real voice (speech) front-end (the Voice and Text Command Layer
+currently accepts typed text only). Build order should follow the roadmap in the master
+documentation (Phase 1 → Phase 2 → …), not be improvised per-feature.
 
 ## Deployment
 

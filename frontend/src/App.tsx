@@ -16,6 +16,8 @@ import { Quotes } from "./pages/Quotes";
 import { QuoteEdit } from "./pages/QuoteEdit";
 import { Recruitment } from "./pages/Recruitment";
 import { JobOpeningDetail } from "./pages/JobOpeningDetail";
+import { Playbooks } from "./pages/Playbooks";
+import { PlaybookDetail } from "./pages/PlaybookDetail";
 import { Leads } from "./pages/Leads";
 import { LeadDetail } from "./pages/LeadDetail";
 
@@ -47,6 +49,8 @@ export default function App() {
             <Route path="/quotes/:id" element={<QuoteEdit />} />
             <Route path="/recruitment" element={<Recruitment />} />
             <Route path="/recruitment/:id" element={<JobOpeningDetail />} />
+            <Route path="/playbooks" element={<Playbooks />} />
+            <Route path="/playbooks/:id" element={<PlaybookDetail />} />
             <Route path="/leads" element={<Leads />} />
             <Route path="/leads/:id" element={<LeadDetail />} />
           </Route>

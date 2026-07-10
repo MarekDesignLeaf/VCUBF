@@ -18,6 +18,7 @@ export function Layout() {
           <NavLink to="/services">Services</NavLink>
           <NavLink to="/quotes">Quotes</NavLink>
           {canRecruit && <NavLink to="/recruitment">Recruitment</NavLink>}
+          <NavLink to="/playbooks">Playbooks</NavLink>
         </nav>
         <div className="sidebar-footer">
           <div className="user-name">{user?.displayName}</div>

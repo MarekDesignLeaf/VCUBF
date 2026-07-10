@@ -357,3 +357,51 @@ export const UPDATE_CANDIDATE_ACTION: ActionContract = {
   dataSources: ["user_input", "crm.candidates"],
   possibleErrors: ["MISSING_PERMISSION", "CANDIDATE_NOT_FOUND", "VALIDATION_FAILED"],
 };
+
+// Playbook Engine — see project instructions section 2 ("...save the
+// workflow as a reusable playbook") and the module list. A playbook is an
+// ordered list of Voice/Text Command Layer templates; running one dispatches
+// each resolved step through the same Action Engine a typed command uses,
+// so nothing about how a step behaves is reimplemented or hidden in this
+// module. Creating/editing a playbook is a normal internal-data change.
+// Running one is the first action reusing the confirmationRequired preview
+// pattern outside employee management: nothing executes until the caller
+// has seen every resolved step and confirms.
+export const CREATE_PLAYBOOK_ACTION: ActionContract = {
+  actionName: "create_playbook",
+  purpose: "Save an ordered sequence of Voice/Text Command Layer templates as a reusable, named playbook.",
+  requiredPermission: "voice.execute",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
+export const UPDATE_PLAYBOOK_ACTION: ActionContract = {
+  actionName: "update_playbook",
+  purpose: "Update a playbook's name, description, step templates, or active status.",
+  requiredPermission: "voice.execute",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.playbooks"],
+  possibleErrors: ["MISSING_PERMISSION", "PLAYBOOK_NOT_FOUND", "VALIDATION_FAILED"],
+};
+
+// Risk level matches execute_text_command's worst case, because a playbook
+// step can be any supported intent — but unlike a single typed command, a
+// playbook can chain several mutating actions in one call, which is exactly
+// the kind of "uncontrolled automation" the project instructions warn
+// against (section 9 and the "No uncontrolled automation" standard). The
+// confirmation preview is the safeguard: it resolves every {placeholder}
+// and shows the exact interpreted intent for every step before anything
+// runs, and execution stops at the first failing step rather than
+// continuing silently.
+export const RUN_PLAYBOOK_ACTION: ActionContract = {
+  actionName: "run_playbook",
+  purpose: "Resolve a playbook's step templates with real variables and execute them in order through the Action Engine, stopping at the first failure.",
+  requiredPermission: "voice.execute",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.playbooks"],
+  possibleErrors: ["MISSING_PERMISSION", "PLAYBOOK_NOT_FOUND", "VALIDATION_FAILED", "CONFIRMATION_REQUIRED", "MISSING_VARIABLE"],
+};

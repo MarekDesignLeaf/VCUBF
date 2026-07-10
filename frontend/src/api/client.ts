@@ -314,6 +314,52 @@ export interface JobOpening {
   candidates: Candidate[];
 }
 
+// Playbook Engine. A playbook is an ordered list of Voice/Text Command Layer
+// templates ("create job {job_title} for {client_name}") with {placeholder}
+// variables — the exact same syntax you could type into the command bar.
+// Running one resolves the placeholders and dispatches each step through the
+// same Action Engine a typed command uses, and always shows a preview of
+// every resolved step before anything actually executes.
+export interface Playbook {
+  id: string;
+  name: string;
+  description?: string | null;
+  stepTemplates: string[];
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface PlaybookStepPreview {
+  template: string;
+  resolvedText: string;
+  interpretedIntent: string;
+}
+
+export interface PlaybookRunPreview {
+  playbookName: string;
+  steps: PlaybookStepPreview[];
+}
+
+export interface PlaybookStepResult {
+  template: string;
+  resolvedText: string;
+  intent: string;
+  ok: boolean;
+  httpStatus: number;
+  data?: unknown;
+  error?: string;
+  message?: string;
+}
+
+export interface PlaybookRun {
+  id: string;
+  playbookId: string;
+  variables?: Record<string, string> | null;
+  stepResults: PlaybookStepResult[];
+  overallOk: boolean;
+  createdAt: string;
+}
+
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -442,6 +488,20 @@ export const api = {
       }),
     updateCandidate: (id: string, data: Record<string, unknown>) =>
       request<Candidate>(`/recruitment/candidates/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  },
+  playbooks: {
+    list: (activeOnly?: boolean) => request<Playbook[]>(`/playbooks${activeOnly ? "?active_only=true" : ""}`),
+    get: (id: string) => request<Playbook>(`/playbooks/${id}`),
+    create: (data: { name: string; description?: string; step_templates: string[] }) =>
+      request<Playbook>("/playbooks", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<Playbook>(`/playbooks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    run: (id: string, variables: Record<string, string>, confirmed?: boolean) =>
+      request<PlaybookRun>(`/playbooks/${id}/run`, {
+        method: "POST",
+        body: JSON.stringify({ variables, confirmed }),
+      }),
+    runs: (id: string) => request<PlaybookRun[]>(`/playbooks/${id}/runs`),
   },
   leads: {
     list: (params?: { status?: string }) => {

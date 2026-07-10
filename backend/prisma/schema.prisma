@@ -24,6 +24,8 @@ model Company {
   quotes              Quote[]
   jobOpenings         JobOpening[]
   candidates          Candidate[]
+  playbooks           Playbook[]
+  playbookRuns        PlaybookRun[]
 
   @@map("companies")
 }
@@ -276,6 +278,53 @@ model Candidate {
   @@index([companyId])
   @@index([jobOpeningId])
   @@map("candidates")
+}
+
+
+// Playbook Engine — a saved, reusable workflow: an ordered list of Voice/Text
+// Command Layer templates (the same syntax a user could type by hand, with
+// {placeholder} variables). Running a playbook resolves the placeholders and
+// dispatches each step through the exact same Action Engine
+// (dispatchParsedCommand) a typed command would use — there is no separate,
+// divergent execution path, and no business logic lives only in a prompt.
+// Running a playbook is itself a risky, potentially multi-step action, so it
+// follows the confirmationRequired pattern established for employee
+// management: a request without confirmed: true returns a preview of every
+// resolved step and its interpreted intent, and changes nothing.
+model Playbook {
+  id            String   @id @default(uuid())
+  companyId     String   @map("company_id")
+  name          String
+  description   String?
+  stepTemplates String[] @default([]) @map("step_templates")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdBy     String?  @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  company Company       @relation(fields: [companyId], references: [id])
+  runs    PlaybookRun[]
+
+  @@index([companyId])
+  @@map("playbooks")
+}
+
+model PlaybookRun {
+  id          String   @id @default(uuid())
+  companyId   String   @map("company_id")
+  playbookId  String   @map("playbook_id")
+  triggeredBy String?  @map("triggered_by")
+  variables   Json?
+  stepResults Json
+  overallOk   Boolean  @map("overall_ok")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  company  Company  @relation(fields: [companyId], references: [id])
+  playbook Playbook @relation(fields: [playbookId], references: [id])
+
+  @@index([companyId])
+  @@index([playbookId])
+  @@map("playbook_runs")
 }
 
 model AuditLog {
