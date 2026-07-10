@@ -87,6 +87,9 @@ export interface Job {
   jobTitle: string;
   jobStatus: JobStatus;
   propertyAddress?: string | null;
+  assignedUserId?: string | null;
+  estimatedDurationHours?: number | null;
+  requiredSkills?: string[];
   plannedStartAt?: string | null;
   plannedEndAt?: string | null;
   notes?: string | null;
@@ -94,6 +97,35 @@ export interface Job {
   client?: { id: string; displayName: string };
 }
 
+// Job Allocation and Capacity Management Module.
+export interface CapacityResult {
+  employeeId: string;
+  employeeName: string;
+  weekStart: string;
+  weekEnd: string;
+  weeklyCapacityHours: number;
+  currentLoadHours: number;
+  jobsCountedInLoad: number;
+  jobsMissingEstimate: number;
+  utilizationPct: number;
+  overloaded: boolean;
+}
+
+export interface Employee {
+  id: string;
+  displayName: string;
+  email: string;
+  role: string;
+  skills: string[];
+  weeklyCapacityHours: number;
+  capacity: CapacityResult | null;
+}
+
+export interface AssignJobResult {
+  job: Job;
+  capacityWarning: { type: string; message?: string; [key: string]: unknown } | null;
+  missingSkills: string[];
+}
 
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
@@ -145,6 +177,17 @@ export const api = {
       request<Job>("/crm/jobs", { method: "POST", body: JSON.stringify(data) }),
     changeStatus: (id: string, jobStatus: JobStatus) =>
       request<Job>(`/crm/jobs/${id}`, { method: "PUT", body: JSON.stringify({ job_status: jobStatus }) }),
+    assign: (id: string, assignedUserId: string) =>
+      request<AssignJobResult>(`/crm/jobs/${id}/assign`, {
+        method: "PUT",
+        body: JSON.stringify({ assigned_user_id: assignedUserId }),
+      }),
+  },
+  employees: {
+    list: () => request<Employee[]>("/crm/employees"),
+    get: (id: string) => request<Employee>(`/crm/employees/${id}`),
+    capacity: (id: string, week?: string) =>
+      request<CapacityResult>(`/crm/employees/${id}/capacity${week ? `?week=${encodeURIComponent(week)}` : ""}`),
   },
   leads: {
     list: (params?: { status?: string }) => {

@@ -92,6 +92,9 @@ export function ClientDetail() {
 function NewJobForm({ clientId, onCreated }: { clientId: string; onCreated: () => void }) {
   const [jobTitle, setJobTitle] = useState("");
   const [address, setAddress] = useState("");
+  const [plannedStart, setPlannedStart] = useState("");
+  const [estimatedHours, setEstimatedHours] = useState("");
+  const [requiredSkills, setRequiredSkills] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -104,9 +107,17 @@ function NewJobForm({ clientId, onCreated }: { clientId: string; onCreated: () =
         client_id: clientId,
         job_title: jobTitle,
         property_address: address || undefined,
+        planned_start_at: plannedStart ? new Date(plannedStart).toISOString() : undefined,
+        estimated_duration_hours: estimatedHours ? Number(estimatedHours) : undefined,
+        required_skills: requiredSkills
+          ? requiredSkills.split(",").map((s) => s.trim()).filter(Boolean)
+          : undefined,
       });
       setJobTitle("");
       setAddress("");
+      setPlannedStart("");
+      setEstimatedHours("");
+      setRequiredSkills("");
       onCreated();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not create job.");
@@ -119,6 +130,21 @@ function NewJobForm({ clientId, onCreated }: { clientId: string; onCreated: () =
     <form className="inline-form" onSubmit={handleSubmit}>
       <input placeholder="Job title" value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} required />
       <input placeholder="Property address" value={address} onChange={(e) => setAddress(e.target.value)} />
+      <input type="datetime-local" value={plannedStart} onChange={(e) => setPlannedStart(e.target.value)} />
+      <input
+        placeholder="Est. hours"
+        type="number"
+        min="0"
+        step="0.5"
+        style={{ width: 90 }}
+        value={estimatedHours}
+        onChange={(e) => setEstimatedHours(e.target.value)}
+      />
+      <input
+        placeholder="Required skills (comma-separated)"
+        value={requiredSkills}
+        onChange={(e) => setRequiredSkills(e.target.value)}
+      />
       <button type="submit" disabled={submitting}>
         {submitting ? "Saving…" : "Save"}
       </button>

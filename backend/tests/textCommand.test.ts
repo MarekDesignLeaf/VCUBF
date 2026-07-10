@@ -111,6 +111,26 @@ describe("command/text", () => {
     assert.ok(audit);
   });
 
+  it("assigns a job to an employee via a text command, resolving both by name", async () => {
+    const res = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "assign job Fence repair to Test Admin" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.intent, "assign_job");
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.data.job.jobTitle, "Fence repair");
+  });
+
+  it("returns EMPLOYEE_NOT_FOUND when assigning to an unknown employee name", async () => {
+    const res = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "assign job Fence repair to Nobody Here" });
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error, "EMPLOYEE_NOT_FOUND");
+  });
+
   it("lists clients via a text command", async () => {
     const res = await request(app)
       .post("/command/text")

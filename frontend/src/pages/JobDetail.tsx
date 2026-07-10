@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { api, type Job, JOB_STATUSES, JOB_STATUS_LABELS, ApiError } from "../api/client";
+import { api, type Job, type Employee, JOB_STATUSES, JOB_STATUS_LABELS, ApiError } from "../api/client";
 
 export function JobDetail() {
   const { id } = useParams<{ id: string }>();
   const [job, setJob] = useState<Job | null>(null);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [assignWarning, setAssignWarning] = useState<string | null>(null);
+  const [missingSkills, setMissingSkills] = useState<string[]>([]);
 
   function load() {
     if (!id) return;
@@ -17,6 +20,9 @@ export function JobDetail() {
   }
 
   useEffect(load, [id]);
+  useEffect(() => {
+    api.employees.list().then(setEmployees).catch(() => undefined);
+  }, []);
 
   async function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
     if (!job) return;
@@ -33,14 +39,57 @@ export function JobDetail() {
     }
   }
 
+  async function handleAssign(e: React.ChangeEvent<HTMLSelectElement>) {
+    if (!job) return;
+    const employeeId = e.target.value;
+    if (!employeeId) return;
+    setUpdating(true);
+    setError(null);
+    setAssignWarning(null);
+    setMissingSkills([]);
+    try {
+      const result = await api.jobs.assign(job.id, employeeId);
+      setJob(result.job);
+      setMissingSkills(result.missingSkills ?? []);
+      if (result.capacityWarning?.type === "OVERLOAD") {
+        const employeeName = result.capacityWarning.employeeName as string;
+        const projectedLoadHours = result.capacityWarning.projectedLoadHours as number;
+        const weeklyCapacityHours = result.capacityWarning.weeklyCapacityHours as number;
+        setAssignWarning(
+          "This assignment would put " +
+            employeeName +
+            " at " +
+            projectedLoadHours +
+            "h against a " +
+            weeklyCapacityHours +
+            "h weekly capacity - they are overloaded this week."
+        );
+      } else if (result.capacityWarning?.type === "NO_PLANNED_DATE") {
+        setAssignWarning("Job has no planned start date - capacity could not be evaluated for this assignment.");
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not assign job.");
+    } finally {
+      setUpdating(false);
+    }
+  }
+
   if (error && !job) return <div className="error-banner">{error}</div>;
   if (!job) return <p>Loading…</p>;
+
+  const assignedEmployee = employees.find((e) => e.id === job.assignedUserId);
 
   return (
     <div>
       <Link to="/jobs">← Back to jobs</Link>
       <h1>{job.jobTitle}</h1>
       {error && <div className="error-banner">{error}</div>}
+      {assignWarning && <div className="warning-banner">{assignWarning}</div>}
+      {missingSkills.length > 0 && (
+        <div className="warning-banner">
+          Assigned employee is missing required skill(s): {missingSkills.join(", ")}.
+        </div>
+      )}
       <dl className="detail-list">
         <dt>Client</dt>
         <dd>
@@ -56,8 +105,35 @@ export function JobDetail() {
             ))}
           </select>
         </dd>
+        <dt>Assigned to</dt>
+        <dd>
+          <select value={job.assignedUserId ?? ""} onChange={handleAssign} disabled={updating}>
+            <option value="">— Unassigned —</option>
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.displayName}
+                {e.capacity?.overloaded ? " (overloaded)" : ""}
+              </option>
+            ))}
+          </select>
+          {assignedEmployee && <span className="hint"> — {assignedEmployee.role}</span>}
+        </dd>
         <dt>Address</dt>
         <dd>{job.propertyAddress ?? "—"}</dd>
+        <dt>Est. hours</dt>
+        <dd>{job.estimatedDurationHours ?? "—"}</dd>
+        <dt>Required skills</dt>
+        <dd>
+          {job.requiredSkills && job.requiredSkills.length > 0 ? (
+            job.requiredSkills.map((s) => (
+              <span className="skill-tag" key={s}>
+                {s}
+              </span>
+            ))
+          ) : (
+            "—"
+          )}
+        </dd>
         <dt>Notes</dt>
         <dd>{job.notes ?? "—"}</dd>
       </dl>

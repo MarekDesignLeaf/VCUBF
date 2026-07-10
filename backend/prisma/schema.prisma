@@ -25,18 +25,24 @@ model Company {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  companyId    String   @map("company_id")
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  displayName  String   @map("display_name")
-  role         String   @default("worker")
-  permissions  String[]
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id                  String   @id @default(uuid())
+  companyId           String   @map("company_id")
+  email               String   @unique
+  passwordHash        String   @map("password_hash")
+  displayName         String   @map("display_name")
+  role                String   @default("worker")
+  permissions         String[]
+  // Job Allocation and Capacity Management Module — real capacity inputs.
+  // Skills are free-text technical tags (e.g. "electrical", "plastering"),
+  // entered by the user/admin — never invented by the system.
+  skills              String[] @default([])
+  weeklyCapacityHours Int      @default(40) @map("weekly_capacity_hours")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at")
 
-  company   Company    @relation(fields: [companyId], references: [id])
-  auditLogs AuditLog[]
+  company       Company    @relation(fields: [companyId], references: [id])
+  auditLogs     AuditLog[]
+  assignedJobs  Job[]      @relation("AssignedJobs")
 
   @@map("users")
 }
@@ -68,25 +74,33 @@ model Client {
 }
 
 model Job {
-  id              String    @id @default(uuid())
-  companyId       String    @map("company_id")
-  clientId        String    @map("client_id")
-  jobTitle        String    @map("job_title")
-  jobStatus       String    @default("nova") @map("job_status")
-  propertyAddress String?   @map("property_address")
-  assignedUserId  String?   @map("assigned_user_id")
-  plannedStartAt  DateTime? @map("planned_start_at")
-  plannedEndAt    DateTime? @map("planned_end_at")
-  notes           String?
-  createdBy       String?   @map("created_by")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  id                     String    @id @default(uuid())
+  companyId              String    @map("company_id")
+  clientId               String    @map("client_id")
+  jobTitle               String    @map("job_title")
+  jobStatus              String    @default("nova") @map("job_status")
+  propertyAddress        String?   @map("property_address")
+  assignedUserId         String?   @map("assigned_user_id")
+  // Job Allocation and Capacity Management Module — real inputs used to
+  // compute capacity. Optional because not every job has an estimate yet;
+  // capacity checks explicitly report when a job cannot be counted because
+  // this data is missing (the system must say what is missing, not guess).
+  estimatedDurationHours Float?    @map("estimated_duration_hours")
+  requiredSkills         String[]  @default([]) @map("required_skills")
+  plannedStartAt         DateTime? @map("planned_start_at")
+  plannedEndAt            DateTime? @map("planned_end_at")
+  notes                  String?
+  createdBy              String?   @map("created_by")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
 
-  company Company @relation(fields: [companyId], references: [id])
-  client  Client  @relation(fields: [clientId], references: [id])
+  company      Company @relation(fields: [companyId], references: [id])
+  client       Client  @relation(fields: [clientId], references: [id])
+  assignedUser User?   @relation("AssignedJobs", fields: [assignedUserId], references: [id])
 
   @@index([companyId])
   @@index([clientId])
+  @@index([assignedUserId])
   @@map("jobs")
 }
 

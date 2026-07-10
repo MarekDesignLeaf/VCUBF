@@ -64,6 +64,15 @@ describe("commandParser", () => {
     assert.equal(parseTextCommand("list leads").intent, "list_leads");
   });
 
+  it("parses 'assign job X to Y'", () => {
+    const result = parseTextCommand("assign job Hedge trimming to Test Worker");
+    assert.equal(result.intent, "assign_job");
+    if (result.intent === "assign_job") {
+      assert.equal(result.entities.job_title, "Hedge trimming");
+      assert.equal(result.entities.employee_name, "Test Worker");
+    }
+  });
+
   it("returns unrecognized for gibberish instead of guessing", () => {
     const result = parseTextCommand("please make the weather nicer today");
     assert.equal(result.intent, "unrecognized");

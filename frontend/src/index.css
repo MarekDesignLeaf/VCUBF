@@ -10,6 +10,8 @@
   --accent-dark: #234f38;
   --error-bg: #fdecec;
   --error-text: #b3261e;
+  --warning-bg: #fff3cd;
+  --warning-text: #8a6a00;
 }
 
 * { box-sizing: border-box; }
@@ -182,3 +184,32 @@ h2 { font-size: 1.1rem; margin-top: 24px; }
 .command-history li.command-ok { border-left: 3px solid var(--accent); }
 .command-history li.command-error { border-left: 3px solid var(--error-text); }
 .command-history code { background: #eef0f3; padding: 1px 5px; border-radius: 4px; }
+
+.warning-banner {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.capacity-bar-track {
+  width: 100%;
+  max-width: 160px;
+  height: 8px;
+  border-radius: 999px;
+  background: #eef0f3;
+  overflow: hidden;
+}
+.capacity-bar-fill { height: 100%; background: var(--accent); }
+.capacity-bar-fill.overloaded { background: var(--error-text); }
+.capacity-text { font-size: 0.8rem; color: var(--muted); }
+.skill-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  margin: 0 4px 4px 0;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  background: #eef0f3;
+  color: var(--text);
+}

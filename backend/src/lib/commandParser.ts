@@ -22,6 +22,7 @@ export type ParsedCommand =
   | { intent: "create_job"; entities: { job_title: string; client_name: string } }
   | { intent: "change_job_status"; entities: { job_title: string; job_status: string } }
   | { intent: "convert_lead"; entities: { lead_name: string } }
+  | { intent: "assign_job"; entities: { job_title: string; employee_name: string } }
   | { intent: "list_clients"; entities: Record<string, never> }
   | { intent: "list_jobs"; entities: Record<string, never> }
   | { intent: "list_leads"; entities: Record<string, never> }
@@ -93,6 +94,11 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   m = text.match(/^convert\s+lead\s+(.+)$/i);
   if (m) {
     return { intent: "convert_lead", entities: { lead_name: m[1].trim() } };
+  }
+
+  m = text.match(/^assign\s+job\s+(.+?)\s+to\s+(.+)$/i);
+  if (m) {
+    return { intent: "assign_job", entities: { job_title: m[1].trim(), employee_name: m[2].trim() } };
   }
 
   if (/^(?:list|show)\s+clients?$/i.test(text)) return { intent: "list_clients", entities: {} };

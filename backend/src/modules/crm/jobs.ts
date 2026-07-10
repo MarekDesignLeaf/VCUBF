@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
-import { CHANGE_JOB_STATUS_ACTION, CREATE_JOB_ACTION } from "../../lib/actionContracts.js";
+import { ASSIGN_JOB_ACTION, CHANGE_JOB_STATUS_ACTION, CREATE_JOB_ACTION } from "../../lib/actionContracts.js";
 import * as jobService from "../../services/jobService.js";
 
 export const jobsRouter = Router();
@@ -34,6 +34,14 @@ jobsRouter.post("/", requirePermission(CREATE_JOB_ACTION.requiredPermission), as
 
 jobsRouter.put("/:id", requirePermission(CHANGE_JOB_STATUS_ACTION.requiredPermission), async (req, res) => {
   const result = await jobService.changeJobStatus(req.user!, req.params.id, req.body);
+  if (!result.ok) {
+    return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  }
+  res.status(result.httpStatus).json(result.data);
+});
+
+jobsRouter.put("/:id/assign", requirePermission(ASSIGN_JOB_ACTION.requiredPermission), async (req, res) => {
+  const result = await jobService.assignJob(req.user!, req.params.id, req.body);
   if (!result.ok) {
     return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   }

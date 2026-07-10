@@ -8,6 +8,7 @@ import { parseTextCommand, type ParsedCommand } from "../../lib/commandParser.js
 import * as clientService from "../../services/clientService.js";
 import * as jobService from "../../services/jobService.js";
 import * as leadService from "../../services/leadService.js";
+import * as employeeService from "../../services/employeeService.js";
 
 export const commandRouter = Router();
 
@@ -177,6 +178,64 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
         };
       } else {
         const result = await leadService.convertLead(user, leadMatches[0].id);
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: result.ok,
+          httpStatus: result.httpStatus,
+          data: result.ok ? result.data : undefined,
+          error: result.ok ? undefined : result.error,
+          message: result.ok ? undefined : result.message,
+        };
+      }
+      break;
+    }
+
+    case "assign_job": {
+      const jobMatches = await jobService.findJobsByTitle(user, command.entities.job_title);
+      const employeeMatches = await employeeService.findEmployeesByName(user, command.entities.employee_name);
+      if (jobMatches.length === 0) {
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: false,
+          httpStatus: 404,
+          error: "NOT_FOUND",
+          message: `No job matching "${command.entities.job_title}".`,
+        };
+      } else if (jobMatches.length > 1) {
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: false,
+          httpStatus: 409,
+          error: "AMBIGUOUS_REFERENCE",
+          message: `Multiple jobs match "${command.entities.job_title}" — be more specific.`,
+          data: jobMatches.map((j) => ({ id: j.id, jobTitle: j.jobTitle })),
+        };
+      } else if (employeeMatches.length === 0) {
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: false,
+          httpStatus: 404,
+          error: "EMPLOYEE_NOT_FOUND",
+          message: `No employee matching "${command.entities.employee_name}".`,
+        };
+      } else if (employeeMatches.length > 1) {
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: false,
+          httpStatus: 409,
+          error: "AMBIGUOUS_REFERENCE",
+          message: `Multiple employees match "${command.entities.employee_name}" — be more specific.`,
+          data: employeeMatches.map((e) => ({ id: e.id, displayName: e.displayName })),
+        };
+      } else {
+        const result = await jobService.assignJob(user, jobMatches[0].id, {
+          assigned_user_id: employeeMatches[0].id,
+        });
         response = {
           intent: command.intent,
           interpreted: command.entities,

@@ -105,3 +105,38 @@ export const EXECUTE_TEXT_COMMAND_ACTION: ActionContract = {
   dataSources: ["user_input"],
   possibleErrors: ["MISSING_PERMISSION", "UNSUPPORTED_ACTION", "AMBIGUOUS_REFERENCE", "NOT_FOUND"],
 };
+
+// Job Allocation and Capacity Management Module — see VCUF master
+// documentation section 24A / 26. Assignment is capacity-aware: it computes
+// real workload from existing jobs (estimated_duration_hours, planned dates)
+// against the employee's declared weekly capacity, and it reports skill
+// gaps, rather than only checking whether the calendar slot is empty.
+export const ASSIGN_JOB_ACTION: ActionContract = {
+  actionName: "assign_job",
+  purpose:
+    "Assign a job to an employee, computing real workload against their weekly capacity and flagging skill or overload issues instead of only checking for a free calendar slot.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.jobs", "crm.users"],
+  possibleErrors: [
+    "MISSING_PERMISSION",
+    "JOB_NOT_FOUND",
+    "EMPLOYEE_NOT_FOUND",
+    "VALIDATION_FAILED",
+  ],
+};
+
+// Read-only capacity computation — no data is changed. Used both by the
+// assign_job flow (to decide whether to surface an overload warning) and
+// standalone (to answer "check capacity" questions / power a dashboard).
+export const CHECK_CAPACITY_ACTION: ActionContract = {
+  actionName: "check_capacity",
+  purpose:
+    "Compute an employee's current workload for a week from real job data and compare it to their declared weekly capacity.",
+  requiredPermission: "crm.read",
+  riskLevel: 0,
+  confirmationRequired: false,
+  dataSources: ["crm.jobs", "crm.users"],
+  possibleErrors: ["MISSING_PERMISSION", "EMPLOYEE_NOT_FOUND"],
+};
