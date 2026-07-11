@@ -553,9 +553,18 @@ export interface Quote {
 
 export interface MetricsOverview {
   period: { from: string; to: string; days: number };
+  comparisonPeriod: { from: string; to: string };
+  trends: {
+    newLeads: { current: number; previous: number; delta: number };
+    quoteCount: { current: number; previous: number; delta: number };
+    quoteConversionRatePct: { current: number | null; previous: number | null };
+    averageQuoteValueGbp: { current: number | null; previous: number | null };
+    completedJobs: { current: number; previous: number; delta: number };
+  };
   leads: { newCount: number; convertedCount: number; lostCount: number; sources: { source: string; count: number }[] };
   quotes: { count: number; decidedCount: number; acceptedCount: number; conversionRatePct: number | null; averageValueGbp: number | null };
   jobs: { acceptedCount: number; completedCount: number; cancelledCount: number; lostDueToAvailability: { available: false; value: null; reason: string } };
+  revenueByService: { rows: { serviceId: string; serviceName: string; acceptedValueGbp: number; lineCount: number }[]; unlinkedAcceptedValueGbp: number; basis: string };
   capacity: { available: true; weekStart: string | null; weekEnd: string | null; loadHours: number; capacityHours: number; utilizationPct: number | null; overloadedEmployees: number; missingEstimates: number } | { available: false; value: null; reason: string };
   unavailableMetrics: Record<string, string>;
   recommendations: { severity: "info" | "warning"; title: string; evidence: string; action: string }[];
