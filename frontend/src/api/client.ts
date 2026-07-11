@@ -272,9 +272,13 @@ export interface ConnectorSyncResult {
   sourceId: string;
   mode: "full" | "incremental";
   fallbackFromExpiredHistory: boolean;
+  fallbackFromExpiredSyncToken?: boolean;
   importedCount: number;
   skippedCount: number;
   importedIntakeIds: string[];
+  upsertedCount?: number;
+  deletedCount?: number;
+  totalItems?: number | null;
   nextPageToken: string | null;
   resultSizeEstimate: number | null;
   hasMore: boolean;
@@ -284,9 +288,32 @@ export interface ConnectorSyncResult {
 
 export interface ConnectorDisconnectResult {
   sourceId: string;
-  provider: "gmail";
+  provider: "gmail" | "google_contacts";
   disconnectedAt: string;
   providerGrantRevoked: boolean;
+}
+
+export interface ExternalContact {
+  id: string;
+  connectorSourceId: string;
+  externalResourceName: string;
+  displayName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  organisation?: string | null;
+  jobTitle?: string | null;
+  department?: string | null;
+  isDeleted: boolean;
+  importedContactId?: string | null;
+  importable: boolean;
+  syncedAt: string;
+}
+
+export interface ExternalContactList {
+  items: ExternalContact[];
+  total: number;
+  offset: number;
+  limit: number;
 }
 
 export interface AssignJobResult {
@@ -1339,6 +1366,13 @@ export const api = {
       }),
     disconnectSource: (id: string, confirmed: boolean) =>
       request<ConnectorDisconnectResult>(`/connectors/sources/${id}/disconnect`, {
+        method: "POST",
+        body: JSON.stringify({ confirmed }),
+      }),
+    externalContacts: (id: string) =>
+      request<ExternalContactList>(`/connectors/sources/${id}/external-contacts?active_only=true&limit=100`),
+    importExternalContact: (sourceId: string, externalContactId: string, confirmed: boolean) =>
+      request<Contact>(`/connectors/sources/${sourceId}/external-contacts/${externalContactId}/import`, {
         method: "POST",
         body: JSON.stringify({ confirmed }),
       }),

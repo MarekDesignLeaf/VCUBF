@@ -24,6 +24,7 @@ model Company {
   connectorSources             ConnectorSource[]
   connectorCredentials         ConnectorCredential[]
   connectorOAuthStates         ConnectorOAuthState[]
+  externalContacts             ExternalContact[]
   jobs                         Job[]
   leads                        Lead[]
   auditLogs                    AuditLog[]
@@ -76,6 +77,7 @@ model ConnectorSource {
   credential           ConnectorCredential?
   oauthStates          ConnectorOAuthState[]
   communicationIntakes CommunicationIntake[]
+  externalContacts     ExternalContact[]
 
   @@unique([companyId, connectorKey, displayName])
   @@index([companyId, serviceType])
@@ -252,14 +254,46 @@ model Contact {
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
-  company Company @relation(fields: [companyId], references: [id])
-  client  Client? @relation(fields: [clientId], references: [id])
+  company         Company           @relation(fields: [companyId], references: [id])
+  client          Client?           @relation(fields: [clientId], references: [id])
+  externalImports ExternalContact[]
 
   @@index([companyId])
   @@index([companyId, clientId])
   @@index([companyId, email])
   @@index([companyId, phone])
   @@map("contacts")
+}
+
+// Read-only Google Contacts are staged here before a human explicitly imports
+// one into CRM. Provider deletions archive only this staging record and never
+// delete or modify an already-confirmed CRM Contact.
+model ExternalContact {
+  id                   String   @id @default(uuid())
+  companyId            String   @map("company_id")
+  connectorSourceId    String   @map("connector_source_id")
+  externalResourceName String   @map("external_resource_name")
+  sourceEtag           String?  @map("source_etag")
+  displayName          String?  @map("display_name")
+  email                String?
+  phone                String?
+  organisation         String?
+  jobTitle             String?  @map("job_title")
+  department           String?
+  isDeleted            Boolean  @default(false) @map("is_deleted")
+  importedContactId    String?  @map("imported_contact_id")
+  syncedAt             DateTime @default(now()) @map("synced_at")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  company         Company         @relation(fields: [companyId], references: [id])
+  connectorSource ConnectorSource @relation(fields: [connectorSourceId], references: [id], onDelete: Cascade)
+  importedContact Contact?        @relation(fields: [importedContactId], references: [id])
+
+  @@unique([companyId, connectorSourceId, externalResourceName])
+  @@index([companyId, isDeleted])
+  @@index([companyId, importedContactId])
+  @@map("external_contacts")
 }
 
 // Document Registry — metadata and references only. The MVP deliberately

@@ -312,6 +312,56 @@ export const DISCONNECT_GMAIL_SOURCE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONFIRMATION_REQUIRED", "OAUTH_PROVIDER_REJECTED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
 };
 
+export const START_GOOGLE_CONTACTS_OAUTH_ACTION: ActionContract = {
+  actionName: "start_google_contacts_oauth",
+  purpose: "Create a short-lived one-time OAuth state for Google Contacts read-only access.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["connector_sources", "server_configuration"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_CONFIGURATION_MISSING"],
+};
+
+export const COMPLETE_GOOGLE_CONTACTS_OAUTH_ACTION: ActionContract = {
+  actionName: "complete_google_contacts_oauth",
+  purpose: "Validate OAuth state, verify the exact contacts.readonly scope and store only encrypted Google tokens.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials"],
+  possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED", "CONNECTOR_CONFIGURATION_MISSING"],
+};
+
+export const SYNC_GOOGLE_CONTACTS_ACTION: ActionContract = {
+  actionName: "sync_google_contacts",
+  purpose: "Read Google Contacts through People API and idempotently stage external contact previews without creating or changing CRM contacts.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["connector_sources", "connector_credentials", "google_people.connections", "external_contacts"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "SYNC_TOKEN_EXPIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
+
+export const IMPORT_GOOGLE_CONTACT_ACTION: ActionContract = {
+  actionName: "import_google_contact",
+  purpose: "Create one CRM contact from a reviewed external Google contact only after explicit confirmation.",
+  requiredPermission: "crm.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["external_contacts", "crm.contacts"],
+  possibleErrors: ["MISSING_PERMISSION", "EXTERNAL_CONTACT_NOT_FOUND", "EXTERNAL_CONTACT_NOT_IMPORTABLE", "CONTACT_ALREADY_IMPORTED", "DUPLICATE_CONTACT_POSSIBLE", "CONFIRMATION_REQUIRED"],
+};
+
+export const DISCONNECT_GOOGLE_CONTACTS_SOURCE_ACTION: ActionContract = {
+  actionName: "disconnect_google_contacts_source",
+  purpose: "After explicit confirmation, revoke the Google OAuth grant and remove local authorization and sync state without deleting staged or CRM contacts.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["connector_sources", "connector_credentials", "google_oauth"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONFIRMATION_REQUIRED", "OAUTH_PROVIDER_REJECTED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
+
 // Service Catalogue Module — see VCUF master documentation section 24C.
 // Entries here are entered by the user, never invented ("no fake facts"
 // rule). Later modules (quoting, website content) must read from this
@@ -627,7 +677,7 @@ export const UPDATE_BUSINESS_CONTEXT_ITEM_ACTION: ActionContract = {
 
 // Contact Directory — explicit, traceable people records independent from a
 // client's primary contact fields.
-export const CONTACT_SOURCES = ["user_input", "communication", "client_record", "other"] as const;
+export const CONTACT_SOURCES = ["user_input", "communication", "client_record", "google_contacts", "other"] as const;
 export type ContactSource = (typeof CONTACT_SOURCES)[number];
 
 export const CONTACT_CHANNELS = ["email", "phone_call", "whatsapp", "sms", "messenger", "other"] as const;

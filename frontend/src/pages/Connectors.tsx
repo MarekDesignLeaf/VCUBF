@@ -5,12 +5,14 @@ import {
   type ConnectorDefinition,
   type ConnectorKey,
   type ConnectorSource,
+  type ExternalContact,
 } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
 export function Connectors() {
   const { user } = useAuth();
   const canManage = user?.permissions.includes("connectors.manage") ?? false;
+  const canImportContacts = user?.permissions.includes("crm.manage") ?? false;
   const [definitions, setDefinitions] = useState<ConnectorDefinition[] | null>(null);
   const [sources, setSources] = useState<ConnectorSource[] | null>(null);
   const [activeOnly, setActiveOnly] = useState(true);
@@ -19,9 +21,13 @@ export function Connectors() {
   const [notice, setNotice] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("gmail") === "connected"
       ? "Gmail authorization completed. Review the access and enable the source before synchronising."
-      : null
+      : new URLSearchParams(window.location.search).get("google_contacts") === "connected"
+        ? "Google Contacts authorization completed. Review the read-only access and enable the source before synchronising."
+        : null
   );
   const [busySourceId, setBusySourceId] = useState<string | null>(null);
+  const [contactSourceId, setContactSourceId] = useState<string | null>(null);
+  const [externalContacts, setExternalContacts] = useState<ExternalContact[] | null>(null);
 
   function loadSources() {
     return api.connectors.sources(activeOnly).then(setSources);
@@ -61,7 +67,7 @@ export function Connectors() {
       const result = await api.connectors.startOAuth(source.id);
       window.location.assign(result.authorizationUrl);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not start Gmail authorization.");
+      setError(err instanceof ApiError ? err.message : "Could not start Google authorization.");
       setBusySourceId(null);
     }
   }
@@ -78,7 +84,10 @@ export function Connectors() {
         setBusySourceId(null);
         return;
       }
-      if (!window.confirm("Enable read-only Gmail access for this source? Synchronisation will import messages into Communication Intake.")) {
+      const impact = source.connectorKey === "google_contacts"
+        ? "Enable read-only Google Contacts access? Synchronisation will stage contact previews but will not create CRM contacts."
+        : "Enable read-only Gmail access? Synchronisation will import messages into Communication Intake.";
+      if (!window.confirm(impact)) {
         setBusySourceId(null);
         return;
       }
@@ -86,7 +95,7 @@ export function Connectors() {
     try {
       await api.connectors.enableSource(source.id, true);
       await loadSources();
-      setNotice("Gmail source enabled. No external write access was granted.");
+      setNotice(`${source.definition.serviceName} enabled. No external write access was granted.`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not enable the data source.");
     } finally {
@@ -99,14 +108,20 @@ export function Connectors() {
     setNotice(null);
     setBusySourceId(source.id);
     try {
-      const result = await api.connectors.syncSource(source.id, { max_results: 25 });
+      const result = await api.connectors.syncSource(source.id, source.connectorKey === "gmail" ? { max_results: 25 } : {});
       await loadSources();
       const mode = result.mode === "incremental" ? "incremental" : "full";
-      const fallback = result.fallbackFromExpiredHistory ? " History cursor expired, so a safe full sync was used." : "";
       const more = result.hasMore ? " More provider pages remain; run sync again." : "";
-      setNotice(`Gmail ${mode} sync: ${result.importedCount} imported, ${result.skippedCount} skipped.${fallback}${more}`);
+      if (source.connectorKey === "google_contacts") {
+        const fallback = result.fallbackFromExpiredSyncToken ? " Sync token expired, so a safe full sync was used." : "";
+        setNotice(`Google Contacts ${mode} sync: ${result.upsertedCount ?? 0} staged, ${result.deletedCount ?? 0} provider deletions.${fallback}${more}`);
+        await showExternalContacts(source);
+      } else {
+        const fallback = result.fallbackFromExpiredHistory ? " History cursor expired, so a safe full sync was used." : "";
+        setNotice(`Gmail ${mode} sync: ${result.importedCount} imported, ${result.skippedCount} skipped.${fallback}${more}`);
+      }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not synchronise Gmail.");
+      setError(err instanceof ApiError ? err.message : "Could not synchronise the source.");
     } finally {
       setBusySourceId(null);
     }
@@ -120,12 +135,12 @@ export function Connectors() {
       await api.connectors.disconnectSource(source.id, false);
     } catch (err) {
       if (!(err instanceof ApiError) || err.code !== "CONFIRMATION_REQUIRED") {
-        setError(err instanceof ApiError ? err.message : "Could not prepare Gmail disconnection.");
+        setError(err instanceof ApiError ? err.message : "Could not prepare provider disconnection.");
         setBusySourceId(null);
         return;
       }
       const confirmed = window.confirm(
-        "Disconnect Gmail and revoke the Google OAuth grant? Google warns that revocation can remove every scope granted to this Google Cloud project for the account. The encrypted local credential and sync cursor will be deleted."
+        `Disconnect ${source.definition.serviceName} and revoke the Google OAuth grant? Google warns that revocation can remove every scope granted to this Google Cloud project for the account. The encrypted local credential and sync cursor will be deleted; staged and CRM records remain.`
       );
       if (!confirmed) {
         setBusySourceId(null);
@@ -135,11 +150,44 @@ export function Connectors() {
     try {
       const result = await api.connectors.disconnectSource(source.id, true);
       await loadSources();
-      setNotice(result.providerGrantRevoked ? "Gmail disconnected and Google OAuth grant revoked." : "Gmail source disconnected locally.");
+      setNotice(result.providerGrantRevoked ? `${source.definition.serviceName} disconnected and Google OAuth grant revoked.` : "Source disconnected locally.");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not disconnect Gmail. The source remains disabled for a safe retry.");
+      setError(err instanceof ApiError ? err.message : "Could not disconnect the provider. The source remains disabled for a safe retry.");
     } finally {
       setBusySourceId(null);
+    }
+  }
+
+  async function showExternalContacts(source: ConnectorSource) {
+    setError(null);
+    setContactSourceId(source.id);
+    try {
+      const result = await api.connectors.externalContacts(source.id);
+      setExternalContacts(result.items);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not load staged Google contacts.");
+    }
+  }
+
+  async function importExternalContact(contact: ExternalContact) {
+    if (!contactSourceId) return;
+    setError(null);
+    try {
+      await api.connectors.importExternalContact(contactSourceId, contact.id, false);
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.code !== "CONFIRMATION_REQUIRED") {
+        setError(err instanceof ApiError ? err.message : "Could not prepare CRM contact import.");
+        return;
+      }
+      if (!window.confirm(`Create CRM contact “${contact.displayName ?? contact.email ?? contact.phone}” from this reviewed Google contact?`)) return;
+    }
+    try {
+      await api.connectors.importExternalContact(contactSourceId, contact.id, true);
+      const source = sources?.find((item) => item.id === contactSourceId);
+      if (source) await showExternalContacts(source);
+      setNotice("Reviewed Google contact imported into CRM.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not import the CRM contact.");
     }
   }
 
@@ -154,8 +202,8 @@ export function Connectors() {
         ) : null}
       </div>
       <p className="hint">
-        Gmail supports read-only OAuth and imports messages into Communication Intake with provider provenance.
-        Other connectors remain contract-only and fail closed. Never paste an OAuth token, client secret or password here.
+        Gmail and Google Contacts support read-only OAuth. Contacts are staged for review and require confirmation before CRM import.
+        Calendar and Drive remain contract-only and fail closed. Never paste an OAuth token, client secret or password here.
       </p>
 
       {error ? <div className="error-banner">{error}</div> : null}
@@ -198,23 +246,26 @@ export function Connectors() {
                 <td><strong>{source.displayName}</strong><div className="hint">{source.definition.serviceName}</div></td>
                 <td>{source.serviceType.replaceAll("_", " ")}</td>
                 <td>{source.configuredScopes.length ? source.configuredScopes.join(", ") : "None configured"}</td>
-                <td>{(source.connectorKey === "gmail" ? source.authorizationConfigured : source.credentialReferenceConfigured) ? "Configured" : "Not configured"}</td>
+                <td>{(["gmail", "google_contacts"].includes(source.connectorKey) ? source.authorizationConfigured : source.credentialReferenceConfigured) ? "Configured" : "Not configured"}</td>
                 <td>{source.connectionStatus.replaceAll("_", " ")}</td>
                 <td>{source.definition.adapterAvailable ? "Available" : "Contract only"}</td>
                 <td>
                   {canManage ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {source.connectorKey === "gmail" && !source.authorizationConfigured ? (
-                      <button onClick={() => authorize(source)} disabled={busySourceId === source.id}>Authorize Gmail</button>
+                    {["gmail", "google_contacts"].includes(source.connectorKey) && !source.authorizationConfigured ? (
+                      <button onClick={() => authorize(source)} disabled={busySourceId === source.id}>Authorize {source.connectorKey === "gmail" ? "Gmail" : "Contacts"}</button>
                     ) : null}
-                    {source.connectorKey === "gmail" && source.authorizationConfigured && !source.isEnabled ? (
+                    {["gmail", "google_contacts"].includes(source.connectorKey) && source.authorizationConfigured && !source.isEnabled ? (
                       <button onClick={() => enable(source)} disabled={busySourceId === source.id}>Enable</button>
                     ) : null}
-                    {source.connectorKey === "gmail" && source.isEnabled ? (
+                    {["gmail", "google_contacts"].includes(source.connectorKey) && source.isEnabled ? (
                       <button onClick={() => sync(source)} disabled={busySourceId === source.id}>
                         {source.incrementalSyncConfigured ? "Sync changes" : "Initial sync"}
                       </button>
                     ) : null}
-                    {source.connectorKey === "gmail" && source.authorizationConfigured ? (
+                    {source.connectorKey === "google_contacts" ? (
+                      <button className="secondary" onClick={() => showExternalContacts(source)}>Review contacts</button>
+                    ) : null}
+                    {["gmail", "google_contacts"].includes(source.connectorKey) && source.authorizationConfigured ? (
                       <button className="secondary" onClick={() => disconnect(source)} disabled={busySourceId === source.id}>Disconnect</button>
                     ) : null}
                     <button className="secondary" onClick={() => disable(source)} disabled={source.connectionStatus === "disabled" || busySourceId === source.id}>
@@ -227,6 +278,28 @@ export function Connectors() {
           </tbody>
         </table>
       )}
+
+      {contactSourceId ? (
+        <section className="card" style={{ marginTop: 20 }}>
+          <div className="page-header">
+            <h2>Staged Google contacts</h2>
+            <button className="secondary" onClick={() => { setContactSourceId(null); setExternalContacts(null); }}>Close</button>
+          </div>
+          <p className="hint">Read-only provider data. Nothing becomes a CRM contact until you review and confirm it.</p>
+          {!externalContacts ? <p>Loading…</p> : externalContacts.length === 0 ? <p className="hint">No active contacts staged.</p> : (
+            <table className="data-table">
+              <thead><tr><th>Name</th><th>Contact</th><th>Organisation</th><th>Status</th><th></th></tr></thead>
+              <tbody>{externalContacts.map((contact) => <tr key={contact.id}>
+                <td><strong>{contact.displayName ?? "Unnamed contact"}</strong><div className="hint">{contact.jobTitle ?? ""}</div></td>
+                <td>{contact.email ?? "—"}<div className="hint">{contact.phone ?? ""}</div></td>
+                <td>{contact.organisation ?? "—"}<div className="hint">{contact.department ?? ""}</div></td>
+                <td>{contact.importedContactId ? "Imported" : contact.importable ? "Ready for review" : "Missing email/phone"}</td>
+                <td>{canImportContacts && contact.importable && !contact.importedContactId ? <button onClick={() => importExternalContact(contact)}>Import to CRM</button> : "—"}</td>
+              </tr>)}</tbody>
+            </table>
+          )}
+        </section>
+      ) : null}
 
       <h2 style={{ marginTop: 28 }}>Connector contracts</h2>
       {!definitions ? <p>Loading…</p> : definitions.map((definition) => (
@@ -260,7 +333,7 @@ function RegisterSourceForm({
   const [connectorKey, setConnectorKey] = useState<ConnectorKey>(definitions[0].key);
   const [displayName, setDisplayName] = useState("");
   const [configuredScopes, setConfiguredScopes] = useState<string[]>(
-    definitions[0].key === "gmail" ? ["read:messages"] : []
+    definitions[0].key === "gmail" ? ["read:messages"] : definitions[0].key === "google_contacts" ? ["read:contacts"] : []
   );
   const [credentialReference, setCredentialReference] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -269,7 +342,7 @@ function RegisterSourceForm({
 
   function changeConnector(value: ConnectorKey) {
     setConnectorKey(value);
-    setConfiguredScopes(value === "gmail" ? ["read:messages"] : []);
+    setConfiguredScopes(value === "gmail" ? ["read:messages"] : value === "google_contacts" ? ["read:contacts"] : []);
   }
 
   function toggleScope(scope: string) {
@@ -303,12 +376,12 @@ function RegisterSourceForm({
         {definitions.map((item) => <option key={item.key} value={item.key}>{item.serviceName}</option>)}
       </select>
       <input placeholder="Source display name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required />
-      {connectorKey !== "gmail" ? <input
+      {!["gmail", "google_contacts"].includes(connectorKey) ? <input
           placeholder="Secret reference, e.g. env:VCUF_CONNECTOR_SECRET"
           value={credentialReference}
           onChange={(event) => setCredentialReference(event.target.value)}
           style={{ minWidth: 300 }}
-        /> : <p className="hint">Gmail credentials are added through OAuth after this disabled source is registered.</p>}
+        /> : <p className="hint">Google credentials are added through OAuth after this disabled source is registered.</p>}
       <fieldset>
         <legend>Logical scopes</legend>
         {definition.logicalScopes.map((scope) => (
