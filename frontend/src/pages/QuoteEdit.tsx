@@ -60,6 +60,7 @@ export function QuoteEdit() {
 
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     api.clients.list().then(setClients).catch(() => undefined);
@@ -178,6 +179,25 @@ export function QuoteEdit() {
     }
   }
 
+  async function handlePdfDownload() {
+    if (!id) return;
+    setDownloading(true);
+    setError(null);
+    try {
+      const blob = await api.quotes.downloadPdf(id);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `quote-${id}.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not download quote PDF.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   if (!isNew && !quote && !error) return <p>Loading…</p>;
 
   return (
@@ -187,7 +207,7 @@ export function QuoteEdit() {
       {error && <div className="error-banner">{error}</div>}
 
       {!isNew && quote && (
-        <p className="hint">
+        <div className="hint">
           Status:{" "}
           <select value={quote.quoteStatus} onChange={(e) => handleStatusChange(e.target.value as any)}>
             {QUOTE_STATUSES.map((s) => (
@@ -198,7 +218,8 @@ export function QuoteEdit() {
           </select>{" "}
           — changing status only updates the internal record; nothing is sent to the client
           automatically.
-        </p>
+          {" "}<button type="button" onClick={handlePdfDownload} disabled={downloading}>{downloading ? "Preparing PDF…" : "Download PDF"}</button>
+        </div>
       )}
 
       <form onSubmit={handleSubmit}>

@@ -219,8 +219,8 @@ npm run dev                 # http://localhost:5173
   something the user already typed).
 
 - **Quote, Pricing and Profitability Module**: `POST /quotes`, `PUT /quotes/:id`, `PUT
-  /quotes/:id/status`, `GET /quotes`, `GET /quotes/:id` (Action Contracts `prepare_quote`,
-  `update_quote`, `change_quote_status`) build a real, itemised quote for a client
+  /quotes/:id/status`, `GET /quotes`, `GET /quotes/:id`, `GET /quotes/:id/pdf` (Action Contracts `prepare_quote`,
+  `update_quote`, `change_quote_status`, `export_quote_pdf`) build a real, itemised quote for a client
   (optionally linked to a job), with each line's unit price and unit cost either pulled
   from a real service catalogue entry or typed in directly — never invented. Margin is
   computed honestly: `backend/src/services/quoteService.ts` sums `quantity × unit_price`
@@ -232,6 +232,9 @@ npm run dev                 # http://localhost:5173
   changing status is an internal record only — no email/message is sent to the client,
   since no outbound communication connector exists yet. A referenced `service_catalogue_item_id`
   or `job_id` is validated against the company's real records before a quote is created.
+  PDF export is generated on demand from the saved company, client, job and line-item data.
+  It intentionally excludes internal costs/margin and explicitly states that VAT/tax is
+  unspecified; the endpoint is company-scoped, audited, non-cacheable and never sends anything.
   Text command: "list quotes" / "list quotes for <client>" (full quote creation needs a
   line-item form, so it isn't a one-line voice command in this slice).
 - **Frontend — Quotes**: new Quotes list page (title, client, status, subtotal, margin —
@@ -239,7 +242,7 @@ npm run dev                 # http://localhost:5173
   repeatable line-item editor (optional service-catalogue picker per line that prefills
   description/price without overwriting anything already typed), a live client-side
   margin preview using the exact same "unknown if any cost is missing" rule as the
-  backend, and a status dropdown on existing quotes. "New quote" links were added from
+  backend, a status dropdown and a PDF download on existing quotes. "New quote" links were added from
   both the client detail page and the job detail page, prefilling the client/job.
 
 - **Recruitment and Workforce Expansion Module**: `POST /recruitment/job-openings`,
@@ -725,8 +728,8 @@ A day-level scheduling grid with travel time, tool/material/vehicle requirements
 staged multi-visit scheduling is not implemented — the calendar slice works at weekly
 granularity, matching the capacity engine underneath it. Employee creation issues no
 invitation email and generates no temporary password reset flow — an admin sets the
-initial password directly, since there is no outbound email action. Quotes have no PDF
-export or "send to client" action — status is tracked internally only, since the Gmail
+initial password directly, since there is no outbound email action. Quotes have no
+"send to client" action — PDF export is manual and status is tracked internally only, since the Gmail
 adapter is read-only and cannot deliver anything. Recruitment adverts are
 drafted text only — there is no job-board connector to place them, no candidate-sourcing
 integration, and no trial-day scheduling tie-in to the calendar module yet; a hired

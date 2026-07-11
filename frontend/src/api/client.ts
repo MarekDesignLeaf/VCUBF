@@ -36,6 +36,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+async function download(path: string): Promise<Blob> {
+  const token = getToken();
+  const res = await fetch(`${API_URL}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) {
+    const body = res.headers.get("content-type")?.includes("application/json") ? await res.json() : undefined;
+    throw new ApiError(res.status, body?.error ?? "UNKNOWN_ERROR", body?.message, body);
+  }
+  return res.blob();
+}
+
 export interface LoginResponse {
   token: string;
   user: {
@@ -1508,6 +1518,7 @@ export const api = {
       return request<Quote[]>(`/quotes${suffix}`);
     },
     get: (id: string) => request<Quote>(`/quotes/${id}`),
+    downloadPdf: (id: string) => download(`/quotes/${id}/pdf`),
     create: (data: { client_id: string; job_id?: string; title: string; notes?: string; valid_until?: string; items: QuoteItemInput[] }) =>
       request<Quote>("/quotes", { method: "POST", body: JSON.stringify(data) }),
     update: (

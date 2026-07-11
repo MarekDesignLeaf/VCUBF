@@ -65,7 +65,7 @@ Use **Tasks** for administrative and delivery work. A task with an assignee, due
 
 ## 6. Quotes and document records
 
-Use **Quotes** to prepare itemised internal quote records. Prices and costs come from entered values or the service catalogue. If any line cost is missing, margin is shown as unknown. Changing a quote to sent or accepted records status only; it does not deliver a PDF or contact the client.
+Use **Quotes** to prepare itemised quote records. Prices and costs come from entered values or the service catalogue. If any line cost is missing, margin is shown as unknown. Open a saved quote and select **Download PDF** to export a client-facing copy from the saved data. The PDF excludes internal cost and margin data and does not invent VAT, tax or payment terms. Changing a quote to sent or accepted records status only; it does not contact the client.
 
 Use **Documents** to register metadata:
 
@@ -130,7 +130,7 @@ The **Service catalogue** page also includes **Browse reference activities**. Th
 
 ## 12. Current MVP limitations
 
-The Google adapters require deployment-owned OAuth credentials and an encryption key. Synchronisation is manually triggered; scheduling/push notifications, attachments, Gmail writes, Drive image-byte storage, WhatsApp, SMS, job boards and website publishing are not implemented. The app also has no push delivery, quote PDF delivery, native/offline voice runtime, automatic image analysis, automatic legal hiring action or automatic public content change.
+The Google adapters require deployment-owned OAuth credentials and an encryption key. Synchronisation is manually triggered; scheduling/push notifications, attachments, Gmail writes, Drive image-byte storage, WhatsApp, SMS, job boards and website publishing are not implemented. The app also has no push delivery, automatic quote PDF delivery, native/offline voice runtime, automatic image analysis, automatic legal hiring action or automatic public content change.
 
 Production encryption, TLS, database backups, monitoring, secret rotation, retention and disaster recovery depend on the selected hosting environment and must be configured and verified before production use.
 

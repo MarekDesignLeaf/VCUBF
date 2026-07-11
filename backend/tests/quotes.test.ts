@@ -211,4 +211,43 @@ describe("Quote, Pricing and Profitability Module", () => {
     assert.equal(res.body.client.id, clientId);
     assert.equal(res.body.job.id, jobId);
   });
+
+  it("exports a client-facing PDF with safe download headers and an audit record", async () => {
+    const quote = await prisma.quote.findFirst({ where: { title: "Fence repair quote" } });
+    const res = await request(app)
+      .get(`/quotes/${quote!.id}/pdf`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .buffer(true)
+      .parse((response, callback) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => callback(null, Buffer.concat(chunks)));
+      });
+
+    assert.equal(res.status, 200);
+    assert.match(res.headers["content-type"], /^application\/pdf/);
+    assert.match(res.headers["content-disposition"], new RegExp(`quote-${quote!.id}\\.pdf`));
+    assert.equal(res.headers["cache-control"], "private, no-store");
+    assert.equal(res.headers["x-content-type-options"], "nosniff");
+    assert.equal((res.body as Buffer).subarray(0, 5).toString(), "%PDF-");
+    assert.ok((res.body as Buffer).length > 1_000);
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { actionName: "export_quote_pdf", result: "success" },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.equal((audit?.inputPayload as any)?.quoteId, quote!.id);
+    assert.equal(typeof (audit?.dataAfter as any)?.byteLength, "number");
+  });
+
+  it("does not expose quote PDFs without authentication and returns 404 for an unknown company-scoped id", async () => {
+    const unauthenticated = await request(app).get("/quotes/00000000-0000-0000-0000-000000000099/pdf");
+    assert.equal(unauthenticated.status, 401);
+
+    const missing = await request(app)
+      .get("/quotes/00000000-0000-0000-0000-000000000099/pdf")
+      .set("Authorization", `Bearer ${adminToken}`);
+    assert.equal(missing.status, 404);
+    assert.equal(missing.body.error, "QUOTE_NOT_FOUND");
+  });
 });

@@ -490,6 +490,16 @@ export const CHANGE_QUOTE_STATUS_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "QUOTE_NOT_FOUND", "VALIDATION_FAILED"],
 };
 
+export const EXPORT_QUOTE_PDF_ACTION: ActionContract = {
+  actionName: "export_quote_pdf",
+  purpose: "Render a client-facing PDF from an existing company-scoped quote without sending or changing it.",
+  requiredPermission: "crm.read",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["crm.quotes", "crm.clients", "crm.jobs", "company.name"],
+  possibleErrors: ["MISSING_PERMISSION", "QUOTE_NOT_FOUND"],
+};
+
 // Recruitment and Workforce Expansion Module — see project instructions
 // section 6. This module tracks openings and candidates and drafts content
 // for the user to review; it never legally hires anyone, sets a wage, or
