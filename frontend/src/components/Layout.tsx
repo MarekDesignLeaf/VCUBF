@@ -5,6 +5,7 @@ export function Layout() {
   const { user, logout } = useAuth();
   const canRecruit = user?.permissions?.includes("recruitment.manage") ?? false;
   const canReadAudit = user?.permissions?.includes("audit.read") ?? false;
+  const canReadConnectors = user?.permissions?.includes("connectors.read") ?? false;
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -26,6 +27,7 @@ export function Layout() {
           <NavLink to="/photo-selection">Photo Selection</NavLink>
           <NavLink to="/business-context">Business Context</NavLink>
           <NavLink to="/industries">Industries</NavLink>
+          {canReadConnectors && <NavLink to="/connectors">Connectors</NavLink>}
           <NavLink to="/website-audits">Website Audit</NavLink>
           <NavLink to="/website-content">Website Content</NavLink>
           <NavLink to="/employees">Employees</NavLink>

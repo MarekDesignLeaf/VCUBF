@@ -14,17 +14,27 @@ async function main() {
   });
 
   const passwordHash = await bcrypt.hash("ChangeMe123!", 10);
+  const adminPermissions = [
+    "crm.read",
+    "crm.manage",
+    "users.manage",
+    "audit.read",
+    "voice.execute",
+    "recruitment.manage",
+    "connectors.read",
+    "connectors.manage",
+  ];
 
   await prisma.user.upsert({
     where: { email: "admin@example.com" },
-    update: {},
+    update: { permissions: adminPermissions },
     create: {
       companyId: company.id,
       email: "admin@example.com",
       passwordHash,
       displayName: "Admin",
       role: "admin",
-      permissions: ["crm.read", "crm.manage", "users.manage", "audit.read", "voice.execute"],
+      permissions: adminPermissions,
     },
   });
 

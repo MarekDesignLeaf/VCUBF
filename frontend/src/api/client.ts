@@ -209,6 +209,8 @@ export const KNOWN_PERMISSIONS = [
   "audit.read",
   "voice.execute",
   "recruitment.manage",
+  "connectors.read",
+  "connectors.manage",
 ] as const;
 export type KnownPermission = (typeof KNOWN_PERMISSIONS)[number];
 
@@ -221,6 +223,41 @@ export interface ManagedEmployee {
   skills: string[];
   weeklyCapacityHours: number;
   isActive: boolean;
+}
+
+export type ConnectorKey = "gmail" | "google_contacts" | "google_calendar" | "google_drive_photos";
+
+export interface ConnectorDefinition {
+  key: ConnectorKey;
+  serviceName: string;
+  serviceType: "email" | "contacts" | "calendar" | "photo_storage";
+  canRead: string[];
+  canWrite: string[];
+  logicalScopes: string[];
+  requiredPermissions: string[];
+  returnedDataTypes: string[];
+  supportedActions: string[];
+  possibleErrors: string[];
+  supportsAudit: boolean;
+  supportsRollback: boolean;
+  actionMode: "proposal_and_confirmed_action";
+  adapterAvailable: boolean;
+}
+
+export interface ConnectorSource {
+  id: string;
+  connectorKey: ConnectorKey;
+  displayName: string;
+  serviceType: ConnectorDefinition["serviceType"];
+  configuredScopes: string[];
+  connectionStatus: string;
+  isEnabled: boolean;
+  isActive: boolean;
+  lastSyncAt?: string | null;
+  lastSyncStatus?: string | null;
+  lastErrorCode?: string | null;
+  credentialReferenceConfigured: boolean;
+  definition: ConnectorDefinition;
 }
 
 export interface AssignJobResult {
@@ -1202,6 +1239,23 @@ export const api = {
       }),
     updateServiceLink: (linkId: string, data: Record<string, unknown>) =>
       request<IndustryServiceLink>(`/industries/service-links/${linkId}`, { method: "PUT", body: JSON.stringify(data) }),
+  },
+  connectors: {
+    definitions: () => request<ConnectorDefinition[]>("/connectors/definitions"),
+    sources: (activeOnly?: boolean) =>
+      request<ConnectorSource[]>(`/connectors/sources${activeOnly ? "?active_only=true" : ""}`),
+    getSource: (id: string) => request<ConnectorSource>(`/connectors/sources/${id}`),
+    registerSource: (data: Record<string, unknown>) =>
+      request<ConnectorSource>("/connectors/sources", { method: "POST", body: JSON.stringify(data) }),
+    updateSource: (id: string, data: Record<string, unknown>) =>
+      request<ConnectorSource>(`/connectors/sources/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    disableSource: (id: string) =>
+      request<ConnectorSource>(`/connectors/sources/${id}/disable`, { method: "POST", body: "{}" }),
+    enableSource: (id: string, confirmed: boolean) =>
+      request<ConnectorSource>(`/connectors/sources/${id}/enable`, {
+        method: "POST",
+        body: JSON.stringify({ confirmed }),
+      }),
   },
   jobs: {
     list: (params?: { clientId?: string; status?: string }) => {

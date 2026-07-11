@@ -116,13 +116,21 @@ Use **Memory Model** to view repeated audit patterns. It suggests candidates for
 
 Important actions record actor, input, result, risk level and before/after evidence in the audit log. Contact an administrator if audit access or a formal export is required.
 
-## 11. Current MVP limitations
+## 11. Connector data-source controls
 
-The current MVP has no authorised email, WhatsApp, SMS, job-board, external calendar, file-storage or website publishing connector. It also has no push delivery, quote PDF delivery, native/offline voice runtime, automatic image analysis, automatic legal hiring action or automatic public content change.
+Users with connector permissions can open **Connectors** to review the declared Gmail, Google Contacts, Google Calendar and Google Drive photo-storage contracts and register a company data source.
+
+Registration is not a connection. It stores a disabled source configuration only. The current build has no provider adapter and cannot enable or access the external account. A credential field accepts only an external `env:`, `vault:` or `secret-manager:` reference; never paste a password, OAuth token or API key into Secretary.
+
+Use **Disable** when a source should no longer be eligible for access. The action is tenant-scoped and audited.
+
+## 12. Current MVP limitations
+
+Connector contracts and disabled source registration now exist, but the current build still has no authorised provider adapter for email, contacts, external calendar, photo storage, WhatsApp, SMS, job boards or website publishing. It also has no push delivery, quote PDF delivery, native/offline voice runtime, automatic image analysis, automatic legal hiring action or automatic public content change.
 
 Production encryption, TLS, database backups, monitoring, secret rotation, retention and disaster recovery depend on the selected hosting environment and must be configured and verified before production use.
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 - **Action rejected:** read the error message; check permissions, required fields and related record ownership.
 - **Cannot assign a job:** set the job to **Accepted**, then retry.
@@ -131,3 +139,4 @@ Production encryption, TLS, database backups, monitoring, secret rotation, reten
 - **Possible duplicate:** compare the candidate records; do not create a second record just to bypass the check.
 - **Voice unavailable:** use text input. Browser support and policy vary.
 - **Referenced document cannot be opened:** Secretary stores only the reference; check the external location and its access permissions.
+- **Connector cannot be enabled:** the current connector is contract-only; no external account was accessed. A verified provider adapter must be installed first.

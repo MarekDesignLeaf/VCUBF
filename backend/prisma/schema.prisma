@@ -21,6 +21,7 @@ model Company {
   documentRecords              DocumentRecord[]
   industries                   Industry[]
   industryServiceLinks         IndustryServiceLink[]
+  connectorSources             ConnectorSource[]
   jobs                         Job[]
   leads                        Lead[]
   auditLogs                    AuditLog[]
@@ -43,6 +44,36 @@ model Company {
   tasks                        Task[]
 
   @@map("companies")
+}
+
+// Connector Engine source registration. This table stores lifecycle and an
+// opaque secret-store reference only — never OAuth tokens, passwords or file
+// contents. Actual provider reads/writes belong to separately authorised
+// adapters and must fail closed while an adapter is unavailable.
+model ConnectorSource {
+  id                  String    @id @default(uuid())
+  companyId           String    @map("company_id")
+  connectorKey        String    @map("connector_key")
+  displayName         String    @map("display_name")
+  serviceType         String    @map("service_type")
+  configuredScopes    String[]  @default([]) @map("configured_scopes")
+  credentialReference String?   @map("credential_reference")
+  connectionStatus    String    @default("setup_required") @map("connection_status")
+  isEnabled           Boolean   @default(false) @map("is_enabled")
+  isActive            Boolean   @default(true) @map("is_active")
+  lastSyncAt          DateTime? @map("last_sync_at")
+  lastSyncStatus      String?   @map("last_sync_status")
+  lastErrorCode       String?   @map("last_error_code")
+  createdBy           String?   @map("created_by")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, connectorKey, displayName])
+  @@index([companyId, serviceType])
+  @@index([companyId, isEnabled])
+  @@map("connector_sources")
 }
 
 model User {

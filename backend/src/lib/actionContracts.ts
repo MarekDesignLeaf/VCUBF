@@ -224,8 +224,53 @@ export const KNOWN_PERMISSIONS = [
   "audit.read",
   "voice.execute",
   "recruitment.manage",
+  "connectors.read",
+  "connectors.manage",
 ] as const;
 export type KnownPermission = (typeof KNOWN_PERMISSIONS)[number];
+
+// Connector Engine — source registration and lifecycle. Provider contracts
+// declare capabilities separately; these actions never imply that an adapter
+// is installed or that an external account has been authorised.
+export const REGISTER_CONNECTOR_SOURCE_ACTION: ActionContract = {
+  actionName: "register_connector_source",
+  purpose: "Register a disabled external data-source configuration against a declared connector contract without storing credentials or accessing the provider.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "connector_registry"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONNECTOR_DEFINITION_NOT_FOUND", "CONNECTOR_SOURCE_ALREADY_EXISTS"],
+};
+
+export const UPDATE_CONNECTOR_SOURCE_ACTION: ActionContract = {
+  actionName: "update_connector_source",
+  purpose: "Update connector metadata, logical scopes or an opaque secret-store reference without reading the referenced secret.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "connector_registry", "connector_sources"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_MUST_BE_DISABLED", "UNSUPPORTED_CONNECTOR_SCOPE", "CONNECTOR_SOURCE_ALREADY_EXISTS"],
+};
+
+export const DISABLE_CONNECTOR_SOURCE_ACTION: ActionContract = {
+  actionName: "disable_connector_source",
+  purpose: "Disable an external data source immediately so it cannot be used by connector reads, writes or synchronisation.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["connector_sources"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND"],
+};
+
+export const ENABLE_CONNECTOR_SOURCE_ACTION: ActionContract = {
+  actionName: "enable_connector_source",
+  purpose: "Enable a configured external data source only after adapter availability, credential-reference and logical-scope checks and explicit confirmation.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["connector_registry", "connector_sources", "secret_reference"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_ADAPTER_UNAVAILABLE", "CONNECTOR_CREDENTIAL_REFERENCE_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "CONFIRMATION_REQUIRED"],
+};
 
 // Service Catalogue Module — see VCUF master documentation section 24C.
 // Entries here are entered by the user, never invented ("no fake facts"

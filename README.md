@@ -621,8 +621,13 @@ npm run dev                 # http://localhost:5173
   urgency, fastest relief route and missing evidence without creating a job opening.
 - **User guide and CI**: `docs/USER_GUIDE.md` documents daily use and limitations. GitHub
   Actions builds and tests the backend against disposable PostgreSQL and builds/lints the frontend.
+- **Connector Engine Phase 3 foundation**: `backend/src/connectors/registry.ts` declares
+  complete Gmail, Google Contacts, Google Calendar and Google Drive photo-storage contracts;
+  tenant-scoped `/connectors` APIs register disabled sources, validate logical scopes, keep
+  secret-store references out of API/audit output, provide an audited disable control and fail
+  closed on enable while provider adapters remain unavailable. See `docs/CONNECTOR_ENGINE.md`.
 
-Backend verified: 303/303 tests passing across 34 suites (auth, CRM clients, CRM jobs, CRM leads,
+Backend verified: 312/312 tests passing across 35 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
  recruitment, playbooks, learning, communication extraction/reply drafting, unresolved enquiry monitoring, communication log, notifications/escalation, data
@@ -694,7 +699,7 @@ Management adds `tasks.test.ts`, covering permissions, validation, relationship 
 job/communication-derived CRM links, assignment, capacity contribution/overload warning,
 calendar visibility, status completion/reopening, overdue filtering and notification,
 audit evidence and cross-tenant isolation; parser/integration coverage proves task creation
-and listing through the shared Voice/Text Action Engine. The complete 34-suite
+and listing through the shared Voice/Text Action Engine. The complete 35-suite
 database-backed run above was verified against a real PostgreSQL instance.
 
 Frontend: `npm run lint` and `npm run build` verified working. Lint remains clean apart

@@ -9,6 +9,7 @@ export async function resetDb() {
   // catalogue items; jobs must go before the catalogue items they may
   // reference.
   await prisma.auditLog.deleteMany({});
+  await prisma.connectorSource.deleteMany({});
   await prisma.notificationAcknowledgement.deleteMany({});
   await prisma.learningRule.deleteMany({});
   await prisma.playbookRun.deleteMany({});
@@ -50,7 +51,7 @@ export async function seedCompanyAndAdmin() {
       passwordHash,
       displayName: "Test Admin",
       role: "admin",
-      permissions: ["crm.read", "crm.manage", "users.manage", "audit.read", "voice.execute", "recruitment.manage"],
+      permissions: ["crm.read", "crm.manage", "users.manage", "audit.read", "voice.execute", "recruitment.manage", "connectors.read", "connectors.manage"],
     },
   });
   const worker = await prisma.user.create({
