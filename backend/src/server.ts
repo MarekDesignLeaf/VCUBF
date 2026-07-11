@@ -21,6 +21,7 @@ import { portfolioRouter } from "./modules/portfolio/routes.js";
 import { memoryModelRouter } from "./modules/memory-model/routes.js";
 import { businessContextRouter } from "./modules/business-context/routes.js";
 import { websiteAuditsRouter } from "./modules/website-audits/routes.js";
+import { websiteContentProposalsRouter } from "./modules/website-content-proposals/routes.js";
 
 export function createServer() {
   const app = express();
@@ -49,6 +50,7 @@ export function createServer() {
   app.use("/memory-model", memoryModelRouter);
   app.use("/business-context", businessContextRouter);
   app.use("/website-audits", websiteAuditsRouter);
+  app.use("/website-content-proposals", websiteContentProposalsRouter);
 
   // Fallback error handler — the system must fail safely, never crash silently.
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

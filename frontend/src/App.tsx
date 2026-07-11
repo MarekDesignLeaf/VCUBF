@@ -28,6 +28,7 @@ import { Portfolio } from "./pages/Portfolio";
 import { MemoryModel } from "./pages/MemoryModel";
 import { BusinessContext } from "./pages/BusinessContext";
 import { WebsiteAudits } from "./pages/WebsiteAudits";
+import { WebsiteContentProposals } from "./pages/WebsiteContentProposals";
 
 export default function App() {
   return (
@@ -69,6 +70,7 @@ export default function App() {
             <Route path="/memory-model" element={<MemoryModel />} />
             <Route path="/business-context" element={<BusinessContext />} />
             <Route path="/website-audits" element={<WebsiteAudits />} />
+            <Route path="/website-content" element={<WebsiteContentProposals />} />
           </Route>
         </Routes>
       </BrowserRouter>

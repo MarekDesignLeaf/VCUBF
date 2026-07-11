@@ -541,6 +541,72 @@ export const CREATE_WEBSITE_AUDIT_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
 };
 
+// Website Content Workflow — the MVP can prepare an evidence-backed draft
+// and move it through explicit human review. There is intentionally no
+// publish action in this slice: public publication is risk level 4 and needs
+// a future authorised connector plus its own confirmation and validation.
+export const WEBSITE_CONTENT_PROPOSAL_TYPES = [
+  "page_title",
+  "service_page",
+  "contact_section",
+  "call_to_action",
+  "meta_description",
+  "photo_selection",
+  "other",
+] as const;
+export type WebsiteContentProposalType = (typeof WEBSITE_CONTENT_PROPOSAL_TYPES)[number];
+
+export const WEBSITE_CONTENT_PROPOSAL_STATUSES = [
+  "ready_for_review",
+  "approved",
+  "rejected",
+  "published",
+  "verified",
+] as const;
+export type WebsiteContentProposalStatus = (typeof WEBSITE_CONTENT_PROPOSAL_STATUSES)[number];
+
+export const PREPARE_WEBSITE_CONTENT_PROPOSAL_ACTION: ActionContract = {
+  actionName: "prepare_website_content_proposal",
+  purpose:
+    "Store a website content proposal for review, together with an immutable snapshot of the selected verified Secretary sources used to support it.",
+  requiredPermission: "crm.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: [
+    "user_input",
+    "website_audits",
+    "website_audit_findings",
+    "crm.service_catalogue",
+    "business_context",
+    "crm.portfolio_photos",
+  ],
+  possibleErrors: [
+    "MISSING_PERMISSION",
+    "VALIDATION_FAILED",
+    "WEBSITE_AUDIT_NOT_FOUND",
+    "TARGET_URL_MISMATCH",
+    "SOURCE_NOT_AVAILABLE",
+    "SOURCE_NOT_CONFIRMED",
+  ],
+};
+
+export const DECIDE_WEBSITE_CONTENT_PROPOSAL_ACTION: ActionContract = {
+  actionName: "decide_website_content_proposal",
+  purpose:
+    "Explicitly approve or reject a website content proposal after presenting the exact proposed status change for confirmation; this does not publish anything.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: true,
+  dataSources: ["user_input", "website_content_proposals"],
+  possibleErrors: [
+    "MISSING_PERMISSION",
+    "VALIDATION_FAILED",
+    "WEBSITE_CONTENT_PROPOSAL_NOT_FOUND",
+    "WEBSITE_CONTENT_PROPOSAL_ALREADY_DECIDED",
+    "CONFIRMATION_REQUIRED",
+  ],
+};
+
 // Communication Log Module — the manual-entry foundation of the
 // Communication Intelligence Module (project instructions section 3). A
 // communication record is a real CRM fact (what was discussed/promised,

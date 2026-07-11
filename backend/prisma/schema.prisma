@@ -33,6 +33,7 @@ model Company {
   businessContextItems BusinessContextItem[]
   websiteAudits       WebsiteAudit[]
   websiteAuditFindings WebsiteAuditFinding[]
+  websiteContentProposals WebsiteContentProposal[]
 
   @@map("companies")
 }
@@ -528,6 +529,7 @@ model WebsiteAudit {
 
   company  Company               @relation(fields: [companyId], references: [id])
   findings WebsiteAuditFinding[]
+  contentProposals WebsiteContentProposal[]
 
   @@index([companyId, createdAt])
   @@map("website_audits")
@@ -554,6 +556,37 @@ model WebsiteAuditFinding {
   @@index([companyId, status])
   @@index([websiteAuditId])
   @@map("website_audit_findings")
+}
+
+// Website Content Workflow — a proposal is an internal, reviewable draft
+// backed by an immutable snapshot of the real Secretary records selected as
+// evidence. This slice can prepare, approve or reject proposals only. Public
+// publishing and post-publication verification remain separate future risk-4
+// connector actions and cannot be triggered by changing this record.
+model WebsiteContentProposal {
+  id               String    @id @default(uuid())
+  companyId        String    @map("company_id")
+  websiteAuditId   String?   @map("website_audit_id")
+  proposalType     String    @map("proposal_type")
+  targetPageUrl    String    @map("target_page_url")
+  headline         String?
+  contentBody      String    @map("content_body")
+  status           String    @default("ready_for_review")
+  sourceSnapshot   Json      @map("source_snapshot")
+  notes            String?
+  decisionNotes    String?   @map("decision_notes")
+  reviewedBy       String?   @map("reviewed_by")
+  reviewedAt       DateTime? @map("reviewed_at")
+  createdBy        String?   @map("created_by")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  company      Company       @relation(fields: [companyId], references: [id])
+  websiteAudit WebsiteAudit? @relation(fields: [websiteAuditId], references: [id])
+
+  @@index([companyId, status])
+  @@index([websiteAuditId])
+  @@map("website_content_proposals")
 }
 
 

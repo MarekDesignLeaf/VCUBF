@@ -531,7 +531,24 @@ npm run dev                 # http://localhost:5173
   check has an explicit "not checked / unknown" state; this slice prepares findings only
   and cannot publish website changes.
 
-Backend verified: 221/221 tests passing across 25 suites (auth, CRM clients, CRM jobs, CRM leads,
+- **Website Content Proposal and Approval Workflow**: `POST /website-content-proposals`,
+  `GET /website-content-proposals`, `GET /website-content-proposals/:id`, and
+  `POST /website-content-proposals/:id/decision` implement the master-document requirement
+  to prepare website content for approval and distinguish a proposal from an approved
+  proposal. `prepare_website_content_proposal` is risk 1 and stores a manual draft together
+  with an immutable evidence snapshot of the selected website audit/findings, active
+  Service Catalogue items, confirmed Business Context and Portfolio photographs already
+  marked usable for marketing. Unsupported/unconfirmed source IDs are rejected rather
+  than treated as facts. `decide_website_content_proposal` is a confirmation-gated risk-2
+  internal status change: the first request returns an exact approval/rejection preview and
+  changes nothing; only `confirmed: true` records the decision and audit before/after data.
+  The decision API accepts only `approved` or `rejected` — it cannot mark content published
+  or verified and has no external connector.
+- **Frontend — Website Content**: new sidebar page for drafting proposals from selectable
+  verified sources, reviewing the frozen evidence snapshot and recording an explicit
+  approval/rejection through the same two-step preview pattern. There is no publish button.
+
+Backend verified: 233/233 tests passing across 26 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, employee/permission management, service catalogue, quotes,
 recruitment, playbooks, learning, communication log, notifications/escalation, data
@@ -593,8 +610,11 @@ checks, validation, create/update audit entries, category/active filtering, arch
 and cross-tenant isolation. Basic Website Audit adds `websiteAudits.test.ts`, covering
 read/manage permissions, URL and same-origin validation, explicit unknown handling,
 Secretary data-gap findings, evidence-backed comparison with real services/context/photos,
-severity ordering, audit-log evidence and cross-tenant isolation. The complete 25-suite
-database-backed run above was verified against a real PostgreSQL instance.
+severity ordering, audit-log evidence and cross-tenant isolation. Website Content Proposal
+adds `websiteContentProposals.test.ts`, covering source eligibility and provenance,
+same-origin protection, confirmation previews, approval/rejection, duplicate-decision and
+publication-state rejection, audit before/after evidence and cross-tenant isolation. The
+complete 26-suite database-backed run above was verified against a real PostgreSQL instance.
 
 Frontend: `npm run build` and `npm run dev` both verified working (clean production
 build, dev server responds 200).
@@ -659,7 +679,7 @@ configurable similarity threshold (the Levenshtein cutoff and phone-normalizatio
 are fixed in code, not a per-company setting). There is also no text-command intent for
 `merge_clients` — the same judgment already applied to `prepare_quote` (real, multi-field
 actions with material consequences stay a dedicated form/API flow, never a one-line
-command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, or serving (a `filename` is just a typed-in reference, not a stored file), no AI-assisted photo selection or auto-tagging, and no website/social publishing — flipping `usableForMarketing` only sets an internal review tag, it never publishes anything anywhere, since no such connector exists yet. The Basic Website Audit is manual-observation only; automated crawling/link checking, website content proposal and approval records, publication/verification history and a real website connector are still missing. Also still missing: business growth content generation and a real voice (speech) front-end (the Voice and Text Command Layer currently accepts typed text only).
+command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, or serving (a `filename` is just a typed-in reference, not a stored file), no AI-assisted photo selection or auto-tagging, and no website/social publishing — flipping `usableForMarketing` only sets an internal review tag, it never publishes anything anywhere, since no such connector exists yet. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. Also still missing: broader business growth content generation and a real voice (speech) front-end (the Voice and Text Command Layer currently accepts typed text only).
 Build order should follow the roadmap in the master documentation (Phase 1 → Phase 2 →
 …), not be improvised per-feature.
 

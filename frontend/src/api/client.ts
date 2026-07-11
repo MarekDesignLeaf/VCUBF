@@ -693,6 +693,111 @@ export interface WebsiteAudit {
   _count?: { findings: number };
 }
 
+export const WEBSITE_CONTENT_PROPOSAL_TYPES = [
+  "page_title",
+  "service_page",
+  "contact_section",
+  "call_to_action",
+  "meta_description",
+  "photo_selection",
+  "other",
+] as const;
+export type WebsiteContentProposalType = (typeof WEBSITE_CONTENT_PROPOSAL_TYPES)[number];
+
+export const WEBSITE_CONTENT_PROPOSAL_TYPE_LABELS: Record<WebsiteContentProposalType, string> = {
+  page_title: "Page title",
+  service_page: "Service page",
+  contact_section: "Contact section",
+  call_to_action: "Call to action",
+  meta_description: "Meta description",
+  photo_selection: "Photo selection",
+  other: "Other",
+};
+
+export type WebsiteContentProposalStatus =
+  | "ready_for_review"
+  | "approved"
+  | "rejected"
+  | "published"
+  | "verified";
+
+export interface WebsiteContentSourceSnapshot {
+  websiteAudit?: {
+    id: string;
+    websiteUrl: string;
+    findingCount: number;
+    urgentCount: number;
+    warningCount: number;
+    infoCount: number;
+  } | null;
+  businessContext: Array<{
+    id: string;
+    category: string;
+    label: string;
+    value: string;
+    source: string;
+    verificationStatus: string;
+  }>;
+  services: Array<{ id: string; name: string; description?: string | null; category?: string | null }>;
+  photos: Array<{
+    id: string;
+    filename: string;
+    caption?: string | null;
+    tags: string[];
+    source: string;
+    usableForMarketingNotes?: string | null;
+  }>;
+  auditFindings: Array<{
+    id: string;
+    title: string;
+    severity: WebsiteAuditSeverity;
+    evidence: string;
+    recommendation: string;
+  }>;
+}
+
+export interface WebsiteContentProposal {
+  id: string;
+  websiteAuditId?: string | null;
+  proposalType: WebsiteContentProposalType;
+  targetPageUrl: string;
+  headline?: string | null;
+  contentBody: string;
+  status: WebsiteContentProposalStatus;
+  sourceSnapshot: WebsiteContentSourceSnapshot;
+  notes?: string | null;
+  decisionNotes?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  websiteAudit?: {
+    id: string;
+    websiteUrl: string;
+    findingCount: number;
+    urgentCount: number;
+    warningCount: number;
+    infoCount: number;
+  } | null;
+}
+
+export interface WebsiteContentProposalDecisionPreview {
+  proposalId: string;
+  proposalType: WebsiteContentProposalType;
+  targetPageUrl: string;
+  headline?: string | null;
+  currentStatus: WebsiteContentProposalStatus;
+  proposedStatus: "approved" | "rejected";
+  contentBody: string;
+  sourceCounts: {
+    websiteAudit: number;
+    businessContext: number;
+    services: number;
+    photos: number;
+    auditFindings: number;
+  };
+}
+
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -940,6 +1045,27 @@ export const api = {
     get: (id: string) => request<WebsiteAudit>(`/website-audits/${id}`),
     create: (data: Record<string, unknown>) =>
       request<WebsiteAudit>("/website-audits", { method: "POST", body: JSON.stringify(data) }),
+  },
+  websiteContentProposals: {
+    list: (status?: string) =>
+      request<WebsiteContentProposal[]>(
+        `/website-content-proposals${status ? `?status=${encodeURIComponent(status)}` : ""}`
+      ),
+    get: (id: string) => request<WebsiteContentProposal>(`/website-content-proposals/${id}`),
+    create: (data: Record<string, unknown>) =>
+      request<WebsiteContentProposal>("/website-content-proposals", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    decide: (id: string, decision: "approved" | "rejected", decisionNotes: string, confirmed: boolean) =>
+      request<WebsiteContentProposal>(`/website-content-proposals/${id}/decision`, {
+        method: "POST",
+        body: JSON.stringify({
+          decision,
+          decision_notes: decisionNotes || undefined,
+          confirmed,
+        }),
+      }),
   },
   command: {
     text: (text: string) =>
