@@ -37,6 +37,7 @@ import { Contacts } from "./pages/Contacts";
 import { Documents } from "./pages/Documents";
 import { Industries } from "./pages/Industries";
 import { Connectors } from "./pages/Connectors";
+import { Metrics } from "./pages/Metrics";
 
 export default function App() {
   return (
@@ -58,6 +59,7 @@ export default function App() {
             <Route path="/documents" element={<Documents />} />
             <Route path="/industries" element={<Industries />} />
             <Route path="/connectors" element={<Connectors />} />
+            <Route path="/metrics" element={<Metrics />} />
             <Route path="/jobs" element={<Jobs />} />
             <Route path="/jobs/:id" element={<JobDetail />} />
             <Route path="/employees" element={<Employees />} />

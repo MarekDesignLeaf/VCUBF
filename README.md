@@ -89,6 +89,12 @@ npm run dev                 # http://localhost:5173
   Action Contracts: `create_lead`, `convert_lead_to_client`.
 - **Frontend — Leads**: leads list with inline "new lead" form, lead detail page
   with a "Convert to client" button that redirects straight to the new client record.
+- **Measurement and KPI Module**: `GET /metrics/overview` measures a selectable period
+  from company-scoped leads, quotes, jobs, tasks and employee capacity. It reports lead
+  sources, quote conversion and average value, job outcomes and current-week team
+  utilisation, then produces deterministic recommendations only when documented
+  thresholds have enough evidence. Unsupported metrics are explicitly unavailable with
+  the missing-data reason rather than estimated. The **Business Metrics** page renders it.
 - **Backend — services layer refactor**: business logic extracted out of route handlers
   into `backend/src/services/*Service.ts` (clients, jobs, leads), each returning a
   uniform `ServiceResult<T>` (`ok()`/`fail()`). Routes are now thin wrappers that call a
@@ -644,7 +650,7 @@ npm run dev                 # http://localhost:5173
   images and requires confirmation before creating an internal Portfolio Photo reference. See
   `docs/CONNECTOR_ENGINE.md`.
 
-Backend verified: 347/347 tests passing across 40 suites (auth, CRM clients, CRM jobs, CRM leads,
+Backend verified: 352/352 tests passing across 41 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
  recruitment, playbooks, learning, connector lifecycle, Gmail OAuth/read-only ingestion, communication extraction/reply drafting, unresolved enquiry monitoring, communication log, notifications/escalation, data
@@ -783,7 +789,7 @@ configurable similarity threshold (the Levenshtein cutoff and phone-normalizatio
 are fixed in code, not a per-company setting). There is also no text-command intent for
 `merge_clients` — the same judgment already applied to `prepare_quote` (real, multi-field
 actions with material consequences stay a dedicated form/API flow, never a one-line
-command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, serving or visual AI review (a `filename` is just a typed-in reference, not a stored file), no image-content recognition or auto-tagging, and no website/social publishing. Metadata-backed candidates and confirmed internal service selections now exist, but they rely only on explicit job/service links, exact tags and human-entered review states; flipping `usableForMarketing` or confirming a service selection never publishes anything anywhere. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. Browser voice input now exists as a reviewed transcript layer, but native/offline speech recognition, wake-word listening, broader command languages and audio storage are intentionally not implemented. Also still missing: broader business growth content generation.
+command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, serving or visual AI review (a `filename` is just a typed-in reference, not a stored file), no image-content recognition or auto-tagging, and no website/social publishing. Metadata-backed candidates and confirmed internal service selections now exist, but they rely only on explicit job/service links, exact tags and human-entered review states; flipping `usableForMarketing` or confirming a service selection never publishes anything anywhere. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. Browser voice input now exists as a reviewed transcript layer, but native/offline speech recognition, wake-word listening, broader command languages and audio storage are intentionally not implemented. The KPI module is a real-data Phase 11 foundation, but trend comparison, service-level revenue/profitability, reputation, invoice and external analytics remain unavailable until their source records or connectors exist.
 Build order should follow the roadmap in the master documentation (Phase 1 → Phase 2 →
 …), not be improvised per-feature.
 

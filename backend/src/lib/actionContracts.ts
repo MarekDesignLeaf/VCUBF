@@ -500,6 +500,16 @@ export const EXPORT_QUOTE_PDF_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "QUOTE_NOT_FOUND"],
 };
 
+export const GET_METRICS_OVERVIEW_ACTION: ActionContract = {
+  actionName: "get_metrics_overview",
+  purpose: "Measure company performance from real CRM records and return deterministic, evidence-backed recommendations.",
+  requiredPermission: "crm.read",
+  riskLevel: 0,
+  confirmationRequired: false,
+  dataSources: ["crm.leads", "crm.quotes", "crm.jobs", "crm.tasks", "crm.users"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
 // Recruitment and Workforce Expansion Module — see project instructions
 // section 6. This module tracks openings and candidates and drafts content
 // for the user to review; it never legally hires anyone, sets a wage, or

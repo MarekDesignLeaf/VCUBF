@@ -551,6 +551,16 @@ export interface Quote {
   job?: { id: string; jobTitle: string } | null;
 }
 
+export interface MetricsOverview {
+  period: { from: string; to: string; days: number };
+  leads: { newCount: number; convertedCount: number; lostCount: number; sources: { source: string; count: number }[] };
+  quotes: { count: number; decidedCount: number; acceptedCount: number; conversionRatePct: number | null; averageValueGbp: number | null };
+  jobs: { acceptedCount: number; completedCount: number; cancelledCount: number; lostDueToAvailability: { available: false; value: null; reason: string } };
+  capacity: { available: true; weekStart: string | null; weekEnd: string | null; loadHours: number; capacityHours: number; utilizationPct: number | null; overloadedEmployees: number; missingEstimates: number } | { available: false; value: null; reason: string };
+  unavailableMetrics: Record<string, string>;
+  recommendations: { severity: "info" | "warning"; title: string; evidence: string; action: string }[];
+}
+
 // Recruitment and Workforce Expansion Module. Every field is what the user
 // typed in — this module never legally hires anyone, sets a wage, or
 // confirms employment terms; it only tracks openings/candidates and drafts
@@ -1309,6 +1319,14 @@ export interface Lead {
 }
 
 export const api = {
+  metrics: {
+    overview: (params?: { from?: string; to?: string }) => {
+      const qs = new URLSearchParams();
+      if (params?.from) qs.set("from", params.from);
+      if (params?.to) qs.set("to", params.to);
+      return request<MetricsOverview>(`/metrics/overview${qs.size ? `?${qs}` : ""}`);
+    },
+  },
   login: (email: string, password: string) =>
     request<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   me: () => request<LoginResponse["user"]>("/auth/me"),
