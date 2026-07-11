@@ -20,6 +20,7 @@ export async function resetDb() {
   await prisma.task.deleteMany({});
   await prisma.communicationIntake.deleteMany({});
   await prisma.communicationRecord.deleteMany({});
+  await prisma.photoServiceSelection.deleteMany({});
   await prisma.portfolioPhoto.deleteMany({});
   await prisma.websiteContentProposal.deleteMany({});
   await prisma.websiteAuditFinding.deleteMany({});

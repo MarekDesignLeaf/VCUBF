@@ -25,6 +25,7 @@ import { CommunicationLog } from "./pages/CommunicationLog";
 import { Notifications } from "./pages/Notifications";
 import { DataQuality } from "./pages/DataQuality";
 import { Portfolio } from "./pages/Portfolio";
+import { PhotoSelection } from "./pages/PhotoSelection";
 import { MemoryModel } from "./pages/MemoryModel";
 import { BusinessContext } from "./pages/BusinessContext";
 import { WebsiteAudits } from "./pages/WebsiteAudits";
@@ -73,6 +74,7 @@ export default function App() {
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/data-quality" element={<DataQuality />} />
             <Route path="/portfolio" element={<Portfolio />} />
+            <Route path="/photo-selection" element={<PhotoSelection />} />
             <Route path="/memory-model" element={<MemoryModel />} />
             <Route path="/business-context" element={<BusinessContext />} />
             <Route path="/website-audits" element={<WebsiteAudits />} />

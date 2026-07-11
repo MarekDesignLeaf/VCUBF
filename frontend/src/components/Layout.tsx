@@ -21,6 +21,7 @@ export function Layout() {
           <NavLink to="/communication-intake">Communication Intake</NavLink>
           <NavLink to="/communications">Communications</NavLink>
           <NavLink to="/portfolio">Photos</NavLink>
+          <NavLink to="/photo-selection">Photo Selection</NavLink>
           <NavLink to="/business-context">Business Context</NavLink>
           <NavLink to="/website-audits">Website Audit</NavLink>
           <NavLink to="/website-content">Website Content</NavLink>

@@ -2,7 +2,9 @@ import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import {
+  FIND_PHOTOS_FOR_SERVICE_ACTION,
   LOG_PORTFOLIO_PHOTO_ACTION,
+  SELECT_PHOTOS_FOR_SERVICE_ACTION,
   UPDATE_PORTFOLIO_PHOTO_ACTION,
 } from "../../lib/actionContracts.js";
 import * as portfolioService from "../../services/portfolioService.js";
@@ -24,6 +26,28 @@ portfolioRouter.get("/", requirePermission("crm.read"), async (req, res) => {
     })
   );
 });
+
+portfolioRouter.get(
+  "/service-selection/workspace",
+  requirePermission(FIND_PHOTOS_FOR_SERVICE_ACTION.requiredPermission),
+  async (req, res) => {
+    const serviceId = typeof req.query.service_catalogue_item_id === "string" ? req.query.service_catalogue_item_id : "";
+    const ownProductionOnly = req.query.own_production_only !== "false";
+    const result = await portfolioService.getPhotoSelectionWorkspace(req.user!, serviceId, ownProductionOnly);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
+portfolioRouter.post(
+  "/service-selection",
+  requirePermission(SELECT_PHOTOS_FOR_SERVICE_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await portfolioService.selectPhotosForService(req.user!, req.body);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
 
 portfolioRouter.get("/:id", requirePermission("crm.read"), async (req, res) => {
   const record = await portfolioService.getPortfolioPhoto(req.user!, req.params.id);

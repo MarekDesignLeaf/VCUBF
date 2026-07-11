@@ -410,22 +410,28 @@ npm run dev                 # http://localhost:5173
   Notifications feed for acknowledgement.
 
 - **Portfolio and Photo Intelligence Module**: `POST /portfolio`, `PUT /portfolio/:id`,
-  `GET /portfolio`, `GET /portfolio/:id` (Action Contracts `log_portfolio_photo`,
-  `update_portfolio_photo`) are the manual-entry foundation of a future automated
-  photo-selection/website-publishing workflow. A record is a real photo reference only —
+  `GET /portfolio`, `GET /portfolio/:id`, `GET /portfolio/service-selection/workspace`
+  and `POST /portfolio/service-selection` (Action Contracts `log_portfolio_photo`,
+  `update_portfolio_photo`, `find_photos_for_service`, `select_photos_for_service`) provide
+  manual photo evidence plus a safe internal selection workflow. A record is a real photo reference only —
   `filename` is exactly the literal filename/reference the user typed in, `source` is
   always one of a fixed set of user-selected values (`employee_upload`, `client_provided`,
   `before_after`, `other`) never guessed — optionally linked to a client and/or job
   (both optional, but each is validated against the company's real records before a
   record is created, matching the dual-optional-FK pattern in `communicationService.ts`).
   There is no image upload/storage connector yet, so no actual image file is stored,
-  moved, or served by this module. `usableForMarketing` (+ optional
-  `usableForMarketingNotes`) is an internal review tag only, reviewed by a human — it does
+  moved, or served by this module. Quality/sharpness, duplicate, sensitive-data and usage-
+  permission states are explicit human reviews, never inferred from a missing image.
+  `usableForMarketing` (+ optional `usableForMarketingNotes`) is an internal review tag only — it does
   not publish anything to a website or social channel by itself, since no such connector
-  exists yet; that remains a separate, higher-risk future action. Both actions are risk
+  exists yet; that remains a separate, higher-risk future action. Logging and metadata update are risk
   level 1 (draft/internal-tag only, the same level used for `draft_job_advert`), lower
   than the risk level 2 used for CRM record creation like `log_communication`, because
-  nothing here changes a core CRM fact or triggers any external effect. Listing supports
+  nothing here changes a core CRM fact or triggers any external effect. Candidate discovery
+  is risk 0 and uses only an explicit job/service link or a case-insensitive exact service
+  name tag. Confirming the exact selected set is risk 2 and follows the standard
+  409 preview + `confirmed: true` flow; it stores an evidence snapshot and never publishes.
+  Listing supports
   filtering by client, job, tag, source, and usable-for-marketing. Text commands: "log
   photo <filename> for <client>: <caption>" / "log photo <filename>: <caption>" (source
   defaults to "other" when not specified via text, the same deterministic-default pattern
@@ -434,10 +440,13 @@ npm run dev                 # http://localhost:5173
   so a future automated photo-selection/AI-tagging/website-publishing workflow can write
   into this exact same table and linkage instead of being a second, disconnected photo
   store.
-- **Frontend — Portfolio**: new Portfolio page (linked in the sidebar as "Photos") — a
+- **Frontend — Portfolio and Photo Selection**: the Portfolio page (linked in the sidebar as "Photos") — a
   filterable list (by tag, source, marketing-usable) and a "Log photo" quick-entry form
   (filename, caption, tags, client picker, source select, usable-for-marketing checkbox +
-  notes). Client detail and job detail pages each gained a "Photos" section showing the
+  notes), plus a human-review editor for date, quality, duplicate, sensitive-data and
+  permission evidence. The separate Photo Selection page chooses a real Service Catalogue
+  item, displays evidence and blockers, and confirms the exact internal set in two steps.
+  Client detail and job detail pages each gained a "Photos" section showing the
   five most recent photos for that client/job plus a "Log photo" link that prefills
   `client_id` (and `job_id` from the job page).
 - **Notification and Escalation Module — Portfolio marketing-readiness gap source**: a
@@ -588,11 +597,11 @@ npm run dev                 # http://localhost:5173
   now loads jobs, due Secretary tasks and overload data in parallel; Employee capacity also
   reports tasks missing an estimate.
 
-Backend verified: 269/269 tests passing across 29 suites (auth, CRM clients, CRM jobs, CRM leads,
+Backend verified: 277/277 tests passing across 30 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
  recruitment, playbooks, learning, communication extraction/reply drafting, unresolved enquiry monitoring, communication log, notifications/escalation, data
-quality, portfolio/photo, and memory model/pattern-detection) —
+quality, portfolio/photo, photo selection by service, and memory model/pattern-detection) —
 covering permissions, validation, duplicate
 detection, cross-tenant checks, status-transition validation, lead conversion and
 duplicate-client reuse, command parsing for every supported intent, ambiguous-reference
@@ -624,7 +633,9 @@ Intelligence Module — permission checks, validation errors (including an unkno
 risk-level and audit before/after assertions, creating a photo with no client or job at
 all, list filtering by client/job/tag/source/usable-for-marketing, update, single-record
 get, and a company-scoping test proving a company B photo is never visible, listed, or
-updatable by company A. The Memory Model — a fixture seeding a real sequence of
+updatable by company A. Photo selection adds exact service-evidence matching, review and
+own-production blockers, confirmation preview with zero writes, atomic exact-set updates,
+evidence snapshots, no-publication assertions and cross-tenant isolation. The Memory Model — a fixture seeding a real sequence of
 AuditLog entries recurring 3 times (detected, with the correct occurrence count and
 example timestamps), a fixture with the same sequence occurring only 2 times (correctly
 not flagged, below threshold), permission checks (401 unauthenticated, 403 without
@@ -724,7 +735,7 @@ configurable similarity threshold (the Levenshtein cutoff and phone-normalizatio
 are fixed in code, not a per-company setting). There is also no text-command intent for
 `merge_clients` — the same judgment already applied to `prepare_quote` (real, multi-field
 actions with material consequences stay a dedicated form/API flow, never a one-line
-command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, or serving (a `filename` is just a typed-in reference, not a stored file), no AI-assisted photo selection or auto-tagging, and no website/social publishing — flipping `usableForMarketing` only sets an internal review tag, it never publishes anything anywhere, since no such connector exists yet. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. Also still missing: broader business growth content generation and a real voice (speech) front-end (the Voice and Text Command Layer currently accepts typed text only).
+command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, serving or visual AI review (a `filename` is just a typed-in reference, not a stored file), no image-content recognition or auto-tagging, and no website/social publishing. Metadata-backed candidates and confirmed internal service selections now exist, but they rely only on explicit job/service links, exact tags and human-entered review states; flipping `usableForMarketing` or confirming a service selection never publishes anything anywhere. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. Also still missing: broader business growth content generation and a real voice (speech) front-end (the Voice and Text Command Layer currently accepts typed text only).
 Build order should follow the roadmap in the master documentation (Phase 1 → Phase 2 →
 …), not be improvised per-feature.
 

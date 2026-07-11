@@ -943,6 +943,15 @@ export const PORTFOLIO_PHOTO_SOURCES = [
 ] as const;
 export type PortfolioPhotoSource = (typeof PORTFOLIO_PHOTO_SOURCES)[number];
 
+export const PHOTO_QUALITY_REVIEW_STATUSES = ["unreviewed", "approved", "rejected"] as const;
+export const PHOTO_DUPLICATE_REVIEW_STATUSES = ["unreviewed", "unique", "duplicate"] as const;
+export const PHOTO_SENSITIVE_DATA_REVIEW_STATUSES = [
+  "unreviewed",
+  "clear",
+  "contains_sensitive_data",
+] as const;
+export const PHOTO_USAGE_PERMISSION_STATUSES = ["unknown", "not_required", "confirmed", "denied"] as const;
+
 export const LOG_PORTFOLIO_PHOTO_ACTION: ActionContract = {
   actionName: "log_portfolio_photo",
   purpose:
@@ -957,12 +966,41 @@ export const LOG_PORTFOLIO_PHOTO_ACTION: ActionContract = {
 export const UPDATE_PORTFOLIO_PHOTO_ACTION: ActionContract = {
   actionName: "update_portfolio_photo",
   purpose:
-    "Update a previously logged photo record's caption, tags, source, or marketing-usable review tag and notes.",
+    "Update a previously logged photo record's metadata and explicit human review states for quality, duplicates, sensitive data, usage permission and marketing suitability.",
   requiredPermission: "crm.manage",
   riskLevel: 1,
   confirmationRequired: false,
   dataSources: ["user_input", "crm.portfolio_photos"],
   possibleErrors: ["MISSING_PERMISSION", "PORTFOLIO_PHOTO_NOT_FOUND", "VALIDATION_FAILED"],
+};
+
+export const FIND_PHOTOS_FOR_SERVICE_ACTION: ActionContract = {
+  actionName: "find_photos_for_service",
+  purpose:
+    "Return photo candidates for one real Service Catalogue item using only an explicit job/service link or an exact user-entered tag, together with blockers from human review metadata; never inspect, move or publish an image.",
+  requiredPermission: "crm.read",
+  riskLevel: 0,
+  confirmationRequired: false,
+  dataSources: ["crm.portfolio_photos", "crm.jobs", "service_catalogue"],
+  possibleErrors: ["MISSING_PERMISSION", "SERVICE_NOT_FOUND", "VALIDATION_FAILED"],
+};
+
+export const SELECT_PHOTOS_FOR_SERVICE_ACTION: ActionContract = {
+  actionName: "select_photos_for_service",
+  purpose:
+    "Confirm the exact internal set of reviewed company photographs selected for one Service Catalogue item, preserving the evidence snapshot; this does not publish or move any image.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.portfolio_photos", "crm.jobs", "service_catalogue"],
+  possibleErrors: [
+    "MISSING_PERMISSION",
+    "VALIDATION_FAILED",
+    "SERVICE_NOT_FOUND",
+    "PORTFOLIO_PHOTO_NOT_FOUND",
+    "PHOTO_SELECTION_BLOCKED",
+    "CONFIRMATION_REQUIRED",
+  ],
 };
 
 // Memory Model — Pattern Detection. See memoryModelService.ts for the full

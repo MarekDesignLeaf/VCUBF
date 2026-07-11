@@ -315,7 +315,16 @@ function WebsiteContentProposalForm({
         if (cancelled) return;
         setServices(serviceResult);
         setContexts(contextResult.filter((context) => context.verificationStatus === "confirmed"));
-        setPhotos(photoResult);
+        setPhotos(
+          photoResult.filter(
+            (photo) =>
+              Boolean(photo.takenAt) &&
+              photo.qualityReviewStatus === "approved" &&
+              photo.duplicateReviewStatus === "unique" &&
+              photo.sensitiveDataReviewStatus === "clear" &&
+              ["confirmed", "not_required"].includes(photo.usagePermissionStatus)
+          )
+        );
         setAudits(auditResult);
       })
       .catch(() => {

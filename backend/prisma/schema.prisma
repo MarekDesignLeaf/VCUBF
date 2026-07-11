@@ -31,6 +31,7 @@ model Company {
   communicationIntakes CommunicationIntake[]
   notificationAcknowledgements NotificationAcknowledgement[]
   portfolioPhotos     PortfolioPhoto[]
+  photoServiceSelections PhotoServiceSelection[]
   businessContextItems BusinessContextItem[]
   websiteAudits       WebsiteAudit[]
   websiteAuditFindings WebsiteAuditFinding[]
@@ -191,6 +192,7 @@ model ServiceCatalogueItem {
   company Company @relation(fields: [companyId], references: [id])
   jobs    Job[]
   quoteItems QuoteItem[]
+  photoSelections PhotoServiceSelection[]
 
   @@index([companyId])
   @@map("service_catalogue_items")
@@ -546,6 +548,10 @@ model PortfolioPhoto {
   source                    String
   usableForMarketing        Boolean   @default(false) @map("usable_for_marketing")
   usableForMarketingNotes   String?   @map("usable_for_marketing_notes")
+  qualityReviewStatus       String    @default("unreviewed") @map("quality_review_status")
+  duplicateReviewStatus     String    @default("unreviewed") @map("duplicate_review_status")
+  sensitiveDataReviewStatus String    @default("unreviewed") @map("sensitive_data_review_status")
+  usagePermissionStatus     String    @default("unknown") @map("usage_permission_status")
   createdBy                 String?   @map("created_by")
   createdAt                 DateTime  @default(now()) @map("created_at")
   updatedAt                 DateTime  @updatedAt @map("updated_at")
@@ -553,11 +559,41 @@ model PortfolioPhoto {
   company Company @relation(fields: [companyId], references: [id])
   client  Client?  @relation(fields: [clientId], references: [id])
   job     Job?     @relation(fields: [jobId], references: [id])
+  serviceSelections PhotoServiceSelection[]
 
   @@index([companyId])
   @@index([clientId])
   @@index([jobId])
   @@map("portfolio_photos")
+}
+
+// A confirmed, internal portfolio choice for one real Service Catalogue
+// item. Candidate generation is never persisted and never claims to inspect
+// the image: it is derived only from explicit job/service links or exact
+// user-entered tags. This record stores the evidence seen at confirmation
+// time and has no publishing side effect.
+model PhotoServiceSelection {
+  id                     String   @id @default(uuid())
+  companyId              String   @map("company_id")
+  serviceCatalogueItemId String   @map("service_catalogue_item_id")
+  portfolioPhotoId       String   @map("portfolio_photo_id")
+  isSelected             Boolean  @default(true) @map("is_selected")
+  ownProductionRequired  Boolean  @default(true) @map("own_production_required")
+  reviewNotes            String?  @map("review_notes")
+  evidenceSnapshot       Json     @map("evidence_snapshot")
+  selectedBy             String?  @map("selected_by")
+  selectedAt             DateTime @default(now()) @map("selected_at")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  company              Company              @relation(fields: [companyId], references: [id])
+  serviceCatalogueItem ServiceCatalogueItem @relation(fields: [serviceCatalogueItemId], references: [id])
+  portfolioPhoto       PortfolioPhoto       @relation(fields: [portfolioPhotoId], references: [id])
+
+  @@unique([serviceCatalogueItemId, portfolioPhotoId])
+  @@index([companyId])
+  @@index([portfolioPhotoId])
+  @@map("photo_service_selections")
 }
 
 // Business Context Layer — structured company knowledge used by later

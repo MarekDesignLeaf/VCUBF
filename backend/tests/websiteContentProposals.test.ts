@@ -59,8 +59,13 @@ describe("Website Content Proposal and Approval Workflow", () => {
         filename: "roof-project.jpg",
         caption: "Completed roof project",
         source: "employee_upload",
+        takenAt: new Date("2026-06-01T12:00:00.000Z"),
         usableForMarketing: true,
         usableForMarketingNotes: "Owner approved",
+        qualityReviewStatus: "approved",
+        duplicateReviewStatus: "unique",
+        sensitiveDataReviewStatus: "clear",
+        usagePermissionStatus: "not_required",
         createdBy: adminId,
       },
     });

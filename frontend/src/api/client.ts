@@ -724,6 +724,15 @@ export const PORTFOLIO_PHOTO_SOURCE_LABELS: Record<PortfolioPhotoSource, string>
   other: "Other",
 };
 
+export const PHOTO_QUALITY_REVIEW_STATUSES = ["unreviewed", "approved", "rejected"] as const;
+export const PHOTO_DUPLICATE_REVIEW_STATUSES = ["unreviewed", "unique", "duplicate"] as const;
+export const PHOTO_SENSITIVE_DATA_REVIEW_STATUSES = [
+  "unreviewed",
+  "clear",
+  "contains_sensitive_data",
+] as const;
+export const PHOTO_USAGE_PERMISSION_STATUSES = ["unknown", "not_required", "confirmed", "denied"] as const;
+
 export interface PortfolioPhoto {
   id: string;
   clientId?: string | null;
@@ -735,9 +744,45 @@ export interface PortfolioPhoto {
   source: PortfolioPhotoSource;
   usableForMarketing: boolean;
   usableForMarketingNotes?: string | null;
+  qualityReviewStatus: (typeof PHOTO_QUALITY_REVIEW_STATUSES)[number];
+  duplicateReviewStatus: (typeof PHOTO_DUPLICATE_REVIEW_STATUSES)[number];
+  sensitiveDataReviewStatus: (typeof PHOTO_SENSITIVE_DATA_REVIEW_STATUSES)[number];
+  usagePermissionStatus: (typeof PHOTO_USAGE_PERMISSION_STATUSES)[number];
   createdAt: string;
   client?: { id: string; displayName: string } | null;
-  job?: { id: string; jobTitle: string } | null;
+  job?: { id: string; jobTitle: string; serviceCatalogueItemId?: string | null } | null;
+}
+
+export interface PhotoSelectionCandidate {
+  photo: PortfolioPhoto;
+  reasons: string[];
+  blockers: string[];
+  isSelected: boolean;
+  eligible: boolean;
+}
+
+export interface PhotoSelectionWorkspace {
+  service: Pick<ServiceCatalogueItem, "id" | "name" | "category" | "isActive">;
+  ownProductionOnly: boolean;
+  selectedPhotoIds: string[];
+  candidates: PhotoSelectionCandidate[];
+  limitations: {
+    actualImageFilesAvailable: false;
+    automatedVisualReviewPerformed: false;
+    publishingAvailable: false;
+    explanation: string;
+  };
+}
+
+export interface PhotoSelectionPreview {
+  service: Pick<ServiceCatalogueItem, "id" | "name" | "category" | "isActive">;
+  ownProductionOnly: boolean;
+  requestedPhotos: Array<{ id: string; filename: string; evidence: string[] }>;
+  addedPhotoIds: string[];
+  removedPhotoIds: string[];
+  unchangedPhotoIds: string[];
+  reviewNotes: string | null;
+  publicationWillOccur: false;
 }
 
 // Business Context Layer — structured company knowledge used by future
@@ -1251,6 +1296,24 @@ export const api = {
       request<PortfolioPhoto>("/portfolio", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Record<string, unknown>) =>
       request<PortfolioPhoto>(`/portfolio/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    selectionWorkspace: (serviceCatalogueItemId: string, ownProductionOnly: boolean) => {
+      const qs = new URLSearchParams({
+        service_catalogue_item_id: serviceCatalogueItemId,
+        own_production_only: String(ownProductionOnly),
+      });
+      return request<PhotoSelectionWorkspace>(`/portfolio/service-selection/workspace?${qs.toString()}`);
+    },
+    selectForService: (data: {
+      service_catalogue_item_id: string;
+      photo_ids: string[];
+      own_production_only: boolean;
+      review_notes?: string;
+      confirmed: boolean;
+    }) =>
+      request<PhotoSelectionWorkspace>("/portfolio/service-selection", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
   },
   businessContext: {
     list: (params?: { category?: string; activeOnly?: boolean }) => {
