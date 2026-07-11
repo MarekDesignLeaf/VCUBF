@@ -25,6 +25,8 @@ model Company {
   connectorCredentials         ConnectorCredential[]
   connectorOAuthStates         ConnectorOAuthState[]
   externalContacts             ExternalContact[]
+  externalCalendars            ExternalCalendar[]
+  externalCalendarEvents       ExternalCalendarEvent[]
   jobs                         Job[]
   leads                        Lead[]
   auditLogs                    AuditLog[]
@@ -73,11 +75,13 @@ model ConnectorSource {
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  company              Company               @relation(fields: [companyId], references: [id])
-  credential           ConnectorCredential?
-  oauthStates          ConnectorOAuthState[]
-  communicationIntakes CommunicationIntake[]
-  externalContacts     ExternalContact[]
+  company                Company                 @relation(fields: [companyId], references: [id])
+  credential             ConnectorCredential?
+  oauthStates            ConnectorOAuthState[]
+  communicationIntakes   CommunicationIntake[]
+  externalContacts       ExternalContact[]
+  externalCalendars      ExternalCalendar[]
+  externalCalendarEvents ExternalCalendarEvent[]
 
   @@unique([companyId, connectorKey, displayName])
   @@index([companyId, serviceType])
@@ -294,6 +298,69 @@ model ExternalContact {
   @@index([companyId, isDeleted])
   @@index([companyId, importedContactId])
   @@map("external_contacts")
+}
+
+model ExternalCalendar {
+  id                 String    @id @default(uuid())
+  companyId          String    @map("company_id")
+  connectorSourceId  String    @map("connector_source_id")
+  externalCalendarId String    @map("external_calendar_id")
+  summary            String
+  description        String?
+  timeZone           String?   @map("time_zone")
+  accessRole         String?   @map("access_role")
+  isPrimary          Boolean   @default(false) @map("is_primary")
+  isDeleted          Boolean   @default(false) @map("is_deleted")
+  eventSyncToken     String?   @map("event_sync_token")
+  eventPageToken     String?   @map("event_page_token")
+  lastEventSyncAt    DateTime? @map("last_event_sync_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  company         Company                 @relation(fields: [companyId], references: [id])
+  connectorSource ConnectorSource         @relation(fields: [connectorSourceId], references: [id], onDelete: Cascade)
+  events          ExternalCalendarEvent[]
+
+  @@unique([companyId, connectorSourceId, externalCalendarId])
+  @@index([companyId, isDeleted])
+  @@map("external_calendars")
+}
+
+model ExternalCalendarEvent {
+  id                       String    @id @default(uuid())
+  companyId                String    @map("company_id")
+  connectorSourceId        String    @map("connector_source_id")
+  externalCalendarRecordId String    @map("external_calendar_record_id")
+  externalEventId          String    @map("external_event_id")
+  sourceEtag               String?   @map("source_etag")
+  status                   String?
+  summary                  String?
+  description              String?
+  location                 String?
+  startAt                  DateTime? @map("start_at")
+  endAt                    DateTime? @map("end_at")
+  startDate                String?   @map("start_date")
+  endDate                  String?   @map("end_date")
+  timeZone                 String?   @map("time_zone")
+  organiserEmail           String?   @map("organiser_email")
+  attendeeEmails           String[]  @default([]) @map("attendee_emails")
+  transparency             String?
+  visibility               String?
+  recurringEventId         String?   @map("recurring_event_id")
+  htmlLink                 String?   @map("html_link")
+  isDeleted                Boolean   @default(false) @map("is_deleted")
+  syncedAt                 DateTime  @default(now()) @map("synced_at")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+
+  company          Company          @relation(fields: [companyId], references: [id])
+  connectorSource  ConnectorSource  @relation(fields: [connectorSourceId], references: [id], onDelete: Cascade)
+  externalCalendar ExternalCalendar @relation(fields: [externalCalendarRecordId], references: [id], onDelete: Cascade)
+
+  @@unique([externalCalendarRecordId, externalEventId])
+  @@index([companyId, startAt])
+  @@index([companyId, isDeleted])
+  @@map("external_calendar_events")
 }
 
 // Document Registry — metadata and references only. The MVP deliberately

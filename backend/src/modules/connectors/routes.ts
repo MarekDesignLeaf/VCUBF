@@ -15,6 +15,7 @@ import { requirePermission } from "../../middleware/permissions.js";
 import * as connectorService from "../../services/connectorService.js";
 import * as gmailConnectorService from "../../services/gmailConnectorService.js";
 import * as googleContactsConnectorService from "../../services/googleContactsConnectorService.js";
+import * as googleCalendarConnectorService from "../../services/googleCalendarConnectorService.js";
 
 export const connectorsRouter = Router();
 
@@ -29,6 +30,11 @@ connectorsRouter.get("/gmail/oauth/callback", async (req, res) => {
 
 connectorsRouter.get("/google-contacts/oauth/callback", async (req, res) => {
   const result = await googleContactsConnectorService.completeGoogleContactsOAuth(req.query);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.redirect(303, result.data.redirectUrl);
+});
+connectorsRouter.get("/google-calendar/oauth/callback", async (req, res) => {
+  const result = await googleCalendarConnectorService.completeGoogleCalendarOAuth(req.query);
   if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   res.redirect(303, result.data.redirectUrl);
 });
@@ -84,6 +90,8 @@ connectorsRouter.post(
     const source = await connectorService.getConnectorSource(req.user!, req.params.id);
     const result = source?.connectorKey === "google_contacts"
       ? await googleContactsConnectorService.startGoogleContactsOAuth(req.user!, req.params.id)
+      : source?.connectorKey === "google_calendar"
+        ? await googleCalendarConnectorService.startGoogleCalendarOAuth(req.user!, req.params.id)
       : await gmailConnectorService.startGmailOAuth(req.user!, req.params.id);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
@@ -97,6 +105,8 @@ connectorsRouter.post(
     const source = await connectorService.getConnectorSource(req.user!, req.params.id);
     const result = source?.connectorKey === "google_contacts"
       ? await googleContactsConnectorService.syncGoogleContacts(req.user!, req.params.id)
+      : source?.connectorKey === "google_calendar"
+        ? await googleCalendarConnectorService.syncGoogleCalendar(req.user!, req.params.id)
       : await gmailConnectorService.syncGmailMessages(req.user!, req.params.id, req.body);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
@@ -110,11 +120,18 @@ connectorsRouter.post(
     const source = await connectorService.getConnectorSource(req.user!, req.params.id);
     const result = source?.connectorKey === "google_contacts"
       ? await googleContactsConnectorService.disconnectGoogleContactsSource(req.user!, req.params.id, req.body)
+      : source?.connectorKey === "google_calendar"
+        ? await googleCalendarConnectorService.disconnectGoogleCalendarSource(req.user!, req.params.id, req.body)
       : await gmailConnectorService.disconnectGmailSource(req.user!, req.params.id, req.body);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
   }
 );
+connectorsRouter.get("/sources/:id/external-calendar-events", requirePermission("connectors.read"), async (req, res) => {
+  const result = await googleCalendarConnectorService.listExternalCalendarEvents(req.user!, req.params.id, req.query);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.status(result.httpStatus).json(result.data);
+});
 
 connectorsRouter.get(
   "/sources/:id/external-contacts",

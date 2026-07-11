@@ -362,6 +362,27 @@ export const DISCONNECT_GOOGLE_CONTACTS_SOURCE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONFIRMATION_REQUIRED", "OAUTH_PROVIDER_REJECTED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
 };
 
+export const START_GOOGLE_CALENDAR_OAUTH_ACTION: ActionContract = {
+  actionName: "start_google_calendar_oauth", purpose: "Start Google Calendar read-only OAuth with a one-time state.",
+  requiredPermission: "connectors.manage", riskLevel: 1, confirmationRequired: false,
+  dataSources: ["connector_sources", "server_configuration"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_CONFIGURATION_MISSING"],
+};
+export const COMPLETE_GOOGLE_CALENDAR_OAUTH_ACTION: ActionContract = {
+  actionName: "complete_google_calendar_oauth", purpose: "Verify exact calendar.readonly scope and store only encrypted Google tokens.",
+  requiredPermission: "connectors.manage", riskLevel: 2, confirmationRequired: false,
+  dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials"], possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED"],
+};
+export const SYNC_GOOGLE_CALENDAR_ACTION: ActionContract = {
+  actionName: "sync_google_calendar", purpose: "Synchronise read-only Google calendar and event previews without changing Secretary jobs, tasks or capacity.",
+  requiredPermission: "connectors.manage", riskLevel: 2, confirmationRequired: false,
+  dataSources: ["connector_sources", "connector_credentials", "google_calendar", "external_calendar_events"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "SYNC_TOKEN_EXPIRED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
+export const DISCONNECT_GOOGLE_CALENDAR_SOURCE_ACTION: ActionContract = {
+  actionName: "disconnect_google_calendar_source", purpose: "After confirmation revoke Google authorization and clear local sync state while retaining staged events.",
+  requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: true,
+  dataSources: ["connector_sources", "connector_credentials", "google_oauth"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONFIRMATION_REQUIRED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
+
 // Service Catalogue Module — see VCUF master documentation section 24C.
 // Entries here are entered by the user, never invented ("no fake facts"
 // rule). Later modules (quoting, website content) must read from this

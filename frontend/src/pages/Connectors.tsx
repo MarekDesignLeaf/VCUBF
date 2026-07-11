@@ -6,6 +6,7 @@ import {
   type ConnectorKey,
   type ConnectorSource,
   type ExternalContact,
+  type ExternalCalendarEvent,
 } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
@@ -23,11 +24,15 @@ export function Connectors() {
       ? "Gmail authorization completed. Review the access and enable the source before synchronising."
       : new URLSearchParams(window.location.search).get("google_contacts") === "connected"
         ? "Google Contacts authorization completed. Review the read-only access and enable the source before synchronising."
-        : null
+        : new URLSearchParams(window.location.search).get("google_calendar") === "connected"
+          ? "Google Calendar authorization completed. Review the read-only access and enable the source before synchronising."
+          : null
   );
   const [busySourceId, setBusySourceId] = useState<string | null>(null);
   const [contactSourceId, setContactSourceId] = useState<string | null>(null);
   const [externalContacts, setExternalContacts] = useState<ExternalContact[] | null>(null);
+  const [calendarSourceId, setCalendarSourceId] = useState<string | null>(null);
+  const [externalEvents, setExternalEvents] = useState<ExternalCalendarEvent[] | null>(null);
 
   function loadSources() {
     return api.connectors.sources(activeOnly).then(setSources);
@@ -86,6 +91,8 @@ export function Connectors() {
       }
       const impact = source.connectorKey === "google_contacts"
         ? "Enable read-only Google Contacts access? Synchronisation will stage contact previews but will not create CRM contacts."
+        : source.connectorKey === "google_calendar"
+          ? "Enable read-only Google Calendar access? Synchronisation will stage event previews but will not change jobs, tasks or capacity."
         : "Enable read-only Gmail access? Synchronisation will import messages into Communication Intake.";
       if (!window.confirm(impact)) {
         setBusySourceId(null);
@@ -116,6 +123,9 @@ export function Connectors() {
         const fallback = result.fallbackFromExpiredSyncToken ? " Sync token expired, so a safe full sync was used." : "";
         setNotice(`Google Contacts ${mode} sync: ${result.upsertedCount ?? 0} staged, ${result.deletedCount ?? 0} provider deletions.${fallback}${more}`);
         await showExternalContacts(source);
+      } else if (source.connectorKey === "google_calendar") {
+        setNotice(`Google Calendar ${mode} sync: ${result.calendarsSeen ?? 0} calendars checked, ${result.eventsUpserted ?? 0} events staged, ${result.eventsDeleted ?? 0} cancellations.${more}`);
+        await showExternalEvents(source);
       } else {
         const fallback = result.fallbackFromExpiredHistory ? " History cursor expired, so a safe full sync was used." : "";
         setNotice(`Gmail ${mode} sync: ${result.importedCount} imported, ${result.skippedCount} skipped.${fallback}${more}`);
@@ -190,6 +200,11 @@ export function Connectors() {
       setError(err instanceof ApiError ? err.message : "Could not import the CRM contact.");
     }
   }
+  async function showExternalEvents(source: ConnectorSource) {
+    setError(null); setCalendarSourceId(source.id);
+    try { setExternalEvents((await api.connectors.externalCalendarEvents(source.id)).items); }
+    catch (err) { setError(err instanceof ApiError ? err.message : "Could not load staged Google events."); }
+  }
 
   return (
     <div>
@@ -202,8 +217,8 @@ export function Connectors() {
         ) : null}
       </div>
       <p className="hint">
-        Gmail and Google Contacts support read-only OAuth. Contacts are staged for review and require confirmation before CRM import.
-        Calendar and Drive remain contract-only and fail closed. Never paste an OAuth token, client secret or password here.
+        Gmail, Google Contacts and Google Calendar support read-only OAuth. Contacts and events are staged for review.
+        Drive remains contract-only and fails closed. Never paste an OAuth token, client secret or password here.
       </p>
 
       {error ? <div className="error-banner">{error}</div> : null}
@@ -246,18 +261,18 @@ export function Connectors() {
                 <td><strong>{source.displayName}</strong><div className="hint">{source.definition.serviceName}</div></td>
                 <td>{source.serviceType.replaceAll("_", " ")}</td>
                 <td>{source.configuredScopes.length ? source.configuredScopes.join(", ") : "None configured"}</td>
-                <td>{(["gmail", "google_contacts"].includes(source.connectorKey) ? source.authorizationConfigured : source.credentialReferenceConfigured) ? "Configured" : "Not configured"}</td>
+                <td>{(["gmail", "google_contacts", "google_calendar"].includes(source.connectorKey) ? source.authorizationConfigured : source.credentialReferenceConfigured) ? "Configured" : "Not configured"}</td>
                 <td>{source.connectionStatus.replaceAll("_", " ")}</td>
                 <td>{source.definition.adapterAvailable ? "Available" : "Contract only"}</td>
                 <td>
                   {canManage ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {["gmail", "google_contacts"].includes(source.connectorKey) && !source.authorizationConfigured ? (
-                      <button onClick={() => authorize(source)} disabled={busySourceId === source.id}>Authorize {source.connectorKey === "gmail" ? "Gmail" : "Contacts"}</button>
+                    {["gmail", "google_contacts", "google_calendar"].includes(source.connectorKey) && !source.authorizationConfigured ? (
+                      <button onClick={() => authorize(source)} disabled={busySourceId === source.id}>Authorize {source.connectorKey === "gmail" ? "Gmail" : source.connectorKey === "google_contacts" ? "Contacts" : "Calendar"}</button>
                     ) : null}
-                    {["gmail", "google_contacts"].includes(source.connectorKey) && source.authorizationConfigured && !source.isEnabled ? (
+                    {["gmail", "google_contacts", "google_calendar"].includes(source.connectorKey) && source.authorizationConfigured && !source.isEnabled ? (
                       <button onClick={() => enable(source)} disabled={busySourceId === source.id}>Enable</button>
                     ) : null}
-                    {["gmail", "google_contacts"].includes(source.connectorKey) && source.isEnabled ? (
+                    {["gmail", "google_contacts", "google_calendar"].includes(source.connectorKey) && source.isEnabled ? (
                       <button onClick={() => sync(source)} disabled={busySourceId === source.id}>
                         {source.incrementalSyncConfigured ? "Sync changes" : "Initial sync"}
                       </button>
@@ -265,7 +280,8 @@ export function Connectors() {
                     {source.connectorKey === "google_contacts" ? (
                       <button className="secondary" onClick={() => showExternalContacts(source)}>Review contacts</button>
                     ) : null}
-                    {["gmail", "google_contacts"].includes(source.connectorKey) && source.authorizationConfigured ? (
+                    {source.connectorKey === "google_calendar" ? <button className="secondary" onClick={() => showExternalEvents(source)}>Review events</button> : null}
+                    {["gmail", "google_contacts", "google_calendar"].includes(source.connectorKey) && source.authorizationConfigured ? (
                       <button className="secondary" onClick={() => disconnect(source)} disabled={busySourceId === source.id}>Disconnect</button>
                     ) : null}
                     <button className="secondary" onClick={() => disable(source)} disabled={source.connectionStatus === "disabled" || busySourceId === source.id}>
@@ -300,6 +316,16 @@ export function Connectors() {
           )}
         </section>
       ) : null}
+      {calendarSourceId ? <section className="card" style={{ marginTop: 20 }}>
+        <div className="page-header"><h2>Staged Google Calendar events</h2><button className="secondary" onClick={() => { setCalendarSourceId(null); setExternalEvents(null); }}>Close</button></div>
+        <p className="hint">Read-only preview. These events do not change Secretary jobs, tasks, assignments or capacity.</p>
+        {!externalEvents ? <p>Loading…</p> : externalEvents.length === 0 ? <p className="hint">No active events staged.</p> : <table className="data-table">
+          <thead><tr><th>Event</th><th>Calendar</th><th>When</th><th>Location</th></tr></thead><tbody>{externalEvents.map(event => <tr key={event.id}>
+            <td><strong>{event.summary ?? "Private or untitled event"}</strong><div className="hint">{event.organiserEmail ?? ""}</div></td>
+            <td>{event.externalCalendar.summary}</td><td>{event.startAt ? new Date(event.startAt).toLocaleString() : event.startDate ?? "Unknown"}</td><td>{event.location ?? "—"}</td>
+          </tr>)}</tbody>
+        </table>}
+      </section> : null}
 
       <h2 style={{ marginTop: 28 }}>Connector contracts</h2>
       {!definitions ? <p>Loading…</p> : definitions.map((definition) => (
@@ -333,7 +359,7 @@ function RegisterSourceForm({
   const [connectorKey, setConnectorKey] = useState<ConnectorKey>(definitions[0].key);
   const [displayName, setDisplayName] = useState("");
   const [configuredScopes, setConfiguredScopes] = useState<string[]>(
-    definitions[0].key === "gmail" ? ["read:messages"] : definitions[0].key === "google_contacts" ? ["read:contacts"] : []
+    definitions[0].key === "gmail" ? ["read:messages"] : definitions[0].key === "google_contacts" ? ["read:contacts"] : definitions[0].key === "google_calendar" ? ["read:calendar"] : []
   );
   const [credentialReference, setCredentialReference] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -342,7 +368,7 @@ function RegisterSourceForm({
 
   function changeConnector(value: ConnectorKey) {
     setConnectorKey(value);
-    setConfiguredScopes(value === "gmail" ? ["read:messages"] : value === "google_contacts" ? ["read:contacts"] : []);
+    setConfiguredScopes(value === "gmail" ? ["read:messages"] : value === "google_contacts" ? ["read:contacts"] : value === "google_calendar" ? ["read:calendar"] : []);
   }
 
   function toggleScope(scope: string) {
@@ -376,7 +402,7 @@ function RegisterSourceForm({
         {definitions.map((item) => <option key={item.key} value={item.key}>{item.serviceName}</option>)}
       </select>
       <input placeholder="Source display name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required />
-      {!["gmail", "google_contacts"].includes(connectorKey) ? <input
+      {!["gmail", "google_contacts", "google_calendar"].includes(connectorKey) ? <input
           placeholder="Secret reference, e.g. env:VCUF_CONNECTOR_SECRET"
           value={credentialReference}
           onChange={(event) => setCredentialReference(event.target.value)}

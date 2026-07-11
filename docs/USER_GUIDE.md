@@ -122,7 +122,7 @@ Users with connector permissions can open **Connectors** to review the declared 
 
 For Gmail, register a source with `read:messages`, choose **Authorize Gmail**, complete Google's consent screen, then review and explicitly **Enable** the source. **Initial sync** imports recent messages and stores a Gmail history cursor; **Sync changes** then reads only newly added messages. Repeated sync is idempotent, and an expired cursor safely falls back to a full sync.
 
-Gmail access is read-only. Secretary cannot send, delete, label or change Gmail messages. Google Contacts is also read-only: synchronisation stages previews, and each CRM import requires a separate review and confirmation. A deletion at Google never deletes an imported CRM contact. Never paste a password, OAuth token, client secret or API key into Secretary. Calendar and Drive photo storage remain contract-only in this build.
+Gmail, Google Contacts and Google Calendar access is read-only. Contacts are staged and every CRM import requires confirmation. Calendar events remain external previews and never change jobs, tasks or capacity. Provider deletions never delete imported CRM data. Never paste credentials into Secretary. Drive photo storage remains contract-only.
 
 Use **Disable** to stop access while retaining authorization. Use **Disconnect** only after reviewing its confirmation warning: it revokes the Google grant and deletes the encrypted local credential and sync cursor. Both actions are tenant-scoped and audited.
 
@@ -144,5 +144,5 @@ Production encryption, TLS, database backups, monitoring, secret rotation, reten
 - **Voice unavailable:** use text input. Browser support and policy vary.
 - **Referenced document cannot be opened:** Secretary stores only the reference; check the external location and its access permissions.
 - **Gmail cannot be authorized:** check the backend Google OAuth environment variables, exact redirect URI and encryption key. Do not send those values through chat or paste them into the UI.
-- **Connector cannot be enabled:** Gmail and Google Contacts must finish their own OAuth flow first. Calendar and Drive are contract-only and cannot be enabled yet.
+- **Connector cannot be enabled:** Gmail, Google Contacts and Google Calendar must finish their own OAuth flow first. Drive remains contract-only.
 - **Gmail sync fails:** verify the source is enabled and consent still exists; inspect the non-secret error code. Disable the source if authorization is in doubt.

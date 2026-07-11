@@ -2,7 +2,7 @@
 
 ## Current status
 
-The connector registry and tenant source lifecycle cover Gmail, Google Contacts, Google Calendar and Google Drive photo storage. Gmail and Google Contacts have real read-only adapters. Calendar and Drive remain contract-only and fail closed.
+The connector registry covers Gmail, Google Contacts, Google Calendar and Google Drive photo storage. Gmail, Contacts and Calendar have real read-only adapters. Drive remains contract-only and fails closed.
 
 The Gmail adapter can:
 
@@ -17,6 +17,8 @@ The Gmail adapter can:
 It cannot draft, send, delete, label or otherwise change Gmail data. No attachment bytes are imported. External write actions remain separate future work and must retain explicit confirmation boundaries.
 
 The Google Contacts adapter uses only `contacts.readonly`. It stages People API contact previews in `ExternalContact`; synchronisation never creates a CRM contact. A user holding both connector and CRM management permissions must review one staged record and confirm its import. Provider deletions archive only the staged record and never delete or deactivate a previously imported CRM contact. Initial sync requests `nextSyncToken`; later calls retrieve only changes. Google's `EXPIRED_SYNC_TOKEN` response triggers a safe full-sync fallback.
+
+Google Calendar uses only `calendar.readonly`. Calendar and event metadata is staged separately from Secretary jobs and tasks. CalendarList and every calendar keep independent sync tokens; HTTP 410 clears only that calendar's stale event staging before a full reload. Provider cancellations never change internal scheduling or capacity records.
 
 ## API
 
@@ -49,6 +51,9 @@ Configure these values outside source control:
 - `GOOGLE_CONTACTS_OAUTH_CLIENT_ID`
 - `GOOGLE_CONTACTS_OAUTH_CLIENT_SECRET`
 - `GOOGLE_CONTACTS_OAUTH_REDIRECT_URI`
+- `GOOGLE_CALENDAR_OAUTH_CLIENT_ID`
+- `GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET`
+- `GOOGLE_CALENDAR_OAUTH_REDIRECT_URI`
 - `CONNECTOR_ENCRYPTION_KEY` — exactly 32 random bytes encoded as base64
 - `FRONTEND_URL`
 
@@ -92,7 +97,7 @@ Cross-company source IDs resolve as not found. Provider failures set `lastSyncSt
 - encryption-key rotation workflow;
 - attachment metadata and separately authorized attachment ingestion;
 - provider sandbox verification for a production Google Cloud project;
-- read-only adapters for Calendar and Drive photos;
+- read-only adapter for Drive photos;
 - separate confirmation-gated Gmail draft/send actions if later authorized.
 
 Official implementation references: [Google OAuth 2.0 for web server applications and revocation](https://developers.google.com/identity/protocols/oauth2/web-server), [People API connections.list](https://developers.google.com/people/api/rest/v1/people.connections/list), [People resource](https://developers.google.com/people/api/rest/v1/people), [Gmail synchronization guide](https://developers.google.com/workspace/gmail/api/guides/sync), [Gmail history.list](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list), [Gmail getProfile](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/getProfile), [Gmail messages.list](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/list), [Gmail messages.get](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/get), and [Google restricted scopes](https://support.google.com/cloud/answer/13464325).

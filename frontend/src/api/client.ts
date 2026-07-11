@@ -279,6 +279,10 @@ export interface ConnectorSyncResult {
   upsertedCount?: number;
   deletedCount?: number;
   totalItems?: number | null;
+  calendarsSeen?: number;
+  eventsUpserted?: number;
+  eventsDeleted?: number;
+  eventFallbacks?: number;
   nextPageToken: string | null;
   resultSizeEstimate: number | null;
   hasMore: boolean;
@@ -288,7 +292,7 @@ export interface ConnectorSyncResult {
 
 export interface ConnectorDisconnectResult {
   sourceId: string;
-  provider: "gmail" | "google_contacts";
+  provider: "gmail" | "google_contacts" | "google_calendar";
   disconnectedAt: string;
   providerGrantRevoked: boolean;
 }
@@ -315,6 +319,13 @@ export interface ExternalContactList {
   offset: number;
   limit: number;
 }
+export interface ExternalCalendarEvent {
+  id: string; summary?: string | null; description?: string | null; location?: string | null;
+  startAt?: string | null; endAt?: string | null; startDate?: string | null; endDate?: string | null;
+  organiserEmail?: string | null; attendeeEmails: string[]; isDeleted: boolean;
+  externalCalendar: { summary: string; timeZone?: string | null; isPrimary: boolean };
+}
+export interface ExternalCalendarEventList { items: ExternalCalendarEvent[]; total: number; offset: number; limit: number }
 
 export interface AssignJobResult {
   job: Job;
@@ -1376,6 +1387,8 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ confirmed }),
       }),
+    externalCalendarEvents: (id: string) =>
+      request<ExternalCalendarEventList>(`/connectors/sources/${id}/external-calendar-events?limit=100`),
   },
   jobs: {
     list: (params?: { clientId?: string; status?: string }) => {
