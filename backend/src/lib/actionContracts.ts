@@ -264,12 +264,42 @@ export const DISABLE_CONNECTOR_SOURCE_ACTION: ActionContract = {
 
 export const ENABLE_CONNECTOR_SOURCE_ACTION: ActionContract = {
   actionName: "enable_connector_source",
-  purpose: "Enable a configured external data source only after adapter availability, credential-reference and logical-scope checks and explicit confirmation.",
+  purpose: "Enable a configured external data source only after adapter availability, provider authorization and logical-scope checks and explicit confirmation.",
   requiredPermission: "connectors.manage",
   riskLevel: 3,
   confirmationRequired: true,
-  dataSources: ["connector_registry", "connector_sources", "secret_reference"],
-  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_ADAPTER_UNAVAILABLE", "CONNECTOR_CREDENTIAL_REFERENCE_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "CONFIRMATION_REQUIRED"],
+  dataSources: ["connector_registry", "connector_sources", "connector_credentials"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_ADAPTER_UNAVAILABLE", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "CONFIRMATION_REQUIRED"],
+};
+
+export const START_GMAIL_OAUTH_ACTION: ActionContract = {
+  actionName: "start_gmail_oauth",
+  purpose: "Create a short-lived one-time OAuth state and return Google's authorization URL for Gmail read-only access.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["connector_sources", "server_configuration"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_CONFIGURATION_MISSING"],
+};
+
+export const COMPLETE_GMAIL_OAUTH_ACTION: ActionContract = {
+  actionName: "complete_gmail_oauth",
+  purpose: "Validate one-time OAuth state, exchange Google's authorization code, verify Gmail read-only scope and store only encrypted provider tokens.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials"],
+  possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED", "CONNECTOR_CONFIGURATION_MISSING"],
+};
+
+export const SYNC_GMAIL_MESSAGES_ACTION: ActionContract = {
+  actionName: "sync_gmail_messages",
+  purpose: "Read Gmail messages with the authorized read-only scope and idempotently import them into Communication Intake with provider provenance.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["connector_sources", "connector_credentials", "gmail.messages", "crm.communication_intakes"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
 };
 
 // Service Catalogue Module — see VCUF master documentation section 24C.

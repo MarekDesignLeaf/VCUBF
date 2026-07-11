@@ -9,7 +9,8 @@ export async function resetDb() {
   // catalogue items; jobs must go before the catalogue items they may
   // reference.
   await prisma.auditLog.deleteMany({});
-  await prisma.connectorSource.deleteMany({});
+  await prisma.connectorOAuthState.deleteMany({});
+  await prisma.connectorCredential.deleteMany({});
   await prisma.notificationAcknowledgement.deleteMany({});
   await prisma.learningRule.deleteMany({});
   await prisma.playbookRun.deleteMany({});
@@ -21,6 +22,7 @@ export async function resetDb() {
   await prisma.documentRecord.deleteMany({});
   await prisma.task.deleteMany({});
   await prisma.communicationIntake.deleteMany({});
+  await prisma.connectorSource.deleteMany({});
   await prisma.communicationRecord.deleteMany({});
   await prisma.photoServiceSelection.deleteMany({});
   await prisma.portfolioPhoto.deleteMany({});

@@ -49,7 +49,9 @@ describe("Connector Engine registry and source lifecycle", () => {
       assert.ok(definition.serviceName);
       assert.ok(definition.serviceType);
       assert.ok(Array.isArray(definition.canRead) && definition.canRead.length > 0);
-      assert.ok(Array.isArray(definition.canWrite) && definition.canWrite.length > 0);
+      assert.ok(Array.isArray(definition.canWrite));
+      if (definition.key === "gmail") assert.deepEqual(definition.canWrite, []);
+      else assert.ok(definition.canWrite.length > 0);
       assert.ok(Array.isArray(definition.requiredPermissions) && definition.requiredPermissions.includes("connectors.manage"));
       assert.ok(Array.isArray(definition.returnedDataTypes) && definition.returnedDataTypes.length > 0);
       assert.ok(Array.isArray(definition.supportedActions) && definition.supportedActions.length > 0);
@@ -57,7 +59,7 @@ describe("Connector Engine registry and source lifecycle", () => {
       assert.equal(definition.supportsAudit, true);
       assert.equal(typeof definition.supportsRollback, "boolean");
       assert.equal(definition.actionMode, "proposal_and_confirmed_action");
-      assert.equal(definition.adapterAvailable, false);
+      assert.equal(definition.adapterAvailable, definition.key === "gmail");
     }
   });
 
@@ -68,7 +70,7 @@ describe("Connector Engine registry and source lifecycle", () => {
       .send({
         connector_key: "gmail",
         display_name: "Operations inbox",
-        configured_scopes: ["read:messages", "read:threads"],
+        configured_scopes: ["read:messages"],
         credential_reference: "env:VCUF_GMAIL_OPERATIONS_SECRET",
       });
     assert.equal(res.status, 201);
@@ -138,18 +140,17 @@ describe("Connector Engine registry and source lifecycle", () => {
     assert.equal(res.body.credentialReference, undefined);
   });
 
-  it("fails closed when asked to enable a contract-only connector", async () => {
+  it("fails closed when Gmail has not been authorized", async () => {
     const res = await request(app)
       .post(`/connectors/sources/${sourceId}/enable`)
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ confirmed: true });
     assert.equal(res.status, 409);
-    assert.equal(res.body.error, "CONNECTOR_ADAPTER_UNAVAILABLE");
-    assert.ok(res.body.message.includes("no external account was accessed"));
+    assert.equal(res.body.error, "CONNECTOR_AUTHORIZATION_REQUIRED");
     const stored = await prisma.connectorSource.findUniqueOrThrow({ where: { id: sourceId } });
     assert.equal(stored.isEnabled, false);
     const audit = await prisma.auditLog.findFirst({
-      where: { actionName: "enable_connector_source", errorMessage: "CONNECTOR_ADAPTER_UNAVAILABLE" },
+      where: { actionName: "enable_connector_source", errorMessage: "CONNECTOR_AUTHORIZATION_REQUIRED" },
       orderBy: { createdAt: "desc" },
     });
     assert.ok(audit);

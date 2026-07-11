@@ -120,13 +120,15 @@ Important actions record actor, input, result, risk level and before/after evide
 
 Users with connector permissions can open **Connectors** to review the declared Gmail, Google Contacts, Google Calendar and Google Drive photo-storage contracts and register a company data source.
 
-Registration is not a connection. It stores a disabled source configuration only. The current build has no provider adapter and cannot enable or access the external account. A credential field accepts only an external `env:`, `vault:` or `secret-manager:` reference; never paste a password, OAuth token or API key into Secretary.
+For Gmail, register a source with `read:messages`, choose **Authorize Gmail**, complete Google's consent screen, then review and explicitly **Enable** the source. **Sync now** imports up to 25 unseen messages into Communication Intake. Repeated sync is safe: messages already imported from that source are skipped.
+
+Gmail access is read-only. Secretary cannot send, delete, label or change Gmail messages. Never paste a password, OAuth token, client secret or API key into Secretary. Google Contacts, Calendar and Drive photo storage remain contract-only in this build.
 
 Use **Disable** when a source should no longer be eligible for access. The action is tenant-scoped and audited.
 
 ## 12. Current MVP limitations
 
-Connector contracts and disabled source registration now exist, but the current build still has no authorised provider adapter for email, contacts, external calendar, photo storage, WhatsApp, SMS, job boards or website publishing. It also has no push delivery, quote PDF delivery, native/offline voice runtime, automatic image analysis, automatic legal hiring action or automatic public content change.
+The read-only Gmail adapter requires deployment-owned Google OAuth credentials, an encryption key and any Google verification/security-assessment obligations applicable to the deployment. Synchronisation is manual; scheduled sync, attachments, disconnect/revoke, Gmail writes, contacts, external calendar, photo storage, WhatsApp, SMS, job boards and website publishing are not implemented. The app also has no push delivery, quote PDF delivery, native/offline voice runtime, automatic image analysis, automatic legal hiring action or automatic public content change.
 
 Production encryption, TLS, database backups, monitoring, secret rotation, retention and disaster recovery depend on the selected hosting environment and must be configured and verified before production use.
 
@@ -139,4 +141,6 @@ Production encryption, TLS, database backups, monitoring, secret rotation, reten
 - **Possible duplicate:** compare the candidate records; do not create a second record just to bypass the check.
 - **Voice unavailable:** use text input. Browser support and policy vary.
 - **Referenced document cannot be opened:** Secretary stores only the reference; check the external location and its access permissions.
-- **Connector cannot be enabled:** the current connector is contract-only; no external account was accessed. A verified provider adapter must be installed first.
+- **Gmail cannot be authorized:** check the backend Google OAuth environment variables, exact redirect URI and encryption key. Do not send those values through chat or paste them into the UI.
+- **Connector cannot be enabled:** Gmail must finish OAuth first. Other connector types are contract-only and cannot be enabled yet.
+- **Gmail sync fails:** verify the source is enabled and consent still exists; inspect the non-secret error code. Disable the source if authorization is in doubt.

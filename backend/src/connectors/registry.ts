@@ -19,24 +19,24 @@ export interface ConnectorDefinition {
 }
 
 // Phase 3 contract registry. Capabilities describe the adapter boundary the
-// provider implementation must honour; adapterAvailable remains false until
-// OAuth/API integration and end-to-end verification actually exist.
+// provider implementation must honour. Availability is true only for an
+// adapter implemented and verified in this build.
 export const CONNECTOR_DEFINITIONS: Record<ConnectorKey, ConnectorDefinition> = {
   gmail: {
     key: "gmail",
     serviceName: "Gmail Connector",
     serviceType: "email",
     canRead: ["messages", "threads", "attachment metadata"],
-    canWrite: ["draft messages", "confirmed outbound messages"],
-    logicalScopes: ["read:messages", "read:threads", "read:attachment_metadata", "write:drafts", "write:messages"],
-    requiredPermissions: ["connectors.read", "connectors.manage", "crm.read", "crm.manage"],
-    returnedDataTypes: ["communication message", "thread reference", "attachment reference"],
-    supportedActions: ["list messages", "read message", "prepare draft", "send confirmed message"],
+    canWrite: [],
+    logicalScopes: ["read:messages"],
+    requiredPermissions: ["connectors.read", "connectors.manage"],
+    returnedDataTypes: ["communication intake", "thread reference"],
+    supportedActions: ["authorize read-only access", "synchronise messages into communication intake"],
     possibleErrors: ["AUTHORIZATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "MESSAGE_NOT_FOUND"],
     supportsAudit: true,
     supportsRollback: false,
     actionMode: "proposal_and_confirmed_action",
-    adapterAvailable: false,
+    adapterAvailable: true,
   },
   google_contacts: {
     key: "google_contacts",

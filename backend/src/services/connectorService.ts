@@ -60,14 +60,16 @@ function redactInput(rawInput: unknown): unknown {
   );
 }
 
-function publicSource<T extends {
+export function publicConnectorSource<T extends {
   connectorKey: string;
   credentialReference: string | null;
+  credential?: { sourceId: string } | null;
 }>(source: T) {
-  const { credentialReference, ...safe } = source;
+  const { credentialReference, credential, ...safe } = source;
   return {
     ...safe,
     credentialReferenceConfigured: Boolean(credentialReference),
+    authorizationConfigured: Boolean(credential),
     definition: getConnectorDefinition(source.connectorKey),
   };
 }
@@ -103,14 +105,18 @@ export function listConnectorDefinitions() {
 export async function listConnectorSources(user: AuthedUser, activeOnly = false) {
   const sources = await prisma.connectorSource.findMany({
     where: { companyId: user.companyId, ...(activeOnly ? { isActive: true } : {}) },
+    include: { credential: { select: { sourceId: true } } },
     orderBy: [{ serviceType: "asc" }, { displayName: "asc" }],
   });
-  return sources.map(publicSource);
+  return sources.map(publicConnectorSource);
 }
 
 export async function getConnectorSource(user: AuthedUser, id: string) {
-  const source = await prisma.connectorSource.findFirst({ where: { id, companyId: user.companyId } });
-  return source ? publicSource(source) : null;
+  const source = await prisma.connectorSource.findFirst({
+    where: { id, companyId: user.companyId },
+    include: { credential: { select: { sourceId: true } } },
+  });
+  return source ? publicConnectorSource(source) : null;
 }
 
 export async function registerConnectorSource(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
@@ -155,7 +161,7 @@ export async function registerConnectorSource(user: AuthedUser, rawInput: unknow
       createdBy: user.id,
     },
   });
-  const safeCreated = publicSource(created);
+  const safeCreated = publicConnectorSource(created);
   await recordAudit({
     companyId: user.companyId,
     userId: user.id,
@@ -180,20 +186,23 @@ export async function updateConnectorSource(
     return fail(400, "VALIDATION_FAILED", parsed.error.message);
   }
   const input = parsed.data;
-  const existing = await prisma.connectorSource.findFirst({ where: { id, companyId: user.companyId } });
+  const existing = await prisma.connectorSource.findFirst({
+    where: { id, companyId: user.companyId },
+    include: { credential: { select: { sourceId: true } } },
+  });
   if (!existing) {
     await auditError(user, UPDATE_CONNECTOR_SOURCE_ACTION, { id, ...input }, "CONNECTOR_SOURCE_NOT_FOUND");
     return fail(404, "CONNECTOR_SOURCE_NOT_FOUND");
   }
   if (existing.isEnabled) {
-    await auditError(user, UPDATE_CONNECTOR_SOURCE_ACTION, { id, ...input }, "CONNECTOR_MUST_BE_DISABLED", publicSource(existing));
+    await auditError(user, UPDATE_CONNECTOR_SOURCE_ACTION, { id, ...input }, "CONNECTOR_MUST_BE_DISABLED", publicConnectorSource(existing));
     return fail(409, "CONNECTOR_MUST_BE_DISABLED", "Disable the source before changing its configuration.");
   }
   const definition = getConnectorDefinition(existing.connectorKey)!;
   if (input.configured_scopes) {
     const invalidScopes = unsupportedScopes(definition, input.configured_scopes);
     if (invalidScopes.length > 0) {
-      await auditError(user, UPDATE_CONNECTOR_SOURCE_ACTION, { id, ...input }, "UNSUPPORTED_CONNECTOR_SCOPE", publicSource(existing));
+      await auditError(user, UPDATE_CONNECTOR_SOURCE_ACTION, { id, ...input }, "UNSUPPORTED_CONNECTOR_SCOPE", publicConnectorSource(existing));
       return fail(400, "UNSUPPORTED_CONNECTOR_SCOPE", "One or more logical scopes are not declared by this connector.", {
         unsupportedScopes: invalidScopes,
         allowedScopes: definition.logicalScopes,
@@ -210,7 +219,7 @@ export async function updateConnectorSource(
       },
     });
     if (duplicate) {
-      await auditError(user, UPDATE_CONNECTOR_SOURCE_ACTION, { id, ...input }, "CONNECTOR_SOURCE_ALREADY_EXISTS", publicSource(existing));
+      await auditError(user, UPDATE_CONNECTOR_SOURCE_ACTION, { id, ...input }, "CONNECTOR_SOURCE_ALREADY_EXISTS", publicConnectorSource(existing));
       return fail(409, "CONNECTOR_SOURCE_ALREADY_EXISTS");
     }
   }
@@ -229,9 +238,13 @@ export async function updateConnectorSource(
       changes.connectionStatus = "disabled";
     }
   }
-  const updated = await prisma.connectorSource.update({ where: { id: existing.id }, data: changes });
-  const safeBefore = publicSource(existing);
-  const safeUpdated = publicSource(updated);
+  const updated = await prisma.connectorSource.update({
+    where: { id: existing.id },
+    data: changes,
+    include: { credential: { select: { sourceId: true } } },
+  });
+  const safeBefore = publicConnectorSource(existing);
+  const safeUpdated = publicConnectorSource(updated);
   await recordAudit({
     companyId: user.companyId,
     userId: user.id,
@@ -247,17 +260,24 @@ export async function updateConnectorSource(
 }
 
 export async function disableConnectorSource(user: AuthedUser, id: string): Promise<ServiceResult<unknown>> {
-  const existing = await prisma.connectorSource.findFirst({ where: { id, companyId: user.companyId } });
+  const existing = await prisma.connectorSource.findFirst({
+    where: { id, companyId: user.companyId },
+    include: { credential: { select: { sourceId: true } } },
+  });
   if (!existing) {
     await auditError(user, DISABLE_CONNECTOR_SOURCE_ACTION, { id }, "CONNECTOR_SOURCE_NOT_FOUND");
     return fail(404, "CONNECTOR_SOURCE_NOT_FOUND");
   }
-  const updated = await prisma.connectorSource.update({
-    where: { id: existing.id },
-    data: { isEnabled: false, connectionStatus: "disabled" },
-  });
-  const safeBefore = publicSource(existing);
-  const safeUpdated = publicSource(updated);
+  const [updated] = await prisma.$transaction([
+    prisma.connectorSource.update({
+      where: { id: existing.id },
+      data: { isEnabled: false, connectionStatus: "disabled" },
+      include: { credential: { select: { sourceId: true } } },
+    }),
+    prisma.connectorOAuthState.deleteMany({ where: { sourceId: existing.id } }),
+  ]);
+  const safeBefore = publicConnectorSource(existing);
+  const safeUpdated = publicConnectorSource(updated);
   await recordAudit({
     companyId: user.companyId,
     userId: user.id,
@@ -282,29 +302,32 @@ export async function enableConnectorSource(
     await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id, input: rawInput }, "VALIDATION_FAILED");
     return fail(400, "VALIDATION_FAILED", parsed.error.message);
   }
-  const existing = await prisma.connectorSource.findFirst({ where: { id, companyId: user.companyId, isActive: true } });
+  const existing = await prisma.connectorSource.findFirst({
+    where: { id, companyId: user.companyId, isActive: true },
+    include: { credential: { select: { sourceId: true } } },
+  });
   if (!existing) {
     await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id }, "CONNECTOR_SOURCE_NOT_FOUND");
     return fail(404, "CONNECTOR_SOURCE_NOT_FOUND");
   }
   const definition = getConnectorDefinition(existing.connectorKey)!;
   if (!definition.adapterAvailable) {
-    await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id }, "CONNECTOR_ADAPTER_UNAVAILABLE", publicSource(existing));
+    await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id }, "CONNECTOR_ADAPTER_UNAVAILABLE", publicConnectorSource(existing));
     return fail(
       409,
       "CONNECTOR_ADAPTER_UNAVAILABLE",
       `${definition.serviceName} is contract-only in this build; no external account was accessed.`
     );
   }
-  if (!existing.credentialReference) {
-    await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id }, "CONNECTOR_CREDENTIAL_REFERENCE_REQUIRED", publicSource(existing));
-    return fail(409, "CONNECTOR_CREDENTIAL_REFERENCE_REQUIRED");
+  if (!existing.credential) {
+    await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id }, "CONNECTOR_AUTHORIZATION_REQUIRED", publicConnectorSource(existing));
+    return fail(409, "CONNECTOR_AUTHORIZATION_REQUIRED", "Authorize the provider account before enabling this source.");
   }
   if (existing.configuredScopes.length === 0) {
-    await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id }, "CONNECTOR_SCOPE_REQUIRED", publicSource(existing));
+    await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id }, "CONNECTOR_SCOPE_REQUIRED", publicConnectorSource(existing));
     return fail(409, "CONNECTOR_SCOPE_REQUIRED");
   }
-  const preview = { source: publicSource(existing), willEnableExternalAccess: true };
+  const preview = { source: publicConnectorSource(existing), willEnableExternalAccess: true };
   if (!parsed.data.confirmed) {
     await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id, confirmed: false }, "CONFIRMATION_REQUIRED", preview);
     return fail(409, "CONFIRMATION_REQUIRED", "Review the connector access and resubmit with confirmed: true.", { preview });
@@ -312,14 +335,15 @@ export async function enableConnectorSource(
   const updated = await prisma.connectorSource.update({
     where: { id: existing.id },
     data: { isEnabled: true, connectionStatus: "enabled", lastErrorCode: null },
+    include: { credential: { select: { sourceId: true } } },
   });
-  const safeUpdated = publicSource(updated);
+  const safeUpdated = publicConnectorSource(updated);
   await recordAudit({
     companyId: user.companyId,
     userId: user.id,
     actionName: ENABLE_CONNECTOR_SOURCE_ACTION.actionName,
     inputPayload: { id, confirmed: true },
-    dataBefore: publicSource(existing),
+    dataBefore: publicConnectorSource(existing),
     dataAfter: safeUpdated,
     riskLevel: ENABLE_CONNECTOR_SOURCE_ACTION.riskLevel,
     confirmationRequired: ENABLE_CONNECTOR_SOURCE_ACTION.confirmationRequired,

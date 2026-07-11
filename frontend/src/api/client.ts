@@ -257,7 +257,23 @@ export interface ConnectorSource {
   lastSyncStatus?: string | null;
   lastErrorCode?: string | null;
   credentialReferenceConfigured: boolean;
+  authorizationConfigured: boolean;
   definition: ConnectorDefinition;
+}
+
+export interface ConnectorOAuthStart {
+  authorizationUrl: string;
+  expiresAt: string;
+}
+
+export interface ConnectorSyncResult {
+  sourceId: string;
+  importedCount: number;
+  skippedCount: number;
+  importedIntakeIds: string[];
+  nextPageToken: string | null;
+  resultSizeEstimate: number | null;
+  syncedAt: string;
 }
 
 export interface AssignJobResult {
@@ -1255,6 +1271,13 @@ export const api = {
       request<ConnectorSource>(`/connectors/sources/${id}/enable`, {
         method: "POST",
         body: JSON.stringify({ confirmed }),
+      }),
+    startOAuth: (id: string) =>
+      request<ConnectorOAuthStart>(`/connectors/sources/${id}/oauth/start`, { method: "POST", body: "{}" }),
+    syncSource: (id: string, data: { max_results?: number; query?: string; page_token?: string } = {}) =>
+      request<ConnectorSyncResult>(`/connectors/sources/${id}/sync`, {
+        method: "POST",
+        body: JSON.stringify(data),
       }),
   },
   jobs: {

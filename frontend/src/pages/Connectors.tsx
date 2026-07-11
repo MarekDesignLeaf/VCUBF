@@ -16,6 +16,12 @@ export function Connectors() {
   const [activeOnly, setActiveOnly] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("gmail") === "connected"
+      ? "Gmail authorization completed. Review the access and enable the source before synchronising."
+      : null
+  );
+  const [busySourceId, setBusySourceId] = useState<string | null>(null);
 
   function loadSources() {
     return api.connectors.sources(activeOnly).then(setSources);
@@ -47,6 +53,62 @@ export function Connectors() {
     }
   }
 
+  async function authorize(source: ConnectorSource) {
+    setError(null);
+    setNotice(null);
+    setBusySourceId(source.id);
+    try {
+      const result = await api.connectors.startOAuth(source.id);
+      window.location.assign(result.authorizationUrl);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not start Gmail authorization.");
+      setBusySourceId(null);
+    }
+  }
+
+  async function enable(source: ConnectorSource) {
+    setError(null);
+    setNotice(null);
+    setBusySourceId(source.id);
+    try {
+      await api.connectors.enableSource(source.id, false);
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.code !== "CONFIRMATION_REQUIRED") {
+        setError(err instanceof ApiError ? err.message : "Could not enable the data source.");
+        setBusySourceId(null);
+        return;
+      }
+      if (!window.confirm("Enable read-only Gmail access for this source? Synchronisation will import messages into Communication Intake.")) {
+        setBusySourceId(null);
+        return;
+      }
+    }
+    try {
+      await api.connectors.enableSource(source.id, true);
+      await loadSources();
+      setNotice("Gmail source enabled. No external write access was granted.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not enable the data source.");
+    } finally {
+      setBusySourceId(null);
+    }
+  }
+
+  async function sync(source: ConnectorSource) {
+    setError(null);
+    setNotice(null);
+    setBusySourceId(source.id);
+    try {
+      const result = await api.connectors.syncSource(source.id, { max_results: 25 });
+      await loadSources();
+      setNotice(`Gmail synchronised: ${result.importedCount} imported, ${result.skippedCount} already present.`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not synchronise Gmail.");
+    } finally {
+      setBusySourceId(null);
+    }
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -58,12 +120,12 @@ export function Connectors() {
         ) : null}
       </div>
       <p className="hint">
-        Phase 3 connector contracts and tenant data-source controls. This build does not contain provider adapters:
-        registering a source stores only disabled configuration, and enabling fails closed without accessing an external account.
-        Never paste an OAuth token or password here; only an env:, vault: or secret-manager: reference is accepted.
+        Gmail supports read-only OAuth and imports messages into Communication Intake with provider provenance.
+        Other connectors remain contract-only and fail closed. Never paste an OAuth token, client secret or password here.
       </p>
 
       {error ? <div className="error-banner">{error}</div> : null}
+      {notice ? <div className="success-banner">{notice}</div> : null}
       {showForm && definitions && canManage ? (
         <RegisterSourceForm
           definitions={definitions}
@@ -90,7 +152,7 @@ export function Connectors() {
               <th>Source</th>
               <th>Type</th>
               <th>Scopes</th>
-              <th>Secret reference</th>
+              <th>Authorization</th>
               <th>Status</th>
               <th>Adapter</th>
               <th></th>
@@ -102,15 +164,24 @@ export function Connectors() {
                 <td><strong>{source.displayName}</strong><div className="hint">{source.definition.serviceName}</div></td>
                 <td>{source.serviceType.replaceAll("_", " ")}</td>
                 <td>{source.configuredScopes.length ? source.configuredScopes.join(", ") : "None configured"}</td>
-                <td>{source.credentialReferenceConfigured ? "Reference configured" : "Not configured"}</td>
+                <td>{(source.connectorKey === "gmail" ? source.authorizationConfigured : source.credentialReferenceConfigured) ? "Configured" : "Not configured"}</td>
                 <td>{source.connectionStatus.replaceAll("_", " ")}</td>
                 <td>{source.definition.adapterAvailable ? "Available" : "Contract only"}</td>
                 <td>
-                  {canManage ? (
-                    <button className="secondary" onClick={() => disable(source)} disabled={source.connectionStatus === "disabled"}>
+                  {canManage ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {source.connectorKey === "gmail" && !source.authorizationConfigured ? (
+                      <button onClick={() => authorize(source)} disabled={busySourceId === source.id}>Authorize Gmail</button>
+                    ) : null}
+                    {source.connectorKey === "gmail" && source.authorizationConfigured && !source.isEnabled ? (
+                      <button onClick={() => enable(source)} disabled={busySourceId === source.id}>Enable</button>
+                    ) : null}
+                    {source.connectorKey === "gmail" && source.isEnabled ? (
+                      <button onClick={() => sync(source)} disabled={busySourceId === source.id}>Sync now</button>
+                    ) : null}
+                    <button className="secondary" onClick={() => disable(source)} disabled={source.connectionStatus === "disabled" || busySourceId === source.id}>
                       Disable
                     </button>
-                  ) : "—"}
+                  </div> : "—"}
                 </td>
               </tr>
             ))}
@@ -149,7 +220,9 @@ function RegisterSourceForm({
 }) {
   const [connectorKey, setConnectorKey] = useState<ConnectorKey>(definitions[0].key);
   const [displayName, setDisplayName] = useState("");
-  const [configuredScopes, setConfiguredScopes] = useState<string[]>([]);
+  const [configuredScopes, setConfiguredScopes] = useState<string[]>(
+    definitions[0].key === "gmail" ? ["read:messages"] : []
+  );
   const [credentialReference, setCredentialReference] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -157,7 +230,7 @@ function RegisterSourceForm({
 
   function changeConnector(value: ConnectorKey) {
     setConnectorKey(value);
-    setConfiguredScopes([]);
+    setConfiguredScopes(value === "gmail" ? ["read:messages"] : []);
   }
 
   function toggleScope(scope: string) {
@@ -191,12 +264,12 @@ function RegisterSourceForm({
         {definitions.map((item) => <option key={item.key} value={item.key}>{item.serviceName}</option>)}
       </select>
       <input placeholder="Source display name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required />
-      <input
-        placeholder="Secret reference, e.g. env:VCUF_GMAIL_SECRET"
-        value={credentialReference}
-        onChange={(event) => setCredentialReference(event.target.value)}
-        style={{ minWidth: 300 }}
-      />
+      {connectorKey !== "gmail" ? <input
+          placeholder="Secret reference, e.g. env:VCUF_CONNECTOR_SECRET"
+          value={credentialReference}
+          onChange={(event) => setCredentialReference(event.target.value)}
+          style={{ minWidth: 300 }}
+        /> : <p className="hint">Gmail credentials are added through OAuth after this disabled source is registered.</p>}
       <fieldset>
         <legend>Logical scopes</legend>
         {definition.logicalScopes.map((scope) => (

@@ -318,7 +318,7 @@ export async function updateQuote(user: AuthedUser, quoteId: string, rawInput: u
 }
 
 // change_quote_status — Action Contract driven. Internal record only; does
-// not send anything to the client (no communication connector exists yet).
+// not send anything to the client (no outbound communication connector exists yet).
 export async function changeQuoteStatus(user: AuthedUser, quoteId: string, rawInput: unknown): Promise<ServiceResult<unknown>> {
   const parsed = changeQuoteStatusSchema.safeParse(rawInput);
   if (!parsed.success) {

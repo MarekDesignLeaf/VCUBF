@@ -105,6 +105,14 @@ button:disabled { opacity: 0.6; cursor: default; }
   font-size: 0.9rem;
 }
 
+.success-banner {
+  background: #e8f5ed;
+  color: #175c35;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
 .page-header { display: flex; justify-content: space-between; align-items: center; }
 
 .inline-form {

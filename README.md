@@ -223,7 +223,7 @@ npm run dev                 # http://localhost:5173
   misleading cost total — the system says what is missing instead of guessing a margin.
   Quotes move through a fixed lifecycle (`draft → sent → accepted / rejected / expired`);
   changing status is an internal record only — no email/message is sent to the client,
-  since no communication connector exists yet. A referenced `service_catalogue_item_id`
+  since no outbound communication connector exists yet. A referenced `service_catalogue_item_id`
   or `job_id` is validated against the company's real records before a quote is created.
   Text command: "list quotes" / "list quotes for <client>" (full quote creation needs a
   line-item form, so it isn't a one-line voice command in this slice).
@@ -621,16 +621,17 @@ npm run dev                 # http://localhost:5173
   urgency, fastest relief route and missing evidence without creating a job opening.
 - **User guide and CI**: `docs/USER_GUIDE.md` documents daily use and limitations. GitHub
   Actions builds and tests the backend against disposable PostgreSQL and builds/lints the frontend.
-- **Connector Engine Phase 3 foundation**: `backend/src/connectors/registry.ts` declares
-  complete Gmail, Google Contacts, Google Calendar and Google Drive photo-storage contracts;
-  tenant-scoped `/connectors` APIs register disabled sources, validate logical scopes, keep
-  secret-store references out of API/audit output, provide an audited disable control and fail
-  closed on enable while provider adapters remain unavailable. See `docs/CONNECTOR_ENGINE.md`.
+- **Connector Engine Phase 3 Gmail read-only adapter**: the registry declares Gmail,
+  Google Contacts, Google Calendar and Google Drive photo-storage contracts. Gmail now has
+  tenant-scoped OAuth with hashed one-time state, exact `gmail.readonly` scope enforcement,
+  AES-256-GCM token storage, refresh-token handling and idempotent import into Communication
+  Intake with provider provenance. Contacts, Calendar and Drive remain contract-only and fail
+  closed. See `docs/CONNECTOR_ENGINE.md`.
 
-Backend verified: 312/312 tests passing across 35 suites (auth, CRM clients, CRM jobs, CRM leads,
+Backend verified: 320/320 tests passing across 36 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
- recruitment, playbooks, learning, communication extraction/reply drafting, unresolved enquiry monitoring, communication log, notifications/escalation, data
+ recruitment, playbooks, learning, connector lifecycle, Gmail OAuth/read-only ingestion, communication extraction/reply drafting, unresolved enquiry monitoring, communication log, notifications/escalation, data
 quality, portfolio/photo, photo selection by service, and memory model/pattern-detection) —
 covering permissions, validation, duplicate
 detection, cross-tenant checks, status-transition validation, lead conversion and
@@ -711,9 +712,9 @@ A day-level scheduling grid with travel time, tool/material/vehicle requirements
 staged multi-visit scheduling is not implemented — the calendar slice works at weekly
 granularity, matching the capacity engine underneath it. Employee creation issues no
 invitation email and generates no temporary password reset flow — an admin sets the
-initial password directly, since there is no email connector yet. Quotes have no PDF
-export or "send to client" action — status is tracked internally only, since no
-communication connector exists yet to actually deliver anything. Recruitment adverts are
+initial password directly, since there is no outbound email action. Quotes have no PDF
+export or "send to client" action — status is tracked internally only, since the Gmail
+adapter is read-only and cannot deliver anything. Recruitment adverts are
 drafted text only — there is no job-board connector to place them, no candidate-sourcing
 integration, and no trial-day scheduling tie-in to the calendar module yet; a hired
 candidate must still be turned into an employee account manually. Playbooks are limited
@@ -732,12 +733,12 @@ cross-user pattern detection are not implemented. Learning rules are
 whole-term substitutions only — a rule can't yet rewrite part of a sentence based on
 context (e.g. it can't tell "old client" apart in "call the old client" vs. "he's quite
 old" — it just doesn't fire on any term it wasn't taught verbatim, matching the "must
-not guess" rule rather than trying to be clever about it). Also still missing from MVP
-scope: automatic connector ingestion — the Communication Intake workflow now preserves
-manually supplied authorised messages, performs deterministic extraction and CRM matching,
-creates/links clients after confirmation, and prepares unsent replies, but it does not log
-into or read an email/WhatsApp/SMS account itself. Thread-wide summarisation, attachment/
-photo ingestion, near-duplicate identity matching beyond the fixed normalized contact/name
+not guess" rule rather than trying to be clever about it). Gmail read-only ingestion now
+imports messages manually on request into Communication Intake, preserving provider source,
+message and thread IDs; it performs deterministic extraction and CRM matching only through
+the existing reviewed intake workflow. Scheduled/background sync, Gmail history cursors,
+disconnect/revoke, WhatsApp/SMS ingestion, thread-wide summarisation, attachment/photo
+ingestion, near-duplicate identity matching beyond the fixed normalized contact/name
 rules, unresolved-enquiry scanning across external inboxes, and any send action remain
 unimplemented. The Notification and Escalation Module's feed is pull-only (a
 page you open, or a text command you run) — there is no push delivery yet: no email
@@ -772,7 +773,9 @@ Build order should follow the roadmap in the master documentation (Phase 1 → P
 ## Deployment
 
 - **Backend**: designed to deploy to Railway (Postgres + Node service). Set
-  `DATABASE_URL`, `JWT_SECRET`, `PORT` as environment variables; run
+  `DATABASE_URL`, `JWT_SECRET`, `PORT`, `FRONTEND_URL`, `GMAIL_OAUTH_CLIENT_ID`,
+  `GMAIL_OAUTH_CLIENT_SECRET`, `GMAIL_OAUTH_REDIRECT_URI` and a 32-byte base64
+  `CONNECTOR_ENCRYPTION_KEY` as environment variables; run
   `npm run build && npx prisma migrate deploy && npm start`.
 - **Frontend**: any static host (Railway static site, Vercel, Netlify). Set
   `VITE_API_URL` to the deployed backend URL at build time.
