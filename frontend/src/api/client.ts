@@ -555,6 +555,7 @@ export interface MetricsOverview {
   period: { from: string; to: string; days: number };
   comparisonPeriod: { from: string; to: string };
   dataCompleteness: Record<"leadSource" | "quoteServiceLink" | "quoteCost" | "activeJobEstimate" | "activeJobPlannedDate" | "activeJobServiceLink", { complete: number; total: number; pct: number | null }>;
+  serviceDemand: { rows: { serviceRequested: string; current: number; previous: number; delta: number }[]; unclassifiedLeadCount: number; basis: string };
   trends: {
     newLeads: { current: number; previous: number; delta: number };
     quoteCount: { current: number; previous: number; delta: number };

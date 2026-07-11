@@ -21,9 +21,9 @@ describe("Measurement and KPI Module", () => {
     workerToken = workerLogin.body.token;
 
     await prisma.lead.createMany({ data: [
-      { companyId: TEST_COMPANY_ID, name: "One", source: "Google", leadStatus: "lost" },
-      { companyId: TEST_COMPANY_ID, name: "Two", source: "Google", leadStatus: "lost" },
-      { companyId: TEST_COMPANY_ID, name: "Three", source: "Referral", leadStatus: "converted" },
+      { companyId: TEST_COMPANY_ID, name: "One", source: "Google", leadStatus: "lost", serviceRequested: "Fencing" },
+      { companyId: TEST_COMPANY_ID, name: "Two", source: "Google", leadStatus: "lost", serviceRequested: "fencing" },
+      { companyId: TEST_COMPANY_ID, name: "Three", source: "Referral", leadStatus: "converted", serviceRequested: " Fencing " },
       { companyId: TEST_COMPANY_ID, name: "Four", source: "Referral", leadStatus: "qualified" },
       { companyId: TEST_COMPANY_ID, name: "Five", source: null, leadStatus: "new" },
       { companyId: TEST_COMPANY_ID, name: "Six", source: "Google", leadStatus: "lost" },
@@ -37,7 +37,7 @@ describe("Measurement and KPI Module", () => {
       await prisma.quote.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, title: `Quote ${index}`, quoteStatus: status, items: { create: items } } });
     }
     const previousCreatedAt = new Date(Date.now() - 45 * 86_400_000);
-    await prisma.lead.create({ data: { companyId: TEST_COMPANY_ID, name: "Previous lead", leadStatus: "converted", createdAt: previousCreatedAt } });
+    await prisma.lead.create({ data: { companyId: TEST_COMPANY_ID, name: "Previous lead", leadStatus: "converted", serviceRequested: "FENCING", createdAt: previousCreatedAt } });
     await prisma.quote.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, title: "Previous quote", quoteStatus: "accepted", createdAt: previousCreatedAt, items: { create: [{ description: "Previous work", quantity: 1, unitPrice: 500, sortOrder: 0 }] } } });
     await prisma.job.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, jobTitle: "Previous completed job", jobStatus: "dokonceno", createdAt: previousCreatedAt } });
     await prisma.user.updateMany({ where: { companyId: TEST_COMPANY_ID }, data: { weeklyCapacityHours: 20 } });
@@ -75,6 +75,8 @@ describe("Measurement and KPI Module", () => {
     assert.deepEqual(res.body.dataCompleteness.quoteServiceLink, { complete: 2, total: 5, pct: 40 });
     assert.deepEqual(res.body.dataCompleteness.quoteCost, { complete: 1, total: 5, pct: 20 });
     assert.deepEqual(res.body.dataCompleteness.activeJobEstimate, { complete: 1, total: 1, pct: 100 });
+    assert.deepEqual(res.body.serviceDemand.rows, [{ serviceRequested: "Fencing", current: 3, previous: 1, delta: 2 }]);
+    assert.equal(res.body.serviceDemand.unclassifiedLeadCount, 3);
     assert.deepEqual(res.body.revenueByService.rows, [{ serviceId: res.body.revenueByService.rows[0].serviceId, serviceName: "Fencing", acceptedValueGbp: 150, lineCount: 2, linesWithKnownCost: 1, costKnown: false, marginGbp: null, marginPct: null }]);
     assert.equal(res.body.revenueByService.unlinkedAcceptedValueGbp, 0);
     assert.equal(res.body.capacity.available, true);
@@ -86,5 +88,6 @@ describe("Measurement and KPI Module", () => {
     assert.ok(res.body.recommendations.some((item: any) => item.title === "Lead source needs review: Google"));
     assert.ok(res.body.recommendations.some((item: any) => item.title === "Quote cost coverage is below 80%"));
     assert.ok(res.body.recommendations.some((item: any) => item.title === "Quote service-link coverage is below 80%"));
+    assert.ok(res.body.recommendations.some((item: any) => item.title === "Demand is increasing: Fencing"));
   });
 });

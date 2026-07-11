@@ -59,6 +59,10 @@ export function Metrics() {
       <tr><td>Average quote</td><td>{data.trends.averageQuoteValueGbp.current == null ? "Unknown" : `£${data.trends.averageQuoteValueGbp.current.toFixed(2)}`}</td><td>{data.trends.averageQuoteValueGbp.previous == null ? "Unknown" : `£${data.trends.averageQuoteValueGbp.previous.toFixed(2)}`}</td><td>{change(data.trends.averageQuoteValueGbp.current, data.trends.averageQuoteValueGbp.previous, " GBP")}</td></tr>
       <tr><td>Completed jobs</td><td>{data.trends.completedJobs.current}</td><td>{data.trends.completedJobs.previous}</td><td>{change(data.trends.completedJobs.current, data.trends.completedJobs.previous)}</td></tr>
     </tbody></table>
+    <h2>Requested service demand</h2>
+    <p className="hint">{data.serviceDemand.basis}</p>
+    {data.serviceDemand.rows.length ? <table className="data-table"><thead><tr><th>Entered service</th><th>Current leads</th><th>Previous leads</th><th>Change</th></tr></thead><tbody>{data.serviceDemand.rows.map((row) => <tr key={row.serviceRequested.toLocaleLowerCase()}><td>{row.serviceRequested}</td><td>{row.current}</td><td>{row.previous}</td><td>{row.delta > 0 ? "+" : ""}{row.delta}</td></tr>)}</tbody></table> : <p className="hint">No leads have a requested service in this period.</p>}
+    {data.serviceDemand.unclassifiedLeadCount > 0 && <p className="hint">{data.serviceDemand.unclassifiedLeadCount} leads have no requested service and remain unclassified.</p>}
     <h2>Data completeness</h2>
     <p className="hint">Coverage of the saved fields used by KPI, margin and capacity calculations. Empty samples remain unknown.</p>
     <table className="data-table"><thead><tr><th>Input</th><th>Complete records</th><th>Coverage</th></tr></thead><tbody>

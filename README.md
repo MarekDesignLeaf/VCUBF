@@ -107,6 +107,10 @@ npm run dev                 # http://localhost:5173
   A data-completeness panel measures lead-source, quote service-link, quote cost,
   active-job estimate/date and active-job service-link coverage. Below-80% completion
   creates a specific remediation only when at least three relevant records exist.
+  Requested-service demand compares exact normalized `Lead.serviceRequested` text with
+  the prior equal period. It keeps blank leads unclassified and never invents a service-
+  catalogue link; a growth suggestion requires at least three current leads and a rise
+  of at least two leads.
 - **Backend — services layer refactor**: business logic extracted out of route handlers
   into `backend/src/services/*Service.ts` (clients, jobs, leads), each returning a
   uniform `ServiceResult<T>` (`ok()`/`fail()`). Routes are now thin wrappers that call a
