@@ -551,6 +551,18 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
       break;
     }
 
+    case "list_unresolved_enquiries": {
+      const since = command.entities.since_days
+        ? new Date(Date.now() - command.entities.since_days * 24 * 60 * 60 * 1000).toISOString()
+        : undefined;
+      const data = await communicationService.listEnquiries(user, {
+        resolution: "unresolved",
+        ...(since ? { since } : {}),
+      });
+      response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
+      break;
+    }
+
     case "list_notifications": {
       const data = await notificationService.getAttentionFeed(user);
       response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };

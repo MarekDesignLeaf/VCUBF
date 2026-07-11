@@ -345,6 +345,15 @@ npm run dev                 # http://localhost:5173
 - **Frontend — Communication Intake**: preserves the original message/source reference,
   shows extracted evidence, missing data and CRM candidates, requires a visible conversion
   confirmation, and labels reply text as an internal unsent draft.
+- **Unresolved Enquiry Monitoring**: `GET /communications/enquiries` combines unconverted
+  inbound intakes (`resolutionNeeded`) with inbound Communication Log records
+  (`followUpNeeded`) into one company-scoped, duplicate-free view. Resolution, channel and
+  ISO `since` filters support both all-time review and the master-document example “check
+  unresolved enquiries from the last week”. `PUT /communications/intakes/:id/resolution`
+  resolves or reopens an intake, records before/after audit evidence, and synchronises a
+  converted intake with its CommunicationRecord in both directions. Raw unresolved intakes
+  also appear in Notifications as warnings; without a stored deadline they are never
+  labelled urgent. The Enquiries frontend exposes the same filters and reversible actions.
 - **Frontend — Communications**: new Communications page (list with channel and
   follow-up-needed filters, and a "Log communication" quick-entry form — client picker,
   channel/direction selects, summary, occurred-at, and a follow-up checkbox + due date).
@@ -355,8 +364,8 @@ npm run dev                 # http://localhost:5173
 - **Notification and Escalation Module**: `GET /notifications` (Action Contract
   `get_attention_feed`, risk 0, read-only) builds a single, unified "things needing
   attention" feed by computing it fresh, on every read, from real data already owned by
-  other modules — it stores no duplicate business facts. Sources: overdue Communication
-  Log follow-ups (`communicationService.listFollowUpsDue`), real capacity overload weeks
+  other modules — it stores no duplicate business facts. Sources: unresolved raw intakes,
+  overdue Communication Log follow-ups (`communicationService.listFollowUpsDue`), real capacity overload weeks
   from the Job Allocation/Calendar module (`calendarService.detectUpcomingOverload`,
   including the same real mitigation menu), and draft/sent quotes whose `valid_until`
   date has passed or is within 7 days (`backend/src/services/notificationService.ts`).
@@ -455,9 +464,10 @@ npm run dev                 # http://localhost:5173
   so using it directly would under-report stuck jobs; a job with no `change_job_status`
   audit entry yet is measured from `Job.createdAt` instead, since it has been sitting in
   its initial status since creation. Both reuse the existing acknowledge/unacknowledge
-  mechanism; no new Prisma model. The Notifications feed now has seven real sources:
-  overdue follow-ups, capacity overload, expiring quotes, data quality findings, the
-  portfolio marketing-readiness gap, stale open leads, and stuck jobs.
+  mechanism; no new Prisma model. With later Task and Communication Intake additions, the
+  Notifications feed now has nine real sources: unresolved raw intakes, overdue follow-ups,
+  capacity overload, expiring quotes, data quality findings, the portfolio
+  marketing-readiness gap, stale open leads, stuck jobs, and overdue tasks.
 - **Data Quality Engine — `merge_clients` (confirmation-gated, risk 3)**: closes the
   previously-documented "no merge these clients action yet" gap. Follows the exact same
   `confirmationRequired: true` / 409 `CONFIRMATION_REQUIRED` preview pattern already used
@@ -578,10 +588,10 @@ npm run dev                 # http://localhost:5173
   now loads jobs, due Secretary tasks and overload data in parallel; Employee capacity also
   reports tasks missing an estimate.
 
-Backend verified: 257/257 tests passing across 28 suites (auth, CRM clients, CRM jobs, CRM leads,
+Backend verified: 269/269 tests passing across 29 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
- recruitment, playbooks, learning, communication extraction/reply drafting, communication log, notifications/escalation, data
+ recruitment, playbooks, learning, communication extraction/reply drafting, unresolved enquiry monitoring, communication log, notifications/escalation, data
 quality, portfolio/photo, and memory model/pattern-detection) —
 covering permissions, validation, duplicate
 detection, cross-tenant checks, status-transition validation, lead conversion and
@@ -691,9 +701,10 @@ rules, unresolved-enquiry scanning across external inboxes, and any send action 
 unimplemented. The Notification and Escalation Module's feed is pull-only (a
 page you open, or a text command you run) — there is no push delivery yet: no email
 digest, no SMS/WhatsApp alert, and no in-app real-time badge/websocket, since no
-notification-delivery connector exists. It now aggregates seven real signal types
-(overdue follow-ups, capacity overload, expiring quotes, data quality findings, the
-portfolio marketing-readiness gap, stale open leads, and stuck jobs); it does not yet
+notification-delivery connector exists. It now aggregates nine real signal types
+(unresolved raw intakes, overdue follow-ups, capacity overload, expiring quotes, data
+quality findings, the portfolio marketing-readiness gap, stale open leads, stuck jobs,
+and overdue tasks); it does not yet
 cover every escalation-worthy condition the architecture lists (e.g. an employee
 approaching their weekly capacity across *multiple* future weeks at once rather than one
 at a time, or a quote sitting in "sent" for a long time without a follow-up) — extending

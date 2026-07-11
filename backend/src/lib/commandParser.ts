@@ -42,6 +42,7 @@ export type ParsedCommand =
     }
   | { intent: "list_portfolio_photos"; entities: { client_name?: string; usable_for_marketing?: boolean } }
   | { intent: "list_follow_ups"; entities: Record<string, never> }
+  | { intent: "list_unresolved_enquiries"; entities: { since_days?: number } }
   | { intent: "list_notifications"; entities: Record<string, never> }
   | { intent: "list_data_quality"; entities: Record<string, never> }
   | { intent: "detect_action_patterns"; entities: Record<string, never> }
@@ -231,6 +232,17 @@ export function parseTextCommand(rawText: string): ParsedCommand {
 
   if (/^(?:list|show)\s+follow[\s-]?ups?$/i.test(text)) return { intent: "list_follow_ups", entities: {} };
 
+  // Communication Intelligence — deterministic forms matching the master
+  // document examples: "show unresolved enquiries" and "check unresolved
+  // enquiries from the last week/7 days".
+  m = text.match(
+    /^(?:list|show|check|find)\s+unresolved\s+enquir(?:y|ies)(?:\s+(?:from|in)\s+(?:the\s+)?last\s+(?:([1-9]\d*)\s+days?|week))?$/i
+  );
+  if (m) {
+    const sinceDays = m[1] ? Number(m[1]) : /\bweek\b/i.test(text) ? 7 : undefined;
+    return { intent: "list_unresolved_enquiries", entities: { since_days: sinceDays } };
+  }
+
   // Notification and Escalation Module — surfaces the unified attention
   // feed (overdue follow-ups, capacity overload, expiring quotes).
   if (/^(?:list|show)\s+notifications?$/i.test(text)) return { intent: "list_notifications", entities: {} };
@@ -248,7 +260,7 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   // here. Same judgment call the README already documents for prepare_quote
   // ("a real, multi-line-item form, so it isn't a one-line voice command in
   // this slice"): merging picks two specific client ids out of a possible
-  // duplicate pair and re-links four different record types, which is not
+  // duplicate pair and re-links five different record types, which is not
   // safely expressible or reviewable as a single typed sentence. It stays a
   // dedicated form/API flow (POST /data-quality/merge-clients) that always
   // goes through the same confirmationRequired preview before anything

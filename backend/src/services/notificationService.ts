@@ -11,7 +11,7 @@ import {
 } from "../lib/actionContracts.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
-import { listFollowUpsDue } from "./communicationService.js";
+import { listFollowUpsDue, listUnresolvedIntakeEnquiries } from "./communicationService.js";
 import { detectUpcomingOverload } from "./calendarService.js";
 import { buildDataQualityItems } from "./dataQualityService.js";
 
@@ -21,6 +21,8 @@ import { buildDataQualityItems } from "./dataQualityService.js";
 // real data already owned by other modules —
 //   - Communication Log Module: follow-ups that are overdue or never had a
 //     date entered (communicationService.listFollowUpsDue).
+//   - Communication Intelligence Module: preserved inbound intakes whose
+//     explicit resolutionNeeded flag remains true before CRM conversion.
 //   - Job Allocation and Capacity Management / Calendar and Scheduling
 //     Intelligence Module: upcoming weeks where a real employee's computed
 //     workload exceeds their declared capacity (calendarService.
@@ -113,6 +115,22 @@ async function buildFollowUpItems(user: AuthedUser): Promise<AttentionItemBase[]
       entity: { type: "communication_record", id: r.id, label: r.client?.displayName },
     };
   });
+}
+
+async function buildUnresolvedEnquiryItems(user: AuthedUser): Promise<AttentionItemBase[]> {
+  const enquiries = await listUnresolvedIntakeEnquiries(user);
+  return enquiries.map((enquiry) => ({
+    key: `unresolved_enquiry:${enquiry.sourceId}`,
+    type: "unresolved_enquiry",
+    // No deadline/SLA is stored for a raw intake, so urgency must not be
+    // fabricated from age alone. The explicit unresolved state warrants a
+    // warning; only records with real overdue dates can become urgent.
+    severity: "warning",
+    title: `Unresolved enquiry from ${enquiry.senderLabel}`,
+    message: `Inbound ${enquiry.channel.replace(/_/g, " ")} enquiry is still marked as needing resolution. No response deadline is recorded.`,
+    dueAt: null,
+    entity: { type: "communication_intake", id: enquiry.sourceId, label: enquiry.senderLabel },
+  }));
 }
 
 async function buildOverloadItems(user: AuthedUser): Promise<AttentionItemBase[]> {
@@ -315,8 +333,9 @@ export async function getAttentionFeed(
   user: AuthedUser,
   options: { includeAcknowledged?: boolean } = {}
 ): Promise<AttentionItem[]> {
-  const [followUps, overloads, expiringQuotes, dataQualityItems, portfolioGapItems, staleLeads, stuckJobs, overdueTasks] =
+  const [unresolvedEnquiries, followUps, overloads, expiringQuotes, dataQualityItems, portfolioGapItems, staleLeads, stuckJobs, overdueTasks] =
     await Promise.all([
+      buildUnresolvedEnquiryItems(user),
       buildFollowUpItems(user),
       buildOverloadItems(user),
       buildQuoteExpiryItems(user),
@@ -328,6 +347,7 @@ export async function getAttentionFeed(
     ]);
 
   const items: AttentionItemBase[] = [
+    ...unresolvedEnquiries,
     ...followUps,
     ...overloads,
     ...expiringQuotes,

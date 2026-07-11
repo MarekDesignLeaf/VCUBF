@@ -7,6 +7,7 @@ import {
   EXTRACT_COMMUNICATION_INTAKE_ACTION,
   LOG_COMMUNICATION_INTAKE_ACTION,
   PREPARE_COMMUNICATION_REPLY_ACTION,
+  SET_COMMUNICATION_INTAKE_RESOLUTION_ACTION,
   UPDATE_COMMUNICATION_RECORD_ACTION,
   COMMUNICATION_CHANNELS,
   COMMUNICATION_DIRECTIONS,
@@ -62,6 +63,35 @@ export const convertCommunicationIntakeSchema = z.object({
   confirmed: z.boolean().optional(),
 });
 
+export const enquiryQuerySchema = z.object({
+  resolution: z.enum(["unresolved", "resolved", "all"]).default("unresolved"),
+  since: z.string().datetime().optional(),
+  channel: z.enum(COMMUNICATION_CHANNELS).optional(),
+});
+
+export const updateCommunicationIntakeResolutionSchema = z.object({
+  resolution_needed: z.boolean(),
+});
+
+export type EnquiryQuery = z.infer<typeof enquiryQuerySchema>;
+
+export interface EnquiryListItem {
+  key: string;
+  sourceType: "communication_intake" | "communication_record";
+  sourceId: string;
+  channel: string;
+  senderLabel: string;
+  summary: string;
+  receivedAt: Date;
+  sourceReference: string | null;
+  resolutionNeeded: boolean;
+  resolvedAt: Date | null;
+  followUpDueAt: Date | null;
+  overdue: boolean;
+  ageDays: number;
+  client: { id: string; displayName: string } | null;
+}
+
 type MatchReason = "email_match" | "phone_match" | "name_match";
 
 interface CommunicationExtraction {
@@ -78,7 +108,7 @@ interface CommunicationExtraction {
 
 const intakeInclude = {
   client: { select: { id: true, displayName: true } },
-  communicationRecord: { select: { id: true, summary: true } },
+  communicationRecord: { select: { id: true, summary: true, followUpNeeded: true } },
 };
 
 const EMAIL_IN_TEXT = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
@@ -222,6 +252,112 @@ export async function listFollowUpsDue(user: AuthedUser) {
   });
 }
 
+function enquiryAgeDays(now: Date, receivedAt: Date): number {
+  return Math.max(0, Math.floor((now.getTime() - receivedAt.getTime()) / (24 * 60 * 60 * 1000)));
+}
+
+function messageSummary(messageText: string): string {
+  const normalized = messageText.replace(/\s+/g, " ").trim();
+  return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
+}
+
+// find_unresolved_enquiries — a read-only view over explicit stored state.
+// It does not infer whether a reply was sent from message wording. Before CRM
+// conversion, CommunicationIntake.resolutionNeeded is authoritative; after
+// conversion (and for manually logged inbound messages), the existing
+// CommunicationRecord.followUpNeeded flag is authoritative.
+export async function listEnquiries(user: AuthedUser, query: EnquiryQuery): Promise<EnquiryListItem[]> {
+  const since = query.since ? new Date(query.since) : undefined;
+  const intakeResolutionFilter =
+    query.resolution === "all" ? {} : { resolutionNeeded: query.resolution === "unresolved" };
+  const recordResolutionFilter =
+    query.resolution === "all" ? {} : { followUpNeeded: query.resolution === "unresolved" };
+
+  const [intakes, communicationRecords] = await Promise.all([
+    prisma.communicationIntake.findMany({
+      where: {
+        companyId: user.companyId,
+        intakeStatus: { in: ["new", "extracted"] },
+        ...intakeResolutionFilter,
+        ...(query.channel ? { channel: query.channel } : {}),
+        ...(since ? { receivedAt: { gte: since } } : {}),
+      },
+      include: { client: { select: { id: true, displayName: true } } },
+    }),
+    prisma.communicationRecord.findMany({
+      where: {
+        companyId: user.companyId,
+        direction: "inbound",
+        ...recordResolutionFilter,
+        ...(query.channel ? { channel: query.channel } : {}),
+        ...(since ? { occurredAt: { gte: since } } : {}),
+      },
+      include: {
+        client: { select: { id: true, displayName: true } },
+        intake: {
+          select: {
+            senderName: true,
+            senderEmail: true,
+            senderPhone: true,
+            sourceReference: true,
+          },
+        },
+      },
+    }),
+  ]);
+
+  const now = new Date();
+  const items: EnquiryListItem[] = [
+    ...intakes.map((intake) => ({
+      key: `communication_intake:${intake.id}`,
+      sourceType: "communication_intake" as const,
+      sourceId: intake.id,
+      channel: intake.channel,
+      senderLabel: intake.senderName ?? intake.senderEmail ?? intake.senderPhone ?? "Unknown sender",
+      summary: messageSummary(intake.messageText),
+      receivedAt: intake.receivedAt,
+      sourceReference: intake.sourceReference,
+      resolutionNeeded: intake.resolutionNeeded,
+      resolvedAt: intake.resolvedAt,
+      followUpDueAt: null,
+      overdue: false,
+      ageDays: enquiryAgeDays(now, intake.receivedAt),
+      client: intake.client,
+    })),
+    ...communicationRecords.map((record) => ({
+      key: `communication_record:${record.id}`,
+      sourceType: "communication_record" as const,
+      sourceId: record.id,
+      channel: record.channel,
+      senderLabel:
+        record.intake?.senderName ??
+        record.intake?.senderEmail ??
+        record.intake?.senderPhone ??
+        record.client.displayName,
+      summary: record.summary,
+      receivedAt: record.occurredAt,
+      sourceReference: record.intake?.sourceReference ?? null,
+      resolutionNeeded: record.followUpNeeded,
+      resolvedAt: null,
+      followUpDueAt: record.followUpDueAt,
+      overdue: Boolean(record.followUpNeeded && record.followUpDueAt && record.followUpDueAt <= now),
+      ageDays: enquiryAgeDays(now, record.occurredAt),
+      client: record.client,
+    })),
+  ];
+
+  items.sort((a, b) => {
+    if (a.resolutionNeeded !== b.resolutionNeeded) return a.resolutionNeeded ? -1 : 1;
+    return a.receivedAt.getTime() - b.receivedAt.getTime();
+  });
+  return items;
+}
+
+export async function listUnresolvedIntakeEnquiries(user: AuthedUser): Promise<EnquiryListItem[]> {
+  const items = await listEnquiries(user, { resolution: "unresolved" });
+  return items.filter((item) => item.sourceType === "communication_intake");
+}
+
 // log_communication — Action Contract driven.
 export async function createCommunicationRecord(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
   const parsed = createCommunicationRecordSchema.safeParse(rawInput);
@@ -351,10 +487,28 @@ export async function updateCommunicationRecord(
     changes.followUpDueAt = data.follow_up_due_at ? new Date(data.follow_up_due_at) : null;
   }
 
-  const updated = await prisma.communicationRecord.update({
-    where: { id: existing.id },
-    data: changes,
-    include: communicationRecordInclude,
+  const updated = await prisma.$transaction(async (tx) => {
+    const record = await tx.communicationRecord.update({
+      where: { id: existing.id },
+      data: changes,
+      include: communicationRecordInclude,
+    });
+    if (data.follow_up_needed !== undefined) {
+      await tx.communicationIntake.updateMany({
+        where: { companyId: user.companyId, communicationRecordId: existing.id },
+        data: {
+          resolutionNeeded: data.follow_up_needed,
+          resolvedAt: data.follow_up_needed ? null : new Date(),
+          resolvedBy: data.follow_up_needed ? null : user.id,
+        },
+      });
+      if (data.follow_up_needed) {
+        await tx.notificationAcknowledgement.deleteMany({
+          where: { companyId: user.companyId, notificationKey: `follow_up:${existing.id}` },
+        });
+      }
+    }
+    return record;
   });
 
   await recordAudit({
@@ -385,6 +539,90 @@ export async function getCommunicationIntake(user: AuthedUser, id: string) {
     where: { id, companyId: user.companyId },
     include: intakeInclude,
   });
+}
+
+export async function updateCommunicationIntakeResolution(
+  user: AuthedUser,
+  id: string,
+  rawInput: unknown
+): Promise<ServiceResult<unknown>> {
+  const parsed = updateCommunicationIntakeResolutionSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    await auditIntakeFailure(
+      user,
+      SET_COMMUNICATION_INTAKE_RESOLUTION_ACTION,
+      { id, rawInput },
+      "VALIDATION_FAILED"
+    );
+    return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  }
+
+  const existing = await prisma.communicationIntake.findFirst({
+    where: { id, companyId: user.companyId },
+    include: intakeInclude,
+  });
+  if (!existing) {
+    await auditIntakeFailure(
+      user,
+      SET_COMMUNICATION_INTAKE_RESOLUTION_ACTION,
+      { id, ...parsed.data },
+      "COMMUNICATION_INTAKE_NOT_FOUND"
+    );
+    return fail(404, "COMMUNICATION_INTAKE_NOT_FOUND");
+  }
+
+  const resolutionNeeded = parsed.data.resolution_needed;
+  const result = await prisma.$transaction(async (tx) => {
+    const intake = await tx.communicationIntake.update({
+      where: { id: existing.id },
+      data: {
+        resolutionNeeded,
+        resolvedAt: resolutionNeeded ? null : new Date(),
+        resolvedBy: resolutionNeeded ? null : user.id,
+      },
+      include: intakeInclude,
+    });
+    const communicationRecord = intake.communicationRecordId
+      ? await tx.communicationRecord.update({
+          where: { id: intake.communicationRecordId },
+          data: { followUpNeeded: resolutionNeeded },
+          include: communicationRecordInclude,
+        })
+      : null;
+
+    // Reopening must resurface previously acknowledged attention items.
+    if (resolutionNeeded) {
+      await tx.notificationAcknowledgement.deleteMany({
+        where: {
+          companyId: user.companyId,
+          notificationKey: {
+            in: [
+              `unresolved_enquiry:${existing.id}`,
+              ...(intake.communicationRecordId ? [`follow_up:${intake.communicationRecordId}`] : []),
+            ],
+          },
+        },
+      });
+    }
+    return { intake, communicationRecord };
+  });
+
+  await recordAudit({
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: SET_COMMUNICATION_INTAKE_RESOLUTION_ACTION.actionName,
+    inputPayload: { id, ...parsed.data },
+    dataBefore: {
+      resolutionNeeded: existing.resolutionNeeded,
+      resolvedAt: existing.resolvedAt,
+      communicationFollowUpNeeded: existing.communicationRecord?.followUpNeeded ?? null,
+    },
+    dataAfter: result,
+    riskLevel: SET_COMMUNICATION_INTAKE_RESOLUTION_ACTION.riskLevel,
+    confirmationRequired: SET_COMMUNICATION_INTAKE_RESOLUTION_ACTION.confirmationRequired,
+    result: "success",
+  });
+  return ok(200, result);
 }
 
 export async function createCommunicationIntake(
@@ -581,7 +819,7 @@ export async function convertCommunicationIntake(
       channel: intake.channel,
       summary,
       originalSourceReference: intake.sourceReference,
-      followUpNeeded: true,
+      followUpNeeded: intake.resolutionNeeded,
     },
   };
 
@@ -620,6 +858,9 @@ export async function convertCommunicationIntake(
         data: { intakeStatus: "converting" },
       });
       if (claimed.count !== 1) throw new Error("INTAKE_ALREADY_CONVERTED");
+      const claimedIntake = await tx.communicationIntake.findUniqueOrThrow({
+        where: { id: currentIntake.id },
+      });
 
       const client = selectedClient ?? await tx.client.create({
         data: {
@@ -645,7 +886,7 @@ export async function convertCommunicationIntake(
           summary,
           fullText: currentIntake.messageText,
           occurredAt: currentIntake.receivedAt,
-          followUpNeeded: true,
+          followUpNeeded: claimedIntake.resolutionNeeded,
           createdBy: user.id,
         },
       });

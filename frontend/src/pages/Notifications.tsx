@@ -7,8 +7,8 @@ import {
 } from "../api/client";
 
 // Notification and Escalation Module — a unified "things needing attention"
-// feed computed from real data already owned by other modules (overdue
-// Communication Log follow-ups, capacity overload weeks, expiring quotes).
+// feed computed from real data already owned by other modules (unresolved
+// communication intakes, overdue follow-ups, capacity overload, quotes, etc.).
 // Nothing here is invented; acknowledging only marks an item as seen/handled
 // and never changes the underlying record — and is fully reversible.
 export function Notifications() {
@@ -36,6 +36,7 @@ export function Notifications() {
   }
 
   function entityLink(item: AttentionItem): string | null {
+    if (item.entity.type === "communication_intake") return "/enquiries";
     if (item.entity.type === "communication_record") return `/communications`;
     if (item.entity.type === "quote") return `/quotes/${item.entity.id}`;
     return null;
@@ -49,9 +50,9 @@ export function Notifications() {
         <h1>Notifications</h1>
       </div>
       <p className="hint">
-        Everything here is computed from real data already in the system — overdue
-        Communication Log follow-ups, real capacity overload weeks, and quotes approaching or
-        past their valid-until date. Nothing is invented. Acknowledging an item only marks it as
+        Everything here is computed from real data already in the system — unresolved inbound
+        intakes, overdue Communication Log follow-ups, real capacity overload and other stored
+        signals. Nothing is invented. Acknowledging an item only marks it as
         seen/handled — it never changes the underlying record, and can always be undone.
       </p>
 

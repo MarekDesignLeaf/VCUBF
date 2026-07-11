@@ -522,12 +522,15 @@ export interface CommunicationIntake {
   receivedAt: string;
   sourceReference?: string | null;
   intakeStatus: "new" | "extracted" | "converted";
+  resolutionNeeded: boolean;
+  resolvedAt?: string | null;
+  resolvedBy?: string | null;
   extractedData?: CommunicationExtraction | null;
   replyDraft?: string | null;
   clientId?: string | null;
   communicationRecordId?: string | null;
   client?: { id: string; displayName: string } | null;
-  communicationRecord?: { id: string; summary: string } | null;
+  communicationRecord?: { id: string; summary: string; followUpNeeded: boolean } | null;
   createdAt: string;
 }
 
@@ -558,6 +561,30 @@ export interface CommunicationConversionResult {
   intake: CommunicationIntake;
 }
 
+export type EnquiryResolution = "unresolved" | "resolved" | "all";
+
+export interface EnquiryListItem {
+  key: string;
+  sourceType: "communication_intake" | "communication_record";
+  sourceId: string;
+  channel: CommunicationChannel;
+  senderLabel: string;
+  summary: string;
+  receivedAt: string;
+  sourceReference?: string | null;
+  resolutionNeeded: boolean;
+  resolvedAt?: string | null;
+  followUpDueAt?: string | null;
+  overdue: boolean;
+  ageDays: number;
+  client?: { id: string; displayName: string } | null;
+}
+
+export interface CommunicationResolutionResult {
+  intake: CommunicationIntake;
+  communicationRecord: CommunicationRecord | null;
+}
+
 // Notification and Escalation Module — a unified, read-only "things needing
 // attention" feed computed from real data already owned by other modules
 // (overdue Communication Log follow-ups, capacity overload weeks, expiring
@@ -565,6 +592,7 @@ export interface CommunicationConversionResult {
 // that it was seen/handled and is fully reversible — it never changes the
 // underlying record it points to.
 export const NOTIFICATION_TYPES = [
+  "unresolved_enquiry",
   "follow_up_due",
   "capacity_overload",
   "quote_expiring",
@@ -578,6 +606,7 @@ export const NOTIFICATION_TYPES = [
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
+  unresolved_enquiry: "Unresolved enquiry",
   follow_up_due: "Follow-up due",
   capacity_overload: "Capacity overload",
   quote_expiring: "Quote expiring",
@@ -1131,6 +1160,14 @@ export const api = {
       request<{ lead: Lead; client: Client }>(`/crm/leads/${id}/convert`, { method: "POST" }),
   },
   communications: {
+    enquiries: (params?: { resolution?: EnquiryResolution; since?: string; channel?: string }) => {
+      const qs = new URLSearchParams();
+      if (params?.resolution) qs.set("resolution", params.resolution);
+      if (params?.since) qs.set("since", params.since);
+      if (params?.channel) qs.set("channel", params.channel);
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request<EnquiryListItem[]>(`/communications/enquiries${suffix}`);
+    },
     list: (params?: { clientId?: string; jobId?: string; channel?: string; followUpNeeded?: boolean }) => {
       const qs = new URLSearchParams();
       if (params?.clientId) qs.set("client_id", params.clientId);
@@ -1161,6 +1198,11 @@ export const api = {
         }),
       draftReply: (id: string) =>
         request<CommunicationIntake>(`/communications/intakes/${id}/reply-draft`, { method: "POST" }),
+      setResolution: (id: string, resolutionNeeded: boolean) =>
+        request<CommunicationResolutionResult>(`/communications/intakes/${id}/resolution`, {
+          method: "PUT",
+          body: JSON.stringify({ resolution_needed: resolutionNeeded }),
+        }),
     },
   },
   notifications: {

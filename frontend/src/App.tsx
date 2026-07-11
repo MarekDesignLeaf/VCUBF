@@ -31,6 +31,7 @@ import { WebsiteAudits } from "./pages/WebsiteAudits";
 import { WebsiteContentProposals } from "./pages/WebsiteContentProposals";
 import { Tasks } from "./pages/Tasks";
 import { CommunicationIntakePage } from "./pages/CommunicationIntake";
+import { Enquiries } from "./pages/Enquiries";
 
 export default function App() {
   return (
@@ -67,6 +68,7 @@ export default function App() {
             <Route path="/leads" element={<Leads />} />
             <Route path="/leads/:id" element={<LeadDetail />} />
             <Route path="/communications" element={<CommunicationLog />} />
+            <Route path="/enquiries" element={<Enquiries />} />
             <Route path="/communication-intake" element={<CommunicationIntakePage />} />
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/data-quality" element={<DataQuality />} />

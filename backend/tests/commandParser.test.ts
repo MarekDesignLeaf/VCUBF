@@ -78,6 +78,20 @@ describe("commandParser", () => {
     assert.equal(parseTextCommand("check overload").intent, "detect_overload");
   });
 
+  it("parses unresolved enquiry commands with an optional evidence window", () => {
+    const all = parseTextCommand("show unresolved enquiries");
+    assert.equal(all.intent, "list_unresolved_enquiries");
+    if (all.intent === "list_unresolved_enquiries") assert.equal(all.entities.since_days, undefined);
+
+    const week = parseTextCommand("check unresolved enquiries from the last week");
+    assert.equal(week.intent, "list_unresolved_enquiries");
+    if (week.intent === "list_unresolved_enquiries") assert.equal(week.entities.since_days, 7);
+
+    const days = parseTextCommand("find unresolved enquiries in last 3 days");
+    assert.equal(days.intent, "list_unresolved_enquiries");
+    if (days.intent === "list_unresolved_enquiries") assert.equal(days.entities.since_days, 3);
+  });
+
   it("parses task creation and listing commands", () => {
     const assigned = parseTextCommand("create task for Test Worker: Prepare materials");
     assert.equal(assigned.intent, "create_task");

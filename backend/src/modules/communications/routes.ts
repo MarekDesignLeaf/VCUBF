@@ -5,8 +5,10 @@ import {
   CREATE_CLIENT_FROM_COMMUNICATION_ACTION,
   CREATE_COMMUNICATION_RECORD_ACTION,
   EXTRACT_COMMUNICATION_INTAKE_ACTION,
+  FIND_UNRESOLVED_ENQUIRIES_ACTION,
   LOG_COMMUNICATION_INTAKE_ACTION,
   PREPARE_COMMUNICATION_REPLY_ACTION,
+  SET_COMMUNICATION_INTAKE_RESOLUTION_ACTION,
   UPDATE_COMMUNICATION_RECORD_ACTION,
 } from "../../lib/actionContracts.js";
 import * as communicationService from "../../services/communicationService.js";
@@ -32,6 +34,20 @@ communicationsRouter.get("/follow-ups-due", requirePermission("crm.read"), async
   res.json(await communicationService.listFollowUpsDue(req.user!));
 });
 
+communicationsRouter.get(
+  "/enquiries",
+  requirePermission(FIND_UNRESOLVED_ENQUIRIES_ACTION.requiredPermission),
+  async (req, res) => {
+    const parsed = communicationService.enquiryQuerySchema.safeParse({
+      resolution: req.query.resolution,
+      since: req.query.since,
+      channel: req.query.channel,
+    });
+    if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
+    res.json(await communicationService.listEnquiries(req.user!, parsed.data));
+  }
+);
+
 communicationsRouter.get("/intakes", requirePermission("crm.read"), async (req, res) => {
   const status = typeof req.query.status === "string" ? req.query.status : undefined;
   res.json(await communicationService.listCommunicationIntakes(req.user!, status));
@@ -42,6 +58,16 @@ communicationsRouter.get("/intakes/:id", requirePermission("crm.read"), async (r
   if (!intake) return res.status(404).json({ error: "COMMUNICATION_INTAKE_NOT_FOUND" });
   res.json(intake);
 });
+
+communicationsRouter.put(
+  "/intakes/:id/resolution",
+  requirePermission(SET_COMMUNICATION_INTAKE_RESOLUTION_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await communicationService.updateCommunicationIntakeResolution(req.user!, req.params.id, req.body);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
 
 communicationsRouter.post(
   "/intakes",

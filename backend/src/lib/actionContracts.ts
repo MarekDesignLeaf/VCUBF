@@ -769,6 +769,28 @@ export const PREPARE_COMMUNICATION_REPLY_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "COMMUNICATION_INTAKE_NOT_FOUND", "EXTRACTION_REQUIRED"],
 };
 
+export const FIND_UNRESOLVED_ENQUIRIES_ACTION: ActionContract = {
+  actionName: "find_unresolved_enquiries",
+  purpose:
+    "List enquiries whose stored intake resolution or inbound Communication Log follow-up state explicitly says they still need attention.",
+  requiredPermission: "crm.read",
+  riskLevel: 0,
+  confirmationRequired: false,
+  dataSources: ["crm.communication_intakes", "crm.communication_records", "crm.clients"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
+export const SET_COMMUNICATION_INTAKE_RESOLUTION_ACTION: ActionContract = {
+  actionName: "set_communication_intake_resolution",
+  purpose:
+    "Mark a preserved inbound communication as resolved or reopen it, synchronising its linked Communication Log follow-up when present.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.communication_intakes", "crm.communication_records"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "COMMUNICATION_INTAKE_NOT_FOUND"],
+};
+
 // Notification and Escalation Module — a unified, read-only "things needing
 // attention" feed computed from real data already owned by other modules:
 // overdue Communication Log follow-ups (log_communication /
@@ -778,6 +800,7 @@ export const PREPARE_COMMUNICATION_REPLY_ACTION: ActionContract = {
 // derived directly from real dates/percentages already stored elsewhere.
 // See notificationService.ts.
 export const NOTIFICATION_TYPES = [
+  "unresolved_enquiry",
   "follow_up_due",
   "capacity_overload",
   "quote_expiring",
@@ -796,18 +819,20 @@ export type NotificationSeverity = (typeof NOTIFICATION_SEVERITIES)[number];
 export const GET_ATTENTION_FEED_ACTION: ActionContract = {
   actionName: "get_attention_feed",
   purpose:
-    "Aggregate overdue communication follow-ups, capacity overload weeks, expiring quotes, data quality findings, completed jobs missing portfolio photos, stale open leads, and jobs stuck in one status too long into a single, real, unified feed of things needing attention.",
+    "Aggregate unresolved communication intakes, overdue communication follow-ups and tasks, capacity overload weeks, expiring quotes, data quality findings, completed jobs missing portfolio photos, stale open leads, and jobs stuck in one status too long into a single, real, unified feed of things needing attention.",
   requiredPermission: "crm.read",
   riskLevel: 0,
   confirmationRequired: false,
   dataSources: [
     "crm.communication_records",
+    "crm.communication_intakes",
     "crm.jobs",
     "crm.users",
     "crm.quotes",
     "crm.clients",
     "crm.portfolio_photos",
     "crm.leads",
+    "crm.tasks",
     "audit_log",
   ],
   possibleErrors: ["MISSING_PERMISSION"],
