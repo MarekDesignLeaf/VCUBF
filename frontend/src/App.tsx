@@ -33,6 +33,8 @@ import { WebsiteContentProposals } from "./pages/WebsiteContentProposals";
 import { Tasks } from "./pages/Tasks";
 import { CommunicationIntakePage } from "./pages/CommunicationIntake";
 import { Enquiries } from "./pages/Enquiries";
+import { Contacts } from "./pages/Contacts";
+import { Documents } from "./pages/Documents";
 
 export default function App() {
   return (
@@ -50,6 +52,8 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/clients" element={<Clients />} />
             <Route path="/clients/:id" element={<ClientDetail />} />
+            <Route path="/contacts" element={<Contacts />} />
+            <Route path="/documents" element={<Documents />} />
             <Route path="/jobs" element={<Jobs />} />
             <Route path="/jobs/:id" element={<JobDetail />} />
             <Route path="/employees" element={<Employees />} />

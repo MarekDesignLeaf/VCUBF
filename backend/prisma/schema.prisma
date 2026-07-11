@@ -15,28 +15,30 @@ model Company {
   name      String
   createdAt DateTime @default(now()) @map("created_at")
 
-  users               User[]
-  clients             Client[]
-  jobs                Job[]
-  leads               Lead[]
-  auditLogs           AuditLog[]
-  serviceCatalogueItems ServiceCatalogueItem[]
-  quotes              Quote[]
-  jobOpenings         JobOpening[]
-  candidates          Candidate[]
-  playbooks           Playbook[]
-  playbookRuns        PlaybookRun[]
-  learningRules       LearningRule[]
-  communicationRecords CommunicationRecord[]
-  communicationIntakes CommunicationIntake[]
+  users                        User[]
+  clients                      Client[]
+  contacts                     Contact[]
+  documentRecords              DocumentRecord[]
+  jobs                         Job[]
+  leads                        Lead[]
+  auditLogs                    AuditLog[]
+  serviceCatalogueItems        ServiceCatalogueItem[]
+  quotes                       Quote[]
+  jobOpenings                  JobOpening[]
+  candidates                   Candidate[]
+  playbooks                    Playbook[]
+  playbookRuns                 PlaybookRun[]
+  learningRules                LearningRule[]
+  communicationRecords         CommunicationRecord[]
+  communicationIntakes         CommunicationIntake[]
   notificationAcknowledgements NotificationAcknowledgement[]
-  portfolioPhotos     PortfolioPhoto[]
-  photoServiceSelections PhotoServiceSelection[]
-  businessContextItems BusinessContextItem[]
-  websiteAudits       WebsiteAudit[]
-  websiteAuditFindings WebsiteAuditFinding[]
-  websiteContentProposals WebsiteContentProposal[]
-  tasks               Task[]
+  portfolioPhotos              PortfolioPhoto[]
+  photoServiceSelections       PhotoServiceSelection[]
+  businessContextItems         BusinessContextItem[]
+  websiteAudits                WebsiteAudit[]
+  websiteAuditFindings         WebsiteAuditFinding[]
+  websiteContentProposals      WebsiteContentProposal[]
+  tasks                        Task[]
 
   @@map("companies")
 }
@@ -90,13 +92,15 @@ model Client {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  company Company @relation(fields: [companyId], references: [id])
-  jobs    Job[]
-  quotes  Quote[]
+  company              Company               @relation(fields: [companyId], references: [id])
+  jobs                 Job[]
+  quotes               Quote[]
   communicationRecords CommunicationRecord[]
   communicationIntakes CommunicationIntake[]
   portfolioPhotos      PortfolioPhoto[]
   tasks                Task[]
+  contacts             Contact[]
+  documentRecords      DocumentRecord[]
 
   @@index([companyId])
   @@map("clients")
@@ -122,20 +126,21 @@ model Job {
   // without forcing every job to originate from a catalogue item.
   serviceCatalogueItemId String?   @map("service_catalogue_item_id")
   plannedStartAt         DateTime? @map("planned_start_at")
-  plannedEndAt            DateTime? @map("planned_end_at")
+  plannedEndAt           DateTime? @map("planned_end_at")
   notes                  String?
   createdBy              String?   @map("created_by")
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
 
-  company             Company              @relation(fields: [companyId], references: [id])
-  client              Client               @relation(fields: [clientId], references: [id])
-  assignedUser        User?                @relation("AssignedJobs", fields: [assignedUserId], references: [id])
+  company              Company               @relation(fields: [companyId], references: [id])
+  client               Client                @relation(fields: [clientId], references: [id])
+  assignedUser         User?                 @relation("AssignedJobs", fields: [assignedUserId], references: [id])
   serviceCatalogueItem ServiceCatalogueItem? @relation(fields: [serviceCatalogueItemId], references: [id])
-  quotes              Quote[]
+  quotes               Quote[]
   communicationRecords CommunicationRecord[]
   portfolioPhotos      PortfolioPhoto[]
   tasks                Task[]
+  documentRecords      DocumentRecord[]
 
   @@index([companyId])
   @@index([clientId])
@@ -144,23 +149,87 @@ model Job {
   @@map("jobs")
 }
 
+// Contact Directory — people are independent records rather than fields on
+// a client. A contact may be linked to a client, but can also exist before a
+// client account is created. Source fields keep every fact traceable.
+model Contact {
+  id                String   @id @default(uuid())
+  companyId         String   @map("company_id")
+  clientId          String?  @map("client_id")
+  displayName       String   @map("display_name")
+  jobTitle          String?  @map("job_title")
+  department        String?
+  email             String?
+  phone             String?
+  preferredChannel  String?  @map("preferred_channel")
+  preferredLanguage String?  @map("preferred_language")
+  source            String   @default("user_input")
+  sourceReference   String?  @map("source_reference")
+  notes             String?
+  isActive          Boolean  @default(true) @map("is_active")
+  createdBy         String?  @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  client  Client? @relation(fields: [clientId], references: [id])
+
+  @@index([companyId])
+  @@index([companyId, clientId])
+  @@index([companyId, email])
+  @@index([companyId, phone])
+  @@map("contacts")
+}
+
+// Document Registry — metadata and references only. The MVP deliberately
+// does not claim to upload, encrypt or retain file bytes without an authorised
+// storage connector. Relations, sensitivity and verification remain explicit.
+model DocumentRecord {
+  id                 String    @id @default(uuid())
+  companyId          String    @map("company_id")
+  clientId           String?   @map("client_id")
+  jobId              String?   @map("job_id")
+  title              String
+  documentType       String    @map("document_type")
+  documentReference  String    @map("document_reference")
+  source             String    @default("user_input")
+  sensitivity        String    @default("normal")
+  verificationStatus String    @default("user_entered") @map("verification_status")
+  issuedAt           DateTime? @map("issued_at")
+  expiresAt          DateTime? @map("expires_at")
+  notes              String?
+  isActive           Boolean   @default(true) @map("is_active")
+  createdBy          String?   @map("created_by")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  client  Client? @relation(fields: [clientId], references: [id])
+  job     Job?    @relation(fields: [jobId], references: [id])
+
+  @@index([companyId])
+  @@index([companyId, clientId])
+  @@index([companyId, jobId])
+  @@index([companyId, documentType])
+  @@map("document_records")
+}
 
 model Lead {
-  id                String    @id @default(uuid())
-  companyId         String    @map("company_id")
+  id                String   @id @default(uuid())
+  companyId         String   @map("company_id")
   name              String
   phone             String?
   email             String?
-  serviceRequested  String?   @map("service_requested")
+  serviceRequested  String?  @map("service_requested")
   location          String?
   source            String?
   urgency           String?
-  leadStatus        String    @default("new") @map("lead_status")
+  leadStatus        String   @default("new") @map("lead_status")
   notes             String?
-  convertedClientId String?   @map("converted_client_id")
-  createdBy         String?   @map("created_by")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  convertedClientId String?  @map("converted_client_id")
+  createdBy         String?  @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
 
   company Company @relation(fields: [companyId], references: [id])
 
@@ -174,30 +243,29 @@ model Lead {
 // prefill jobs and (eventually) quotes and website content, so the same
 // real facts propagate everywhere instead of being retyped or guessed.
 model ServiceCatalogueItem {
-  id                     String   @id @default(uuid())
-  companyId              String   @map("company_id")
-  name                   String
-  description            String?
-  category               String?
-  basePriceMin           Float?   @map("base_price_min")
-  basePriceMax           Float?   @map("base_price_max")
-  priceUnit              String?  @map("price_unit")
-  defaultDurationHours   Float?   @map("default_duration_hours")
-  defaultRequiredSkills  String[] @default([]) @map("default_required_skills")
-  isActive               Boolean  @default(true) @map("is_active")
-  createdBy              String?  @map("created_by")
-  createdAt              DateTime @default(now()) @map("created_at")
-  updatedAt              DateTime @updatedAt @map("updated_at")
+  id                    String   @id @default(uuid())
+  companyId             String   @map("company_id")
+  name                  String
+  description           String?
+  category              String?
+  basePriceMin          Float?   @map("base_price_min")
+  basePriceMax          Float?   @map("base_price_max")
+  priceUnit             String?  @map("price_unit")
+  defaultDurationHours  Float?   @map("default_duration_hours")
+  defaultRequiredSkills String[] @default([]) @map("default_required_skills")
+  isActive              Boolean  @default(true) @map("is_active")
+  createdBy             String?  @map("created_by")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
 
-  company Company @relation(fields: [companyId], references: [id])
-  jobs    Job[]
-  quoteItems QuoteItem[]
+  company         Company                 @relation(fields: [companyId], references: [id])
+  jobs            Job[]
+  quoteItems      QuoteItem[]
   photoSelections PhotoServiceSelection[]
 
   @@index([companyId])
   @@map("service_catalogue_items")
 }
-
 
 // Quote, Pricing and Profitability Module — turns real service-catalogue
 // prices and real job data into a real, itemised quote for a client, and
@@ -206,17 +274,17 @@ model ServiceCatalogueItem {
 // entry the user created, or typed in directly. If a cost is not entered,
 // margin is left unknown for that line rather than assumed to be 100%.
 model Quote {
-  id          String   @id @default(uuid())
-  companyId   String   @map("company_id")
-  clientId    String   @map("client_id")
-  jobId       String?  @map("job_id")
+  id          String    @id @default(uuid())
+  companyId   String    @map("company_id")
+  clientId    String    @map("client_id")
+  jobId       String?   @map("job_id")
   title       String
-  quoteStatus String   @default("draft") @map("quote_status")
+  quoteStatus String    @default("draft") @map("quote_status")
   notes       String?
   validUntil  DateTime? @map("valid_until")
-  createdBy   String?  @map("created_by")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdBy   String?   @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   company Company     @relation(fields: [companyId], references: [id])
   client  Client      @relation(fields: [clientId], references: [id])
@@ -234,11 +302,11 @@ model QuoteItem {
   quoteId                String   @map("quote_id")
   serviceCatalogueItemId String?  @map("service_catalogue_item_id")
   description            String
-  quantity                Float   @default(1)
-  unitPrice               Float   @map("unit_price")
-  unitCost                Float?  @map("unit_cost")
-  sortOrder               Int     @default(0) @map("sort_order")
-  createdAt               DateTime @default(now()) @map("created_at")
+  quantity               Float    @default(1)
+  unitPrice              Float    @map("unit_price")
+  unitCost               Float?   @map("unit_cost")
+  sortOrder              Int      @default(0) @map("sort_order")
+  createdAt              DateTime @default(now()) @map("created_at")
 
   quote                Quote                 @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   serviceCatalogueItem ServiceCatalogueItem? @relation(fields: [serviceCatalogueItemId], references: [id])
@@ -248,7 +316,6 @@ model QuoteItem {
   @@map("quote_items")
 }
 
-
 // Recruitment and Workforce Expansion Module — see project instructions
 // section 6. Every field here is what the user entered: reason, urgency,
 // required skills, experience and language requirements are never invented,
@@ -256,27 +323,27 @@ model QuoteItem {
 // employment terms — it only tracks openings and candidates and drafts
 // content for the user to review and use elsewhere.
 model JobOpening {
-  id                        String   @id @default(uuid())
-  companyId                 String   @map("company_id")
-  title                     String
-  reason                    String?
-  urgency                   String   @default("medium")
-  openingStatus             String   @default("draft") @map("opening_status")
-  skillsRequired            String[] @default([]) @map("skills_required")
-  expectedTasks             String?  @map("expected_tasks")
-  minExperienceYears        Float?   @map("min_experience_years")
-  preferredExperienceYears  Float?   @map("preferred_experience_years")
-  languageRequirements      String[] @default([]) @map("language_requirements")
-  availabilityRequirements  String?  @map("availability_requirements")
-  description               String?
+  id                       String   @id @default(uuid())
+  companyId                String   @map("company_id")
+  title                    String
+  reason                   String?
+  urgency                  String   @default("medium")
+  openingStatus            String   @default("draft") @map("opening_status")
+  skillsRequired           String[] @default([]) @map("skills_required")
+  expectedTasks            String?  @map("expected_tasks")
+  minExperienceYears       Float?   @map("min_experience_years")
+  preferredExperienceYears Float?   @map("preferred_experience_years")
+  languageRequirements     String[] @default([]) @map("language_requirements")
+  availabilityRequirements String?  @map("availability_requirements")
+  description              String?
   // The generated advert is stored so it can be reviewed and reused, but it
   // is only ever built from the real fields above — see
   // recruitmentService.buildAdvertText. Nothing is published automatically;
   // there is no job-board connector.
-  draftAdvertText           String?  @map("draft_advert_text")
-  createdBy                 String?  @map("created_by")
-  createdAt                 DateTime @default(now()) @map("created_at")
-  updatedAt                 DateTime @updatedAt @map("updated_at")
+  draftAdvertText          String?  @map("draft_advert_text")
+  createdBy                String?  @map("created_by")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
   company    Company     @relation(fields: [companyId], references: [id])
   candidates Candidate[]
@@ -305,7 +372,6 @@ model Candidate {
   @@index([jobOpeningId])
   @@map("candidates")
 }
-
 
 // Playbook Engine — a saved, reusable workflow: an ordered list of Voice/Text
 // Command Layer templates (the same syntax a user could type by hand, with
@@ -353,7 +419,6 @@ model PlaybookRun {
   @@map("playbook_runs")
 }
 
-
 // Learning Engine — see project instructions section 11 and the MVP
 // priority list ("basic learning of aliases and workflows"). The strongest
 // learning signal is explicit user correction/teaching, never an inferred
@@ -365,16 +430,16 @@ model PlaybookRun {
 // Command Layer parses a command, so a learned alias actually changes how
 // commands and playbook steps are interpreted — not just a static glossary.
 model LearningRule {
-  id         String   @id @default(uuid())
-  companyId  String   @map("company_id")
-  term       String
-  meaning    String
-  aliasFor   String?  @map("alias_for")
-  category   String?
-  status     String   @default("active")
-  createdBy  String?  @map("created_by")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id        String   @id @default(uuid())
+  companyId String   @map("company_id")
+  term      String
+  meaning   String
+  aliasFor  String?  @map("alias_for")
+  category  String?
+  status    String   @default("active")
+  createdBy String?  @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   company Company @relation(fields: [companyId], references: [id])
 
@@ -393,24 +458,24 @@ model LearningRule {
 // extraction workflow can write into the same table and CRM linkage instead
 // of being a disconnected system.
 model CommunicationRecord {
-  id              String    @id @default(uuid())
-  companyId       String    @map("company_id")
-  clientId        String    @map("client_id")
-  jobId           String?   @map("job_id")
-  channel         String
-  direction       String
-  summary         String
-  fullText        String?   @map("full_text")
-  occurredAt      DateTime  @map("occurred_at")
-  followUpNeeded  Boolean   @default(false) @map("follow_up_needed")
-  followUpDueAt   DateTime? @map("follow_up_due_at")
-  createdBy       String?   @map("created_by")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  id             String    @id @default(uuid())
+  companyId      String    @map("company_id")
+  clientId       String    @map("client_id")
+  jobId          String?   @map("job_id")
+  channel        String
+  direction      String
+  summary        String
+  fullText       String?   @map("full_text")
+  occurredAt     DateTime  @map("occurred_at")
+  followUpNeeded Boolean   @default(false) @map("follow_up_needed")
+  followUpDueAt  DateTime? @map("follow_up_due_at")
+  createdBy      String?   @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  company Company @relation(fields: [companyId], references: [id])
-  client  Client  @relation(fields: [clientId], references: [id])
-  job     Job?    @relation(fields: [jobId], references: [id])
+  company Company              @relation(fields: [companyId], references: [id])
+  client  Client               @relation(fields: [clientId], references: [id])
+  job     Job?                 @relation(fields: [jobId], references: [id])
   tasks   Task[]
   intake  CommunicationIntake?
 
@@ -496,7 +561,6 @@ model Task {
   @@map("tasks")
 }
 
-
 // Notification and Escalation Module — a unified "things needing attention"
 // feed. This module deliberately stores no duplicate business facts: every
 // item on the feed is computed fresh, on read, from real existing data
@@ -511,11 +575,11 @@ model Task {
 // row = unacknowledge), matching the Learning Engine's
 // visible/editable/reversible standard for low-risk state changes.
 model NotificationAcknowledgement {
-  id               String   @id @default(uuid())
-  companyId        String   @map("company_id")
-  notificationKey  String   @map("notification_key")
-  acknowledgedBy   String?  @map("acknowledged_by")
-  acknowledgedAt   DateTime @default(now()) @map("acknowledged_at")
+  id              String   @id @default(uuid())
+  companyId       String   @map("company_id")
+  notificationKey String   @map("notification_key")
+  acknowledgedBy  String?  @map("acknowledged_by")
+  acknowledgedAt  DateTime @default(now()) @map("acknowledged_at")
 
   company Company @relation(fields: [companyId], references: [id])
 
@@ -523,7 +587,6 @@ model NotificationAcknowledgement {
   @@index([companyId])
   @@map("notification_acknowledgements")
 }
-
 
 // Portfolio and Photo Intelligence Module — the manual-entry foundation of a
 // future automated photo-selection/website-publishing workflow. See VCUF
@@ -556,9 +619,9 @@ model PortfolioPhoto {
   createdAt                 DateTime  @default(now()) @map("created_at")
   updatedAt                 DateTime  @updatedAt @map("updated_at")
 
-  company Company @relation(fields: [companyId], references: [id])
-  client  Client?  @relation(fields: [clientId], references: [id])
-  job     Job?     @relation(fields: [jobId], references: [id])
+  company           Company                 @relation(fields: [companyId], references: [id])
+  client            Client?                 @relation(fields: [clientId], references: [id])
+  job               Job?                    @relation(fields: [jobId], references: [id])
   serviceSelections PhotoServiceSelection[]
 
   @@index([companyId])
@@ -647,8 +710,8 @@ model WebsiteAudit {
   createdBy         String?  @map("created_by")
   createdAt         DateTime @default(now()) @map("created_at")
 
-  company  Company               @relation(fields: [companyId], references: [id])
-  findings WebsiteAuditFinding[]
+  company          Company                  @relation(fields: [companyId], references: [id])
+  findings         WebsiteAuditFinding[]
   contentProposals WebsiteContentProposal[]
 
   @@index([companyId, createdAt])
@@ -684,22 +747,22 @@ model WebsiteAuditFinding {
 // publishing and post-publication verification remain separate future risk-4
 // connector actions and cannot be triggered by changing this record.
 model WebsiteContentProposal {
-  id               String    @id @default(uuid())
-  companyId        String    @map("company_id")
-  websiteAuditId   String?   @map("website_audit_id")
-  proposalType     String    @map("proposal_type")
-  targetPageUrl    String    @map("target_page_url")
-  headline         String?
-  contentBody      String    @map("content_body")
-  status           String    @default("ready_for_review")
-  sourceSnapshot   Json      @map("source_snapshot")
-  notes            String?
-  decisionNotes    String?   @map("decision_notes")
-  reviewedBy       String?   @map("reviewed_by")
-  reviewedAt       DateTime? @map("reviewed_at")
-  createdBy        String?   @map("created_by")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id             String    @id @default(uuid())
+  companyId      String    @map("company_id")
+  websiteAuditId String?   @map("website_audit_id")
+  proposalType   String    @map("proposal_type")
+  targetPageUrl  String    @map("target_page_url")
+  headline       String?
+  contentBody    String    @map("content_body")
+  status         String    @default("ready_for_review")
+  sourceSnapshot Json      @map("source_snapshot")
+  notes          String?
+  decisionNotes  String?   @map("decision_notes")
+  reviewedBy     String?   @map("reviewed_by")
+  reviewedAt     DateTime? @map("reviewed_at")
+  createdBy      String?   @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   company      Company       @relation(fields: [companyId], references: [id])
   websiteAudit WebsiteAudit? @relation(fields: [websiteAuditId], references: [id])
@@ -708,7 +771,6 @@ model WebsiteContentProposal {
   @@index([websiteAuditId])
   @@map("website_content_proposals")
 }
-
 
 model AuditLog {
   id                   String   @id @default(uuid())

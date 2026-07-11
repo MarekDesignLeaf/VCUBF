@@ -15,6 +15,8 @@ export function Layout() {
           <NavLink to="/data-quality">Data Quality</NavLink>
           <NavLink to="/leads">Leads</NavLink>
           <NavLink to="/clients">Clients</NavLink>
+          <NavLink to="/contacts">Contacts</NavLink>
+          <NavLink to="/documents">Documents</NavLink>
           <NavLink to="/jobs">Jobs</NavLink>
           <NavLink to="/tasks">Tasks</NavLink>
           <NavLink to="/enquiries">Enquiries</NavLink>

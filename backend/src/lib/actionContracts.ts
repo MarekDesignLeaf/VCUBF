@@ -507,6 +507,77 @@ export const UPDATE_BUSINESS_CONTEXT_ITEM_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "BUSINESS_CONTEXT_ITEM_NOT_FOUND", "VALIDATION_FAILED"],
 };
 
+// Contact Directory — explicit, traceable people records independent from a
+// client's primary contact fields.
+export const CONTACT_SOURCES = ["user_input", "communication", "client_record", "other"] as const;
+export type ContactSource = (typeof CONTACT_SOURCES)[number];
+
+export const CONTACT_CHANNELS = ["email", "phone_call", "whatsapp", "sms", "messenger", "other"] as const;
+export type ContactChannel = (typeof CONTACT_CHANNELS)[number];
+
+export const CONTACT_LANGUAGES = ["en", "cs", "pl", "other"] as const;
+export type ContactLanguage = (typeof CONTACT_LANGUAGES)[number];
+
+export const CREATE_CONTACT_ACTION: ActionContract = {
+  actionName: "create_contact",
+  purpose: "Record a person with explicit contact details, source and optional client relationship in the company contact directory.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.clients", "crm.communication_records"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CLIENT_NOT_FOUND", "DUPLICATE_CONTACT_POSSIBLE"],
+};
+
+export const UPDATE_CONTACT_ACTION: ActionContract = {
+  actionName: "update_contact",
+  purpose: "Update, relink or archive an existing contact while preserving source and audit history.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.contacts", "crm.clients"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONTACT_NOT_FOUND", "CLIENT_NOT_FOUND", "DUPLICATE_CONTACT_POSSIBLE"],
+};
+
+// Document Registry — metadata only until an authorised file-storage
+// connector is configured.
+export const DOCUMENT_TYPES = [
+  "quote", "contract", "invoice", "receipt", "photo_consent", "employment",
+  "certificate", "correspondence", "other",
+] as const;
+export type DocumentType = (typeof DOCUMENT_TYPES)[number];
+
+export const DOCUMENT_SOURCES = [
+  "user_input", "client_provided", "employee_provided", "generated_internal",
+  "external_storage", "other",
+] as const;
+export type DocumentSource = (typeof DOCUMENT_SOURCES)[number];
+
+export const DOCUMENT_SENSITIVITIES = ["normal", "confidential", "personal_data", "financial", "legal"] as const;
+export type DocumentSensitivity = (typeof DOCUMENT_SENSITIVITIES)[number];
+
+export const DOCUMENT_VERIFICATION_STATUSES = ["user_entered", "confirmed", "unverified", "needs_review"] as const;
+export type DocumentVerificationStatus = (typeof DOCUMENT_VERIFICATION_STATUSES)[number];
+
+export const CREATE_DOCUMENT_RECORD_ACTION: ActionContract = {
+  actionName: "create_document_record",
+  purpose: "Register document metadata and a traceable reference without claiming that Secretary stores the underlying file.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.clients", "crm.jobs", "external_storage_reference"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CLIENT_NOT_FOUND", "JOB_NOT_FOUND", "RELATED_RECORD_MISMATCH"],
+};
+
+export const UPDATE_DOCUMENT_RECORD_ACTION: ActionContract = {
+  actionName: "update_document_record",
+  purpose: "Update or archive registered document metadata while preserving its source, sensitivity and audit history.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "document_registry", "crm.clients", "crm.jobs"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "DOCUMENT_RECORD_NOT_FOUND", "CLIENT_NOT_FOUND", "JOB_NOT_FOUND", "RELATED_RECORD_MISMATCH"],
+};
+
 // Task Management — Secretary-owned work items linked to real CRM/job/
 // communication records. A due date plus assignee also makes a task visible
 // in the calendar; an entered duration contributes to capacity. No duration,

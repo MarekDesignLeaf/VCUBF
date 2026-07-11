@@ -61,6 +61,56 @@ export interface Client {
   createdAt: string;
 }
 
+export const CONTACT_CHANNELS = ["email", "phone_call", "whatsapp", "sms", "messenger", "other"] as const;
+export type ContactChannel = (typeof CONTACT_CHANNELS)[number];
+export const CONTACT_LANGUAGES = ["en", "cs", "pl", "other"] as const;
+export type ContactLanguage = (typeof CONTACT_LANGUAGES)[number];
+
+export interface Contact {
+  id: string;
+  clientId?: string | null;
+  displayName: string;
+  jobTitle?: string | null;
+  department?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  preferredChannel?: ContactChannel | null;
+  preferredLanguage?: ContactLanguage | null;
+  source: string;
+  sourceReference?: string | null;
+  notes?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  client?: { id: string; displayName: string } | null;
+}
+
+export const DOCUMENT_TYPES = [
+  "quote", "contract", "invoice", "receipt", "photo_consent", "employment",
+  "certificate", "correspondence", "other",
+] as const;
+export type DocumentType = (typeof DOCUMENT_TYPES)[number];
+export const DOCUMENT_SENSITIVITIES = ["normal", "confidential", "personal_data", "financial", "legal"] as const;
+export type DocumentSensitivity = (typeof DOCUMENT_SENSITIVITIES)[number];
+
+export interface DocumentRecord {
+  id: string;
+  clientId?: string | null;
+  jobId?: string | null;
+  title: string;
+  documentType: DocumentType;
+  documentReference: string;
+  source: string;
+  sensitivity: DocumentSensitivity;
+  verificationStatus: string;
+  issuedAt?: string | null;
+  expiresAt?: string | null;
+  notes?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  client?: { id: string; displayName: string } | null;
+  job?: { id: string; jobTitle: string } | null;
+}
+
 // Keep in sync with backend/src/lib/actionContracts.ts JOB_STATUSES.
 export const JOB_STATUSES = [
   "nova",
@@ -1049,6 +1099,38 @@ export const api = {
     create: (data: Record<string, unknown>) =>
       request<Client>("/crm/clients", { method: "POST", body: JSON.stringify(data) }),
     search: (q: string) => request<Client[]>(`/crm/clients/search?q=${encodeURIComponent(q)}`),
+  },
+  contacts: {
+    list: (params?: { clientId?: string; activeOnly?: boolean; search?: string }) => {
+      const qs = new URLSearchParams();
+      if (params?.clientId) qs.set("client_id", params.clientId);
+      if (params?.activeOnly) qs.set("active_only", "true");
+      if (params?.search) qs.set("search", params.search);
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request<Contact[]>(`/crm/contacts${suffix}`);
+    },
+    get: (id: string) => request<Contact>(`/crm/contacts/${id}`),
+    create: (data: Record<string, unknown>) =>
+      request<Contact>("/crm/contacts", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<Contact>(`/crm/contacts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  },
+  documents: {
+    list: (params?: { clientId?: string; jobId?: string; documentType?: string; sensitivity?: string; activeOnly?: boolean }) => {
+      const qs = new URLSearchParams();
+      if (params?.clientId) qs.set("client_id", params.clientId);
+      if (params?.jobId) qs.set("job_id", params.jobId);
+      if (params?.documentType) qs.set("document_type", params.documentType);
+      if (params?.sensitivity) qs.set("sensitivity", params.sensitivity);
+      if (params?.activeOnly) qs.set("active_only", "true");
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request<DocumentRecord[]>(`/documents${suffix}`);
+    },
+    get: (id: string) => request<DocumentRecord>(`/documents/${id}`),
+    create: (data: Record<string, unknown>) =>
+      request<DocumentRecord>("/documents", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<DocumentRecord>(`/documents/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   },
   jobs: {
     list: (params?: { clientId?: string; status?: string }) => {
