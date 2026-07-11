@@ -578,6 +578,54 @@ export const UPDATE_DOCUMENT_RECORD_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "DOCUMENT_RECORD_NOT_FOUND", "CLIENT_NOT_FOUND", "JOB_NOT_FOUND", "RELATED_RECORD_MISMATCH"],
 };
 
+// Basic Industry Model — structured industry records and explicit links to
+// real catalogue services. No industry or relationship is inferred.
+export const INDUSTRY_SOURCES = ["user_input", "confirmed_company_data", "crm_record", "external_reference"] as const;
+export type IndustrySource = (typeof INDUSTRY_SOURCES)[number];
+
+export const INDUSTRY_VERIFICATION_STATUSES = ["user_entered", "confirmed", "unverified", "needs_review"] as const;
+export type IndustryVerificationStatus = (typeof INDUSTRY_VERIFICATION_STATUSES)[number];
+
+export const CREATE_INDUSTRY_ACTION: ActionContract = {
+  actionName: "create_industry",
+  purpose: "Record an explicit industry in the company taxonomy with source and verification status.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "confirmed_company_data", "external_reference"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "INDUSTRY_ALREADY_EXISTS"],
+};
+
+export const UPDATE_INDUSTRY_ACTION: ActionContract = {
+  actionName: "update_industry",
+  purpose: "Update or archive an industry while preserving source and audit history.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "industry_model"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "INDUSTRY_NOT_FOUND", "INDUSTRY_ALREADY_EXISTS"],
+};
+
+export const LINK_INDUSTRY_SERVICE_ACTION: ActionContract = {
+  actionName: "link_industry_service",
+  purpose: "Link an explicit industry to an existing Service Catalogue item for structured service applicability.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "industry_model", "service_catalogue"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "INDUSTRY_NOT_FOUND", "SERVICE_NOT_FOUND"],
+};
+
+export const UPDATE_INDUSTRY_SERVICE_LINK_ACTION: ActionContract = {
+  actionName: "update_industry_service_link",
+  purpose: "Update, archive or restore an industry-to-service relationship with audit history.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "industry_model", "service_catalogue"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "INDUSTRY_SERVICE_LINK_NOT_FOUND"],
+};
+
 // Task Management — Secretary-owned work items linked to real CRM/job/
 // communication records. A due date plus assignee also makes a task visible
 // in the calendar; an entered duration contributes to capacity. No duration,

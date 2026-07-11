@@ -111,6 +111,26 @@ export interface DocumentRecord {
   job?: { id: string; jobTitle: string } | null;
 }
 
+export interface IndustryServiceLink {
+  id: string;
+  industryId: string;
+  serviceCatalogueItemId: string;
+  notes?: string | null;
+  isActive: boolean;
+  serviceCatalogueItem: ServiceCatalogueItem;
+}
+
+export interface Industry {
+  id: string;
+  name: string;
+  description?: string | null;
+  source: string;
+  verificationStatus: string;
+  notes?: string | null;
+  isActive: boolean;
+  serviceLinks: IndustryServiceLink[];
+}
+
 // Keep in sync with backend/src/lib/actionContracts.ts JOB_STATUSES.
 export const JOB_STATUSES = [
   "nova",
@@ -1131,6 +1151,20 @@ export const api = {
       request<DocumentRecord>("/documents", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Record<string, unknown>) =>
       request<DocumentRecord>(`/documents/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  },
+  industries: {
+    list: (activeOnly?: boolean) => request<Industry[]>(`/industries${activeOnly ? "?active_only=true" : ""}`),
+    get: (id: string) => request<Industry>(`/industries/${id}`),
+    create: (data: Record<string, unknown>) =>
+      request<Industry>("/industries", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<Industry>(`/industries/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    linkService: (id: string, serviceCatalogueItemId: string, notes?: string) =>
+      request<IndustryServiceLink>(`/industries/${id}/services`, {
+        method: "POST", body: JSON.stringify({ service_catalogue_item_id: serviceCatalogueItemId, notes }),
+      }),
+    updateServiceLink: (linkId: string, data: Record<string, unknown>) =>
+      request<IndustryServiceLink>(`/industries/service-links/${linkId}`, { method: "PUT", body: JSON.stringify(data) }),
   },
   jobs: {
     list: (params?: { clientId?: string; status?: string }) => {

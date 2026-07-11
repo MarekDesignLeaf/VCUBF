@@ -19,6 +19,8 @@ model Company {
   clients                      Client[]
   contacts                     Contact[]
   documentRecords              DocumentRecord[]
+  industries                   Industry[]
+  industryServiceLinks         IndustryServiceLink[]
   jobs                         Job[]
   leads                        Lead[]
   auditLogs                    AuditLog[]
@@ -262,6 +264,7 @@ model ServiceCatalogueItem {
   jobs            Job[]
   quoteItems      QuoteItem[]
   photoSelections PhotoServiceSelection[]
+  industryLinks   IndustryServiceLink[]
 
   @@index([companyId])
   @@map("service_catalogue_items")
@@ -686,6 +689,51 @@ model BusinessContextItem {
   @@index([companyId])
   @@index([companyId, category])
   @@map("business_context_items")
+}
+
+// Basic Industry Model — a structured company taxonomy distinct from free-
+// text Business Context. Each industry is explicit and source-labelled; its
+// service links point only to real Service Catalogue entries.
+model Industry {
+  id                 String   @id @default(uuid())
+  companyId          String   @map("company_id")
+  name               String
+  description        String?
+  source             String   @default("user_input")
+  verificationStatus String   @default("user_entered") @map("verification_status")
+  notes              String?
+  isActive           Boolean  @default(true) @map("is_active")
+  createdBy          String?  @map("created_by")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  company      Company               @relation(fields: [companyId], references: [id])
+  serviceLinks IndustryServiceLink[]
+
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
+  @@map("industries")
+}
+
+model IndustryServiceLink {
+  id                     String   @id @default(uuid())
+  companyId              String   @map("company_id")
+  industryId             String   @map("industry_id")
+  serviceCatalogueItemId String   @map("service_catalogue_item_id")
+  notes                  String?
+  isActive               Boolean  @default(true) @map("is_active")
+  createdBy              String?  @map("created_by")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  company              Company              @relation(fields: [companyId], references: [id])
+  industry             Industry             @relation(fields: [industryId], references: [id])
+  serviceCatalogueItem ServiceCatalogueItem @relation(fields: [serviceCatalogueItemId], references: [id])
+
+  @@unique([industryId, serviceCatalogueItemId])
+  @@index([companyId])
+  @@index([serviceCatalogueItemId])
+  @@map("industry_service_links")
 }
 
 // Website Management / Business Growth MVP slice. An audit stores only

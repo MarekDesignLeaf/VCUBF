@@ -35,6 +35,7 @@ import { CommunicationIntakePage } from "./pages/CommunicationIntake";
 import { Enquiries } from "./pages/Enquiries";
 import { Contacts } from "./pages/Contacts";
 import { Documents } from "./pages/Documents";
+import { Industries } from "./pages/Industries";
 
 export default function App() {
   return (
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="/clients/:id" element={<ClientDetail />} />
             <Route path="/contacts" element={<Contacts />} />
             <Route path="/documents" element={<Documents />} />
+            <Route path="/industries" element={<Industries />} />
             <Route path="/jobs" element={<Jobs />} />
             <Route path="/jobs/:id" element={<JobDetail />} />
             <Route path="/employees" element={<Employees />} />

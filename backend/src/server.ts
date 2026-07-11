@@ -25,6 +25,7 @@ import { websiteContentProposalsRouter } from "./modules/website-content-proposa
 import { tasksRouter } from "./modules/tasks/routes.js";
 import { contactsRouter } from "./modules/crm/contacts.js";
 import { documentsRouter } from "./modules/documents/routes.js";
+import { industriesRouter } from "./modules/industries/routes.js";
 
 export function createServer() {
   const app = express();
@@ -57,6 +58,7 @@ export function createServer() {
   app.use("/tasks", tasksRouter);
   app.use("/crm/contacts", contactsRouter);
   app.use("/documents", documentsRouter);
+  app.use("/industries", industriesRouter);
 
   // Fallback error handler — the system must fail safely, never crash silently.
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
