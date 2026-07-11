@@ -120,15 +120,17 @@ Important actions record actor, input, result, risk level and before/after evide
 
 Users with connector permissions can open **Connectors** to review the declared Gmail, Google Contacts, Google Calendar and Google Drive photo-storage contracts and register a company data source.
 
-For Gmail, register a source with `read:messages`, choose **Authorize Gmail**, complete Google's consent screen, then review and explicitly **Enable** the source. **Sync now** imports up to 25 unseen messages into Communication Intake. Repeated sync is safe: messages already imported from that source are skipped.
+For Gmail, register a source with `read:messages`, choose **Authorize Gmail**, complete Google's consent screen, then review and explicitly **Enable** the source. **Initial sync** imports recent messages and stores a Gmail history cursor; **Sync changes** then reads only newly added messages. Repeated sync is idempotent, and an expired cursor safely falls back to a full sync.
 
 Gmail access is read-only. Secretary cannot send, delete, label or change Gmail messages. Never paste a password, OAuth token, client secret or API key into Secretary. Google Contacts, Calendar and Drive photo storage remain contract-only in this build.
 
-Use **Disable** when a source should no longer be eligible for access. The action is tenant-scoped and audited.
+Use **Disable** to stop access while retaining authorization. Use **Disconnect** only after reviewing its confirmation warning: it revokes the Google grant and deletes the encrypted local credential and sync cursor. Both actions are tenant-scoped and audited.
+
+The **Service catalogue** page also includes **Browse reference activities**. The supplied CSV contains activity candidates across many industries. Activating one requires explicit confirmation that the company really performs it. The displayed Oxfordshire rate is reference-only and does not become the company price.
 
 ## 12. Current MVP limitations
 
-The read-only Gmail adapter requires deployment-owned Google OAuth credentials, an encryption key and any Google verification/security-assessment obligations applicable to the deployment. Synchronisation is manual; scheduled sync, attachments, disconnect/revoke, Gmail writes, contacts, external calendar, photo storage, WhatsApp, SMS, job boards and website publishing are not implemented. The app also has no push delivery, quote PDF delivery, native/offline voice runtime, automatic image analysis, automatic legal hiring action or automatic public content change.
+The read-only Gmail adapter requires deployment-owned Google OAuth credentials, an encryption key and any Google verification/security-assessment obligations applicable to the deployment. Synchronisation is manually triggered; scheduling/push notifications, attachments, Gmail writes, contacts, external calendar, photo storage, WhatsApp, SMS, job boards and website publishing are not implemented. The app also has no push delivery, quote PDF delivery, native/offline voice runtime, automatic image analysis, automatic legal hiring action or automatic public content change.
 
 Production encryption, TLS, database backups, monitoring, secret rotation, retention and disaster recovery depend on the selected hosting environment and must be configured and verified before production use.
 

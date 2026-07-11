@@ -64,12 +64,15 @@ export function publicConnectorSource<T extends {
   connectorKey: string;
   credentialReference: string | null;
   credential?: { sourceId: string } | null;
+  syncCursor?: string | null;
+  syncPageToken?: string | null;
 }>(source: T) {
-  const { credentialReference, credential, ...safe } = source;
+  const { credentialReference, credential, syncCursor, syncPageToken: _syncPageToken, ...safe } = source;
   return {
     ...safe,
     credentialReferenceConfigured: Boolean(credentialReference),
     authorizationConfigured: Boolean(credential),
+    incrementalSyncConfigured: Boolean(syncCursor),
     definition: getConnectorDefinition(source.connectorKey),
   };
 }

@@ -1,7 +1,13 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
-import { CREATE_SERVICE_ACTION, UPDATE_SERVICE_ACTION } from "../../lib/actionContracts.js";
+import {
+  ACTIVATE_REFERENCE_ACTIVITY_ACTION,
+  CREATE_SERVICE_ACTION,
+  LIST_REFERENCE_ACTIVITIES_ACTION,
+  UPDATE_SERVICE_ACTION,
+} from "../../lib/actionContracts.js";
+import * as activityReferenceService from "../../services/activityReferenceService.js";
 import * as serviceCatalogueService from "../../services/serviceCatalogueService.js";
 
 export const catalogueRouter = Router();
@@ -12,6 +18,26 @@ catalogueRouter.get("/", requirePermission("crm.read"), async (req, res) => {
   const activeOnly = req.query.active_only === "true";
   res.json(await serviceCatalogueService.listServices(req.user!, { activeOnly }));
 });
+
+catalogueRouter.get(
+  "/reference-activities",
+  requirePermission(LIST_REFERENCE_ACTIVITIES_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await activityReferenceService.listReferenceActivities(req.user!, req.query);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
+catalogueRouter.post(
+  "/reference-activities/:activityCode/activate",
+  requirePermission(ACTIVATE_REFERENCE_ACTIVITY_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await activityReferenceService.activateReferenceActivity(req.user!, req.params.activityCode, req.body);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
 
 catalogueRouter.get("/:id", requirePermission("crm.read"), async (req, res) => {
   const service = await serviceCatalogueService.getService(req.user!, req.params.id);

@@ -224,6 +224,54 @@ describe("Gmail read-only connector", () => {
     assert.ok(!auditJson.includes("newer_than:7d"));
   });
 
+  it("initializes a Gmail history cursor and then imports only added messages", async () => {
+    globalThis.fetch = async (input, init) => {
+      const url = requestUrl(input);
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer access-token-1");
+      if (url.pathname.endsWith("/profile")) return Response.json({ historyId: "100" });
+      if (url.pathname.endsWith("/messages")) return Response.json({ messages: [] });
+      throw new Error(`Unexpected initial sync request: ${url}`);
+    };
+    const initial = await request(app)
+      .post(`/connectors/sources/${sourceId}/sync`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ max_results: 10 });
+    assert.equal(initial.status, 200);
+    assert.equal(initial.body.mode, "full");
+    assert.equal(initial.body.cursorAdvanced, true);
+    let stored = await prisma.connectorSource.findUniqueOrThrow({ where: { id: sourceId } });
+    assert.equal(stored.syncCursor, "100");
+    assert.ok(stored.lastFullSyncAt);
+
+    globalThis.fetch = async (input, init) => {
+      const url = requestUrl(input);
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer access-token-1");
+      if (url.pathname.endsWith("/history")) {
+        assert.equal(url.searchParams.get("startHistoryId"), "100");
+        assert.equal(url.searchParams.get("historyTypes"), "messageAdded");
+        return Response.json({
+          history: [{ id: "104", messagesAdded: [{ message: { id: "message-2", threadId: "thread-2" } }] }],
+          historyId: "105",
+        });
+      }
+      if (url.pathname.endsWith("/messages/message-2")) {
+        return Response.json({ id: "message-2", threadId: "thread-2", snippet: "Incremental Gmail message" });
+      }
+      throw new Error(`Unexpected incremental sync request: ${url}`);
+    };
+    const incremental = await request(app)
+      .post(`/connectors/sources/${sourceId}/sync`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ max_results: 10 });
+    assert.equal(incremental.status, 200);
+    assert.equal(incremental.body.mode, "incremental");
+    assert.equal(incremental.body.importedCount, 1);
+    assert.equal(incremental.body.cursorAdvanced, true);
+    stored = await prisma.connectorSource.findUniqueOrThrow({ where: { id: sourceId } });
+    assert.equal(stored.syncCursor, "105");
+    assert.equal(await prisma.communicationIntake.count({ where: { externalMessageId: "message-2" } }), 1);
+  });
+
   it("refreshes an expired access token without replacing the refresh token", async () => {
     const expired = encryptConnectorPayload({
       accessToken: "expired-token",
@@ -244,16 +292,78 @@ describe("Gmail read-only connector", () => {
         return Response.json({ access_token: "refreshed-token", expires_in: 3600, token_type: "Bearer" });
       }
       assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer refreshed-token");
+      if (url.pathname.endsWith("/profile")) return Response.json({ historyId: "200" });
       if (url.pathname.endsWith("/messages")) return Response.json({ messages: [] });
       throw new Error("Unexpected Gmail request");
     };
     const response = await request(app)
       .post(`/connectors/sources/${sourceId}/sync`)
       .set("Authorization", `Bearer ${token}`)
-      .send({ max_results: 1 });
+      .send({ max_results: 1, full_sync: true });
     assert.equal(response.status, 200);
     assert.equal(response.body.importedCount, 0);
     assert.equal(refreshed, true);
+  });
+
+  it("falls back to a full sync when Gmail reports an expired history cursor", async () => {
+    globalThis.fetch = async (input, init) => {
+      const url = requestUrl(input);
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer refreshed-token");
+      if (url.pathname.endsWith("/history")) return new Response("{}", { status: 404 });
+      if (url.pathname.endsWith("/profile")) return Response.json({ historyId: "300" });
+      if (url.pathname.endsWith("/messages")) return Response.json({ messages: [] });
+      throw new Error(`Unexpected fallback request: ${url}`);
+    };
+    const response = await request(app)
+      .post(`/connectors/sources/${sourceId}/sync`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ max_results: 10 });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.mode, "full");
+    assert.equal(response.body.fallbackFromExpiredHistory, true);
+    const source = await prisma.connectorSource.findUniqueOrThrow({ where: { id: sourceId } });
+    assert.equal(source.syncCursor, "300");
+    assert.equal(source.lastSyncStatus, "success");
+  });
+
+  it("requires confirmation, revokes Google and removes the local encrypted credential", async () => {
+    let contacted = false;
+    globalThis.fetch = async () => {
+      contacted = true;
+      return new Response(null, { status: 200 });
+    };
+    const preview = await request(app)
+      .post(`/connectors/sources/${sourceId}/disconnect`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ confirmed: false });
+    assert.equal(preview.status, 409);
+    assert.equal(preview.body.error, "CONFIRMATION_REQUIRED");
+    assert.equal(preview.body.preview.willRevokeGoogleProjectGrant, true);
+    assert.equal(contacted, false);
+
+    globalThis.fetch = async (input, init) => {
+      const url = requestUrl(input);
+      assert.equal(url.toString(), "https://oauth2.googleapis.com/revoke");
+      const body = new URLSearchParams(String(init?.body));
+      assert.equal(body.get("token"), "refresh-token-1");
+      return new Response(null, { status: 200 });
+    };
+    const disconnected = await request(app)
+      .post(`/connectors/sources/${sourceId}/disconnect`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ confirmed: true });
+    assert.equal(disconnected.status, 200);
+    assert.equal(disconnected.body.providerGrantRevoked, true);
+    assert.equal(await prisma.connectorCredential.count({ where: { sourceId } }), 0);
+    const source = await prisma.connectorSource.findUniqueOrThrow({ where: { id: sourceId } });
+    assert.equal(source.connectionStatus, "disconnected");
+    assert.equal(source.isEnabled, false);
+    assert.equal(source.syncCursor, null);
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: { actionName: "disconnect_gmail_source", result: "success" },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.ok(!JSON.stringify(audit).includes("refresh-token-1"));
   });
 
   it("rejects a token carrying broader scopes than Gmail readonly", async () => {

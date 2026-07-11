@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import {
   DISABLE_CONNECTOR_SOURCE_ACTION,
+  DISCONNECT_GMAIL_SOURCE_ACTION,
   ENABLE_CONNECTOR_SOURCE_ACTION,
   REGISTER_CONNECTOR_SOURCE_ACTION,
   START_GMAIL_OAUTH_ACTION,
@@ -83,6 +84,16 @@ connectorsRouter.post(
   requirePermission(SYNC_GMAIL_MESSAGES_ACTION.requiredPermission),
   async (req, res) => {
     const result = await gmailConnectorService.syncGmailMessages(req.user!, req.params.id, req.body);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
+connectorsRouter.post(
+  "/sources/:id/disconnect",
+  requirePermission(DISCONNECT_GMAIL_SOURCE_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await gmailConnectorService.disconnectGmailSource(req.user!, req.params.id, req.body);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
   }

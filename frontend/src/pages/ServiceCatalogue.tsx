@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, type ServiceCatalogueItem } from "../api/client";
+import {
+  api,
+  ApiError,
+  type ReferenceActivity,
+  type ReferenceActivityList,
+  type ServiceCatalogueItem,
+} from "../api/client";
 
 // Service Catalogue Module — the company's real, user-entered menu of
 // services. Nothing shown here is invented: every field is what the user
@@ -10,6 +16,7 @@ export function ServiceCatalogue() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
+  const [showReference, setShowReference] = useState(false);
 
   function load() {
     api.catalogue
@@ -38,12 +45,18 @@ export function ServiceCatalogue() {
     <div>
       <div className="page-header">
         <h1>Service catalogue</h1>
-        <button onClick={() => setShowForm((v) => !v)}>{showForm ? "Cancel" : "New service"}</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="secondary" onClick={() => setShowReference((value) => !value)}>
+            {showReference ? "Close reference catalogue" : "Browse reference activities"}
+          </button>
+          <button onClick={() => setShowForm((v) => !v)}>{showForm ? "Cancel" : "New service"}</button>
+        </div>
       </div>
       <p className="hint">
         The real menu of services the company offers — used to prefill jobs (and later quotes and
         website content) instead of retyping or guessing.
       </p>
+      {showReference ? <ReferenceActivities onActivated={load} /> : null}
       {showForm && (
         <NewServiceForm
           onCreated={() => {
@@ -76,6 +89,7 @@ export function ServiceCatalogue() {
                 <td>
                   {s.name}
                   {!s.isActive && <span className="hint"> (inactive)</span>}
+                  {s.referenceActivityCode ? <div className="hint">Confirmed from reference catalogue</div> : null}
                 </td>
                 <td>{s.category ?? "—"}</td>
                 <td>
@@ -104,6 +118,119 @@ export function ServiceCatalogue() {
         </table>
       )}
     </div>
+  );
+}
+
+function ReferenceActivities({ onActivated }: { onActivated: () => void }) {
+  const [result, setResult] = useState<ReferenceActivityList | null>(null);
+  const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [industryCode, setIndustryCode] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [busyCode, setBusyCode] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const limit = 25;
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    api.catalogue.referenceActivities({
+      search: appliedSearch || undefined,
+      industryCode: industryCode || undefined,
+      offset,
+      limit,
+    }).then((data) => {
+      if (!cancelled) setResult(data);
+    }).catch((err) => {
+      if (!cancelled) setError(err instanceof ApiError ? err.message : "Could not load reference activities.");
+    });
+    return () => { cancelled = true; };
+  }, [appliedSearch, industryCode, offset]);
+
+  async function activate(activity: ReferenceActivity) {
+    setError(null);
+    setNotice(null);
+    setBusyCode(activity.activityCode);
+    try {
+      await api.catalogue.activateReferenceActivity(activity.activityCode, { confirmed: false });
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.code !== "CONFIRMATION_REQUIRED") {
+        setError(err instanceof ApiError ? err.message : "Could not prepare activity activation.");
+        setBusyCode(null);
+        return;
+      }
+      const confirmed = window.confirm(
+        `Confirm that the company really performs “${activity.activityName}” in “${activity.industryName}”? `
+        + `The Oxfordshire reference rate (${activity.oxfordshireRateGbp} ${activity.rateUnit}) will not become the company price.`
+      );
+      if (!confirmed) {
+        setBusyCode(null);
+        return;
+      }
+    }
+    try {
+      await api.catalogue.activateReferenceActivity(activity.activityCode, { confirmed: true });
+      setNotice(`${activity.activityName} was added as a confirmed company service. Company pricing remains unset.`);
+      onActivated();
+      const refreshed = await api.catalogue.referenceActivities({
+        search: appliedSearch || undefined,
+        industryCode: industryCode || undefined,
+        offset,
+        limit,
+      });
+      setResult(refreshed);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not activate the reference activity.");
+    } finally {
+      setBusyCode(null);
+    }
+  }
+
+  return (
+    <section className="card" style={{ marginBottom: 20 }}>
+      <h2>Reference activities</h2>
+      <p className="hint">
+        Search 1,810 deduplicated activity templates across 14 industries. These are candidates, not claims about the company.
+        Oxfordshire rates are reference values only and are never copied into company prices automatically.
+      </p>
+      <form onSubmit={(event) => { event.preventDefault(); setOffset(0); setAppliedSearch(search.trim()); }} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <input placeholder="Search activity, subtype or code" value={search} onChange={(event) => setSearch(event.target.value)} style={{ minWidth: 280 }} />
+        <select value={industryCode} onChange={(event) => { setIndustryCode(event.target.value); setOffset(0); }}>
+          <option value="">All industries</option>
+          {(result?.industries ?? []).map((industry) => <option key={industry.code} value={industry.code}>{industry.name}</option>)}
+        </select>
+        <button type="submit">Search</button>
+      </form>
+      {error ? <div className="error-banner">{error}</div> : null}
+      {notice ? <div className="success-banner">{notice}</div> : null}
+      {!result ? <p>Loading…</p> : result.items.length === 0 ? <p className="hint">No matching reference activities.</p> : (
+        <>
+          <table className="data-table">
+            <thead><tr><th>Activity</th><th>Industry / subtype</th><th>Pricing reference</th><th></th></tr></thead>
+            <tbody>{result.items.map((activity) => (
+              <tr key={activity.activityCode}>
+                <td><strong>{activity.activityName}</strong><div className="hint">{activity.activityCode}</div></td>
+                <td>{activity.industryName}<div className="hint">{activity.subtypeName}</div></td>
+                <td>{activity.oxfordshireRateGbp} {activity.rateUnit}<div className="hint">Reference only · {activity.defaultPricingMethod}</div></td>
+                <td>{activity.activatedServiceId ? (
+                  <span>{activity.activatedServiceIsActive ? "Activated" : "Activated (inactive)"}</span>
+                ) : (
+                  <button onClick={() => activate(activity)} disabled={busyCode === activity.activityCode}>
+                    {busyCode === activity.activityCode ? "Activating…" : "Activate for company"}
+                  </button>
+                )}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
+            <button className="secondary" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Previous</button>
+            <span className="hint">{offset + 1}–{Math.min(offset + result.items.length, result.total)} of {result.total}</span>
+            <button className="secondary" disabled={offset + limit >= result.total} onClick={() => setOffset(offset + limit)}>Next</button>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 

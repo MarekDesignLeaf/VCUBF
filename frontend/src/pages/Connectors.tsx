@@ -101,9 +101,43 @@ export function Connectors() {
     try {
       const result = await api.connectors.syncSource(source.id, { max_results: 25 });
       await loadSources();
-      setNotice(`Gmail synchronised: ${result.importedCount} imported, ${result.skippedCount} already present.`);
+      const mode = result.mode === "incremental" ? "incremental" : "full";
+      const fallback = result.fallbackFromExpiredHistory ? " History cursor expired, so a safe full sync was used." : "";
+      const more = result.hasMore ? " More provider pages remain; run sync again." : "";
+      setNotice(`Gmail ${mode} sync: ${result.importedCount} imported, ${result.skippedCount} skipped.${fallback}${more}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not synchronise Gmail.");
+    } finally {
+      setBusySourceId(null);
+    }
+  }
+
+  async function disconnect(source: ConnectorSource) {
+    setError(null);
+    setNotice(null);
+    setBusySourceId(source.id);
+    try {
+      await api.connectors.disconnectSource(source.id, false);
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.code !== "CONFIRMATION_REQUIRED") {
+        setError(err instanceof ApiError ? err.message : "Could not prepare Gmail disconnection.");
+        setBusySourceId(null);
+        return;
+      }
+      const confirmed = window.confirm(
+        "Disconnect Gmail and revoke the Google OAuth grant? Google warns that revocation can remove every scope granted to this Google Cloud project for the account. The encrypted local credential and sync cursor will be deleted."
+      );
+      if (!confirmed) {
+        setBusySourceId(null);
+        return;
+      }
+    }
+    try {
+      const result = await api.connectors.disconnectSource(source.id, true);
+      await loadSources();
+      setNotice(result.providerGrantRevoked ? "Gmail disconnected and Google OAuth grant revoked." : "Gmail source disconnected locally.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not disconnect Gmail. The source remains disabled for a safe retry.");
     } finally {
       setBusySourceId(null);
     }
@@ -176,7 +210,12 @@ export function Connectors() {
                       <button onClick={() => enable(source)} disabled={busySourceId === source.id}>Enable</button>
                     ) : null}
                     {source.connectorKey === "gmail" && source.isEnabled ? (
-                      <button onClick={() => sync(source)} disabled={busySourceId === source.id}>Sync now</button>
+                      <button onClick={() => sync(source)} disabled={busySourceId === source.id}>
+                        {source.incrementalSyncConfigured ? "Sync changes" : "Initial sync"}
+                      </button>
+                    ) : null}
+                    {source.connectorKey === "gmail" && source.authorizationConfigured ? (
+                      <button className="secondary" onClick={() => disconnect(source)} disabled={busySourceId === source.id}>Disconnect</button>
                     ) : null}
                     <button className="secondary" onClick={() => disable(source)} disabled={source.connectionStatus === "disabled" || busySourceId === source.id}>
                       Disable

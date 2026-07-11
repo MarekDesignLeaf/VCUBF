@@ -256,8 +256,10 @@ export interface ConnectorSource {
   lastSyncAt?: string | null;
   lastSyncStatus?: string | null;
   lastErrorCode?: string | null;
+  lastFullSyncAt?: string | null;
   credentialReferenceConfigured: boolean;
   authorizationConfigured: boolean;
+  incrementalSyncConfigured: boolean;
   definition: ConnectorDefinition;
 }
 
@@ -268,12 +270,23 @@ export interface ConnectorOAuthStart {
 
 export interface ConnectorSyncResult {
   sourceId: string;
+  mode: "full" | "incremental";
+  fallbackFromExpiredHistory: boolean;
   importedCount: number;
   skippedCount: number;
   importedIntakeIds: string[];
   nextPageToken: string | null;
   resultSizeEstimate: number | null;
+  hasMore: boolean;
+  cursorAdvanced: boolean;
   syncedAt: string;
+}
+
+export interface ConnectorDisconnectResult {
+  sourceId: string;
+  provider: "gmail";
+  disconnectedAt: string;
+  providerGrantRevoked: boolean;
 }
 
 export interface AssignJobResult {
@@ -382,8 +395,50 @@ export interface ServiceCatalogueItem {
   priceUnit?: string | null;
   defaultDurationHours?: number | null;
   defaultRequiredSkills: string[];
+  source?: string;
+  sourceReference?: string | null;
+  referenceActivityCode?: string | null;
+  referenceRateGbp?: number | null;
+  referenceRateUnit?: string | null;
   isActive: boolean;
   createdAt: string;
+}
+
+export interface ReferenceActivity {
+  industryCode: string;
+  industryName: string;
+  subtypeCode: string;
+  subtypeName: string;
+  activityCode: string;
+  activityName: string;
+  defaultPricingMethod: string;
+  rateUnit: string;
+  oxfordshireRateGbp: number;
+  availablePricingMethods: string[];
+  activatedServiceId: string | null;
+  activatedServiceIsActive: boolean | null;
+}
+
+export interface ReferenceActivityList {
+  items: ReferenceActivity[];
+  total: number;
+  offset: number;
+  limit: number;
+  industries: Array<{ code: string; name: string }>;
+  catalogue: {
+    sourceFile: string;
+    rawRowCount: number;
+    uniqueActivityCount: number;
+    duplicateRowCount: number;
+    industryCount: number;
+    pricingDisclaimer: string;
+  };
+}
+
+export interface ActivatedReferenceActivity {
+  service: ServiceCatalogueItem;
+  industry: Industry;
+  link: IndustryServiceLink;
 }
 
 // Quote, Pricing and Profitability Module. Every price/cost is either typed
@@ -1274,10 +1329,18 @@ export const api = {
       }),
     startOAuth: (id: string) =>
       request<ConnectorOAuthStart>(`/connectors/sources/${id}/oauth/start`, { method: "POST", body: "{}" }),
-    syncSource: (id: string, data: { max_results?: number; query?: string; page_token?: string } = {}) =>
+    syncSource: (
+      id: string,
+      data: { max_results?: number; query?: string; page_token?: string; full_sync?: boolean } = {}
+    ) =>
       request<ConnectorSyncResult>(`/connectors/sources/${id}/sync`, {
         method: "POST",
         body: JSON.stringify(data),
+      }),
+    disconnectSource: (id: string, confirmed: boolean) =>
+      request<ConnectorDisconnectResult>(`/connectors/sources/${id}/disconnect`, {
+        method: "POST",
+        body: JSON.stringify({ confirmed }),
       }),
   },
   jobs: {
@@ -1361,6 +1424,20 @@ export const api = {
       request<ServiceCatalogueItem>("/service-catalogue", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Record<string, unknown>) =>
       request<ServiceCatalogueItem>(`/service-catalogue/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    referenceActivities: (params?: { search?: string; industryCode?: string; offset?: number; limit?: number }) => {
+      const qs = new URLSearchParams();
+      if (params?.search) qs.set("search", params.search);
+      if (params?.industryCode) qs.set("industry_code", params.industryCode);
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request<ReferenceActivityList>(`/service-catalogue/reference-activities${suffix}`);
+    },
+    activateReferenceActivity: (activityCode: string, data: Record<string, unknown>) =>
+      request<ActivatedReferenceActivity>(
+        `/service-catalogue/reference-activities/${encodeURIComponent(activityCode)}/activate`,
+        { method: "POST", body: JSON.stringify(data) }
+      ),
   },
   quotes: {
     list: (params?: { clientId?: string; jobId?: string; status?: string }) => {

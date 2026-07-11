@@ -12,14 +12,18 @@ import {
   buildGmailAuthorizationUrl,
   exchangeGmailAuthorizationCode,
   getGmailMessage,
+  getGmailProfile,
   GmailAdapterError,
+  listGmailHistory,
   listGmailMessages,
   parseGmailMessage,
   refreshGmailCredential,
+  revokeGmailCredential,
   type StoredGmailCredential,
 } from "../connectors/gmailAdapter.js";
 import {
   COMPLETE_GMAIL_OAUTH_ACTION,
+  DISCONNECT_GMAIL_SOURCE_ACTION,
   START_GMAIL_OAUTH_ACTION,
   SYNC_GMAIL_MESSAGES_ACTION,
   type ActionContract,
@@ -44,8 +48,14 @@ export const syncGmailSchema = z
     max_results: z.number().int().min(1).max(50).default(25),
     query: z.string().trim().min(1).max(500).optional(),
     page_token: z.string().trim().min(1).max(2000).optional(),
+    full_sync: z.boolean().default(false),
   })
-  .strict();
+  .strict()
+  .refine((value) => !(value.full_sync && (value.query || value.page_token)), {
+    message: "full_sync cannot be combined with query or page_token",
+  });
+
+export const disconnectGmailSchema = z.object({ confirmed: z.boolean().optional() }).strict();
 
 function stateHash(state: string) {
   return createHash("sha256").update(state).digest("hex");
@@ -96,6 +106,10 @@ function providerErrorResult(error: unknown): ServiceResult<never> {
         ? 503
         : error.code === "PROVIDER_RESPONSE_INVALID"
           ? 502
+          : error.code === "MESSAGE_NOT_FOUND"
+            ? 404
+          : error.code === "HISTORY_CURSOR_EXPIRED"
+            ? 409
           : 409;
     return fail(status, error.code, error.message);
   }
@@ -220,7 +234,14 @@ export async function completeGmailOAuth(rawInput: unknown): Promise<ServiceResu
       }),
       prisma.connectorSource.update({
         where: { id: oauthState.sourceId },
-        data: { connectionStatus: "configured", isEnabled: false, lastErrorCode: null },
+        data: {
+          connectionStatus: "configured",
+          isEnabled: false,
+          lastErrorCode: null,
+          syncCursor: null,
+          syncPageToken: null,
+          lastFullSyncAt: null,
+        },
       }),
     ]);
     await recordAudit({
@@ -257,6 +278,190 @@ async function usableCredential(source: { credential: Prisma.ConnectorCredential
   return credential;
 }
 
+type GmailSource = Prisma.ConnectorSourceGetPayload<{ include: { credential: true } }>;
+
+interface GmailSyncResult {
+  sourceId: string;
+  mode: "full" | "incremental";
+  fallbackFromExpiredHistory: boolean;
+  importedCount: number;
+  skippedCount: number;
+  importedIntakeIds: string[];
+  nextPageToken: string | null;
+  resultSizeEstimate: number | null;
+  hasMore: boolean;
+  cursorAdvanced: boolean;
+  syncedAt: Date;
+}
+
+async function importMessageReferences(
+  user: AuthedUser,
+  source: GmailSource,
+  accessToken: string,
+  references: Array<{ id?: string; threadId?: string }>
+) {
+  const importedIntakeIds: string[] = [];
+  let skippedCount = 0;
+  for (const reference of references) {
+    if (!reference?.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    const existing = await prisma.communicationIntake.findUnique({
+      where: {
+        companyId_connectorSourceId_externalMessageId: {
+          companyId: user.companyId,
+          connectorSourceId: source.id,
+          externalMessageId: reference.id,
+        },
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      skippedCount += 1;
+      continue;
+    }
+    let rawMessage;
+    try {
+      rawMessage = await getGmailMessage(accessToken, reference.id);
+    } catch (error) {
+      if (error instanceof GmailAdapterError && error.code === "MESSAGE_NOT_FOUND") {
+        skippedCount += 1;
+        continue;
+      }
+      throw error;
+    }
+    const message = parseGmailMessage(rawMessage);
+    if (message.externalMessageId !== reference.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    try {
+      const intake = await prisma.communicationIntake.create({
+        data: {
+          companyId: user.companyId,
+          connectorSourceId: source.id,
+          externalMessageId: message.externalMessageId,
+          externalThreadId: message.externalThreadId,
+          channel: "email",
+          senderName: message.senderName,
+          senderEmail: message.senderEmail,
+          messageText: message.messageText,
+          receivedAt: message.receivedAt,
+          sourceReference: `gmail:${source.id}:${message.externalMessageId}`,
+          createdBy: user.id,
+        },
+      });
+      importedIntakeIds.push(intake.id);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        skippedCount += 1;
+        continue;
+      }
+      throw error;
+    }
+  }
+  return { importedIntakeIds, skippedCount };
+}
+
+async function performFullSync(
+  user: AuthedUser,
+  source: GmailSource,
+  accessToken: string,
+  input: z.infer<typeof syncGmailSchema>,
+  fallbackFromExpiredHistory: boolean
+): Promise<GmailSyncResult> {
+  const initializesCursor = input.full_sync || (!source.syncCursor && !input.query && !input.page_token);
+  const profile = initializesCursor ? await getGmailProfile(accessToken) : null;
+  if (profile && (!profile.historyId || !/^\d+$/.test(profile.historyId))) {
+    throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+  }
+  const listed = await listGmailMessages(accessToken, {
+    maxResults: input.max_results,
+    query: input.query,
+    pageToken: input.page_token,
+  });
+  if (listed.messages !== undefined && !Array.isArray(listed.messages)) {
+    throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+  }
+  const imported = await importMessageReferences(user, source, accessToken, listed.messages ?? []);
+  const syncedAt = new Date();
+  await prisma.connectorSource.update({
+    where: { id: source.id },
+    data: {
+      lastSyncAt: syncedAt,
+      lastSyncStatus: "success",
+      lastErrorCode: null,
+      ...(initializesCursor
+        ? { syncCursor: profile!.historyId!, syncPageToken: null, lastFullSyncAt: syncedAt }
+        : {}),
+    },
+  });
+  return {
+    sourceId: source.id,
+    mode: "full",
+    fallbackFromExpiredHistory,
+    importedCount: imported.importedIntakeIds.length,
+    skippedCount: imported.skippedCount,
+    importedIntakeIds: imported.importedIntakeIds,
+    nextPageToken: listed.nextPageToken ?? null,
+    resultSizeEstimate: listed.resultSizeEstimate ?? null,
+    hasMore: Boolean(listed.nextPageToken),
+    cursorAdvanced: initializesCursor,
+    syncedAt,
+  };
+}
+
+async function performIncrementalSync(
+  user: AuthedUser,
+  source: GmailSource,
+  accessToken: string,
+  maxResults: number
+): Promise<GmailSyncResult> {
+  const listed = await listGmailHistory(accessToken, {
+    startHistoryId: source.syncCursor!,
+    maxResults,
+    pageToken: source.syncPageToken ?? undefined,
+  });
+  if (listed.history !== undefined && !Array.isArray(listed.history)) {
+    throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+  }
+  const byId = new Map<string, { id: string; threadId?: string }>();
+  for (const record of listed.history ?? []) {
+    if (record.messagesAdded !== undefined && !Array.isArray(record.messagesAdded)) {
+      throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    }
+    for (const added of record.messagesAdded ?? []) {
+      const id = added.message?.id;
+      if (!id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+      byId.set(id, { id, threadId: added.message?.threadId });
+    }
+  }
+  const imported = await importMessageReferences(user, source, accessToken, [...byId.values()]);
+  const hasMore = Boolean(listed.nextPageToken);
+  if (!hasMore && (!listed.historyId || !/^\d+$/.test(listed.historyId))) {
+    throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+  }
+  const syncedAt = new Date();
+  await prisma.connectorSource.update({
+    where: { id: source.id },
+    data: {
+      lastSyncAt: syncedAt,
+      lastSyncStatus: "success",
+      lastErrorCode: null,
+      syncPageToken: listed.nextPageToken ?? null,
+      ...(!hasMore ? { syncCursor: listed.historyId! } : {}),
+    },
+  });
+  return {
+    sourceId: source.id,
+    mode: "incremental",
+    fallbackFromExpiredHistory: false,
+    importedCount: imported.importedIntakeIds.length,
+    skippedCount: imported.skippedCount,
+    importedIntakeIds: imported.importedIntakeIds,
+    nextPageToken: null,
+    resultSizeEstimate: byId.size,
+    hasMore,
+    cursorAdvanced: !hasMore,
+    syncedAt,
+  };
+}
+
 export async function syncGmailMessages(
   user: AuthedUser,
   sourceId: string,
@@ -286,76 +491,24 @@ export async function syncGmailMessages(
 
   try {
     const credential = await usableCredential({ credential: source.credential });
-    const listed = await listGmailMessages(credential.accessToken, {
-      maxResults: parsed.data.max_results,
-      query: parsed.data.query,
-      pageToken: parsed.data.page_token,
-    });
-    if (listed.messages !== undefined && !Array.isArray(listed.messages)) {
-      throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
-    }
-    const messageRefs = listed.messages ?? [];
-    const importedIntakeIds: string[] = [];
-    let skippedCount = 0;
-
-    for (const reference of messageRefs) {
-      if (!reference?.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
-      const existing = await prisma.communicationIntake.findUnique({
-        where: {
-          companyId_connectorSourceId_externalMessageId: {
-            companyId: user.companyId,
-            connectorSourceId: source.id,
-            externalMessageId: reference.id,
-          },
-        },
-        select: { id: true },
-      });
-      if (existing) {
-        skippedCount += 1;
-        continue;
-      }
-      const message = parseGmailMessage(await getGmailMessage(credential.accessToken, reference.id));
-      if (message.externalMessageId !== reference.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    let result: GmailSyncResult;
+    const incremental = Boolean(source.syncCursor && !parsed.data.full_sync && !parsed.data.query && !parsed.data.page_token);
+    if (incremental) {
       try {
-        const intake = await prisma.communicationIntake.create({
-          data: {
-            companyId: user.companyId,
-            connectorSourceId: source.id,
-            externalMessageId: message.externalMessageId,
-            externalThreadId: message.externalThreadId,
-            channel: "email",
-            senderName: message.senderName,
-            senderEmail: message.senderEmail,
-            messageText: message.messageText,
-            receivedAt: message.receivedAt,
-            sourceReference: `gmail:${source.id}:${message.externalMessageId}`,
-            createdBy: user.id,
-          },
-        });
-        importedIntakeIds.push(intake.id);
+        result = await performIncrementalSync(user, source, credential.accessToken, parsed.data.max_results);
       } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-          skippedCount += 1;
-          continue;
-        }
-        throw error;
+        if (!(error instanceof GmailAdapterError) || error.code !== "HISTORY_CURSOR_EXPIRED") throw error;
+        result = await performFullSync(
+          user,
+          { ...source, syncCursor: null, syncPageToken: null },
+          credential.accessToken,
+          { max_results: parsed.data.max_results, full_sync: true },
+          true
+        );
       }
+    } else {
+      result = await performFullSync(user, source, credential.accessToken, parsed.data, false);
     }
-
-    const syncedAt = new Date();
-    await prisma.connectorSource.update({
-      where: { id: source.id },
-      data: { lastSyncAt: syncedAt, lastSyncStatus: "success", lastErrorCode: null },
-    });
-    const result = {
-      sourceId: source.id,
-      importedCount: importedIntakeIds.length,
-      skippedCount,
-      importedIntakeIds,
-      nextPageToken: listed.nextPageToken ?? null,
-      resultSizeEstimate: listed.resultSizeEstimate ?? null,
-      syncedAt,
-    };
     await recordAudit({
       companyId: user.companyId,
       userId: user.id,
@@ -365,8 +518,19 @@ export async function syncGmailMessages(
         maxResults: parsed.data.max_results,
         queryProvided: Boolean(parsed.data.query),
         pageTokenProvided: Boolean(parsed.data.page_token),
+        fullSyncRequested: parsed.data.full_sync,
       },
-      dataAfter: result,
+      dataAfter: {
+        sourceId,
+        mode: result.mode,
+        fallbackFromExpiredHistory: result.fallbackFromExpiredHistory,
+        importedCount: result.importedCount,
+        skippedCount: result.skippedCount,
+        importedIntakeIds: result.importedIntakeIds,
+        hasMore: result.hasMore,
+        cursorAdvanced: result.cursorAdvanced,
+        syncedAt: result.syncedAt,
+      },
       riskLevel: SYNC_GMAIL_MESSAGES_ACTION.riskLevel,
       result: "success",
     });
@@ -379,6 +543,101 @@ export async function syncGmailMessages(
       data: { lastSyncAt: new Date(), lastSyncStatus: "error", lastErrorCode: errorCode },
     });
     await auditFailure(SYNC_GMAIL_MESSAGES_ACTION, user, sourceId, errorCode);
+    return result;
+  }
+}
+
+export async function disconnectGmailSource(
+  user: AuthedUser,
+  sourceId: string,
+  rawInput: unknown
+): Promise<ServiceResult<unknown>> {
+  const parsed = disconnectGmailSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    await auditFailure(DISCONNECT_GMAIL_SOURCE_ACTION, user, sourceId, "VALIDATION_FAILED");
+    return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  }
+  const source = await prisma.connectorSource.findFirst({
+    where: { id: sourceId, companyId: user.companyId, connectorKey: "gmail", isActive: true },
+    include: { credential: true },
+  });
+  if (!source) {
+    await auditFailure(DISCONNECT_GMAIL_SOURCE_ACTION, user, sourceId, "CONNECTOR_SOURCE_NOT_FOUND");
+    return fail(404, "CONNECTOR_SOURCE_NOT_FOUND");
+  }
+  const preview = {
+    sourceId,
+    provider: "gmail",
+    willDisableSource: true,
+    willDeleteEncryptedCredential: Boolean(source.credential),
+    willRevokeGoogleProjectGrant: Boolean(source.credential),
+    warning: "Google revocation can remove every OAuth scope granted to this Google Cloud project for the account.",
+  };
+  if (!parsed.data.confirmed) {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: DISCONNECT_GMAIL_SOURCE_ACTION.actionName,
+      inputPayload: { sourceId, confirmed: false },
+      dataBefore: preview,
+      riskLevel: DISCONNECT_GMAIL_SOURCE_ACTION.riskLevel,
+      confirmationRequired: true,
+      result: "rejected",
+      errorMessage: "CONFIRMATION_REQUIRED",
+    });
+    return fail(409, "CONFIRMATION_REQUIRED", "Review the revoke impact and resubmit with confirmed: true.", { preview });
+  }
+
+  await prisma.connectorSource.update({
+    where: { id: source.id },
+    data: { isEnabled: false, connectionStatus: "disconnecting" },
+  });
+  try {
+    if (source.credential) {
+      const credential = decryptConnectorPayload<StoredGmailCredential>(
+        source.credential,
+        credentialContext(source.companyId, source.id)
+      );
+      await revokeGmailCredential(credential.refreshToken);
+    }
+    const disconnectedAt = new Date();
+    await prisma.$transaction([
+      prisma.connectorCredential.deleteMany({ where: { sourceId: source.id } }),
+      prisma.connectorOAuthState.deleteMany({ where: { sourceId: source.id } }),
+      prisma.connectorSource.update({
+        where: { id: source.id },
+        data: {
+          isEnabled: false,
+          connectionStatus: "disconnected",
+          lastErrorCode: null,
+          syncCursor: null,
+          syncPageToken: null,
+          lastFullSyncAt: null,
+        },
+      }),
+    ]);
+    const result = { sourceId, provider: "gmail", disconnectedAt, providerGrantRevoked: Boolean(source.credential) };
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: DISCONNECT_GMAIL_SOURCE_ACTION.actionName,
+      inputPayload: { sourceId, confirmed: true },
+      dataBefore: preview,
+      dataAfter: result,
+      riskLevel: DISCONNECT_GMAIL_SOURCE_ACTION.riskLevel,
+      confirmationRequired: true,
+      confirmed: true,
+      result: "success",
+    });
+    return ok(200, result);
+  } catch (error) {
+    const result = providerErrorResult(error);
+    const errorCode = result.ok ? "CONNECTOR_INTERNAL_ERROR" : result.error;
+    await prisma.connectorSource.update({
+      where: { id: source.id },
+      data: { isEnabled: false, connectionStatus: "disconnect_failed", lastErrorCode: errorCode },
+    });
+    await auditFailure(DISCONNECT_GMAIL_SOURCE_ACTION, user, sourceId, errorCode);
     return result;
   }
 }

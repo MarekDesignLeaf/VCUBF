@@ -65,6 +65,9 @@ model ConnectorSource {
   lastSyncAt          DateTime? @map("last_sync_at")
   lastSyncStatus      String?   @map("last_sync_status")
   lastErrorCode       String?   @map("last_error_code")
+  syncCursor          String?   @map("sync_cursor")
+  syncPageToken       String?   @map("sync_page_token")
+  lastFullSyncAt      DateTime? @map("last_full_sync_at")
   createdBy           String?   @map("created_by")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
@@ -321,20 +324,29 @@ model Lead {
 // prefill jobs and (eventually) quotes and website content, so the same
 // real facts propagate everywhere instead of being retyped or guessed.
 model ServiceCatalogueItem {
-  id                    String   @id @default(uuid())
-  companyId             String   @map("company_id")
-  name                  String
-  description           String?
-  category              String?
-  basePriceMin          Float?   @map("base_price_min")
-  basePriceMax          Float?   @map("base_price_max")
-  priceUnit             String?  @map("price_unit")
-  defaultDurationHours  Float?   @map("default_duration_hours")
-  defaultRequiredSkills String[] @default([]) @map("default_required_skills")
-  isActive              Boolean  @default(true) @map("is_active")
-  createdBy             String?  @map("created_by")
-  createdAt             DateTime @default(now()) @map("created_at")
-  updatedAt             DateTime @updatedAt @map("updated_at")
+  id                      String   @id @default(uuid())
+  companyId               String   @map("company_id")
+  name                    String
+  description             String?
+  category                String?
+  basePriceMin            Float?   @map("base_price_min")
+  basePriceMax            Float?   @map("base_price_max")
+  priceUnit               String?  @map("price_unit")
+  defaultDurationHours    Float?   @map("default_duration_hours")
+  defaultRequiredSkills   String[] @default([]) @map("default_required_skills")
+  source                  String   @default("user_input")
+  sourceReference         String?  @map("source_reference")
+  referenceActivityCode   String?  @map("reference_activity_code")
+  referenceIndustryCode   String?  @map("reference_industry_code")
+  referenceSubtypeCode    String?  @map("reference_subtype_code")
+  referencePricingMethod  String?  @map("reference_pricing_method")
+  referenceRateUnit       String?  @map("reference_rate_unit")
+  referenceRateGbp        Float?   @map("reference_rate_gbp")
+  referencePricingMethods String[] @default([]) @map("reference_pricing_methods")
+  isActive                Boolean  @default(true) @map("is_active")
+  createdBy               String?  @map("created_by")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
 
   company         Company                 @relation(fields: [companyId], references: [id])
   jobs            Job[]
@@ -342,6 +354,7 @@ model ServiceCatalogueItem {
   photoSelections PhotoServiceSelection[]
   industryLinks   IndustryServiceLink[]
 
+  @@unique([companyId, referenceActivityCode])
   @@index([companyId])
   @@map("service_catalogue_items")
 }

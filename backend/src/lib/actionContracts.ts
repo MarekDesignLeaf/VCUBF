@@ -294,12 +294,22 @@ export const COMPLETE_GMAIL_OAUTH_ACTION: ActionContract = {
 
 export const SYNC_GMAIL_MESSAGES_ACTION: ActionContract = {
   actionName: "sync_gmail_messages",
-  purpose: "Read Gmail messages with the authorized read-only scope and idempotently import them into Communication Intake with provider provenance.",
+  purpose: "Read Gmail messages with the authorized read-only scope, use Gmail history cursors when available, and idempotently import them into Communication Intake with provider provenance.",
   requiredPermission: "connectors.manage",
   riskLevel: 2,
   confirmationRequired: false,
   dataSources: ["connector_sources", "connector_credentials", "gmail.messages", "crm.communication_intakes"],
-  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "HISTORY_CURSOR_EXPIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
+};
+
+export const DISCONNECT_GMAIL_SOURCE_ACTION: ActionContract = {
+  actionName: "disconnect_gmail_source",
+  purpose: "After explicit confirmation, revoke the stored Google OAuth grant, remove the encrypted local credential and reset Gmail synchronisation state.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["connector_sources", "connector_credentials", "google_oauth"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONFIRMATION_REQUIRED", "OAUTH_PROVIDER_REJECTED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
 };
 
 // Service Catalogue Module — see VCUF master documentation section 24C.
@@ -324,6 +334,26 @@ export const UPDATE_SERVICE_ACTION: ActionContract = {
   confirmationRequired: false,
   dataSources: ["user_input", "crm.service_catalogue"],
   possibleErrors: ["MISSING_PERMISSION", "SERVICE_NOT_FOUND", "VALIDATION_FAILED"],
+};
+
+export const LIST_REFERENCE_ACTIVITIES_ACTION: ActionContract = {
+  actionName: "list_reference_activities",
+  purpose: "Search the supplied multi-industry activity reference catalogue without asserting that the company performs any listed activity.",
+  requiredPermission: "crm.read",
+  riskLevel: 0,
+  confirmationRequired: false,
+  dataSources: ["SECRETARY_ACTIVITIES_CATALOGUE.csv"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "REFERENCE_CATALOGUE_UNAVAILABLE"],
+};
+
+export const ACTIVATE_REFERENCE_ACTIVITY_ACTION: ActionContract = {
+  actionName: "activate_reference_activity",
+  purpose: "After explicit confirmation, record one reference activity as a real company service and link its industry while keeping reference pricing separate from company pricing.",
+  requiredPermission: "crm.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "SECRETARY_ACTIVITIES_CATALOGUE.csv", "industry_model", "service_catalogue"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "REFERENCE_ACTIVITY_NOT_FOUND", "REFERENCE_ACTIVITY_ALREADY_ACTIVATED", "CONFIRMATION_REQUIRED"],
 };
 
 // Quote, Pricing and Profitability Module — turns real service-catalogue

@@ -1,7 +1,10 @@
 export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const GOOGLE_REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
 const GMAIL_MESSAGES_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
+const GMAIL_HISTORY_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/history";
+const GMAIL_PROFILE_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/profile";
 const MAX_IMPORTED_MESSAGE_CHARS = 100_000;
 
 export interface StoredGmailCredential {
@@ -26,6 +29,22 @@ export interface GmailMessageList {
   resultSizeEstimate?: number;
 }
 
+export interface GmailProfile {
+  emailAddress?: string;
+  messagesTotal?: number;
+  threadsTotal?: number;
+  historyId?: string;
+}
+
+export interface GmailHistoryList {
+  history?: Array<{
+    id?: string;
+    messagesAdded?: Array<{ message?: { id?: string; threadId?: string } }>;
+  }>;
+  nextPageToken?: string;
+  historyId?: string;
+}
+
 interface GmailPayloadPart {
   mimeType?: string;
   headers?: Array<{ name?: string; value?: string }>;
@@ -36,6 +55,7 @@ interface GmailPayloadPart {
 export interface GmailMessage {
   id: string;
   threadId?: string;
+  historyId?: string;
   internalDate?: string;
   snippet?: string;
   payload?: GmailPayloadPart;
@@ -59,6 +79,8 @@ export class GmailAdapterError extends Error {
       | "SCOPE_DENIED"
       | "RATE_LIMITED"
       | "PROVIDER_UNAVAILABLE"
+      | "HISTORY_CURSOR_EXPIRED"
+      | "MESSAGE_NOT_FOUND"
       | "PROVIDER_RESPONSE_INVALID",
     message: string = code
   ) {
@@ -175,7 +197,11 @@ export async function refreshGmailCredential(credential: StoredGmailCredential) 
   return credentialFromTokenResponse(response, credential.refreshToken);
 }
 
-async function gmailJson<T>(url: URL, accessToken: string): Promise<T> {
+async function gmailJson<T>(
+  url: URL,
+  accessToken: string,
+  requestKind?: "history" | "message"
+): Promise<T> {
   let response: Response;
   try {
     response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
@@ -186,6 +212,8 @@ async function gmailJson<T>(url: URL, accessToken: string): Promise<T> {
     if (response.status === 401) throw new GmailAdapterError("CONNECTOR_AUTHORIZATION_REQUIRED");
     if (response.status === 403) throw new GmailAdapterError("SCOPE_DENIED");
     if (response.status === 429) throw new GmailAdapterError("RATE_LIMITED");
+    if (requestKind === "history" && response.status === 404) throw new GmailAdapterError("HISTORY_CURSOR_EXPIRED");
+    if (requestKind === "message" && response.status === 404) throw new GmailAdapterError("MESSAGE_NOT_FOUND");
     throw new GmailAdapterError("PROVIDER_UNAVAILABLE");
   }
   try {
@@ -209,7 +237,40 @@ export async function listGmailMessages(
 export async function getGmailMessage(accessToken: string, id: string) {
   const url = new URL(`${GMAIL_MESSAGES_ENDPOINT}/${encodeURIComponent(id)}`);
   url.searchParams.set("format", "full");
-  return gmailJson<GmailMessage>(url, accessToken);
+  return gmailJson<GmailMessage>(url, accessToken, "message");
+}
+
+export async function getGmailProfile(accessToken: string) {
+  return gmailJson<GmailProfile>(new URL(GMAIL_PROFILE_ENDPOINT), accessToken);
+}
+
+export async function listGmailHistory(
+  accessToken: string,
+  input: { startHistoryId: string; maxResults: number; pageToken?: string }
+) {
+  const url = new URL(GMAIL_HISTORY_ENDPOINT);
+  url.searchParams.set("startHistoryId", input.startHistoryId);
+  url.searchParams.set("maxResults", String(input.maxResults));
+  url.searchParams.append("historyTypes", "messageAdded");
+  if (input.pageToken) url.searchParams.set("pageToken", input.pageToken);
+  return gmailJson<GmailHistoryList>(url, accessToken, "history");
+}
+
+export async function revokeGmailCredential(refreshToken: string) {
+  let response: Response;
+  try {
+    response = await fetch(GOOGLE_REVOKE_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token: refreshToken }),
+    });
+  } catch {
+    throw new GmailAdapterError("PROVIDER_UNAVAILABLE");
+  }
+  if (response.ok) return;
+  if (response.status === 429) throw new GmailAdapterError("RATE_LIMITED");
+  if (response.status >= 500) throw new GmailAdapterError("PROVIDER_UNAVAILABLE");
+  throw new GmailAdapterError("OAUTH_PROVIDER_REJECTED");
 }
 
 function header(payload: GmailPayloadPart | undefined, name: string) {

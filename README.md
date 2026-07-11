@@ -204,8 +204,15 @@ npm run dev                 # http://localhost:5173
   `Job` gained an optional `service_catalogue_item_id` link (`GET /crm/jobs/:id` includes
   the linked service's name) so a job can trace back to the catalogue entry it was based
   on. Text command: "create service X, category Y".
+- **Multi-industry Activity Reference Catalogue**: the supplied
+  `SECRETARY_ACTIVITIES_CATALOGUE.csv` is exposed as a read-only, searchable catalogue of
+  1,810 deduplicated activity templates across 14 industries. A risk-3 confirmation action
+  activates exactly one activity as a real company service, creates/confirms its Industry and
+  links both atomically. Oxfordshire rates remain labelled reference metadata and are never
+  copied into company pricing. See `docs/ACTIVITY_REFERENCE_CATALOGUE.md`.
 - **Frontend — Service catalogue**: new Services page (list, filter to active-only,
-  a "New service" form covering all catalogue fields, and per-row activate/deactivate).
+  a "New service" form covering all catalogue fields, per-row activate/deactivate, and a
+  paginated reference-activity browser with confirmation-gated company activation).
   The "new job" form on the client detail page gained a "Based on a service" dropdown
   that prefills the job title, estimated hours, and required skills from the selected
   catalogue entry (still editable, and only fills blank fields — it never overwrites
@@ -624,11 +631,12 @@ npm run dev                 # http://localhost:5173
 - **Connector Engine Phase 3 Gmail read-only adapter**: the registry declares Gmail,
   Google Contacts, Google Calendar and Google Drive photo-storage contracts. Gmail now has
   tenant-scoped OAuth with hashed one-time state, exact `gmail.readonly` scope enforcement,
-  AES-256-GCM token storage, refresh-token handling and idempotent import into Communication
-  Intake with provider provenance. Contacts, Calendar and Drive remain contract-only and fail
+  AES-256-GCM token storage, refresh-token handling, full-to-incremental Gmail history sync,
+  expired-cursor fallback, idempotent Communication Intake provenance and confirmation-gated
+  provider revocation/disconnect. Contacts, Calendar and Drive remain contract-only and fail
   closed. See `docs/CONNECTOR_ENGINE.md`.
 
-Backend verified: 320/320 tests passing across 36 suites (auth, CRM clients, CRM jobs, CRM leads,
+Backend verified: 329/329 tests passing across 37 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
  recruitment, playbooks, learning, connector lifecycle, Gmail OAuth/read-only ingestion, communication extraction/reply drafting, unresolved enquiry monitoring, communication log, notifications/escalation, data
@@ -735,9 +743,10 @@ context (e.g. it can't tell "old client" apart in "call the old client" vs. "he'
 old" — it just doesn't fire on any term it wasn't taught verbatim, matching the "must
 not guess" rule rather than trying to be clever about it). Gmail read-only ingestion now
 imports messages manually on request into Communication Intake, preserving provider source,
-message and thread IDs; it performs deterministic extraction and CRM matching only through
-the existing reviewed intake workflow. Scheduled/background sync, Gmail history cursors,
-disconnect/revoke, WhatsApp/SMS ingestion, thread-wide summarisation, attachment/photo
+message and thread IDs; after the initial full sync it uses Gmail history changes, and supports
+confirmed provider revocation/disconnect. It performs deterministic extraction and CRM matching
+only through the existing reviewed intake workflow. Scheduled/background invocation, Gmail push
+notifications, WhatsApp/SMS ingestion, thread-wide summarisation, attachment/photo
 ingestion, near-duplicate identity matching beyond the fixed normalized contact/name
 rules, unresolved-enquiry scanning across external inboxes, and any send action remain
 unimplemented. The Notification and Escalation Module's feed is pull-only (a
