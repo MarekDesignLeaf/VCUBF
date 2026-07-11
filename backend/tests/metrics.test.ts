@@ -71,6 +71,10 @@ describe("Measurement and KPI Module", () => {
     assert.equal(res.body.quotes.averageValueGbp, 262.5);
     assert.deepEqual(res.body.trends.newLeads, { current: 6, previous: 1, delta: 5 });
     assert.equal(res.body.trends.quoteConversionRatePct.previous, 100);
+    assert.deepEqual(res.body.dataCompleteness.leadSource, { complete: 5, total: 6, pct: 83.3 });
+    assert.deepEqual(res.body.dataCompleteness.quoteServiceLink, { complete: 2, total: 5, pct: 40 });
+    assert.deepEqual(res.body.dataCompleteness.quoteCost, { complete: 1, total: 5, pct: 20 });
+    assert.deepEqual(res.body.dataCompleteness.activeJobEstimate, { complete: 1, total: 1, pct: 100 });
     assert.deepEqual(res.body.revenueByService.rows, [{ serviceId: res.body.revenueByService.rows[0].serviceId, serviceName: "Fencing", acceptedValueGbp: 150, lineCount: 2, linesWithKnownCost: 1, costKnown: false, marginGbp: null, marginPct: null }]);
     assert.equal(res.body.revenueByService.unlinkedAcceptedValueGbp, 0);
     assert.equal(res.body.capacity.available, true);
@@ -80,5 +84,7 @@ describe("Measurement and KPI Module", () => {
     assert.ok(res.body.recommendations.some((item: any) => item.title === "Quote conversion is below 40%"));
     assert.ok(res.body.recommendations.some((item: any) => item.title === "Current team capacity is tight"));
     assert.ok(res.body.recommendations.some((item: any) => item.title === "Lead source needs review: Google"));
+    assert.ok(res.body.recommendations.some((item: any) => item.title === "Quote cost coverage is below 80%"));
+    assert.ok(res.body.recommendations.some((item: any) => item.title === "Quote service-link coverage is below 80%"));
   });
 });

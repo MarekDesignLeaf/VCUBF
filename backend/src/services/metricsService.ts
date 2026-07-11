@@ -12,6 +12,10 @@ function unavailable(reason: string) {
   return { available: false as const, value: null, reason };
 }
 
+function coverage(complete: number, total: number) {
+  return { complete, total, pct: total ? Math.round((complete / total) * 1000) / 10 : null };
+}
+
 export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof metricsQuerySchema>) {
   const to = input.to ? new Date(input.to) : new Date();
   const from = input.from ? new Date(input.from) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
@@ -24,7 +28,7 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
   const [leads, quotes, jobs, employees, previousLeads, previousQuotes, previousJobs] = await Promise.all([
     prisma.lead.findMany({ where: { companyId: user.companyId, createdAt }, select: { leadStatus: true, source: true } }),
     prisma.quote.findMany({ where: { companyId: user.companyId, createdAt }, select: { quoteStatus: true, items: { select: { quantity: true, unitPrice: true, unitCost: true, serviceCatalogueItem: { select: { id: true, name: true } } } } } }),
-    prisma.job.findMany({ where: { companyId: user.companyId, createdAt }, select: { jobStatus: true } }),
+    prisma.job.findMany({ where: { companyId: user.companyId, createdAt }, select: { jobStatus: true, estimatedDurationHours: true, plannedStartAt: true, serviceCatalogueItemId: true } }),
     prisma.user.findMany({ where: { companyId: user.companyId, isActive: true }, select: { id: true } }),
     prisma.lead.findMany({ where: { companyId: user.companyId, createdAt: previousCreatedAt }, select: { leadStatus: true } }),
     prisma.quote.findMany({ where: { companyId: user.companyId, createdAt: previousCreatedAt }, select: { quoteStatus: true, items: { select: { quantity: true, unitPrice: true } } } }),
@@ -43,6 +47,16 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
   const quoteDecisions = quotes.filter((quote) => ["accepted", "rejected", "expired"].includes(quote.quoteStatus));
   const acceptedQuotes = quoteDecisions.filter((quote) => quote.quoteStatus === "accepted").length;
   const quoteValues = quotes.map((quote) => quote.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0));
+  const quoteItems = quotes.flatMap((quote) => quote.items);
+  const activePeriodJobs = jobs.filter((job) => !["dokonceno", "zruseno"].includes(job.jobStatus));
+  const dataCompleteness = {
+    leadSource: coverage(leads.filter((lead) => Boolean(lead.source?.trim())).length, leads.length),
+    quoteServiceLink: coverage(quoteItems.filter((item) => Boolean(item.serviceCatalogueItem)).length, quoteItems.length),
+    quoteCost: coverage(quoteItems.filter((item) => item.unitCost != null).length, quoteItems.length),
+    activeJobEstimate: coverage(activePeriodJobs.filter((job) => job.estimatedDurationHours != null).length, activePeriodJobs.length),
+    activeJobPlannedDate: coverage(activePeriodJobs.filter((job) => job.plannedStartAt != null).length, activePeriodJobs.length),
+    activeJobServiceLink: coverage(activePeriodJobs.filter((job) => job.serviceCatalogueItemId != null).length, activePeriodJobs.length),
+  };
   const previousQuoteDecisions = previousQuotes.filter((quote) => ["accepted", "rejected", "expired"].includes(quote.quoteStatus));
   const previousAcceptedQuotes = previousQuoteDecisions.filter((quote) => quote.quoteStatus === "accepted").length;
   const previousQuoteValues = previousQuotes.map((quote) => quote.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0));
@@ -74,6 +88,15 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
   for (const source of leadSources.values()) {
     if (source.count >= 3 && source.lostCount / source.count >= 0.5) recommendations.push({ severity: "warning", title: `Lead source needs review: ${source.source}`, evidence: `${source.lostCount} of ${source.count} leads from this source are marked lost; ${source.convertedCount} are converted.`, action: "Review this source's lead quality and follow-up evidence before reducing or increasing spend." });
   }
+  const completenessChecks: { label: string; metric: { complete: number; total: number; pct: number | null }; action: string }[] = [
+    { label: "Quote cost coverage", metric: dataCompleteness.quoteCost, action: "Enter real unit costs on quote lines before relying on margin reporting." },
+    { label: "Quote service-link coverage", metric: dataCompleteness.quoteServiceLink, action: "Link quote lines to catalogue services where the relationship is known." },
+    { label: "Active-job estimate coverage", metric: dataCompleteness.activeJobEstimate, action: "Add duration estimates to active jobs so capacity calculations can count them." },
+    { label: "Active-job planned-date coverage", metric: dataCompleteness.activeJobPlannedDate, action: "Add real planned dates before relying on weekly workload figures." },
+  ];
+  for (const check of completenessChecks) {
+    if (check.metric.total >= 3 && check.metric.pct != null && check.metric.pct < 80) recommendations.push({ severity: "warning", title: `${check.label} is below 80%`, evidence: `${check.metric.complete} of ${check.metric.total} relevant records are complete (${check.metric.pct}%).`, action: check.action });
+  }
   if (quoteDecisions.length >= 3 && acceptedQuotes / quoteDecisions.length < 0.4) recommendations.push({ severity: "warning", title: "Quote conversion is below 40%", evidence: `${acceptedQuotes} of ${quoteDecisions.length} decided quotes were accepted.`, action: "Review rejected and expired quotes and follow-up timing; do not change prices without evidence." });
   if (utilization != null && utilization >= 85) recommendations.push({ severity: "warning", title: "Current team capacity is tight", evidence: `${totalLoad} of ${totalCapacity} entered hours are allocated this week (${utilization}%).`, action: "Review scheduling, subcontracting or recruitment capacity before accepting urgent dates." });
   if (recommendations.length === 0) recommendations.push({ severity: "info", title: "No threshold-based issue detected", evidence: `Analysis used ${leads.length} leads, ${quotes.length} quotes and ${jobs.length} jobs in the selected period.`, action: "Keep collecting complete source, status, price, cost and duration data to improve decisions." });
@@ -81,6 +104,7 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
   return {
     period: { from: from.toISOString(), to: to.toISOString(), days: Math.max(1, Math.ceil((to.getTime() - from.getTime()) / 86_400_000)) },
     comparisonPeriod: { from: previousFrom.toISOString(), to: previousTo.toISOString() },
+    dataCompleteness,
     trends: {
       newLeads: { current: leads.length, previous: previousLeads.length, delta: leads.length - previousLeads.length },
       quoteCount: { current: quotes.length, previous: previousQuotes.length, delta: quotes.length - previousQuotes.length },

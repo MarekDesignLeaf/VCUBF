@@ -59,6 +59,18 @@ export function Metrics() {
       <tr><td>Average quote</td><td>{data.trends.averageQuoteValueGbp.current == null ? "Unknown" : `£${data.trends.averageQuoteValueGbp.current.toFixed(2)}`}</td><td>{data.trends.averageQuoteValueGbp.previous == null ? "Unknown" : `£${data.trends.averageQuoteValueGbp.previous.toFixed(2)}`}</td><td>{change(data.trends.averageQuoteValueGbp.current, data.trends.averageQuoteValueGbp.previous, " GBP")}</td></tr>
       <tr><td>Completed jobs</td><td>{data.trends.completedJobs.current}</td><td>{data.trends.completedJobs.previous}</td><td>{change(data.trends.completedJobs.current, data.trends.completedJobs.previous)}</td></tr>
     </tbody></table>
+    <h2>Data completeness</h2>
+    <p className="hint">Coverage of the saved fields used by KPI, margin and capacity calculations. Empty samples remain unknown.</p>
+    <table className="data-table"><thead><tr><th>Input</th><th>Complete records</th><th>Coverage</th></tr></thead><tbody>
+      {([
+        ["Lead source", data.dataCompleteness.leadSource],
+        ["Quote line service link", data.dataCompleteness.quoteServiceLink],
+        ["Quote line unit cost", data.dataCompleteness.quoteCost],
+        ["Active job duration estimate", data.dataCompleteness.activeJobEstimate],
+        ["Active job planned date", data.dataCompleteness.activeJobPlannedDate],
+        ["Active job service link", data.dataCompleteness.activeJobServiceLink],
+      ] as const).map(([label, metric]) => <tr key={label}><td>{label}</td><td>{metric.complete}/{metric.total}</td><td>{value(metric.pct, "%")}</td></tr>)}
+    </tbody></table>
     <h2>Lead sources</h2>
     {data.leads.sources.length ? <table className="data-table"><thead><tr><th>Source</th><th>Leads</th><th>Converted</th><th>Lost</th><th>Conversion</th><th>Loss rate</th></tr></thead><tbody>{data.leads.sources.map((row) => <tr key={row.source}><td>{row.source}</td><td>{row.count}</td><td>{row.convertedCount}</td><td>{row.lostCount}</td><td>{value(row.conversionRatePct, "%")}</td><td>{value(row.lossRatePct, "%")}</td></tr>)}</tbody></table> : <p className="hint">No leads in this period.</p>}
     <h2>Accepted quote value by service</h2>

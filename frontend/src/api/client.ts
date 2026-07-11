@@ -554,6 +554,7 @@ export interface Quote {
 export interface MetricsOverview {
   period: { from: string; to: string; days: number };
   comparisonPeriod: { from: string; to: string };
+  dataCompleteness: Record<"leadSource" | "quoteServiceLink" | "quoteCost" | "activeJobEstimate" | "activeJobPlannedDate" | "activeJobServiceLink", { complete: number; total: number; pct: number | null }>;
   trends: {
     newLeads: { current: number; previous: number; delta: number };
     quoteCount: { current: number; previous: number; delta: number };

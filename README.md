@@ -104,6 +104,9 @@ npm run dev                 # http://localhost:5173
   Lead-source rows include real converted/lost counts and rates; a source-specific
   warning requires at least three leads and a loss rate of 50% or more, avoiding
   recommendations based on a one-record sample.
+  A data-completeness panel measures lead-source, quote service-link, quote cost,
+  active-job estimate/date and active-job service-link coverage. Below-80% completion
+  creates a specific remediation only when at least three relevant records exist.
 - **Backend — services layer refactor**: business logic extracted out of route handlers
   into `backend/src/services/*Service.ts` (clients, jobs, leads), each returning a
   uniform `ServiceResult<T>` (`ok()`/`fail()`). Routes are now thin wrappers that call a
