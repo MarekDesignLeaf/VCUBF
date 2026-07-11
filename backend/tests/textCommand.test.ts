@@ -141,6 +141,25 @@ describe("command/text", () => {
     assert.ok(Array.isArray(res.body.data.overloadedWeeks));
   });
 
+  it("creates and lists Secretary tasks through text commands", async () => {
+    const create = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "create task for Test Admin: Review tomorrow's schedule" });
+    assert.equal(create.status, 201);
+    assert.equal(create.body.intent, "create_task");
+    assert.equal(create.body.data.task.title, "Review tomorrow's schedule");
+    assert.equal(create.body.data.task.assignedUser.displayName, "Test Admin");
+
+    const list = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "list tasks" });
+    assert.equal(list.status, 200);
+    assert.equal(list.body.intent, "list_tasks");
+    assert.ok(list.body.data.some((task: any) => task.id === create.body.data.task.id));
+  });
+
   it("creates a service catalogue item via a text command", async () => {
     const res = await request(app)
       .post("/command/text")

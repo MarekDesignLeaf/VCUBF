@@ -29,6 +29,7 @@ import { MemoryModel } from "./pages/MemoryModel";
 import { BusinessContext } from "./pages/BusinessContext";
 import { WebsiteAudits } from "./pages/WebsiteAudits";
 import { WebsiteContentProposals } from "./pages/WebsiteContentProposals";
+import { Tasks } from "./pages/Tasks";
 
 export default function App() {
   return (
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="/employees/new" element={<EmployeeEdit />} />
             <Route path="/employees/:id/edit" element={<EmployeeEdit />} />
             <Route path="/calendar" element={<Calendar />} />
+            <Route path="/tasks" element={<Tasks />} />
             <Route path="/services" element={<ServiceCatalogue />} />
             <Route path="/quotes" element={<Quotes />} />
             <Route path="/quotes/new" element={<QuoteEdit />} />

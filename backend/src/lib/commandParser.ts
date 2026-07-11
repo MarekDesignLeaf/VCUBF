@@ -25,6 +25,8 @@ export type ParsedCommand =
   | { intent: "assign_job"; entities: { job_title: string; employee_name: string } }
   | { intent: "detect_overload"; entities: Record<string, never> }
   | { intent: "create_service"; entities: { name: string; category?: string } }
+  | { intent: "create_task"; entities: { title: string; employee_name?: string; due_at?: string } }
+  | { intent: "list_tasks"; entities: Record<string, never> }
   | { intent: "list_quotes"; entities: { client_name?: string } }
   | { intent: "list_job_openings"; entities: Record<string, never> }
   | { intent: "create_learning_rule"; entities: { term: string; meaning: string } }
@@ -122,6 +124,31 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   }
 
   if (/^(?:show|check)\s+overload$/i.test(text)) return { intent: "detect_overload", entities: {} };
+
+  // Task Management — deterministic forms:
+  // "create task for Daniel: Prepare materials"
+  // "create task Prepare materials, assigned to Daniel, due 2026-08-01T09:00:00.000Z"
+  m = text.match(/^(?:create|add|new)\s+task\s+for\s+(.+?)\s*:\s*(.+)$/i);
+  if (m) {
+    const employeeName = m[1].trim();
+    const title = m[2].trim();
+    if (!employeeName || !title) return { intent: "unrecognized", entities: {} };
+    return { intent: "create_task", entities: { title, employee_name: employeeName } };
+  }
+
+  m = text.match(/^(?:create|add|new)\s+task\s+(.+)$/i);
+  if (m) {
+    let rest = m[1];
+    const assigned = extractLabelled(rest, "assigned to");
+    rest = assigned.rest;
+    const due = extractLabelled(rest, "due");
+    rest = due.rest;
+    const title = rest.replace(/,\s*$/, "").trim();
+    if (!title) return { intent: "unrecognized", entities: {} };
+    return { intent: "create_task", entities: { title, employee_name: assigned.value, due_at: due.value } };
+  }
+
+  if (/^(?:list|show)\s+tasks?$/i.test(text)) return { intent: "list_tasks", entities: {} };
 
   m = text.match(/^(?:create|add|new)\s+service\s+(.+)$/i);
   if (m) {

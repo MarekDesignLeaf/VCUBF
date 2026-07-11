@@ -112,6 +112,8 @@ export interface CapacityResult {
   currentLoadHours: number;
   jobsCountedInLoad: number;
   jobsMissingEstimate: number;
+  tasksCountedInLoad: number;
+  tasksMissingEstimate: number;
   utilizationPct: number;
   overloaded: boolean;
 }
@@ -153,6 +155,67 @@ export interface AssignJobResult {
   job: Job;
   capacityWarning: { type: string; message?: string; [key: string]: unknown } | null;
   missingSkills: string[];
+}
+
+export const TASK_STATUSES = ["open", "in_progress", "completed", "cancelled"] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  open: "Open",
+  in_progress: "In progress",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
+export const TASK_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
+
+export const TASK_CATEGORIES = [
+  "administrative",
+  "client_follow_up",
+  "job_work",
+  "communication",
+  "website",
+  "recruitment",
+  "other",
+] as const;
+export type TaskCategory = (typeof TASK_CATEGORIES)[number];
+
+export interface SecretaryTask {
+  id: string;
+  companyId: string;
+  clientId?: string | null;
+  jobId?: string | null;
+  communicationRecordId?: string | null;
+  assignedUserId?: string | null;
+  title: string;
+  description?: string | null;
+  taskStatus: TaskStatus;
+  priority: TaskPriority;
+  category: TaskCategory;
+  source: string;
+  dueAt?: string | null;
+  estimatedDurationHours?: number | null;
+  completedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  client?: { id: string; displayName: string } | null;
+  job?: { id: string; jobTitle: string } | null;
+  communicationRecord?: { id: string; channel: string; summary: string } | null;
+  assignedUser?: { id: string; displayName: string } | null;
+}
+
+export interface TaskWriteResult {
+  task: SecretaryTask;
+  capacityWarning: {
+    type: "OVERLOAD";
+    employeeId: string;
+    employeeName: string;
+    weekStart: string;
+    currentLoadHours: number;
+    weeklyCapacityHours: number;
+    utilizationPct: number;
+  } | null;
 }
 
 // Calendar and Scheduling Intelligence Module.
@@ -439,6 +502,10 @@ export const NOTIFICATION_TYPES = [
   "quote_expiring",
   "duplicate_client_possible",
   "missing_client_contact_info",
+  "portfolio_gap",
+  "stale_lead",
+  "stuck_job",
+  "overdue_task",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -448,6 +515,10 @@ export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   quote_expiring: "Quote expiring",
   duplicate_client_possible: "Possible duplicate client",
   missing_client_contact_info: "Missing contact info",
+  portfolio_gap: "Portfolio gap",
+  stale_lead: "Stale lead",
+  stuck_job: "Stuck job",
+  overdue_task: "Overdue task",
 };
 
 export const NOTIFICATION_SEVERITIES = ["info", "warning", "urgent"] as const;
@@ -869,6 +940,8 @@ export const api = {
   calendar: {
     jobs: (from: string, to: string) =>
       request<Job[]>(`/calendar/jobs?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+    tasks: (from: string, to: string) =>
+      request<SecretaryTask[]>(`/calendar/tasks?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
     overload: (weeksAhead?: number) =>
       request<OverloadReport>(`/calendar/overload${weeksAhead ? `?weeks_ahead=${weeksAhead}` : ""}`),
     suggest: (params: { estimatedDurationHours?: number; requiredSkills?: string[]; weeksAhead?: number }) => {
@@ -880,6 +953,31 @@ export const api = {
       const suffix = qs.toString() ? `?${qs.toString()}` : "";
       return request<SuggestedEmployee[]>(`/calendar/suggest${suffix}`);
     },
+  },
+  tasks: {
+    list: (params?: {
+      status?: string;
+      priority?: string;
+      assignedUserId?: string;
+      clientId?: string;
+      jobId?: string;
+      overdue?: boolean;
+    }) => {
+      const qs = new URLSearchParams();
+      if (params?.status) qs.set("status", params.status);
+      if (params?.priority) qs.set("priority", params.priority);
+      if (params?.assignedUserId) qs.set("assigned_user_id", params.assignedUserId);
+      if (params?.clientId) qs.set("client_id", params.clientId);
+      if (params?.jobId) qs.set("job_id", params.jobId);
+      if (params?.overdue) qs.set("overdue", "true");
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request<SecretaryTask[]>(`/tasks${suffix}`);
+    },
+    get: (id: string) => request<SecretaryTask>(`/tasks/${id}`),
+    create: (data: Record<string, unknown>) =>
+      request<TaskWriteResult>("/tasks", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<TaskWriteResult>(`/tasks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   },
   catalogue: {
     list: (activeOnly?: boolean) =>

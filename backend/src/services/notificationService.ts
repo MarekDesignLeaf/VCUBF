@@ -51,6 +51,8 @@ import { buildDataQualityItems } from "./dataQualityService.js";
 //     that has never had a change_job_status audit entry is measured from
 //     Job.createdAt instead (it has been sitting in its initial status
 //     since creation, which is exactly the same "stuck" signal).
+//   - Task Management: unfinished Secretary tasks whose real dueAt timestamp
+//     is in the past. Completed/cancelled tasks never appear.
 // Nothing here is invented — severity is derived directly from real dates
 // and percentages already stored elsewhere, never guessed. The only state
 // this module persists is which computed item a user has explicitly
@@ -277,6 +279,33 @@ async function buildStuckJobItems(user: AuthedUser): Promise<AttentionItemBase[]
   return stuckJobs;
 }
 
+async function buildOverdueTaskItems(user: AuthedUser): Promise<AttentionItemBase[]> {
+  const now = new Date();
+  const tasks = await prisma.task.findMany({
+    where: {
+      companyId: user.companyId,
+      taskStatus: { notIn: ["completed", "cancelled"] },
+      dueAt: { lt: now },
+    },
+    include: { assignedUser: { select: { id: true, displayName: true } } },
+  });
+  return tasks.map((task) => {
+    const overdueDays = task.dueAt ? daysBetween(now, task.dueAt) : 0;
+    const severity: NotificationSeverity = overdueDays > 2 ? "urgent" : "warning";
+    return {
+      key: `overdue_task:${task.id}`,
+      type: "overdue_task",
+      severity,
+      title: `Task overdue: ${task.title}`,
+      message: `Due ${task.dueAt?.toISOString().slice(0, 10)}${
+        task.assignedUser ? ` — assigned to ${task.assignedUser.displayName}` : " — unassigned"
+      }. Status is still "${task.taskStatus}".`,
+      dueAt: task.dueAt?.toISOString() ?? null,
+      entity: { type: "task", id: task.id, label: task.title },
+    };
+  });
+}
+
 const severityRank: Record<NotificationSeverity, number> = { urgent: 0, warning: 1, info: 2 };
 
 // get_attention_feed — read-only. By default, already-acknowledged items are
@@ -286,7 +315,7 @@ export async function getAttentionFeed(
   user: AuthedUser,
   options: { includeAcknowledged?: boolean } = {}
 ): Promise<AttentionItem[]> {
-  const [followUps, overloads, expiringQuotes, dataQualityItems, portfolioGapItems, staleLeads, stuckJobs] =
+  const [followUps, overloads, expiringQuotes, dataQualityItems, portfolioGapItems, staleLeads, stuckJobs, overdueTasks] =
     await Promise.all([
       buildFollowUpItems(user),
       buildOverloadItems(user),
@@ -295,6 +324,7 @@ export async function getAttentionFeed(
       buildPortfolioGapItems(user),
       buildStaleLeadItems(user),
       buildStuckJobItems(user),
+      buildOverdueTaskItems(user),
     ]);
 
   const items: AttentionItemBase[] = [
@@ -305,6 +335,7 @@ export async function getAttentionFeed(
     ...portfolioGapItems,
     ...staleLeads,
     ...stuckJobs,
+    ...overdueTasks,
   ];
 
   const acks = await prisma.notificationAcknowledgement.findMany({

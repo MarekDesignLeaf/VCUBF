@@ -27,6 +27,20 @@ calendarRouter.get("/jobs", requirePermission("crm.read"), async (req, res) => {
   res.json(jobs);
 });
 
+// Real Secretary tasks due in the date window — same calendar, same source
+// of truth; no external calendar connector or duplicate record is created.
+calendarRouter.get("/tasks", requirePermission("crm.read"), async (req, res) => {
+  const parsed = jobsQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
+  }
+  const tasks = await calendarService.getCalendarTasks(req.user!, {
+    from: new Date(parsed.data.from),
+    to: new Date(parsed.data.to),
+  });
+  res.json(tasks);
+});
+
 // detect_overload — Action Contract driven, read-only.
 calendarRouter.get("/overload", requirePermission(DETECT_OVERLOAD_ACTION.requiredPermission), async (req, res) => {
   const weeksAhead = req.query.weeks_ahead ? Number(req.query.weeks_ahead) : undefined;

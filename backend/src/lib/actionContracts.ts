@@ -506,6 +506,67 @@ export const UPDATE_BUSINESS_CONTEXT_ITEM_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "BUSINESS_CONTEXT_ITEM_NOT_FOUND", "VALIDATION_FAILED"],
 };
 
+// Task Management — Secretary-owned work items linked to real CRM/job/
+// communication records. A due date plus assignee also makes a task visible
+// in the calendar; an entered duration contributes to capacity. No duration,
+// client link or priority is inferred by a prompt.
+export const TASK_STATUSES = ["open", "in_progress", "completed", "cancelled"] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+export const TASK_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
+
+export const TASK_CATEGORIES = [
+  "administrative",
+  "client_follow_up",
+  "job_work",
+  "communication",
+  "website",
+  "recruitment",
+  "other",
+] as const;
+export type TaskCategory = (typeof TASK_CATEGORIES)[number];
+
+export const TASK_SOURCES = [
+  "user_input",
+  "communication_follow_up",
+  "job_workflow",
+  "website_workflow",
+  "recruitment_workflow",
+  "other",
+] as const;
+export type TaskSource = (typeof TASK_SOURCES)[number];
+
+export const CREATE_TASK_ACTION: ActionContract = {
+  actionName: "create_task",
+  purpose:
+    "Create a Secretary task linked to real company records, optionally assigning it to an employee with a due date and entered duration for calendar/capacity planning.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.clients", "crm.jobs", "crm.communication_records", "crm.users"],
+  possibleErrors: [
+    "MISSING_PERMISSION",
+    "VALIDATION_FAILED",
+    "CLIENT_NOT_FOUND",
+    "JOB_NOT_FOUND",
+    "COMMUNICATION_RECORD_NOT_FOUND",
+    "EMPLOYEE_NOT_FOUND",
+    "RELATED_RECORD_MISMATCH",
+  ],
+};
+
+export const UPDATE_TASK_ACTION: ActionContract = {
+  actionName: "update_task",
+  purpose:
+    "Update a task's content, assignment, due date, entered duration, priority or lifecycle status while preserving audit history.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.tasks", "crm.users"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "TASK_NOT_FOUND", "EMPLOYEE_NOT_FOUND"],
+};
+
 // Basic Website Audit — MVP Website Management / Business Growth slice.
 // The current implementation analyses explicit manual observations and real
 // Secretary data only. It does not crawl an external site because no
@@ -669,6 +730,7 @@ export const NOTIFICATION_TYPES = [
   "portfolio_gap",
   "stale_lead",
   "stuck_job",
+  "overdue_task",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

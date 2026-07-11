@@ -78,6 +78,26 @@ describe("commandParser", () => {
     assert.equal(parseTextCommand("check overload").intent, "detect_overload");
   });
 
+  it("parses task creation and listing commands", () => {
+    const assigned = parseTextCommand("create task for Test Worker: Prepare materials");
+    assert.equal(assigned.intent, "create_task");
+    if (assigned.intent === "create_task") {
+      assert.equal(assigned.entities.title, "Prepare materials");
+      assert.equal(assigned.entities.employee_name, "Test Worker");
+    }
+
+    const dated = parseTextCommand(
+      "create task Send quote, assigned to Test Admin, due 2027-01-04T09:00:00.000Z"
+    );
+    assert.equal(dated.intent, "create_task");
+    if (dated.intent === "create_task") {
+      assert.equal(dated.entities.title, "Send quote");
+      assert.equal(dated.entities.employee_name, "Test Admin");
+      assert.equal(dated.entities.due_at, "2027-01-04T09:00:00.000Z");
+    }
+    assert.equal(parseTextCommand("list tasks").intent, "list_tasks");
+  });
+
   it("parses 'create service X, category Y'", () => {
     const result = parseTextCommand("create service Fence repair, category Fencing");
     assert.equal(result.intent, "create_service");

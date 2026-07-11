@@ -33,6 +33,25 @@ export async function getCalendarJobs(user: AuthedUser, filter: CalendarJobsFilt
   });
 }
 
+// Secretary tasks with a due date in the same calendar window. Completed and
+// cancelled tasks remain visible as history; the UI can distinguish status.
+// A task assigned to an employee is therefore present in that employee's
+// agenda without creating a disconnected external-calendar copy.
+export async function getCalendarTasks(user: AuthedUser, filter: CalendarJobsFilter) {
+  return prisma.task.findMany({
+    where: {
+      companyId: user.companyId,
+      dueAt: { gte: filter.from, lt: filter.to },
+    },
+    include: {
+      client: { select: { id: true, displayName: true } },
+      job: { select: { id: true, jobTitle: true } },
+      assignedUser: { select: { id: true, displayName: true } },
+    },
+    orderBy: { dueAt: "asc" },
+  });
+}
+
 // The standard menu of realistic mitigation options for overload, taken
 // directly from the VCUF master documentation / project instructions
 // (section 6). This is structured operational guidance, not a fabricated

@@ -34,6 +34,7 @@ model Company {
   websiteAudits       WebsiteAudit[]
   websiteAuditFindings WebsiteAuditFinding[]
   websiteContentProposals WebsiteContentProposal[]
+  tasks               Task[]
 
   @@map("companies")
 }
@@ -57,6 +58,7 @@ model User {
   company       Company    @relation(fields: [companyId], references: [id])
   auditLogs     AuditLog[]
   assignedJobs  Job[]      @relation("AssignedJobs")
+  assignedTasks Task[]     @relation("AssignedTasks")
 
   @@map("users")
 }
@@ -91,6 +93,7 @@ model Client {
   quotes  Quote[]
   communicationRecords CommunicationRecord[]
   portfolioPhotos      PortfolioPhoto[]
+  tasks                Task[]
 
   @@index([companyId])
   @@map("clients")
@@ -129,6 +132,7 @@ model Job {
   quotes              Quote[]
   communicationRecords CommunicationRecord[]
   portfolioPhotos      PortfolioPhoto[]
+  tasks                Task[]
 
   @@index([companyId])
   @@index([clientId])
@@ -403,11 +407,51 @@ model CommunicationRecord {
   company Company @relation(fields: [companyId], references: [id])
   client  Client  @relation(fields: [clientId], references: [id])
   job     Job?    @relation(fields: [jobId], references: [id])
+  tasks   Task[]
 
   @@index([companyId])
   @@index([clientId])
   @@index([jobId])
   @@map("communication_records")
+}
+
+// Task Management — one structured task list shared by CRM, jobs,
+// communication, employees, calendar and capacity. A task may be linked to
+// any of those real records, but never exists only inside an external
+// calendar. dueAt + assignedUserId place it on the employee agenda;
+// estimatedDurationHours contributes to real weekly load when known.
+model Task {
+  id                     String    @id @default(uuid())
+  companyId              String    @map("company_id")
+  clientId               String?   @map("client_id")
+  jobId                  String?   @map("job_id")
+  communicationRecordId  String?   @map("communication_record_id")
+  assignedUserId         String?   @map("assigned_user_id")
+  title                  String
+  description            String?
+  taskStatus             String    @default("open") @map("task_status")
+  priority               String    @default("normal")
+  category               String    @default("administrative")
+  source                 String    @default("user_input")
+  dueAt                  DateTime? @map("due_at")
+  estimatedDurationHours Float?    @map("estimated_duration_hours")
+  completedAt            DateTime? @map("completed_at")
+  createdBy              String?   @map("created_by")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  company             Company              @relation(fields: [companyId], references: [id])
+  client              Client?              @relation(fields: [clientId], references: [id])
+  job                 Job?                 @relation(fields: [jobId], references: [id])
+  communicationRecord CommunicationRecord? @relation(fields: [communicationRecordId], references: [id])
+  assignedUser        User?                @relation("AssignedTasks", fields: [assignedUserId], references: [id])
+
+  @@index([companyId, taskStatus])
+  @@index([assignedUserId, dueAt])
+  @@index([clientId])
+  @@index([jobId])
+  @@index([communicationRecordId])
+  @@map("tasks")
 }
 
 

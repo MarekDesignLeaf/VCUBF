@@ -77,6 +77,8 @@ export function Employees() {
                         {cap.overloaded && " — overloaded"}
                         {cap.jobsMissingEstimate > 0 &&
                           ` — ${cap.jobsMissingEstimate} job(s) missing an estimate`}
+                        {cap.tasksMissingEstimate > 0 &&
+                          ` — ${cap.tasksMissingEstimate} task(s) missing an estimate`}
                       </div>
                     </>
                   ) : (

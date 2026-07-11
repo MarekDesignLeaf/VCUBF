@@ -548,9 +548,26 @@ npm run dev                 # http://localhost:5173
   verified sources, reviewing the frozen evidence snapshot and recording an explicit
   approval/rejection through the same two-step preview pattern. There is no publish button.
 
-Backend verified: 233/233 tests passing across 26 suites (auth, CRM clients, CRM jobs, CRM leads,
+- **Task Management**: `POST /tasks`, `PUT /tasks/:id`, `GET /tasks`, and
+  `GET /tasks/:id` (Action Contracts `create_task`, `update_task`, risk 2) provide one
+  Secretary-owned task list linked to real clients, jobs, communication records and
+  employees. Job/communication links derive their real client/job relationship and reject
+  inconsistent combinations rather than saving split business facts. Tasks have fixed
+  lifecycle statuses (`open`, `in_progress`, `completed`, `cancelled`), priorities and
+  categories. An assigned task with `dueAt` appears through `GET /calendar/tasks`; when an
+  `estimatedDurationHours` value is entered it contributes to the employee's real weekly
+  capacity alongside jobs. Missing duration is counted and reported separately, never
+  guessed. Overdue unfinished tasks feed into Notifications as `overdue_task`; completed or
+  cancelled tasks do not. Text commands include `create task for <employee>: <title>`, the
+  labelled `assigned to` / ISO `due` form, and `list tasks`.
+- **Frontend — Tasks and Calendar**: new Tasks sidebar page with creation, filters,
+  lifecycle actions, CRM/job/employee selectors and immediate capacity warnings. Calendar
+  now loads jobs, due Secretary tasks and overload data in parallel; Employee capacity also
+  reports tasks missing an estimate.
+
+Backend verified: 246/246 tests passing across 27 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
-calendar/scheduling, employee/permission management, service catalogue, quotes,
+calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
 recruitment, playbooks, learning, communication log, notifications/escalation, data
 quality, portfolio/photo, and memory model/pattern-detection) —
 covering permissions, validation, duplicate
@@ -613,11 +630,16 @@ Secretary data-gap findings, evidence-backed comparison with real services/conte
 severity ordering, audit-log evidence and cross-tenant isolation. Website Content Proposal
 adds `websiteContentProposals.test.ts`, covering source eligibility and provenance,
 same-origin protection, confirmation previews, approval/rejection, duplicate-decision and
-publication-state rejection, audit before/after evidence and cross-tenant isolation. The
-complete 26-suite database-backed run above was verified against a real PostgreSQL instance.
+publication-state rejection, audit before/after evidence and cross-tenant isolation. Task
+Management adds `tasks.test.ts`, covering permissions, validation, relationship consistency,
+job/communication-derived CRM links, assignment, capacity contribution/overload warning,
+calendar visibility, status completion/reopening, overdue filtering and notification,
+audit evidence and cross-tenant isolation; parser/integration coverage proves task creation
+and listing through the shared Voice/Text Action Engine. The complete 27-suite
+database-backed run above was verified against a real PostgreSQL instance.
 
-Frontend: `npm run build` and `npm run dev` both verified working (clean production
-build, dev server responds 200).
+Frontend: `npm run lint` and `npm run build` verified working. Lint remains clean apart
+from the pre-existing Fast Refresh warning in `src/context/AuthContext.tsx`.
 
 ## What's deliberately NOT here yet
 

@@ -1,12 +1,20 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type Job, type OverloadReport, JOB_STATUS_LABELS } from "../api/client";
+import {
+  api,
+  type Job,
+  type OverloadReport,
+  type SecretaryTask,
+  JOB_STATUS_LABELS,
+  TASK_STATUS_LABELS,
+} from "../api/client";
 
 // Calendar and Scheduling Intelligence Module — an agenda of real planned
 // jobs for the next 4 weeks, plus an upfront overload warning computed from
 // real workload data (never from whether the calendar looks empty).
 export function Calendar() {
   const [jobs, setJobs] = useState<Job[] | null>(null);
+  const [tasks, setTasks] = useState<SecretaryTask[] | null>(null);
   const [overload, setOverload] = useState<OverloadReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,18 +24,24 @@ export function Calendar() {
     const to = new Date(from);
     to.setUTCDate(to.getUTCDate() + 28);
 
-    Promise.all([api.calendar.jobs(from.toISOString(), to.toISOString()), api.calendar.overload(4)])
-      .then(([jobsRes, overloadRes]) => {
+    Promise.all([
+      api.calendar.jobs(from.toISOString(), to.toISOString()),
+      api.calendar.tasks(from.toISOString(), to.toISOString()),
+      api.calendar.overload(4),
+    ])
+      .then(([jobsRes, tasksRes, overloadRes]) => {
         setJobs(jobsRes);
+        setTasks(tasksRes);
         setOverload(overloadRes);
       })
       .catch(() => setError("Could not load the calendar."));
   }, []);
 
   if (error) return <div className="error-banner">{error}</div>;
-  if (!jobs || !overload) return <p>Loading…</p>;
+  if (!jobs || !tasks || !overload) return <p>Loading…</p>;
 
   const grouped = groupByDate(jobs);
+  const groupedTasks = groupTasksByDate(tasks);
 
   return (
     <div>
@@ -88,8 +102,52 @@ export function Calendar() {
           </div>
         ))
       )}
+
+      <h2 style={{ marginTop: 28 }}>Tasks due</h2>
+      {Object.keys(groupedTasks).length === 0 ? (
+        <p className="hint">No Secretary tasks due in the next 4 weeks.</p>
+      ) : (
+        Object.entries(groupedTasks).map(([date, dayTasks]) => (
+          <div key={date} style={{ marginBottom: 16 }}>
+            <h3>{new Date(date).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}</h3>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Task</th>
+                  <th>Status</th>
+                  <th>Priority</th>
+                  <th>Assigned to</th>
+                  <th>Job / client</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dayTasks.map((task) => (
+                  <tr key={task.id}>
+                    <td><Link to="/tasks">{task.title}</Link></td>
+                    <td>{TASK_STATUS_LABELS[task.taskStatus]}</td>
+                    <td>{task.priority}</td>
+                    <td>{task.assignedUser?.displayName ?? <span className="hint">Unassigned</span>}</td>
+                    <td>{task.job?.jobTitle ?? task.client?.displayName ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))
+      )}
     </div>
   );
+}
+
+function groupTasksByDate(tasks: SecretaryTask[]): Record<string, SecretaryTask[]> {
+  const groups: Record<string, SecretaryTask[]> = {};
+  for (const task of tasks) {
+    if (!task.dueAt) continue;
+    const dateKey = task.dueAt.slice(0, 10);
+    if (!groups[dateKey]) groups[dateKey] = [];
+    groups[dateKey].push(task);
+  }
+  return groups;
 }
 
 function groupByDate(jobs: Job[]): Record<string, Job[]> {

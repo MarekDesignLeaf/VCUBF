@@ -14,6 +14,7 @@ import * as notificationService from "../services/notificationService.js";
 import * as dataQualityService from "../services/dataQualityService.js";
 import * as portfolioService from "../services/portfolioService.js";
 import * as memoryModelService from "../services/memoryModelService.js";
+import * as taskService from "../services/taskService.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -245,6 +246,58 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
 
     case "detect_overload": {
       const data = await calendarService.detectUpcomingOverload(user);
+      response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "create_task": {
+      let assignedUserId: string | undefined;
+      if (command.entities.employee_name) {
+        const matches = await employeeService.findEmployeesByName(user, command.entities.employee_name);
+        if (matches.length === 0) {
+          response = {
+            intent: command.intent,
+            interpreted: command.entities,
+            ok: false,
+            httpStatus: 404,
+            error: "EMPLOYEE_NOT_FOUND",
+            message: `No employee matching "${command.entities.employee_name}".`,
+          };
+          break;
+        }
+        if (matches.length > 1) {
+          response = {
+            intent: command.intent,
+            interpreted: command.entities,
+            ok: false,
+            httpStatus: 409,
+            error: "AMBIGUOUS_REFERENCE",
+            message: `Multiple employees match "${command.entities.employee_name}" — be more specific.`,
+            data: matches.map((employee) => ({ id: employee.id, displayName: employee.displayName })),
+          };
+          break;
+        }
+        assignedUserId = matches[0].id;
+      }
+      const result = await taskService.createTask(user, {
+        title: command.entities.title,
+        assigned_user_id: assignedUserId,
+        due_at: command.entities.due_at,
+      });
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? undefined : result.message,
+      };
+      break;
+    }
+
+    case "list_tasks": {
+      const data = await taskService.listTasks(user);
       response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
       break;
     }

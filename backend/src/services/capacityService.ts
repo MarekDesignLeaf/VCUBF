@@ -27,6 +27,7 @@ export function getWeekRange(reference: Date = new Date()): WeekRange {
 }
 
 export const ACTIVE_JOB_STATUSES = ["nova", "naplanovano", "v_realizaci", "ceka_na_material", "ceka_na_klienta"];
+export const ACTIVE_TASK_STATUSES = ["open", "in_progress"];
 
 export interface CapacityResult {
   employeeId: string;
@@ -37,15 +38,15 @@ export interface CapacityResult {
   currentLoadHours: number;
   jobsCountedInLoad: number;
   jobsMissingEstimate: number;
+  tasksCountedInLoad: number;
+  tasksMissingEstimate: number;
   utilizationPct: number;
   overloaded: boolean;
 }
 
-// Computes an employee's real workload for a week from active jobs that have
-// both a planned_start_at in that week AND an estimated_duration_hours. Jobs
-// missing an estimate are reported separately (jobsMissingEstimate) rather
-// than silently ignored or guessed at — the caller/UI must be told data is
-// missing, per the "no improvisation with real company data" rule.
+// Computes an employee's real workload for a week from active jobs and active
+// Secretary tasks. Both must have a date in the week and an entered duration.
+// Missing estimates are reported separately rather than silently guessed.
 export async function computeEmployeeCapacity(
   user: AuthedUser,
   employeeId: string,
@@ -56,15 +57,26 @@ export async function computeEmployeeCapacity(
 
   const { weekStart, weekEnd } = getWeekRange(reference);
 
-  const jobsInWeek = await prisma.job.findMany({
-    where: {
-      companyId: user.companyId,
-      assignedUserId: employeeId,
-      jobStatus: { in: ACTIVE_JOB_STATUSES },
-      plannedStartAt: { gte: weekStart, lt: weekEnd },
-    },
-    select: { id: true, estimatedDurationHours: true },
-  });
+  const [jobsInWeek, tasksInWeek] = await Promise.all([
+    prisma.job.findMany({
+      where: {
+        companyId: user.companyId,
+        assignedUserId: employeeId,
+        jobStatus: { in: ACTIVE_JOB_STATUSES },
+        plannedStartAt: { gte: weekStart, lt: weekEnd },
+      },
+      select: { id: true, estimatedDurationHours: true },
+    }),
+    prisma.task.findMany({
+      where: {
+        companyId: user.companyId,
+        assignedUserId: employeeId,
+        taskStatus: { in: ACTIVE_TASK_STATUSES },
+        dueAt: { gte: weekStart, lt: weekEnd },
+      },
+      select: { id: true, estimatedDurationHours: true },
+    }),
+  ]);
 
   let currentLoadHours = 0;
   let jobsCountedInLoad = 0;
@@ -76,6 +88,17 @@ export async function computeEmployeeCapacity(
     }
     currentLoadHours += job.estimatedDurationHours;
     jobsCountedInLoad += 1;
+  }
+
+  let tasksCountedInLoad = 0;
+  let tasksMissingEstimate = 0;
+  for (const task of tasksInWeek) {
+    if (task.estimatedDurationHours == null) {
+      tasksMissingEstimate += 1;
+      continue;
+    }
+    currentLoadHours += task.estimatedDurationHours;
+    tasksCountedInLoad += 1;
   }
 
   const utilizationPct = employee.weeklyCapacityHours > 0
@@ -91,6 +114,8 @@ export async function computeEmployeeCapacity(
     currentLoadHours,
     jobsCountedInLoad,
     jobsMissingEstimate,
+    tasksCountedInLoad,
+    tasksMissingEstimate,
     utilizationPct,
     overloaded: currentLoadHours > employee.weeklyCapacityHours,
   };
