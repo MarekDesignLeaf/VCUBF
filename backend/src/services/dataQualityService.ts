@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
 import { MERGE_CLIENTS_ACTION } from "../lib/actionContracts.js";
+import { normalizeEmail, normalizeName, normalizePhone } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -52,30 +53,6 @@ export interface DataQualityAttentionItem {
   message: string;
   dueAt: string | null;
   entity: { type: string; id: string; label?: string };
-}
-
-function normalizeEmail(email: string | null): string | null {
-  if (!email) return null;
-  const trimmed = email.trim().toLowerCase();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-// Strips everything but digits, then normalizes the UK international
-// prefix ("+44") and the domestic trunk prefix ("0") down to the same
-// significant-digit form, so "+44 7700 900123" and "07700900123" compare
-// equal — a plain, deterministic string rule, not a fabricated identity
-// match. Requires at least 6 remaining digits to avoid false positives on
-// garbage or placeholder values like "0" or "-".
-function normalizePhone(phone: string | null): string | null {
-  if (!phone) return null;
-  let digits = phone.replace(/[^0-9]/g, "");
-  if (digits.startsWith("44") && digits.length > 10) digits = digits.slice(2);
-  if (digits.startsWith("0")) digits = digits.slice(1);
-  return digits.length >= 6 ? digits : null;
-}
-
-function normalizeName(name: string): string {
-  return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 // Plain Levenshtein edit distance — a standard, deterministic string
@@ -164,8 +141,8 @@ export async function getDataQualityReport(user: AuthedUser): Promise<DataQualit
         continue;
       }
 
-      const nameA = normalizeName(a.displayName);
-      const nameB = normalizeName(b.displayName);
+      const nameA = normalizeName(a.displayName)!;
+      const nameB = normalizeName(b.displayName)!;
       if (nameA.length >= MIN_NAME_LENGTH_FOR_EXACT_MATCH && nameA === nameB) {
         duplicateClientGroups.push({
           clientAId: a.id,
@@ -250,7 +227,7 @@ export async function buildDataQualityItems(user: AuthedUser): Promise<DataQuali
 // failure partway through rolls back every table's change, never leaving a
 // partial merge. The duplicate client is archived (isActive: false), never
 // hard-deleted — its own row, and its own AuditLog history, remain in the
-// database untouched; only its Job/Quote/CommunicationRecord/PortfolioPhoto
+// database untouched; only its Job/Quote/CommunicationRecord/CommunicationIntake/PortfolioPhoto
 // foreign keys move to the primary client.
 
 export const mergeClientsSchema = z.object({
@@ -263,17 +240,19 @@ interface MergeCounts {
   jobs: number;
   quotes: number;
   communicationRecords: number;
+  communicationIntakes: number;
   portfolioPhotos: number;
 }
 
 async function countDuplicateLinkedRecords(companyId: string, duplicateClientId: string): Promise<MergeCounts> {
-  const [jobs, quotes, communicationRecords, portfolioPhotos] = await Promise.all([
+  const [jobs, quotes, communicationRecords, communicationIntakes, portfolioPhotos] = await Promise.all([
     prisma.job.count({ where: { companyId, clientId: duplicateClientId } }),
     prisma.quote.count({ where: { companyId, clientId: duplicateClientId } }),
     prisma.communicationRecord.count({ where: { companyId, clientId: duplicateClientId } }),
+    prisma.communicationIntake.count({ where: { companyId, clientId: duplicateClientId } }),
     prisma.portfolioPhoto.count({ where: { companyId, clientId: duplicateClientId } }),
   ]);
-  return { jobs, quotes, communicationRecords, portfolioPhotos };
+  return { jobs, quotes, communicationRecords, communicationIntakes, portfolioPhotos };
 }
 
 export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
@@ -358,8 +337,8 @@ export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise
   // Single Prisma $transaction — every updateMany plus the duplicate's
   // isActive flip either all succeed or all roll back together. There is no
   // partial-merge state: a job either still points at the duplicate, or the
-  // whole merge (all four record types + archive) has completed.
-  const [jobsRelinked, quotesRelinked, communicationRecordsRelinked, portfolioPhotosRelinked, archivedDuplicate] =
+  // whole merge (all five record types + archive) has completed.
+  const [jobsRelinked, quotesRelinked, communicationRecordsRelinked, communicationIntakesRelinked, portfolioPhotosRelinked, archivedDuplicate] =
     await prisma.$transaction([
       prisma.job.updateMany({
         where: { companyId: user.companyId, clientId: duplicate.id },
@@ -370,6 +349,10 @@ export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise
         data: { clientId: primary.id },
       }),
       prisma.communicationRecord.updateMany({
+        where: { companyId: user.companyId, clientId: duplicate.id },
+        data: { clientId: primary.id },
+      }),
+      prisma.communicationIntake.updateMany({
         where: { companyId: user.companyId, clientId: duplicate.id },
         data: { clientId: primary.id },
       }),
@@ -390,6 +373,7 @@ export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise
       jobs: jobsRelinked.count,
       quotes: quotesRelinked.count,
       communicationRecords: communicationRecordsRelinked.count,
+      communicationIntakes: communicationIntakesRelinked.count,
       portfolioPhotos: portfolioPhotosRelinked.count,
     },
     duplicateClient: { id: archivedDuplicate.id, isActive: archivedDuplicate.isActive },

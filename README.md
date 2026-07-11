@@ -318,8 +318,7 @@ npm run dev                 # http://localhost:5173
   (email/whatsapp/sms/phone_call/messenger/in_person/other), direction (inbound/
   outbound), a required summary, an optional full-text capture, and when it actually
   happened (`occurred_at`, not necessarily "now" — a call from yesterday can be logged
-  today). Every field is exactly what the user typed in; there is no email/WhatsApp/SMS
-  connector in this slice, so nothing is auto-extracted. A referenced `client_id` (and
+  today). Every field is exactly what the user typed in. A referenced `client_id` (and
   `job_id` if given) is validated against the company's real records before a record is
   created, matching the FK-validation pattern in `quoteService.ts`. Follow-up tracking
   is a first-class field (`follow_up_needed` + optional `follow_up_due_at`);
@@ -329,9 +328,23 @@ npm run dev                 # http://localhost:5173
   <summary>" / "log email from <client>: <summary>" (channel word and with/from
   direction are mapped deterministically to the real channel/direction values), "list
   communications" / "list communications for <client>", "show follow ups". This module
-  is deliberately generic and CRM-linked so a future connector-driven extraction
-  workflow (reading real email/WhatsApp/SMS threads) can write into this exact same
-  table and linkage instead of being a second, disconnected communication store.
+  is deliberately generic and CRM-linked so the extraction workflow below writes into
+  this exact same table and linkage instead of being a second, disconnected store.
+- **Communication Extraction and Reply Drafting**: `POST /communications/intakes`
+  preserves an authorised inbound email/WhatsApp/SMS/Messenger/portal-chat/web-form/
+  voice-note message before a client identity is known. `POST /communications/intakes/:id/extract`
+  deterministically extracts only evidenced sender metadata, labelled address/postcode,
+  and exact active Service Catalogue names, reports missing fields, and compares normalized
+  email/UK phone/name values with active CRM clients. `POST /communications/intakes/:id/convert`
+  always returns a `CONFIRMATION_REQUIRED` preview before writing: it creates a new client,
+  reuses one exact contact match, or requires an explicit choice for an uncertain/name-only
+  match, then atomically links the original intake, client, and inbound CommunicationRecord.
+  A transaction claim prevents two concurrent confirmations from creating duplicates.
+  `POST /communications/intakes/:id/reply-draft` prepares and stores factual British-English
+  draft text from real company/service data; there is intentionally no send endpoint.
+- **Frontend — Communication Intake**: preserves the original message/source reference,
+  shows extracted evidence, missing data and CRM candidates, requires a visible conversion
+  confirmation, and labels reply text as an internal unsent draft.
 - **Frontend — Communications**: new Communications page (list with channel and
   follow-up-needed filters, and a "Log communication" quick-entry form — client picker,
   channel/direction selects, summary, occurred-at, and a follow-up checkbox + due date).
@@ -452,10 +465,10 @@ npm run dev                 # http://localhost:5173
   /data-quality/merge-clients` without `confirmed: true` validates that both clients
   exist, belong to the caller's own company, and are actually different clients, then
   returns a preview with real counts of the `Job`/`Quote`/`CommunicationRecord`/
-  `PortfolioPhoto` records currently linked to the duplicate that would be re-linked to
+  `CommunicationIntake`/`PortfolioPhoto` records currently linked to the duplicate that would be re-linked to
   the primary — nothing is written yet. Only a second call with `confirmed: true`
   performs the merge, inside a single Prisma `$transaction`
-  (`backend/src/services/dataQualityService.mergeClients`): the four record types' FKs
+  (`backend/src/services/dataQualityService.mergeClients`): the five record types' FKs
   are re-pointed from the duplicate to the primary, and the duplicate client is
   **archived, never hard-deleted** — a new `Client.isActive` column (defaulting to
   `true`), reusing the same soft-delete pattern already used by `User`/
@@ -465,7 +478,7 @@ npm run dev                 # http://localhost:5173
   duplicate" of the client it was merged into. There is deliberately **no text-command
   intent** for `merge_clients` — the same judgment call the README already documents for
   `prepare_quote` ("a real, multi-line-item form, so it isn't a one-line voice command in
-  this slice"): merging picks two specific client ids and re-links four different record
+  this slice"): merging picks two specific client ids and re-links five different record
   types, which is not safely expressible as a single typed sentence, so it stays a
   dedicated form/API flow that always goes through the confirmation preview.
 - **Frontend — Data Quality merge UI**: the Data Quality page's duplicate-pair table
@@ -565,10 +578,10 @@ npm run dev                 # http://localhost:5173
   now loads jobs, due Secretary tasks and overload data in parallel; Employee capacity also
   reports tasks missing an estimate.
 
-Backend verified: 246/246 tests passing across 27 suites (auth, CRM clients, CRM jobs, CRM leads,
+Backend verified: 257/257 tests passing across 28 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
-recruitment, playbooks, learning, communication log, notifications/escalation, data
+ recruitment, playbooks, learning, communication extraction/reply drafting, communication log, notifications/escalation, data
 quality, portfolio/photo, and memory model/pattern-detection) —
 covering permissions, validation, duplicate
 detection, cross-tenant checks, status-transition validation, lead conversion and
@@ -615,7 +628,7 @@ entry, not flagged when its status was changed recently even if the job itself i
 flagged once done or cancelled regardless of age. The Data Quality Engine's new
 `merge_clients` action — permission check, same-client rejection, nonexistent-client
 rejection, cross-tenant client rejection, an unconfirmed preview with accurate real
-counts that changes nothing, a confirmed merge that correctly re-links all four record
+counts that changes nothing, a confirmed merge that correctly re-links all five record
 types and leaves the duplicate archived (`isActive: false`) with its own row and prior
 audit history intact, the archived duplicate no longer resurfacing in the duplicate scan,
 and an atomicity test proving a merge that fails validation (a client id that no longer
@@ -669,14 +682,13 @@ whole-term substitutions only — a rule can't yet rewrite part of a sentence ba
 context (e.g. it can't tell "old client" apart in "call the old client" vs. "he's quite
 old" — it just doesn't fire on any term it wasn't taught verbatim, matching the "must
 not guess" rule rather than trying to be clever about it). Also still missing from MVP
-scope: automated communication intelligence — the Communication Log Module now gives
-every communication a real, CRM-linked, auditable home, but extracting new
-communications automatically from an email/WhatsApp/SMS connector (rather than manual
-entry), duplicate/near-duplicate detection across channels, and AI-assisted
-summarisation of a raw thread into a structured record are still not implemented; the
-data model and CRM linkage are deliberately built so that future connector-driven
-extraction work writes into this same table instead of creating a second, disconnected
-communication store. The Notification and Escalation Module's feed is pull-only (a
+scope: automatic connector ingestion — the Communication Intake workflow now preserves
+manually supplied authorised messages, performs deterministic extraction and CRM matching,
+creates/links clients after confirmation, and prepares unsent replies, but it does not log
+into or read an email/WhatsApp/SMS account itself. Thread-wide summarisation, attachment/
+photo ingestion, near-duplicate identity matching beyond the fixed normalized contact/name
+rules, unresolved-enquiry scanning across external inboxes, and any send action remain
+unimplemented. The Notification and Escalation Module's feed is pull-only (a
 page you open, or a text command you run) — there is no push delivery yet: no email
 digest, no SMS/WhatsApp alert, and no in-app real-time badge/websocket, since no
 notification-delivery connector exists. It now aggregates seven real signal types
@@ -688,7 +700,7 @@ at a time, or a quote sitting in "sent" for a long time without a follow-up) —
 coverage means adding another `buildXItems` source function, not a new module. The Data
 Quality Engine can now merge two clients (`merge_clients`, confirmation-gated, risk 3),
 closing the earlier "no merge action" gap, but it is still deliberately limited: merging
-only re-links `Job`/`Quote`/`CommunicationRecord`/`PortfolioPhoto` foreign keys and
+only re-links `Job`/`Quote`/`CommunicationRecord`/`CommunicationIntake`/`PortfolioPhoto` foreign keys and
 archives the duplicate (`Client.isActive = false`) — it never hard-deletes a client row,
 never touches the `AuditLog` (the duplicate's own prior audit history, and the primary's,
 are both left completely intact), and there is currently **no "un-merge" or reactivate

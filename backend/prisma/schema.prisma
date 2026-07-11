@@ -28,6 +28,7 @@ model Company {
   playbookRuns        PlaybookRun[]
   learningRules       LearningRule[]
   communicationRecords CommunicationRecord[]
+  communicationIntakes CommunicationIntake[]
   notificationAcknowledgements NotificationAcknowledgement[]
   portfolioPhotos     PortfolioPhoto[]
   businessContextItems BusinessContextItem[]
@@ -92,6 +93,7 @@ model Client {
   jobs    Job[]
   quotes  Quote[]
   communicationRecords CommunicationRecord[]
+  communicationIntakes CommunicationIntake[]
   portfolioPhotos      PortfolioPhoto[]
   tasks                Task[]
 
@@ -408,11 +410,45 @@ model CommunicationRecord {
   client  Client  @relation(fields: [clientId], references: [id])
   job     Job?    @relation(fields: [jobId], references: [id])
   tasks   Task[]
+  intake  CommunicationIntake?
 
   @@index([companyId])
   @@index([clientId])
   @@index([jobId])
   @@map("communication_records")
+}
+
+// Communication Intelligence intake — preserves the original inbound
+// message before a client identity is known. Extraction results and reply
+// drafts are reviewable internal data; conversion links the same intake to
+// the resulting/reused Client and CommunicationRecord so source provenance
+// is never lost.
+model CommunicationIntake {
+  id                    String    @id @default(uuid())
+  companyId             String    @map("company_id")
+  clientId              String?   @map("client_id")
+  communicationRecordId String?   @unique @map("communication_record_id")
+  channel               String
+  senderName            String?   @map("sender_name")
+  senderEmail           String?   @map("sender_email")
+  senderPhone           String?   @map("sender_phone")
+  messageText           String    @map("message_text")
+  receivedAt            DateTime  @map("received_at")
+  sourceReference       String?   @map("source_reference")
+  intakeStatus          String    @default("new") @map("intake_status")
+  extractedData         Json?     @map("extracted_data")
+  replyDraft            String?   @map("reply_draft")
+  createdBy             String?   @map("created_by")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  company             Company              @relation(fields: [companyId], references: [id])
+  client              Client?              @relation(fields: [clientId], references: [id])
+  communicationRecord CommunicationRecord? @relation(fields: [communicationRecordId], references: [id])
+
+  @@index([companyId, intakeStatus])
+  @@index([clientId])
+  @@map("communication_intakes")
 }
 
 // Task Management — one structured task list shared by CRM, jobs,

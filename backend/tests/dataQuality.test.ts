@@ -166,6 +166,7 @@ describe("Data Quality Engine", () => {
     let jobId: string;
     let quoteId: string;
     let commId: string;
+    let intakeId: string;
     let photoId: string;
 
     let pairCounter = 0;
@@ -210,6 +211,19 @@ describe("Data Quality Engine", () => {
           occurred_at: new Date().toISOString(),
         });
       commId = commRes.body.id;
+
+      const duplicate = await prisma.client.findUniqueOrThrow({ where: { id: duplicateId } });
+      const intake = await prisma.communicationIntake.create({
+        data: {
+          companyId: duplicate.companyId,
+          clientId: duplicateId,
+          channel: "email",
+          messageText: "Original intake linked to duplicate",
+          receivedAt: new Date(),
+          intakeStatus: "converted",
+        },
+      });
+      intakeId = intake.id;
 
       const photoRes = await request(app)
         .post("/portfolio")
@@ -279,6 +293,7 @@ describe("Data Quality Engine", () => {
       assert.equal(res.body.preview.recordsToRelink.jobs, 1);
       assert.equal(res.body.preview.recordsToRelink.quotes, 1);
       assert.equal(res.body.preview.recordsToRelink.communicationRecords, 1);
+      assert.equal(res.body.preview.recordsToRelink.communicationIntakes, 1);
       assert.equal(res.body.preview.recordsToRelink.portfolioPhotos, 1);
       assert.equal(res.body.preview.duplicateWillBeArchived, true);
 
@@ -291,7 +306,7 @@ describe("Data Quality Engine", () => {
       assert.equal(duplicateStillListed.status, 200);
     });
 
-    it("with confirmed:true, re-links all four record types, archives the duplicate, and preserves the primary's audit history", async () => {
+    it("with confirmed:true, re-links all five record types, archives the duplicate, and preserves the primary's audit history", async () => {
       const primaryAuditsBefore = await prisma.auditLog.count({
         where: { companyId: (await prisma.client.findUnique({ where: { id: primaryId } }))!.companyId },
       });
@@ -305,6 +320,7 @@ describe("Data Quality Engine", () => {
       assert.equal(res.body.relinked.jobs, 1);
       assert.equal(res.body.relinked.quotes, 1);
       assert.equal(res.body.relinked.communicationRecords, 1);
+      assert.equal(res.body.relinked.communicationIntakes, 1);
       assert.equal(res.body.relinked.portfolioPhotos, 1);
       assert.equal(res.body.duplicateClient.isActive, false);
 
@@ -316,6 +332,9 @@ describe("Data Quality Engine", () => {
 
       const commRes = await request(app).get(`/communications/${commId}`).set("Authorization", `Bearer ${adminToken}`);
       assert.equal(commRes.body.clientId, primaryId);
+
+      const intake = await prisma.communicationIntake.findUniqueOrThrow({ where: { id: intakeId } });
+      assert.equal(intake.clientId, primaryId);
 
       const photoRes = await request(app).get(`/portfolio/${photoId}`).set("Authorization", `Bearer ${adminToken}`);
       assert.equal(photoRes.body.clientId, primaryId);

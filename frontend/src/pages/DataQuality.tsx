@@ -202,6 +202,10 @@ export function DataQuality() {
                                       Communication records to re-link:{" "}
                                       {mergePreview.recordsToRelink.communicationRecords}
                                     </li>
+                                    <li>
+                                      Communication intakes to re-link:{" "}
+                                      {mergePreview.recordsToRelink.communicationIntakes}
+                                    </li>
                                     <li>Photos to re-link: {mergePreview.recordsToRelink.portfolioPhotos}</li>
                                     <li>{mergePreview.duplicateClientLabel} will be archived (not deleted)</li>
                                   </ul>

@@ -684,6 +684,9 @@ export const COMMUNICATION_CHANNELS = [
   "sms",
   "phone_call",
   "messenger",
+  "portal_chat",
+  "web_form",
+  "voice_note",
   "in_person",
   "other",
 ] as const;
@@ -711,6 +714,59 @@ export const UPDATE_COMMUNICATION_RECORD_ACTION: ActionContract = {
   confirmationRequired: false,
   dataSources: ["user_input", "crm.communication_records"],
   possibleErrors: ["MISSING_PERMISSION", "COMMUNICATION_RECORD_NOT_FOUND", "VALIDATION_FAILED"],
+};
+
+export const LOG_COMMUNICATION_INTAKE_ACTION: ActionContract = {
+  actionName: "log_communication_intake",
+  purpose:
+    "Preserve an original inbound enquiry and its real sender/source metadata before the sender has been linked to a CRM client.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "authorised_communication_source"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
+export const EXTRACT_COMMUNICATION_INTAKE_ACTION: ActionContract = {
+  actionName: "extract_communication_intake",
+  purpose:
+    "Deterministically extract contact, address and service evidence from a preserved inbound communication and compare it with the company's CRM.",
+  requiredPermission: "crm.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["crm.communication_intakes", "crm.clients", "crm.service_catalogue"],
+  possibleErrors: ["MISSING_PERMISSION", "COMMUNICATION_INTAKE_NOT_FOUND", "UNSUPPORTED_ACTION"],
+};
+
+export const CREATE_CLIENT_FROM_COMMUNICATION_ACTION: ActionContract = {
+  actionName: "create_client_from_communication",
+  purpose:
+    "After a human preview, create or reuse a CRM client and link it to the preserved original communication and a communication log record.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.communication_intakes", "crm.clients"],
+  possibleErrors: [
+    "MISSING_PERMISSION",
+    "COMMUNICATION_INTAKE_NOT_FOUND",
+    "EXTRACTION_REQUIRED",
+    "MISSING_DATA",
+    "CLIENT_SELECTION_REQUIRED",
+    "CLIENT_NOT_FOUND",
+    "CONFIRMATION_REQUIRED",
+    "UNSUPPORTED_ACTION",
+  ],
+};
+
+export const PREPARE_COMMUNICATION_REPLY_ACTION: ActionContract = {
+  actionName: "prepare_communication_reply",
+  purpose:
+    "Prepare an internal reply draft from preserved communication evidence and real company/service data without sending it.",
+  requiredPermission: "crm.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["crm.communication_intakes", "crm.service_catalogue", "crm.companies"],
+  possibleErrors: ["MISSING_PERMISSION", "COMMUNICATION_INTAKE_NOT_FOUND", "EXTRACTION_REQUIRED"],
 };
 
 // Notification and Escalation Module — a unified, read-only "things needing
@@ -807,7 +863,7 @@ export const ANALYZE_DATA_QUALITY_ACTION: ActionContract = {
 // clients action yet" gap documented in README.md. This is deliberately the
 // highest-risk action in the Data Quality Engine so far: it re-links real,
 // already-linked business records (Job, Quote, CommunicationRecord,
-// PortfolioPhoto) from a duplicate client onto a primary client, and
+// CommunicationIntake, PortfolioPhoto) from a duplicate client onto a primary client, and
 // archives (never hard-deletes) the duplicate. Follows the exact same
 // confirmationRequired: true / 409 CONFIRMATION_REQUIRED preview pattern as
 // create_employee / update_employee / run_playbook — see employeeService.ts
@@ -826,11 +882,11 @@ export const ANALYZE_DATA_QUALITY_ACTION: ActionContract = {
 export const MERGE_CLIENTS_ACTION: ActionContract = {
   actionName: "merge_clients",
   purpose:
-    "Re-link a duplicate client's Job, Quote, CommunicationRecord, and PortfolioPhoto records onto a primary client, then archive (never delete) the duplicate — always previewed before anything changes.",
+    "Re-link a duplicate client's Job, Quote, CommunicationRecord, CommunicationIntake, and PortfolioPhoto records onto a primary client, then archive (never delete) the duplicate — always previewed before anything changes.",
   requiredPermission: "crm.manage",
   riskLevel: 3,
   confirmationRequired: true,
-  dataSources: ["user_input", "crm.clients", "crm.jobs", "crm.quotes", "crm.communication_records", "crm.portfolio_photos"],
+  dataSources: ["user_input", "crm.clients", "crm.jobs", "crm.quotes", "crm.communication_records", "crm.communication_intakes", "crm.portfolio_photos"],
   possibleErrors: [
     "MISSING_PERMISSION",
     "VALIDATION_FAILED",

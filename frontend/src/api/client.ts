@@ -451,6 +451,9 @@ export const COMMUNICATION_CHANNELS = [
   "sms",
   "phone_call",
   "messenger",
+  "portal_chat",
+  "web_form",
+  "voice_note",
   "in_person",
   "other",
 ] as const;
@@ -462,6 +465,9 @@ export const COMMUNICATION_CHANNEL_LABELS: Record<CommunicationChannel, string> 
   sms: "SMS",
   phone_call: "Phone call",
   messenger: "Messenger",
+  portal_chat: "Portal chat",
+  web_form: "Web form",
+  voice_note: "Voice note",
   in_person: "In person",
   other: "Other",
 };
@@ -488,6 +494,68 @@ export interface CommunicationRecord {
   createdAt: string;
   client?: { id: string; displayName: string };
   job?: { id: string; jobTitle: string } | null;
+}
+
+export interface CommunicationExtraction {
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  postcode: string | null;
+  serviceMatches: Array<{ id: string; name: string }>;
+  existingClientMatches: Array<{
+    id: string;
+    displayName: string;
+    reasons: Array<"email_match" | "phone_match" | "name_match">;
+  }>;
+  identityConfidence: "exact_contact_match" | "new_contact" | "uncertain";
+  missingFields: string[];
+}
+
+export interface CommunicationIntake {
+  id: string;
+  channel: CommunicationChannel;
+  senderName?: string | null;
+  senderEmail?: string | null;
+  senderPhone?: string | null;
+  messageText: string;
+  receivedAt: string;
+  sourceReference?: string | null;
+  intakeStatus: "new" | "extracted" | "converted";
+  extractedData?: CommunicationExtraction | null;
+  replyDraft?: string | null;
+  clientId?: string | null;
+  communicationRecordId?: string | null;
+  client?: { id: string; displayName: string } | null;
+  communicationRecord?: { id: string; summary: string } | null;
+  createdAt: string;
+}
+
+export interface CommunicationConversionPreview {
+  intakeId: string;
+  operation: "link_existing" | "selection_required" | "create_new";
+  selectedClient: { id: string; displayName: string } | null;
+  possibleClients: CommunicationExtraction["existingClientMatches"];
+  newClient: {
+    displayName: string;
+    emailPrimary: string | null;
+    phonePrimary: string | null;
+    billingAddressLine1: string | null;
+    billingPostcode: string | null;
+    source: string;
+  } | null;
+  communication: {
+    channel: CommunicationChannel;
+    summary: string;
+    originalSourceReference: string | null;
+    followUpNeeded: boolean;
+  };
+}
+
+export interface CommunicationConversionResult {
+  client: Client;
+  communicationRecord: CommunicationRecord;
+  intake: CommunicationIntake;
 }
 
 // Notification and Escalation Module — a unified, read-only "things needing
@@ -576,6 +644,7 @@ export interface MergeClientsPreview {
     jobs: number;
     quotes: number;
     communicationRecords: number;
+    communicationIntakes: number;
     portfolioPhotos: number;
   };
   duplicateWillBeArchived: boolean;
@@ -588,6 +657,7 @@ export interface MergeClientsResult {
     jobs: number;
     quotes: number;
     communicationRecords: number;
+    communicationIntakes: number;
     portfolioPhotos: number;
   };
   duplicateClient: { id: string; isActive: boolean };
@@ -1076,6 +1146,22 @@ export const api = {
     update: (id: string, data: Record<string, unknown>) =>
       request<CommunicationRecord>(`/communications/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     followUpsDue: () => request<CommunicationRecord[]>("/communications/follow-ups-due"),
+    intakes: {
+      list: (status?: string) =>
+        request<CommunicationIntake[]>(`/communications/intakes${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+      get: (id: string) => request<CommunicationIntake>(`/communications/intakes/${id}`),
+      create: (data: Record<string, unknown>) =>
+        request<CommunicationIntake>("/communications/intakes", { method: "POST", body: JSON.stringify(data) }),
+      extract: (id: string) =>
+        request<CommunicationIntake>(`/communications/intakes/${id}/extract`, { method: "POST" }),
+      convert: (id: string, confirmed: boolean, clientId?: string) =>
+        request<CommunicationConversionResult>(`/communications/intakes/${id}/convert`, {
+          method: "POST",
+          body: JSON.stringify({ confirmed, client_id: clientId || undefined }),
+        }),
+      draftReply: (id: string) =>
+        request<CommunicationIntake>(`/communications/intakes/${id}/reply-draft`, { method: "POST" }),
+    },
   },
   notifications: {
     feed: (includeAcknowledged?: boolean) =>
