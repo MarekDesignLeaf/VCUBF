@@ -499,8 +499,39 @@ npm run dev                 # http://localhost:5173
   `useSearchParams` prefill convention `QuoteEdit.tsx` uses for `client_id`/`job_id`),
   which now pre-opens and pre-fills the real "New playbook" form for the user to review
   and explicitly save.
+- **Business Context Layer**: `POST /business-context`, `PUT /business-context/:id`,
+  `GET /business-context`, `GET /business-context/:id` (Action Contracts
+  `create_business_context_item`, `update_business_context_item`) store explicit company
+  knowledge as structured data: company profile facts, industries, activities, regions,
+  pricing/work rules, communication tone, approval/capacity rules, website/social/
+  external profile notes, marketing text references, documents, and other context. Each
+  item records `source` and `verificationStatus` (`user_entered`, `confirmed`,
+  `unverified`, `needs_review`) so later Website, Business Growth, Communication and
+  Process Planning workflows can distinguish confirmed facts from unverified notes rather
+  than inventing company claims. Operational facts such as clients, jobs, communications
+  and photos remain in their source modules; Business Context only stores reusable company
+  context. Updating can archive an item (`isActive: false`) rather than deleting it.
+- **Frontend — Business Context**: new Business Context page in the sidebar with category
+  and active-only filters, a quick-entry form, source/verification selectors, and an
+  archive action. It does not generate content, send messages or publish website changes;
+  it only records real context for later workflows.
 
-Backend: 204/204 tests passing across 23 suites (auth, CRM clients, CRM jobs, CRM leads,
+- **Basic Website Audit**: `POST /website-audits`, `GET /website-audits`, and
+  `GET /website-audits/:id` (Action Contract `create_website_audit`, risk 1) implement the
+  connector-free MVP audit workflow. A user records explicit observations for pages on a
+  single website origin: HTTP status, title, contact details/form, service content,
+  photographs, observed service names and broken links. Omitted checks stay unknown and
+  do not become negative findings. The service compares those observations with active
+  Service Catalogue entries, confirmed Business Context and Portfolio photographs marked
+  usable for marketing, producing persisted, evidence-backed findings with severity,
+  source and recommendation. It does not crawl, edit or publish the website and never
+  generates a company claim from missing data.
+- **Frontend — Website Audit**: new sidebar page for recording a one-page manual audit,
+  reviewing prior audit summaries and opening their evidence/recommendation tables. Every
+  check has an explicit "not checked / unknown" state; this slice prepares findings only
+  and cannot publish website changes.
+
+Backend verified: 221/221 tests passing across 25 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, employee/permission management, service catalogue, quotes,
 recruitment, playbooks, learning, communication log, notifications/escalation, data
@@ -556,6 +587,14 @@ audit history intact, the archived duplicate no longer resurfacing in the duplic
 and an atomicity test proving a merge that fails validation (a client id that no longer
 exists at confirm time) leaves no partial state — against a real Postgres instance, run
 twice to rule out flakiness in the merge-transaction tests specifically.
+
+Business Context Layer adds a dedicated `businessContext.test.ts` suite covering permission
+checks, validation, create/update audit entries, category/active filtering, archive flow,
+and cross-tenant isolation. Basic Website Audit adds `websiteAudits.test.ts`, covering
+read/manage permissions, URL and same-origin validation, explicit unknown handling,
+Secretary data-gap findings, evidence-backed comparison with real services/context/photos,
+severity ordering, audit-log evidence and cross-tenant isolation. The complete 25-suite
+database-backed run above was verified against a real PostgreSQL instance.
 
 Frontend: `npm run build` and `npm run dev` both verified working (clean production
 build, dev server responds 200).
@@ -620,7 +659,7 @@ configurable similarity threshold (the Levenshtein cutoff and phone-normalizatio
 are fixed in code, not a per-company setting). There is also no text-command intent for
 `merge_clients` — the same judgment already applied to `prepare_quote` (real, multi-field
 actions with material consequences stay a dedicated form/API flow, never a one-line
-command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, or serving (a `filename` is just a typed-in reference, not a stored file), no AI-assisted photo selection or auto-tagging, and no website/social publishing — flipping `usableForMarketing` only sets an internal review tag, it never publishes anything anywhere, since no such connector exists yet. Also still missing: website content modules, business growth content generation, and a real voice (speech) front-end (the Voice and Text Command Layer currently accepts typed text only).
+command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, or serving (a `filename` is just a typed-in reference, not a stored file), no AI-assisted photo selection or auto-tagging, and no website/social publishing — flipping `usableForMarketing` only sets an internal review tag, it never publishes anything anywhere, since no such connector exists yet. The Basic Website Audit is manual-observation only; automated crawling/link checking, website content proposal and approval records, publication/verification history and a real website connector are still missing. Also still missing: business growth content generation and a real voice (speech) front-end (the Voice and Text Command Layer currently accepts typed text only).
 Build order should follow the roadmap in the master documentation (Phase 1 → Phase 2 →
 …), not be improvised per-feature.
 

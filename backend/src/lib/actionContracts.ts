@@ -440,6 +440,107 @@ export const UPDATE_LEARNING_RULE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "LEARNING_RULE_NOT_FOUND", "VALIDATION_FAILED"],
 };
 
+// Business Context Layer — structured company knowledge that later modules
+// (Website Management, Business Growth, Communication Intelligence and
+// Process Planning) can read instead of asking an LLM to invent company
+// facts. This stores explicit user-entered or verified context items only:
+// company profile facts, industries, activities, regions, rules, tone and
+// approval/capacity policies. Existing operational facts such as clients,
+// jobs, communications and photos remain in their source modules.
+export const BUSINESS_CONTEXT_CATEGORIES = [
+  "company_profile",
+  "industry",
+  "activity",
+  "region",
+  "pricing_rule",
+  "work_rule",
+  "communication_tone",
+  "approval_rule",
+  "capacity_rule",
+  "website",
+  "social_profile",
+  "external_profile",
+  "marketing_text",
+  "document",
+  "other",
+] as const;
+export type BusinessContextCategory = (typeof BUSINESS_CONTEXT_CATEGORIES)[number];
+
+export const BUSINESS_CONTEXT_SOURCES = [
+  "user_input",
+  "confirmed_company_data",
+  "crm_record",
+  "communication_record",
+  "document_reference",
+  "external_reference",
+] as const;
+export type BusinessContextSource = (typeof BUSINESS_CONTEXT_SOURCES)[number];
+
+export const BUSINESS_CONTEXT_VERIFICATION_STATUSES = [
+  "user_entered",
+  "confirmed",
+  "unverified",
+  "needs_review",
+] as const;
+export type BusinessContextVerificationStatus = (typeof BUSINESS_CONTEXT_VERIFICATION_STATUSES)[number];
+
+export const CREATE_BUSINESS_CONTEXT_ITEM_ACTION: ActionContract = {
+  actionName: "create_business_context_item",
+  purpose:
+    "Record an explicit company context item — such as industry, activity, region, communication tone, or business rule — with source and verification status so future workflows use real company knowledge.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
+export const UPDATE_BUSINESS_CONTEXT_ITEM_ACTION: ActionContract = {
+  actionName: "update_business_context_item",
+  purpose:
+    "Update or archive a previously recorded business context item while preserving source, verification status and audit history.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "business_context"],
+  possibleErrors: ["MISSING_PERMISSION", "BUSINESS_CONTEXT_ITEM_NOT_FOUND", "VALIDATION_FAILED"],
+};
+
+// Basic Website Audit — MVP Website Management / Business Growth slice.
+// The current implementation analyses explicit manual observations and real
+// Secretary data only. It does not crawl an external site because no
+// authorised website connector exists yet, and it cannot publish anything.
+export const WEBSITE_AUDIT_FINDING_CATEGORIES = [
+  "technical",
+  "content",
+  "contact",
+  "form",
+  "service_content",
+  "missing_service_page",
+  "photos",
+  "data_gap",
+] as const;
+export type WebsiteAuditFindingCategory = (typeof WEBSITE_AUDIT_FINDING_CATEGORIES)[number];
+
+export const WEBSITE_AUDIT_SEVERITIES = ["info", "warning", "urgent"] as const;
+export type WebsiteAuditSeverity = (typeof WEBSITE_AUDIT_SEVERITIES)[number];
+
+export const CREATE_WEBSITE_AUDIT_ACTION: ActionContract = {
+  actionName: "create_website_audit",
+  purpose:
+    "Create a basic website audit from explicit page observations and compare them with real service, business-context and reviewed-photo records to produce evidence-backed improvement findings.",
+  requiredPermission: "crm.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: [
+    "user_input",
+    "crm.service_catalogue",
+    "business_context",
+    "crm.portfolio_photos",
+  ],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
 // Communication Log Module — the manual-entry foundation of the
 // Communication Intelligence Module (project instructions section 3). A
 // communication record is a real CRM fact (what was discussed/promised,

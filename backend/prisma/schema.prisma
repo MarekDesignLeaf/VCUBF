@@ -30,6 +30,9 @@ model Company {
   communicationRecords CommunicationRecord[]
   notificationAcknowledgements NotificationAcknowledgement[]
   portfolioPhotos     PortfolioPhoto[]
+  businessContextItems BusinessContextItem[]
+  websiteAudits       WebsiteAudit[]
+  websiteAuditFindings WebsiteAuditFinding[]
 
   @@map("companies")
 }
@@ -470,6 +473,87 @@ model PortfolioPhoto {
   @@index([clientId])
   @@index([jobId])
   @@map("portfolio_photos")
+}
+
+// Business Context Layer — structured company knowledge used by later
+// Website, Business Growth, Communication and Process Planning workflows.
+// This does not duplicate operational records such as clients/jobs/photos;
+// those stay in their own modules. It stores explicit context items such as
+// company profile facts, industries, activities, regions, pricing/work rules,
+// communication tone and approval/capacity rules. Every item records its
+// source and verification status so future content generation can distinguish
+// real entered facts from unverified notes instead of inventing claims.
+model BusinessContextItem {
+  id                 String   @id @default(uuid())
+  companyId          String   @map("company_id")
+  category           String
+  label              String
+  value              String
+  source             String   @default("user_input")
+  verificationStatus String   @default("user_entered") @map("verification_status")
+  notes              String?
+  isActive           Boolean  @default(true) @map("is_active")
+  createdBy          String?  @map("created_by")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+  @@index([companyId, category])
+  @@map("business_context_items")
+}
+
+// Website Management / Business Growth MVP slice. An audit stores only
+// explicit observations supplied by the user or a future authorised website
+// connector, then compares them deterministically with the company's real
+// Service Catalogue, confirmed Business Context and reviewed Portfolio data.
+// It never fetches or publishes a website in this connector-free slice and
+// never turns missing data into an invented marketing claim.
+model WebsiteAudit {
+  id                String   @id @default(uuid())
+  companyId         String   @map("company_id")
+  websiteUrl        String   @map("website_url")
+  status            String   @default("completed")
+  observationSource String   @default("manual_observation") @map("observation_source")
+  observations      Json
+  notes             String?
+  pageCount         Int      @map("page_count")
+  findingCount      Int      @map("finding_count")
+  urgentCount       Int      @default(0) @map("urgent_count")
+  warningCount      Int      @default(0) @map("warning_count")
+  infoCount         Int      @default(0) @map("info_count")
+  createdBy         String?  @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  company  Company               @relation(fields: [companyId], references: [id])
+  findings WebsiteAuditFinding[]
+
+  @@index([companyId, createdAt])
+  @@map("website_audits")
+}
+
+model WebsiteAuditFinding {
+  id             String   @id @default(uuid())
+  companyId      String   @map("company_id")
+  websiteAuditId String   @map("website_audit_id")
+  category       String
+  severity       String
+  title          String
+  evidence       String
+  recommendation String
+  pageUrl        String?  @map("page_url")
+  sourceType     String   @map("source_type")
+  sourceRecordId String?  @map("source_record_id")
+  status         String   @default("open")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  company Company      @relation(fields: [companyId], references: [id])
+  audit   WebsiteAudit @relation(fields: [websiteAuditId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status])
+  @@index([websiteAuditId])
+  @@map("website_audit_findings")
 }
 
 

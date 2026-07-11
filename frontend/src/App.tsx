@@ -26,6 +26,8 @@ import { Notifications } from "./pages/Notifications";
 import { DataQuality } from "./pages/DataQuality";
 import { Portfolio } from "./pages/Portfolio";
 import { MemoryModel } from "./pages/MemoryModel";
+import { BusinessContext } from "./pages/BusinessContext";
+import { WebsiteAudits } from "./pages/WebsiteAudits";
 
 export default function App() {
   return (
@@ -65,6 +67,8 @@ export default function App() {
             <Route path="/data-quality" element={<DataQuality />} />
             <Route path="/portfolio" element={<Portfolio />} />
             <Route path="/memory-model" element={<MemoryModel />} />
+            <Route path="/business-context" element={<BusinessContext />} />
+            <Route path="/website-audits" element={<WebsiteAudits />} />
           </Route>
         </Routes>
       </BrowserRouter>

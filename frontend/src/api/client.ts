@@ -570,6 +570,129 @@ export interface PortfolioPhoto {
   job?: { id: string; jobTitle: string } | null;
 }
 
+// Business Context Layer — structured company knowledge used by future
+// Website, Business Growth, Communication and Process Planning workflows.
+// These are explicit facts/rules entered by a user or marked with their
+// source and verification status; the UI does not generate or infer claims.
+export const BUSINESS_CONTEXT_CATEGORIES = [
+  "company_profile",
+  "industry",
+  "activity",
+  "region",
+  "pricing_rule",
+  "work_rule",
+  "communication_tone",
+  "approval_rule",
+  "capacity_rule",
+  "website",
+  "social_profile",
+  "external_profile",
+  "marketing_text",
+  "document",
+  "other",
+] as const;
+export type BusinessContextCategory = (typeof BUSINESS_CONTEXT_CATEGORIES)[number];
+
+export const BUSINESS_CONTEXT_CATEGORY_LABELS: Record<BusinessContextCategory, string> = {
+  company_profile: "Company profile",
+  industry: "Industry",
+  activity: "Activity",
+  region: "Region",
+  pricing_rule: "Pricing rule",
+  work_rule: "Work rule",
+  communication_tone: "Communication tone",
+  approval_rule: "Approval rule",
+  capacity_rule: "Capacity rule",
+  website: "Website",
+  social_profile: "Social profile",
+  external_profile: "External profile",
+  marketing_text: "Marketing text",
+  document: "Document",
+  other: "Other",
+};
+
+export const BUSINESS_CONTEXT_SOURCES = [
+  "user_input",
+  "confirmed_company_data",
+  "crm_record",
+  "communication_record",
+  "document_reference",
+  "external_reference",
+] as const;
+export type BusinessContextSource = (typeof BUSINESS_CONTEXT_SOURCES)[number];
+
+export const BUSINESS_CONTEXT_SOURCE_LABELS: Record<BusinessContextSource, string> = {
+  user_input: "User input",
+  confirmed_company_data: "Confirmed company data",
+  crm_record: "CRM record",
+  communication_record: "Communication record",
+  document_reference: "Document reference",
+  external_reference: "External reference",
+};
+
+export const BUSINESS_CONTEXT_VERIFICATION_STATUSES = [
+  "user_entered",
+  "confirmed",
+  "unverified",
+  "needs_review",
+] as const;
+export type BusinessContextVerificationStatus = (typeof BUSINESS_CONTEXT_VERIFICATION_STATUSES)[number];
+
+export const BUSINESS_CONTEXT_VERIFICATION_LABELS: Record<BusinessContextVerificationStatus, string> = {
+  user_entered: "User entered",
+  confirmed: "Confirmed",
+  unverified: "Unverified",
+  needs_review: "Needs review",
+};
+
+export interface BusinessContextItem {
+  id: string;
+  category: BusinessContextCategory;
+  label: string;
+  value: string;
+  source: BusinessContextSource;
+  verificationStatus: BusinessContextVerificationStatus;
+  notes?: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+// Basic Website Audit — findings are generated only from explicit page
+// observations plus real Service Catalogue, confirmed Business Context and
+// reviewed Portfolio records. The current slice never crawls or publishes.
+export type WebsiteAuditSeverity = "info" | "warning" | "urgent";
+
+export interface WebsiteAuditFinding {
+  id: string;
+  category: string;
+  severity: WebsiteAuditSeverity;
+  title: string;
+  evidence: string;
+  recommendation: string;
+  pageUrl?: string | null;
+  sourceType: string;
+  sourceRecordId?: string | null;
+  status: string;
+  createdAt: string;
+}
+
+export interface WebsiteAudit {
+  id: string;
+  websiteUrl: string;
+  status: string;
+  observationSource: string;
+  observations: unknown;
+  notes?: string | null;
+  pageCount: number;
+  findingCount: number;
+  urgentCount: number;
+  warningCount: number;
+  infoCount: number;
+  createdAt: string;
+  findings?: WebsiteAuditFinding[];
+  _count?: { findings: number };
+}
+
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -797,6 +920,26 @@ export const api = {
       request<PortfolioPhoto>("/portfolio", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Record<string, unknown>) =>
       request<PortfolioPhoto>(`/portfolio/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  },
+  businessContext: {
+    list: (params?: { category?: string; activeOnly?: boolean }) => {
+      const qs = new URLSearchParams();
+      if (params?.category) qs.set("category", params.category);
+      if (params?.activeOnly) qs.set("active_only", "true");
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request<BusinessContextItem[]>(`/business-context${suffix}`);
+    },
+    get: (id: string) => request<BusinessContextItem>(`/business-context/${id}`),
+    create: (data: Record<string, unknown>) =>
+      request<BusinessContextItem>("/business-context", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<BusinessContextItem>(`/business-context/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  },
+  websiteAudits: {
+    list: () => request<WebsiteAudit[]>("/website-audits"),
+    get: (id: string) => request<WebsiteAudit>(`/website-audits/${id}`),
+    create: (data: Record<string, unknown>) =>
+      request<WebsiteAudit>("/website-audits", { method: "POST", body: JSON.stringify(data) }),
   },
   command: {
     text: (text: string) =>
