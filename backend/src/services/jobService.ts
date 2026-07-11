@@ -183,6 +183,8 @@ export async function findJobsByTitle(user: AuthedUser, title: string) {
 const STATUS_WORD_MAP: Record<string, string> = {
   new: "nova",
   nova: "nova",
+  accepted: "prijato",
+  prijato: "prijato",
   scheduled: "naplanovano",
   naplanovano: "naplanovano",
   "in progress": "v_realizaci",
@@ -240,6 +242,20 @@ export async function assignJob(user: AuthedUser, jobId: string, rawInput: unkno
       errorMessage: "JOB_NOT_FOUND",
     });
     return fail(404, "JOB_NOT_FOUND");
+  }
+
+  if (job.jobStatus !== "prijato") {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: ASSIGN_JOB_ACTION.actionName,
+      inputPayload: { jobId, assigned_user_id, current_job_status: job.jobStatus },
+      riskLevel: ASSIGN_JOB_ACTION.riskLevel,
+      confirmationRequired: ASSIGN_JOB_ACTION.confirmationRequired,
+      result: "error",
+      errorMessage: "JOB_NOT_ACCEPTED",
+    });
+    return fail(409, "JOB_NOT_ACCEPTED", "Set the job status to accepted before assigning it.");
   }
 
   const employee = await prisma.user.findFirst({

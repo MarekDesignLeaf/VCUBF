@@ -29,6 +29,7 @@ export const CREATE_CLIENT_ACTION: ActionContract = {
 // in a translation layer, not hardcoded here (language rule).
 export const JOB_STATUSES = [
   "nova",
+  "prijato",
   "naplanovano",
   "v_realizaci",
   "ceka_na_material",
@@ -129,9 +130,21 @@ export const ASSIGN_JOB_ACTION: ActionContract = {
   possibleErrors: [
     "MISSING_PERMISSION",
     "JOB_NOT_FOUND",
+    "JOB_NOT_ACCEPTED",
     "EMPLOYEE_NOT_FOUND",
     "VALIDATION_FAILED",
   ],
+};
+
+export const GET_RECRUITMENT_RECOMMENDATION_ACTION: ActionContract = {
+  actionName: "get_recruitment_recommendation",
+  purpose:
+    "Recommend whether and how to strengthen the team only when real capacity evidence shows repeated insufficiency, with role, skills, tasks, urgency and fastest route grounded in source records.",
+  requiredPermission: "recruitment.manage",
+  riskLevel: 0,
+  confirmationRequired: false,
+  dataSources: ["crm.jobs", "crm.tasks", "crm.users"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
 };
 
 // Read-only capacity computation — no data is changed. Used both by the

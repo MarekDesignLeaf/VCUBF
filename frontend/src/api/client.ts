@@ -134,6 +134,7 @@ export interface Industry {
 // Keep in sync with backend/src/lib/actionContracts.ts JOB_STATUSES.
 export const JOB_STATUSES = [
   "nova",
+  "prijato",
   "naplanovano",
   "v_realizaci",
   "ceka_na_material",
@@ -145,6 +146,7 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
 
 export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
   nova: "New",
+  prijato: "Accepted",
   naplanovano: "Scheduled",
   v_realizaci: "In progress",
   ceka_na_material: "Waiting for material",
@@ -447,6 +449,35 @@ export interface JobOpening {
   candidates: Candidate[];
 }
 
+export interface RecruitmentRecommendation {
+  decision: "not_recommended" | "recommend_recruitment_review";
+  reason: string;
+  recommendation: null | {
+    role: string;
+    requiredSkills: string[];
+    expectedTasks: string[];
+    urgency: "medium" | "high";
+    fastestRoute: string;
+    suggestedOpening: {
+      title: string;
+      reason: string;
+      urgency: "medium" | "high";
+      skillsRequired: string[];
+      expectedTasks: string | null;
+    };
+  };
+  evidence: {
+    weeksAhead: number;
+    minimumRepeatedWeeks: number;
+    distinctOverloadedWeeks: number;
+    overloadedEmployeeWeeks: number;
+    affectedEmployees?: string[];
+    sourceJobIds?: string[];
+    sourceTaskIds?: string[];
+  };
+  missingData: string[];
+}
+
 // Playbook Engine. A playbook is an ordered list of Voice/Text Command Layer
 // templates ("create job {job_title} for {client_name}") with {placeholder}
 // variables — the exact same syntax you could type into the command bar.
@@ -745,6 +776,9 @@ export interface MergeClientsPreview {
     communicationRecords: number;
     communicationIntakes: number;
     portfolioPhotos: number;
+    contacts: number;
+    documentRecords: number;
+    tasks: number;
   };
   duplicateWillBeArchived: boolean;
 }
@@ -758,6 +792,9 @@ export interface MergeClientsResult {
     communicationRecords: number;
     communicationIntakes: number;
     portfolioPhotos: number;
+    contacts: number;
+    documentRecords: number;
+    tasks: number;
   };
   duplicateClient: { id: string; isActive: boolean };
 }
@@ -1268,6 +1305,10 @@ export const api = {
       request<Quote>(`/quotes/${id}/status`, { method: "PUT", body: JSON.stringify({ quote_status: quoteStatus }) }),
   },
   recruitment: {
+    capacityRecommendation: (weeksAhead = 6, minimumRepeatedWeeks = 2) =>
+      request<RecruitmentRecommendation>(
+        `/recruitment/capacity-recommendation?weeks_ahead=${weeksAhead}&minimum_repeated_weeks=${minimumRepeatedWeeks}`
+      ),
     listJobOpenings: (status?: string) =>
       request<JobOpening[]>(`/recruitment/job-openings${status ? `?status=${status}` : ""}`),
     getJobOpening: (id: string) => request<JobOpening>(`/recruitment/job-openings/${id}`),

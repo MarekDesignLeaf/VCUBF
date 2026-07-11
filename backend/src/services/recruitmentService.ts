@@ -10,9 +10,12 @@ import {
   JOB_OPENING_STATUSES,
   JOB_OPENING_URGENCY_LEVELS,
   CANDIDATE_STAGES,
+  GET_RECRUITMENT_RECOMMENDATION_ACTION,
 } from "../lib/actionContracts.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
+import { detectUpcomingOverload } from "./calendarService.js";
+import { ACTIVE_JOB_STATUSES, ACTIVE_TASK_STATUSES, getWeekRange } from "./capacityService.js";
 
 // Recruitment and Workforce Expansion Module. Every field is what the user
 // typed in — reason, urgency, required skills, experience and language
@@ -64,6 +67,127 @@ export const updateCandidateSchema = z.object({
 });
 
 const jobOpeningInclude = { candidates: { orderBy: { createdAt: "desc" as const } } };
+
+export async function getCapacityRecruitmentRecommendation(
+  user: AuthedUser,
+  input: { weeksAhead: number; minimumRepeatedWeeks: number }
+) {
+  const report = await detectUpcomingOverload(user, input.weeksAhead);
+  const distinctWeekStarts = [...new Set(report.overloadedWeeks.map((item) => item.weekStart))].sort();
+  const repeatedInsufficiency = distinctWeekStarts.length >= input.minimumRepeatedWeeks;
+  const baseEvidence = {
+    weeksAhead: input.weeksAhead,
+    minimumRepeatedWeeks: input.minimumRepeatedWeeks,
+    distinctOverloadedWeeks: distinctWeekStarts.length,
+    overloadedEmployeeWeeks: report.overloadedWeeks.length,
+    overloads: report.overloadedWeeks,
+  };
+
+  if (!repeatedInsufficiency) {
+    const result = {
+      decision: "not_recommended" as const,
+      reason: `Recruitment needs at least ${input.minimumRepeatedWeeks} distinct overloaded weeks; current evidence shows ${distinctWeekStarts.length}.`,
+      recommendation: null,
+      evidence: baseEvidence,
+      missingData: [],
+    };
+    await recordAudit({
+      companyId: user.companyId, userId: user.id,
+      actionName: GET_RECRUITMENT_RECOMMENDATION_ACTION.actionName,
+      inputPayload: input, dataAfter: result,
+      riskLevel: GET_RECRUITMENT_RECOMMENDATION_ACTION.riskLevel,
+      confirmationRequired: GET_RECRUITMENT_RECOMMENDATION_ACTION.confirmationRequired,
+      result: "success",
+    });
+    return result;
+  }
+
+  const firstWeek = new Date(distinctWeekStarts[0]);
+  const end = new Date(distinctWeekStarts[distinctWeekStarts.length - 1]);
+  end.setUTCDate(end.getUTCDate() + 7);
+  const overloadKeys = new Set(report.overloadedWeeks.map((item) => `${item.employeeId}|${item.weekStart}`));
+  const [jobsInRange, tasksInRange] = await Promise.all([
+    prisma.job.findMany({
+      where: {
+        companyId: user.companyId, assignedUserId: { not: null }, jobStatus: { in: ACTIVE_JOB_STATUSES },
+        plannedStartAt: { gte: firstWeek, lt: end },
+      },
+      select: { id: true, jobTitle: true, assignedUserId: true, plannedStartAt: true, estimatedDurationHours: true, requiredSkills: true },
+    }),
+    prisma.task.findMany({
+      where: {
+        companyId: user.companyId, assignedUserId: { not: null }, taskStatus: { in: ACTIVE_TASK_STATUSES },
+        dueAt: { gte: firstWeek, lt: end },
+      },
+      select: { id: true, title: true, assignedUserId: true, dueAt: true, estimatedDurationHours: true },
+    }),
+  ]);
+  const evidenceJobs = jobsInRange.filter((job) =>
+    job.assignedUserId && job.plannedStartAt && overloadKeys.has(`${job.assignedUserId}|${getWeekRange(job.plannedStartAt).weekStart.toISOString()}`)
+  );
+  const evidenceTasks = tasksInRange.filter((task) =>
+    task.assignedUserId && task.dueAt && overloadKeys.has(`${task.assignedUserId}|${getWeekRange(task.dueAt).weekStart.toISOString()}`)
+  );
+  const skillCounts = new Map<string, number>();
+  for (const skill of evidenceJobs.flatMap((job) => job.requiredSkills).map((skill) => skill.trim()).filter(Boolean)) {
+    skillCounts.set(skill, (skillCounts.get(skill) ?? 0) + 1);
+  }
+  const requiredSkills = [...skillCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([skill]) => skill);
+  const expectedTasks = [...new Set([...evidenceJobs.map((job) => job.jobTitle), ...evidenceTasks.map((task) => task.title)])];
+  const primarySkill = requiredSkills[0] ?? null;
+  const role = primarySkill
+    ? `${primarySkill.charAt(0).toUpperCase()}${primarySkill.slice(1)} specialist`
+    : "Additional delivery worker (role detail needs review)";
+  const currentWeekStart = getWeekRange(new Date()).weekStart;
+  const urgent = firstWeek.getTime() <= currentWeekStart.getTime() + 7 * 24 * 60 * 60 * 1_000;
+  const urgency = urgent ? "high" : "medium";
+  const missingData: string[] = [];
+  if (requiredSkills.length === 0) missingData.push("required_skills on overload-driving jobs");
+  if (expectedTasks.length === 0) missingData.push("job or task titles for overload-driving work");
+  const jobsMissingEstimate = evidenceJobs.filter((job) => job.estimatedDurationHours == null).length;
+  const tasksMissingEstimate = evidenceTasks.filter((task) => task.estimatedDurationHours == null).length;
+  if (jobsMissingEstimate > 0) missingData.push(`${jobsMissingEstimate} overload-period job estimate(s)`);
+  if (tasksMissingEstimate > 0) missingData.push(`${tasksMissingEstimate} overload-period task estimate(s)`);
+
+  const result = {
+    decision: "recommend_recruitment_review" as const,
+    reason: `Real workload exceeds declared capacity in ${distinctWeekStarts.length} distinct weeks. Review recruitment; no opening or employment action has been created.`,
+    recommendation: {
+      role,
+      requiredSkills,
+      expectedTasks,
+      urgency,
+      fastestRoute: urgent
+        ? "Use a temporary worker or subcontractor for immediate relief, then review a permanent job opening."
+        : "Review internal reallocation first; if the repeated gap remains, create and approve a job opening.",
+      suggestedOpening: {
+        title: role,
+        reason: `Repeated capacity insufficiency across ${distinctWeekStarts.length} distinct weeks.`,
+        urgency,
+        skillsRequired: requiredSkills,
+        expectedTasks: expectedTasks.join("; ") || null,
+      },
+    },
+    evidence: {
+      ...baseEvidence,
+      sourceJobIds: evidenceJobs.map((job) => job.id),
+      sourceTaskIds: evidenceTasks.map((task) => task.id),
+      affectedEmployees: [...new Set(report.overloadedWeeks.map((item) => item.employeeName))],
+    },
+    missingData,
+  };
+  await recordAudit({
+    companyId: user.companyId, userId: user.id,
+    actionName: GET_RECRUITMENT_RECOMMENDATION_ACTION.actionName,
+    inputPayload: input, dataAfter: result,
+    riskLevel: GET_RECRUITMENT_RECOMMENDATION_ACTION.riskLevel,
+    confirmationRequired: GET_RECRUITMENT_RECOMMENDATION_ACTION.confirmationRequired,
+    result: "success",
+  });
+  return result;
+}
 
 export async function listJobOpenings(user: AuthedUser, filters: { status?: string } = {}) {
   return prisma.jobOpening.findMany({

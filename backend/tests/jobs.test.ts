@@ -87,6 +87,21 @@ describe("crm/jobs", () => {
     assert.ok(res.body.some((j: { id: string }) => j.id === jobId));
   });
 
+  it("rejects assignment until the job has been explicitly accepted", async () => {
+    const employee = await prisma.user.findFirst({ where: { email: "worker@test.local" } });
+    const res = await request(app)
+      .put(`/crm/jobs/${jobId}/assign`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ assigned_user_id: employee!.id });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.error, "JOB_NOT_ACCEPTED");
+    const audit = await prisma.auditLog.findFirst({
+      where: { actionName: "assign_job", errorMessage: "JOB_NOT_ACCEPTED" },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.ok(audit);
+  });
+
   it("rejects an invalid status transition value (400)", async () => {
     const res = await request(app)
       .put(`/crm/jobs/${jobId}`)

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, ApiError, type JobOpening } from "../api/client";
+import { api, ApiError, type JobOpening, type RecruitmentRecommendation } from "../api/client";
 
 // Recruitment and Workforce Expansion Module — a real hiring need the user
 // entered (role, skills, reason, urgency), tracked through to candidates.
@@ -9,20 +9,23 @@ import { api, ApiError, type JobOpening } from "../api/client";
 // for the user to review and place manually.
 export function Recruitment() {
   const [openings, setOpenings] = useState<JobOpening[] | null>(null);
+  const [recommendation, setRecommendation] = useState<RecruitmentRecommendation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
 
   function load() {
-    api.recruitment
-      .listJobOpenings()
-      .then(setOpenings)
+    Promise.all([api.recruitment.listJobOpenings(), api.recruitment.capacityRecommendation()])
+      .then(([openingResult, recommendationResult]) => {
+        setOpenings(openingResult);
+        setRecommendation(recommendationResult);
+      })
       .catch(() => setError("Could not load job openings."));
   }
 
   useEffect(load, []);
 
   if (error) return <div className="error-banner">{error}</div>;
-  if (!openings) return <p>Loading…</p>;
+  if (!openings || !recommendation) return <p>Loading…</p>;
 
   return (
     <div>
@@ -34,6 +37,7 @@ export function Recruitment() {
         Tracks real hiring needs and candidates only — no advert is placed and no employment
         terms are confirmed automatically; that always stays a manual, deliberate step.
       </p>
+      <CapacityRecommendation recommendation={recommendation} />
       {showForm && (
         <NewOpeningForm
           onCreated={() => {
@@ -82,6 +86,30 @@ export function Recruitment() {
       )}
     </div>
   );
+}
+
+function CapacityRecommendation({ recommendation }: { recommendation: RecruitmentRecommendation }) {
+  if (!recommendation.recommendation) {
+    return <div className="card" style={{ marginBottom: 20 }}>
+      <h2>Capacity-backed recommendation</h2>
+      <p>No recruitment recommendation yet. {recommendation.reason}</p>
+      <p className="hint">Evidence: {recommendation.evidence.distinctOverloadedWeeks} distinct overloaded week(s) in the next {recommendation.evidence.weeksAhead} weeks.</p>
+    </div>;
+  }
+  const detail = recommendation.recommendation;
+  return <div className="warning-banner" style={{ marginBottom: 20 }}>
+    <h2>Recruitment review recommended</h2>
+    <p>{recommendation.reason}</p>
+    <dl className="detail-list">
+      <dt>Role</dt><dd>{detail.role}</dd>
+      <dt>Skills</dt><dd>{detail.requiredSkills.length ? detail.requiredSkills.join(", ") : "Unknown — review required"}</dd>
+      <dt>Evidence tasks</dt><dd>{detail.expectedTasks.length ? detail.expectedTasks.join("; ") : "Unknown — review required"}</dd>
+      <dt>Urgency</dt><dd>{detail.urgency}</dd>
+      <dt>Fastest route</dt><dd>{detail.fastestRoute}</dd>
+    </dl>
+    <p className="hint">Decision support only. No opening, advert, candidate action or employment commitment was created.</p>
+    {recommendation.missingData.length ? <p className="hint">Missing evidence: {recommendation.missingData.join(", ")}</p> : null}
+  </div>;
 }
 
 function NewOpeningForm({ onCreated }: { onCreated: () => void }) {

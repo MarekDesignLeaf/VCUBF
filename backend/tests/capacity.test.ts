@@ -58,6 +58,7 @@ describe("Job Allocation and Capacity Management Module", () => {
       .send({
         client_id: clientId,
         job_title: "Small plaster patch",
+        job_status: "prijato",
         planned_start_at: monday.toISOString(),
         estimated_duration_hours: 4,
         required_skills: ["plastering"],
@@ -83,6 +84,7 @@ describe("Job Allocation and Capacity Management Module", () => {
       .send({
         client_id: clientId,
         job_title: "Big re-plaster job",
+        job_status: "prijato",
         planned_start_at: monday.toISOString(),
         estimated_duration_hours: 12,
       });
@@ -100,7 +102,7 @@ describe("Job Allocation and Capacity Management Module", () => {
     const jobRes = await request(app)
       .post("/crm/jobs")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ client_id: clientId, job_title: "Electrical rewire", required_skills: ["electrical"] });
+      .send({ client_id: clientId, job_title: "Electrical rewire", job_status: "prijato", required_skills: ["electrical"] });
     assert.equal(jobRes.status, 201);
 
     const assignRes = await request(app)
@@ -117,7 +119,7 @@ describe("Job Allocation and Capacity Management Module", () => {
     const jobRes = await request(app)
       .post("/crm/jobs")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ client_id: clientId, job_title: "Orphan job" });
+      .send({ client_id: clientId, job_title: "Orphan job", job_status: "prijato" });
 
     const assignRes = await request(app)
       .put(`/crm/jobs/${jobRes.body.id}/assign`)

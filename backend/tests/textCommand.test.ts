@@ -129,6 +129,13 @@ describe("command/text", () => {
   });
 
   it("assigns a job to an employee via a text command, resolving both by name", async () => {
+    const accepted = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "set job Fence repair as accepted" });
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.body.data.jobStatus, "prijato");
+
     const res = await request(app)
       .post("/command/text")
       .set("Authorization", `Bearer ${adminToken}`)

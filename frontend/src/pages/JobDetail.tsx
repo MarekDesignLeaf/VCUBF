@@ -130,7 +130,7 @@ export function JobDetail() {
         </dd>
         <dt>Assigned to</dt>
         <dd>
-          <select value={job.assignedUserId ?? ""} onChange={handleAssign} disabled={updating}>
+          <select value={job.assignedUserId ?? ""} onChange={handleAssign} disabled={updating || job.jobStatus !== "prijato"}>
             <option value="">— Unassigned —</option>
             {employees.map((e) => (
               <option key={e.id} value={e.id}>
@@ -140,6 +140,7 @@ export function JobDetail() {
             ))}
           </select>
           {assignedEmployee && <span className="hint"> — {assignedEmployee.role}</span>}
+          {!assignedEmployee && job.jobStatus !== "prijato" && <span className="hint"> — Set status to Accepted before assignment.</span>}
         </dd>
         <dt>Address</dt>
         <dd>{job.propertyAddress ?? "—"}</dd>

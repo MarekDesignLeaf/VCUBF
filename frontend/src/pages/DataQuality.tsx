@@ -207,6 +207,9 @@ export function DataQuality() {
                                       {mergePreview.recordsToRelink.communicationIntakes}
                                     </li>
                                     <li>Photos to re-link: {mergePreview.recordsToRelink.portfolioPhotos}</li>
+                                    <li>Contacts to re-link: {mergePreview.recordsToRelink.contacts}</li>
+                                    <li>Documents to re-link: {mergePreview.recordsToRelink.documentRecords}</li>
+                                    <li>Tasks to re-link: {mergePreview.recordsToRelink.tasks}</li>
                                     <li>{mergePreview.duplicateClientLabel} will be archived (not deleted)</li>
                                   </ul>
                                   <button

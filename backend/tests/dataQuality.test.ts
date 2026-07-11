@@ -168,6 +168,9 @@ describe("Data Quality Engine", () => {
     let commId: string;
     let intakeId: string;
     let photoId: string;
+    let contactId: string;
+    let documentId: string;
+    let taskId: string;
 
     let pairCounter = 0;
     async function createFreshPair() {
@@ -230,6 +233,19 @@ describe("Data Quality Engine", () => {
         .set("Authorization", `Bearer ${adminToken}`)
         .send({ client_id: duplicateId, filename: "duplicate.jpg", source: "other" });
       photoId = photoRes.body.id;
+
+      const contact = await prisma.contact.create({
+        data: { companyId: duplicate.companyId, clientId: duplicateId, displayName: "Duplicate contact", email: "merge-contact@example.test" },
+      });
+      contactId = contact.id;
+      const document = await prisma.documentRecord.create({
+        data: { companyId: duplicate.companyId, clientId: duplicateId, title: "Duplicate document", documentType: "other", documentReference: "merge-document-ref" },
+      });
+      documentId = document.id;
+      const task = await prisma.task.create({
+        data: { companyId: duplicate.companyId, clientId: duplicateId, title: "Duplicate client task" },
+      });
+      taskId = task.id;
     });
 
     it("rejects merging without crm.manage permission (403)", async () => {
@@ -295,6 +311,9 @@ describe("Data Quality Engine", () => {
       assert.equal(res.body.preview.recordsToRelink.communicationRecords, 1);
       assert.equal(res.body.preview.recordsToRelink.communicationIntakes, 1);
       assert.equal(res.body.preview.recordsToRelink.portfolioPhotos, 1);
+      assert.equal(res.body.preview.recordsToRelink.contacts, 1);
+      assert.equal(res.body.preview.recordsToRelink.documentRecords, 1);
+      assert.equal(res.body.preview.recordsToRelink.tasks, 1);
       assert.equal(res.body.preview.duplicateWillBeArchived, true);
 
       // Nothing actually changed yet.
@@ -306,7 +325,7 @@ describe("Data Quality Engine", () => {
       assert.equal(duplicateStillListed.status, 200);
     });
 
-    it("with confirmed:true, re-links all five record types, archives the duplicate, and preserves the primary's audit history", async () => {
+    it("with confirmed:true, re-links every supported client record, archives the duplicate, and preserves audit history", async () => {
       const primaryAuditsBefore = await prisma.auditLog.count({
         where: { companyId: (await prisma.client.findUnique({ where: { id: primaryId } }))!.companyId },
       });
@@ -322,6 +341,9 @@ describe("Data Quality Engine", () => {
       assert.equal(res.body.relinked.communicationRecords, 1);
       assert.equal(res.body.relinked.communicationIntakes, 1);
       assert.equal(res.body.relinked.portfolioPhotos, 1);
+      assert.equal(res.body.relinked.contacts, 1);
+      assert.equal(res.body.relinked.documentRecords, 1);
+      assert.equal(res.body.relinked.tasks, 1);
       assert.equal(res.body.duplicateClient.isActive, false);
 
       const jobRes = await request(app).get(`/crm/jobs/${jobId}`).set("Authorization", `Bearer ${adminToken}`);
@@ -338,6 +360,10 @@ describe("Data Quality Engine", () => {
 
       const photoRes = await request(app).get(`/portfolio/${photoId}`).set("Authorization", `Bearer ${adminToken}`);
       assert.equal(photoRes.body.clientId, primaryId);
+
+      assert.equal((await prisma.contact.findUniqueOrThrow({ where: { id: contactId } })).clientId, primaryId);
+      assert.equal((await prisma.documentRecord.findUniqueOrThrow({ where: { id: documentId } })).clientId, primaryId);
+      assert.equal((await prisma.task.findUniqueOrThrow({ where: { id: taskId } })).clientId, primaryId);
 
       // The duplicate client's own row (and its own prior audit history, if
       // any) is untouched other than the isActive flip — it is archived,

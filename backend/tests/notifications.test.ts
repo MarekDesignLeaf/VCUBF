@@ -77,6 +77,7 @@ describe("Notification and Escalation Module", () => {
       .send({
         client_id: clientId,
         job_title: "Overload-causing job",
+        job_status: "prijato",
         planned_start_at: monday.toISOString(),
         estimated_duration_hours: 20,
       });

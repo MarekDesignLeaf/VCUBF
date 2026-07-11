@@ -5,8 +5,13 @@ Web frontend + backend for **VCUF (VoiceControl Universal Framework)**, built ar
 project folder (`VCUF_Master_Documentation_Secretary_Voice_Control_EN.docx`) for the full
 architecture.
 
-This repo covers three vertical slices of the MVP: **Secretary Core** (auth,
-permissions, audit log), **CRM Core** (clients, jobs), and **Lead Intake Module** (leads).
+This repository contains the integrated Secretary MVP: core identity/permissions/audit,
+CRM and contacts, communication intake, tasks/calendar/capacity, service and industry
+models, quotes, document metadata, portfolio/photo review, website review workflows,
+learning/playbooks, recruitment decision support and the shared text/reviewed-voice layer.
+
+For day-to-day operation and current safety limitations, see
+[`docs/USER_GUIDE.md`](docs/USER_GUIDE.md).
 
 ## Structure
 
@@ -68,7 +73,7 @@ npm run dev                 # http://localhost:5173
   `backend/src/lib/actionContracts.ts` as structured data, not a prompt.
 - **CRM Core — Jobs**: create (linked to an existing client, validated against
   cross-tenant access), list (filterable by client/status), get, and status change along
-  a fixed lifecycle (`nova → naplanovano → v_realizaci → ceka_na_material /
+  a fixed lifecycle (`nova → prijato → naplanovano → v_realizaci → ceka_na_material /
   ceka_na_klienta → dokonceno / zruseno`). Action Contracts: `create_job`,
   `change_job_status`. Status codes are stable ASCII technical names — display labels
   live in the frontend's translation layer (`JOB_STATUS_LABELS`), not hardcoded into
@@ -119,7 +124,8 @@ npm run dev                 # http://localhost:5173
   capacityService.ts` computes an employee's **real** current-week workload from actual
   job data (`estimated_duration_hours` + `planned_start_at` on active jobs assigned to
   them), never from whether a calendar slot merely looks empty (doc section 24A/26).
-  `PUT /crm/jobs/:id/assign` (Action Contract `assign_job`) assigns a job to an employee
+  `PUT /crm/jobs/:id/assign` (Action Contract `assign_job`) assigns an explicitly accepted
+  (`prijato`) job to an employee
   and returns two structured, non-blocking warnings when relevant: an `OVERLOAD` warning
   when the projected load would exceed the employee's declared `weekly_capacity_hours`,
   or a `NO_PLANNED_DATE` warning stating capacity could not be evaluated because the job
@@ -488,10 +494,10 @@ npm run dev                 # http://localhost:5173
   /data-quality/merge-clients` without `confirmed: true` validates that both clients
   exist, belong to the caller's own company, and are actually different clients, then
   returns a preview with real counts of the `Job`/`Quote`/`CommunicationRecord`/
-  `CommunicationIntake`/`PortfolioPhoto` records currently linked to the duplicate that would be re-linked to
+  `CommunicationIntake`/`PortfolioPhoto`/`Contact`/`DocumentRecord`/`Task` records currently linked to the duplicate that would be re-linked to
   the primary — nothing is written yet. Only a second call with `confirmed: true`
   performs the merge, inside a single Prisma `$transaction`
-  (`backend/src/services/dataQualityService.mergeClients`): the five record types' FKs
+  (`backend/src/services/dataQualityService.mergeClients`): all supported client record FKs
   are re-pointed from the duplicate to the primary, and the duplicate client is
   **archived, never hard-deleted** — a new `Client.isActive` column (defaulting to
   `true`), reusing the same soft-delete pattern already used by `User`/
@@ -501,7 +507,7 @@ npm run dev                 # http://localhost:5173
   duplicate" of the client it was merged into. There is deliberately **no text-command
   intent** for `merge_clients` — the same judgment call the README already documents for
   `prepare_quote` ("a real, multi-line-item form, so it isn't a one-line voice command in
-  this slice"): merging picks two specific client ids and re-links five different record
+  this slice"): merging picks two specific client ids and re-links several record
   types, which is not safely expressible as a single typed sentence, so it stays a
   dedicated form/API flow that always goes through the confirmation preview.
 - **Frontend — Data Quality merge UI**: the Data Quality page's duplicate-pair table
@@ -601,7 +607,22 @@ npm run dev                 # http://localhost:5173
   now loads jobs, due Secretary tasks and overload data in parallel; Employee capacity also
   reports tasks missing an estimate.
 
-Backend verified: 278/278 tests passing across 30 suites (auth, CRM clients, CRM jobs, CRM leads,
+- **Contact Directory**: independent, tenant-scoped contact records with optional client
+  links, source references, preferences, audit history and normalized email/phone duplicate
+  protection. The frontend supports entry, search, filtering and archive.
+- **Document Registry**: tenant-scoped metadata and external references linked to clients/jobs,
+  with fixed type, sensitivity and verification states. It deliberately stores no file bytes.
+- **Basic Industry Model**: explicit sourced/verified industries with reversible links to real
+  Service Catalogue entries; no industry or applicability is inferred.
+- **Accepted-job workflow and capacity-backed recruitment recommendation**: `prijato`
+  (Accepted) is now an explicit job status and assignment is rejected until it is set.
+  `GET /recruitment/capacity-recommendation` recommends a human recruitment review only after
+  at least two distinct overloaded weeks, returning the source-backed role, skills, task titles,
+  urgency, fastest relief route and missing evidence without creating a job opening.
+- **User guide and CI**: `docs/USER_GUIDE.md` documents daily use and limitations. GitHub
+  Actions builds and tests the backend against disposable PostgreSQL and builds/lints the frontend.
+
+Backend verified: 303/303 tests passing across 34 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
  recruitment, playbooks, learning, communication extraction/reply drafting, unresolved enquiry monitoring, communication log, notifications/escalation, data
@@ -653,7 +674,7 @@ entry, not flagged when its status was changed recently even if the job itself i
 flagged once done or cancelled regardless of age. The Data Quality Engine's new
 `merge_clients` action — permission check, same-client rejection, nonexistent-client
 rejection, cross-tenant client rejection, an unconfirmed preview with accurate real
-counts that changes nothing, a confirmed merge that correctly re-links all five record
+counts that changes nothing, a confirmed merge that correctly re-links all supported client record
 types and leaves the duplicate archived (`isActive: false`) with its own row and prior
 audit history intact, the archived duplicate no longer resurfacing in the duplicate scan,
 and an atomicity test proving a merge that fails validation (a client id that no longer
@@ -673,7 +694,7 @@ Management adds `tasks.test.ts`, covering permissions, validation, relationship 
 job/communication-derived CRM links, assignment, capacity contribution/overload warning,
 calendar visibility, status completion/reopening, overdue filtering and notification,
 audit evidence and cross-tenant isolation; parser/integration coverage proves task creation
-and listing through the shared Voice/Text Action Engine. The complete 27-suite
+and listing through the shared Voice/Text Action Engine. The complete 34-suite
 database-backed run above was verified against a real PostgreSQL instance.
 
 Frontend: `npm run lint` and `npm run build` verified working. Lint remains clean apart

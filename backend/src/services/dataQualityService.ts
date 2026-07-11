@@ -227,8 +227,8 @@ export async function buildDataQualityItems(user: AuthedUser): Promise<DataQuali
 // failure partway through rolls back every table's change, never leaving a
 // partial merge. The duplicate client is archived (isActive: false), never
 // hard-deleted — its own row, and its own AuditLog history, remain in the
-// database untouched; only its Job/Quote/CommunicationRecord/CommunicationIntake/PortfolioPhoto
-// foreign keys move to the primary client.
+// database untouched; all supported client-linked operational records move
+// to the primary client in the same transaction.
 
 export const mergeClientsSchema = z.object({
   primary_client_id: z.string().min(1, "primary_client_id is required"),
@@ -242,17 +242,23 @@ interface MergeCounts {
   communicationRecords: number;
   communicationIntakes: number;
   portfolioPhotos: number;
+  contacts: number;
+  documentRecords: number;
+  tasks: number;
 }
 
 async function countDuplicateLinkedRecords(companyId: string, duplicateClientId: string): Promise<MergeCounts> {
-  const [jobs, quotes, communicationRecords, communicationIntakes, portfolioPhotos] = await Promise.all([
+  const [jobs, quotes, communicationRecords, communicationIntakes, portfolioPhotos, contacts, documentRecords, tasks] = await Promise.all([
     prisma.job.count({ where: { companyId, clientId: duplicateClientId } }),
     prisma.quote.count({ where: { companyId, clientId: duplicateClientId } }),
     prisma.communicationRecord.count({ where: { companyId, clientId: duplicateClientId } }),
     prisma.communicationIntake.count({ where: { companyId, clientId: duplicateClientId } }),
     prisma.portfolioPhoto.count({ where: { companyId, clientId: duplicateClientId } }),
+    prisma.contact.count({ where: { companyId, clientId: duplicateClientId } }),
+    prisma.documentRecord.count({ where: { companyId, clientId: duplicateClientId } }),
+    prisma.task.count({ where: { companyId, clientId: duplicateClientId } }),
   ]);
-  return { jobs, quotes, communicationRecords, communicationIntakes, portfolioPhotos };
+  return { jobs, quotes, communicationRecords, communicationIntakes, portfolioPhotos, contacts, documentRecords, tasks };
 }
 
 export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
@@ -337,8 +343,8 @@ export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise
   // Single Prisma $transaction — every updateMany plus the duplicate's
   // isActive flip either all succeed or all roll back together. There is no
   // partial-merge state: a job either still points at the duplicate, or the
-  // whole merge (all five record types + archive) has completed.
-  const [jobsRelinked, quotesRelinked, communicationRecordsRelinked, communicationIntakesRelinked, portfolioPhotosRelinked, archivedDuplicate] =
+  // whole merge (all supported client-linked record types + archive) has completed.
+  const [jobsRelinked, quotesRelinked, communicationRecordsRelinked, communicationIntakesRelinked, portfolioPhotosRelinked, contactsRelinked, documentRecordsRelinked, tasksRelinked, archivedDuplicate] =
     await prisma.$transaction([
       prisma.job.updateMany({
         where: { companyId: user.companyId, clientId: duplicate.id },
@@ -360,6 +366,18 @@ export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise
         where: { companyId: user.companyId, clientId: duplicate.id },
         data: { clientId: primary.id },
       }),
+      prisma.contact.updateMany({
+        where: { companyId: user.companyId, clientId: duplicate.id },
+        data: { clientId: primary.id },
+      }),
+      prisma.documentRecord.updateMany({
+        where: { companyId: user.companyId, clientId: duplicate.id },
+        data: { clientId: primary.id },
+      }),
+      prisma.task.updateMany({
+        where: { companyId: user.companyId, clientId: duplicate.id },
+        data: { clientId: primary.id },
+      }),
       prisma.client.update({
         where: { id: duplicate.id },
         data: { isActive: false },
@@ -375,6 +393,9 @@ export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise
       communicationRecords: communicationRecordsRelinked.count,
       communicationIntakes: communicationIntakesRelinked.count,
       portfolioPhotos: portfolioPhotosRelinked.count,
+      contacts: contactsRelinked.count,
+      documentRecords: documentRecordsRelinked.count,
+      tasks: tasksRelinked.count,
     },
     duplicateClient: { id: archivedDuplicate.id, isActive: archivedDuplicate.isActive },
   };
