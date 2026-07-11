@@ -669,7 +669,7 @@ npm run dev                 # http://localhost:5173
   images and requires confirmation before creating an internal Portfolio Photo reference. See
   `docs/CONNECTOR_ENGINE.md`.
 
-Backend verified: 352/352 tests passing across 41 suites (auth, CRM clients, CRM jobs, CRM leads,
+Backend verified: 354/354 tests passing across 42 suites (auth, CORS, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
  recruitment, playbooks, learning, connector lifecycle, Gmail OAuth/read-only ingestion, communication extraction/reply drafting, unresolved enquiry monitoring, communication log, notifications/escalation, data
