@@ -30,7 +30,10 @@ describe("Measurement and KPI Module", () => {
     const client = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Metrics Client" } });
     const service = await prisma.serviceCatalogueItem.create({ data: { companyId: TEST_COMPANY_ID, name: "Fencing" } });
     for (const [index, status] of ["accepted", "rejected", "rejected", "expired"].entries()) {
-      await prisma.quote.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, title: `Quote ${index}`, quoteStatus: status, items: { create: [{ description: "Work", quantity: 1, unitPrice: 100 + index * 100, serviceCatalogueItemId: index === 0 ? service.id : undefined, sortOrder: 0 }] } } });
+      const items = index === 0
+        ? [{ description: "Costed work", quantity: 1, unitPrice: 100, unitCost: 60, serviceCatalogueItemId: service.id, sortOrder: 0 }, { description: "Uncosted work", quantity: 1, unitPrice: 50, serviceCatalogueItemId: service.id, sortOrder: 1 }]
+        : [{ description: "Work", quantity: 1, unitPrice: 100 + index * 100, sortOrder: 0 }];
+      await prisma.quote.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, title: `Quote ${index}`, quoteStatus: status, items: { create: items } } });
     }
     const previousCreatedAt = new Date(Date.now() - 45 * 86_400_000);
     await prisma.lead.create({ data: { companyId: TEST_COMPANY_ID, name: "Previous lead", leadStatus: "converted", createdAt: previousCreatedAt } });
@@ -60,10 +63,10 @@ describe("Measurement and KPI Module", () => {
     assert.equal(res.body.leads.newCount, 5);
     assert.deepEqual(res.body.leads.sources, [{ source: "Google", count: 2 }, { source: "Referral", count: 2 }, { source: "Unknown", count: 1 }]);
     assert.equal(res.body.quotes.conversionRatePct, 25);
-    assert.equal(res.body.quotes.averageValueGbp, 250);
+    assert.equal(res.body.quotes.averageValueGbp, 262.5);
     assert.deepEqual(res.body.trends.newLeads, { current: 5, previous: 1, delta: 4 });
     assert.equal(res.body.trends.quoteConversionRatePct.previous, 100);
-    assert.deepEqual(res.body.revenueByService.rows, [{ serviceId: res.body.revenueByService.rows[0].serviceId, serviceName: "Fencing", acceptedValueGbp: 100, lineCount: 1 }]);
+    assert.deepEqual(res.body.revenueByService.rows, [{ serviceId: res.body.revenueByService.rows[0].serviceId, serviceName: "Fencing", acceptedValueGbp: 150, lineCount: 2, linesWithKnownCost: 1, costKnown: false, marginGbp: null, marginPct: null }]);
     assert.equal(res.body.revenueByService.unlinkedAcceptedValueGbp, 0);
     assert.equal(res.body.capacity.available, true);
     assert.equal(res.body.capacity.utilizationPct, 88);

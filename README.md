@@ -97,7 +97,10 @@ npm run dev                 # http://localhost:5173
   the missing-data reason rather than estimated. The API also compares the selected
   period with the immediately preceding equal-length period and groups accepted quote
   value by real service-catalogue links; unlinked value stays separate. This is quote
-  value, explicitly not recognised accounting revenue. The **Business Metrics** page renders it.
+  value, explicitly not recognised accounting revenue. Service-level quote margin is
+  shown only when every included accepted line has an entered cost; otherwise cost
+  coverage and an unknown margin are returned. The **Business Metrics** page includes
+  an explicit date-range selector and renders the backend results.
 - **Backend — services layer refactor**: business logic extracted out of route handlers
   into `backend/src/services/*Service.ts` (clients, jobs, leads), each returning a
   uniform `ServiceResult<T>` (`ok()`/`fail()`). Routes are now thin wrappers that call a
