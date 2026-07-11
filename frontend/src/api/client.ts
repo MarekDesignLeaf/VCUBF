@@ -326,6 +326,12 @@ export interface ExternalCalendarEvent {
   externalCalendar: { summary: string; timeZone?: string | null; isPrimary: boolean };
 }
 export interface ExternalCalendarEventList { items: ExternalCalendarEvent[]; total: number; offset: number; limit: number }
+export interface DrivePickerToken { accessToken: string; expiresAt: string; appId: string; developerKey: string }
+export interface ExternalDriveImage {
+  id: string; externalFileId: string; name: string; mimeType: string; webViewLink?: string | null;
+  thumbnailLink?: string | null; sizeBytes?: string | null; width?: number | null; height?: number | null;
+  portfolioPhotoId?: string | null; stagedAt: string;
+}
 
 export interface AssignJobResult {
   job: Job;
@@ -1389,6 +1395,12 @@ export const api = {
       }),
     externalCalendarEvents: (id: string) =>
       request<ExternalCalendarEventList>(`/connectors/sources/${id}/external-calendar-events?limit=100`),
+    drivePickerToken: (id: string) => request<DrivePickerToken>(`/connectors/sources/${id}/drive-picker-token`),
+    stageDriveImages: (id: string, fileIds: string[]) =>
+      request<{ items: ExternalDriveImage[] }>(`/connectors/sources/${id}/drive-images/stage`, { method: "POST", body: JSON.stringify({ file_ids: fileIds }) }),
+    driveImages: (id: string) => request<ExternalDriveImage[]>(`/connectors/sources/${id}/drive-images`),
+    registerDrivePhoto: (sourceId: string, imageId: string, confirmed: boolean) =>
+      request<PortfolioPhoto>(`/connectors/sources/${sourceId}/drive-images/${imageId}/register`, { method: "POST", body: JSON.stringify({ confirmed }) }),
   },
   jobs: {
     list: (params?: { clientId?: string; status?: string }) => {

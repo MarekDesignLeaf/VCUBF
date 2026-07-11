@@ -2,7 +2,7 @@
 
 ## Current status
 
-The connector registry covers Gmail, Google Contacts, Google Calendar and Google Drive photo storage. Gmail, Contacts and Calendar have real read-only adapters. Drive remains contract-only and fails closed.
+The connector registry covers Gmail, Google Contacts, Google Calendar and Google Drive photo storage. All four have real least-privilege adapters.
 
 The Gmail adapter can:
 
@@ -19,6 +19,8 @@ It cannot draft, send, delete, label or otherwise change Gmail data. No attachme
 The Google Contacts adapter uses only `contacts.readonly`. It stages People API contact previews in `ExternalContact`; synchronisation never creates a CRM contact. A user holding both connector and CRM management permissions must review one staged record and confirm its import. Provider deletions archive only the staged record and never delete or deactivate a previously imported CRM contact. Initial sync requests `nextSyncToken`; later calls retrieve only changes. Google's `EXPIRED_SYNC_TOKEN` response triggers a safe full-sync fallback.
 
 Google Calendar uses only `calendar.readonly`. Calendar and event metadata is staged separately from Secretary jobs and tasks. CalendarList and every calendar keep independent sync tokens; HTTP 410 clears only that calendar's stale event staging before a full reload. Provider cancellations never change internal scheduling or capacity records.
+
+Google Drive/Photos deliberately uses non-sensitive `drive.file` rather than broad restricted Drive scopes. Google Picker grants access only to images the user explicitly selects. The backend verifies each selected ID with `files.get`, accepts only `image/*`, stores metadata but no bytes, and requires confirmation before creating a Portfolio Photo reference. Registration leaves marketing use false and all review/permission states unreviewed or unknown.
 
 ## API
 
@@ -54,6 +56,11 @@ Configure these values outside source control:
 - `GOOGLE_CALENDAR_OAUTH_CLIENT_ID`
 - `GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET`
 - `GOOGLE_CALENDAR_OAUTH_REDIRECT_URI`
+- `GOOGLE_DRIVE_OAUTH_CLIENT_ID`
+- `GOOGLE_DRIVE_OAUTH_CLIENT_SECRET`
+- `GOOGLE_DRIVE_OAUTH_REDIRECT_URI`
+- `GOOGLE_DRIVE_PICKER_APP_ID` — Google Cloud project number
+- `GOOGLE_DRIVE_PICKER_API_KEY` — browser-restricted Picker API key
 - `CONNECTOR_ENCRYPTION_KEY` — exactly 32 random bytes encoded as base64
 - `FRONTEND_URL`
 
@@ -96,8 +103,7 @@ Cross-company source IDs resolve as not found. Provider failures set `lastSyncSt
 - scheduled/background invocation and Gmail push notifications;
 - encryption-key rotation workflow;
 - attachment metadata and separately authorized attachment ingestion;
-- provider sandbox verification for a production Google Cloud project;
-- read-only adapter for Drive photos;
+- provider sandbox verification plus production Google Picker origin/API-key restrictions;
 - separate confirmation-gated Gmail draft/send actions if later authorized.
 
-Official implementation references: [Google OAuth 2.0 for web server applications and revocation](https://developers.google.com/identity/protocols/oauth2/web-server), [People API connections.list](https://developers.google.com/people/api/rest/v1/people.connections/list), [People resource](https://developers.google.com/people/api/rest/v1/people), [Gmail synchronization guide](https://developers.google.com/workspace/gmail/api/guides/sync), [Gmail history.list](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list), [Gmail getProfile](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/getProfile), [Gmail messages.list](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/list), [Gmail messages.get](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/get), and [Google restricted scopes](https://support.google.com/cloud/answer/13464325).
+Official implementation references: [Google OAuth 2.0 for web server applications and revocation](https://developers.google.com/identity/protocols/oauth2/web-server), [People API connections.list](https://developers.google.com/people/api/rest/v1/people.connections/list), [Calendar events.list](https://developers.google.com/workspace/calendar/api/v3/reference/events/list), [Drive API scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth), [Google Picker](https://developers.google.com/workspace/drive/picker/reference/picker), [Drive files metadata](https://developers.google.com/workspace/drive/api/guides/file-metadata), [Gmail synchronization guide](https://developers.google.com/workspace/gmail/api/guides/sync), and [Google restricted scopes](https://support.google.com/cloud/answer/13464325).

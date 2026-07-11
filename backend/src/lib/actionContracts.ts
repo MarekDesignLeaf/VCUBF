@@ -382,6 +382,26 @@ export const DISCONNECT_GOOGLE_CALENDAR_SOURCE_ACTION: ActionContract = {
   requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: true,
   dataSources: ["connector_sources", "connector_credentials", "google_oauth"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONFIRMATION_REQUIRED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
 };
+export const START_GOOGLE_DRIVE_OAUTH_ACTION: ActionContract = {
+  actionName: "start_google_drive_oauth", purpose: "Start per-file Google Drive OAuth for explicitly selected images.", requiredPermission: "connectors.manage", riskLevel: 1, confirmationRequired: false,
+  dataSources: ["connector_sources", "server_configuration"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_CONFIGURATION_MISSING"],
+};
+export const COMPLETE_GOOGLE_DRIVE_OAUTH_ACTION: ActionContract = {
+  actionName: "complete_google_drive_oauth", purpose: "Verify exact drive.file scope and store only encrypted Google tokens.", requiredPermission: "connectors.manage", riskLevel: 2, confirmationRequired: false,
+  dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials"], possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED"],
+};
+export const STAGE_GOOGLE_DRIVE_IMAGES_ACTION: ActionContract = {
+  actionName: "stage_google_drive_images", purpose: "Read metadata only for image files explicitly selected through Google Picker; never download image bytes.", requiredPermission: "connectors.manage", riskLevel: 1, confirmationRequired: false,
+  dataSources: ["google_picker", "drive.files.get", "external_drive_images"], possibleErrors: ["MISSING_PERMISSION", "FILE_NOT_FOUND", "NOT_AN_IMAGE", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
+export const REGISTER_GOOGLE_DRIVE_PHOTO_ACTION: ActionContract = {
+  actionName: "register_google_drive_portfolio_photo", purpose: "Create an internal Portfolio Photo reference from one reviewed Drive image after explicit confirmation.", requiredPermission: "crm.manage", riskLevel: 3, confirmationRequired: true,
+  dataSources: ["external_drive_images", "portfolio_photos"], possibleErrors: ["MISSING_PERMISSION", "DRIVE_IMAGE_NOT_FOUND", "PHOTO_ALREADY_REGISTERED", "CONFIRMATION_REQUIRED"],
+};
+export const DISCONNECT_GOOGLE_DRIVE_SOURCE_ACTION: ActionContract = {
+  actionName: "disconnect_google_drive_source", purpose: "After confirmation revoke Drive authorization while retaining staged and registered metadata.", requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: true,
+  dataSources: ["connector_sources", "connector_credentials", "google_oauth"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONFIRMATION_REQUIRED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
 
 // Service Catalogue Module — see VCUF master documentation section 24C.
 // Entries here are entered by the user, never invented ("no fake facts"
@@ -1248,6 +1268,7 @@ export const PORTFOLIO_PHOTO_SOURCES = [
   "employee_upload",
   "client_provided",
   "before_after",
+  "google_drive",
   "other",
 ] as const;
 export type PortfolioPhotoSource = (typeof PORTFOLIO_PHOTO_SOURCES)[number];

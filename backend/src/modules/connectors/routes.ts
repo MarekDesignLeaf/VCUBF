@@ -8,6 +8,7 @@ import {
   START_GMAIL_OAUTH_ACTION,
   SYNC_GMAIL_MESSAGES_ACTION,
   IMPORT_GOOGLE_CONTACT_ACTION,
+  REGISTER_GOOGLE_DRIVE_PHOTO_ACTION,
   UPDATE_CONNECTOR_SOURCE_ACTION,
 } from "../../lib/actionContracts.js";
 import { requireAuth } from "../../middleware/auth.js";
@@ -16,6 +17,7 @@ import * as connectorService from "../../services/connectorService.js";
 import * as gmailConnectorService from "../../services/gmailConnectorService.js";
 import * as googleContactsConnectorService from "../../services/googleContactsConnectorService.js";
 import * as googleCalendarConnectorService from "../../services/googleCalendarConnectorService.js";
+import * as googleDriveConnectorService from "../../services/googleDriveConnectorService.js";
 
 export const connectorsRouter = Router();
 
@@ -35,6 +37,11 @@ connectorsRouter.get("/google-contacts/oauth/callback", async (req, res) => {
 });
 connectorsRouter.get("/google-calendar/oauth/callback", async (req, res) => {
   const result = await googleCalendarConnectorService.completeGoogleCalendarOAuth(req.query);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.redirect(303, result.data.redirectUrl);
+});
+connectorsRouter.get("/google-drive/oauth/callback", async (req, res) => {
+  const result = await googleDriveConnectorService.completeGoogleDriveOAuth(req.query);
   if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   res.redirect(303, result.data.redirectUrl);
 });
@@ -92,6 +99,8 @@ connectorsRouter.post(
       ? await googleContactsConnectorService.startGoogleContactsOAuth(req.user!, req.params.id)
       : source?.connectorKey === "google_calendar"
         ? await googleCalendarConnectorService.startGoogleCalendarOAuth(req.user!, req.params.id)
+      : source?.connectorKey === "google_drive_photos"
+        ? await googleDriveConnectorService.startGoogleDriveOAuth(req.user!, req.params.id)
       : await gmailConnectorService.startGmailOAuth(req.user!, req.params.id);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
@@ -122,6 +131,8 @@ connectorsRouter.post(
       ? await googleContactsConnectorService.disconnectGoogleContactsSource(req.user!, req.params.id, req.body)
       : source?.connectorKey === "google_calendar"
         ? await googleCalendarConnectorService.disconnectGoogleCalendarSource(req.user!, req.params.id, req.body)
+      : source?.connectorKey === "google_drive_photos"
+        ? await googleDriveConnectorService.disconnectGoogleDriveSource(req.user!, req.params.id, req.body)
       : await gmailConnectorService.disconnectGmailSource(req.user!, req.params.id, req.body);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
@@ -129,6 +140,27 @@ connectorsRouter.post(
 );
 connectorsRouter.get("/sources/:id/external-calendar-events", requirePermission("connectors.read"), async (req, res) => {
   const result = await googleCalendarConnectorService.listExternalCalendarEvents(req.user!, req.params.id, req.query);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.status(result.httpStatus).json(result.data);
+});
+connectorsRouter.get("/sources/:id/drive-picker-token", requirePermission("connectors.manage"), async (req, res) => {
+  const result = await googleDriveConnectorService.getDrivePickerToken(req.user!, req.params.id);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.setHeader("Cache-Control", "no-store");
+  res.status(result.httpStatus).json(result.data);
+});
+connectorsRouter.post("/sources/:id/drive-images/stage", requirePermission("connectors.manage"), async (req, res) => {
+  const result = await googleDriveConnectorService.stageGoogleDriveImages(req.user!, req.params.id, req.body);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.status(result.httpStatus).json(result.data);
+});
+connectorsRouter.get("/sources/:id/drive-images", requirePermission("connectors.read"), async (req, res) => {
+  const result = await googleDriveConnectorService.listDriveImages(req.user!, req.params.id);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.status(result.httpStatus).json(result.data);
+});
+connectorsRouter.post("/sources/:id/drive-images/:imageId/register", requirePermission("connectors.manage"), requirePermission(REGISTER_GOOGLE_DRIVE_PHOTO_ACTION.requiredPermission), async (req, res) => {
+  const result = await googleDriveConnectorService.registerDrivePortfolioPhoto(req.user!, req.params.id, req.params.imageId, req.body);
   if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   res.status(result.httpStatus).json(result.data);
 });

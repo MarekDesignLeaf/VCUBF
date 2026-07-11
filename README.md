@@ -636,10 +636,12 @@ npm run dev                 # http://localhost:5173
   provider revocation/disconnect. Google Contacts adds exact `contacts.readonly` OAuth,
   full-to-incremental People API sync, review staging, confirmation-gated CRM import and
   deletion isolation. Google Calendar adds exact `calendar.readonly` OAuth, per-calendar
-  incremental event staging and HTTP 410 recovery without changing jobs or tasks. Drive remains contract-only. See
+  incremental event staging and HTTP 410 recovery without changing jobs or tasks. Google Drive/Photos uses
+  non-sensitive per-file `drive.file` access through Google Picker, stages metadata only for explicitly selected
+  images and requires confirmation before creating an internal Portfolio Photo reference. See
   `docs/CONNECTOR_ENGINE.md`.
 
-Backend verified: 342/342 tests passing across 39 suites (auth, CRM clients, CRM jobs, CRM leads,
+Backend verified: 347/347 tests passing across 40 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
  recruitment, playbooks, learning, connector lifecycle, Gmail OAuth/read-only ingestion, communication extraction/reply drafting, unresolved enquiry monitoring, communication log, notifications/escalation, data
@@ -711,7 +713,7 @@ Management adds `tasks.test.ts`, covering permissions, validation, relationship 
 job/communication-derived CRM links, assignment, capacity contribution/overload warning,
 calendar visibility, status completion/reopening, overdue filtering and notification,
 audit evidence and cross-tenant isolation; parser/integration coverage proves task creation
-and listing through the shared Voice/Text Action Engine. The complete 39-suite
+and listing through the shared Voice/Text Action Engine. The complete 40-suite
 database-backed run above was verified against a real PostgreSQL instance.
 
 Frontend: `npm run lint` and `npm run build` verified working. Lint remains clean apart
@@ -788,7 +790,9 @@ Build order should follow the roadmap in the master documentation (Phase 1 → P
   `DATABASE_URL`, `JWT_SECRET`, `PORT`, `FRONTEND_URL`, `GMAIL_OAUTH_CLIENT_ID`,
   `GMAIL_OAUTH_CLIENT_SECRET`, `GMAIL_OAUTH_REDIRECT_URI`, `GOOGLE_CONTACTS_OAUTH_CLIENT_ID`,
   `GOOGLE_CONTACTS_OAUTH_CLIENT_SECRET`, `GOOGLE_CONTACTS_OAUTH_REDIRECT_URI`, `GOOGLE_CALENDAR_OAUTH_CLIENT_ID`,
-  `GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET`, `GOOGLE_CALENDAR_OAUTH_REDIRECT_URI` and a 32-byte base64
+  `GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET`, `GOOGLE_CALENDAR_OAUTH_REDIRECT_URI`, `GOOGLE_DRIVE_OAUTH_CLIENT_ID`,
+  `GOOGLE_DRIVE_OAUTH_CLIENT_SECRET`, `GOOGLE_DRIVE_OAUTH_REDIRECT_URI`, `GOOGLE_DRIVE_PICKER_APP_ID`,
+  `GOOGLE_DRIVE_PICKER_API_KEY` and a 32-byte base64
   `CONNECTOR_ENCRYPTION_KEY` as environment variables; run
   `npm run build && npx prisma migrate deploy && npm start`.
 - **Frontend**: any static host (Railway static site, Vercel, Netlify). Set

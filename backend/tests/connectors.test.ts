@@ -50,8 +50,7 @@ describe("Connector Engine registry and source lifecycle", () => {
       assert.ok(definition.serviceType);
       assert.ok(Array.isArray(definition.canRead) && definition.canRead.length > 0);
       assert.ok(Array.isArray(definition.canWrite));
-      if (["gmail", "google_contacts", "google_calendar"].includes(definition.key)) assert.deepEqual(definition.canWrite, []);
-      else assert.ok(definition.canWrite.length > 0);
+      assert.deepEqual(definition.canWrite, []);
       assert.ok(Array.isArray(definition.requiredPermissions) && definition.requiredPermissions.includes("connectors.manage"));
       assert.ok(Array.isArray(definition.returnedDataTypes) && definition.returnedDataTypes.length > 0);
       assert.ok(Array.isArray(definition.supportedActions) && definition.supportedActions.length > 0);
@@ -59,7 +58,7 @@ describe("Connector Engine registry and source lifecycle", () => {
       assert.equal(definition.supportsAudit, true);
       assert.equal(typeof definition.supportsRollback, "boolean");
       assert.equal(definition.actionMode, "proposal_and_confirmed_action");
-      assert.equal(definition.adapterAvailable, ["gmail", "google_contacts", "google_calendar"].includes(definition.key));
+      assert.equal(definition.adapterAvailable, true);
     }
   });
 
