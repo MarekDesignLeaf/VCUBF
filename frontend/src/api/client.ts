@@ -1357,7 +1357,7 @@ export const api = {
       }),
   },
   command: {
-    text: (text: string) =>
+    text: (text: string, inputMethod: "text" | "voice_transcript" = "text") =>
       request<{
         intent: string;
         interpreted: unknown;
@@ -1365,7 +1365,10 @@ export const api = {
         data?: unknown;
         error?: string;
         message?: string;
-      }>("/command/text", { method: "POST", body: JSON.stringify({ text }) }),
+      }>("/command/text", {
+        method: "POST",
+        body: JSON.stringify({ text, input_method: inputMethod }),
+      }),
   },
 };
 

@@ -11,8 +11,9 @@ export function Dashboard() {
       </p>
       <h2>Command</h2>
       <p className="hint">
-        Type a command instead of clicking through forms. Every command is interpreted
-        deterministically (no guessing) and fully audited.
+        Type or dictate an English command instead of clicking through forms. A dictated
+        transcript must be reviewed and run manually. Every submitted command is interpreted
+        deterministically (no guessing) and fully audited by the same backend.
       </p>
       <CommandBar />
     </div>

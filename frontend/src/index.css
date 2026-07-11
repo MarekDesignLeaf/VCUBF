@@ -168,6 +168,12 @@ h2 { font-size: 1.1rem; margin-top: 24px; }
 
 .command-input { flex: 1; min-width: 320px; }
 
+.voice-button { background: #eef0f3; color: var(--text); }
+.voice-button:hover { background: #dde1e7; }
+.voice-button-listening { background: var(--error-text); color: white; }
+.voice-button-listening:hover { background: #8f1f19; }
+.voice-privacy-note { margin-top: -10px; }
+
 .link-button {
   background: none;
   border: none;

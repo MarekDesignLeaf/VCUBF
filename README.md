@@ -105,11 +105,15 @@ npm run dev                 # http://localhost:5173
   Every call writes its own audit entry recording the raw text, the interpreted intent,
   and the result, in addition to the audit entry the underlying action (e.g.
   `create_client`) writes itself.
-- **Frontend — Command Bar**: a text command box on the dashboard with example quick-fill
-  buttons and a running history of the last 8 commands showing intent, success/failure,
-  and message — the first concrete piece of the Voice and Text Command Layer's UI
-  (text input today; a voice/speech front-end can be layered on top of the same
-  `/command/text` endpoint later without backend changes).
+- **Frontend — Voice and Text Command Bar**: a command box on the dashboard with example
+  quick-fill buttons, opt-in browser speech recognition and a running history of the last
+  8 submitted commands. Voice recognition only fills the text field; it never submits or
+  executes automatically. The user must stop listening, review the exact transcript and
+  choose Run. The browser may use its own online speech service, but Secretary stores no
+  audio and the Secretary backend receives only the reviewed text after Run is chosen. Text
+  input remains available when speech recognition is unsupported. Both paths therefore
+  use the same deterministic backend parser, permission checks and audit trail; the audit
+  records `text` versus `voice_transcript` as the input method, never audio.
 
 - **Job Allocation and Capacity Management Module**: `backend/src/services/
   capacityService.ts` computes an employee's **real** current-week workload from actual
@@ -597,7 +601,7 @@ npm run dev                 # http://localhost:5173
   now loads jobs, due Secretary tasks and overload data in parallel; Employee capacity also
   reports tasks missing an estimate.
 
-Backend verified: 277/277 tests passing across 30 suites (auth, CRM clients, CRM jobs, CRM leads,
+Backend verified: 278/278 tests passing across 30 suites (auth, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
  recruitment, playbooks, learning, communication extraction/reply drafting, unresolved enquiry monitoring, communication log, notifications/escalation, data
@@ -735,7 +739,7 @@ configurable similarity threshold (the Levenshtein cutoff and phone-normalizatio
 are fixed in code, not a per-company setting). There is also no text-command intent for
 `merge_clients` — the same judgment already applied to `prepare_quote` (real, multi-field
 actions with material consequences stay a dedicated form/API flow, never a one-line
-command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, serving or visual AI review (a `filename` is just a typed-in reference, not a stored file), no image-content recognition or auto-tagging, and no website/social publishing. Metadata-backed candidates and confirmed internal service selections now exist, but they rely only on explicit job/service links, exact tags and human-entered review states; flipping `usableForMarketing` or confirming a service selection never publishes anything anywhere. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. Also still missing: broader business growth content generation and a real voice (speech) front-end (the Voice and Text Command Layer currently accepts typed text only).
+command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, serving or visual AI review (a `filename` is just a typed-in reference, not a stored file), no image-content recognition or auto-tagging, and no website/social publishing. Metadata-backed candidates and confirmed internal service selections now exist, but they rely only on explicit job/service links, exact tags and human-entered review states; flipping `usableForMarketing` or confirming a service selection never publishes anything anywhere. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. Browser voice input now exists as a reviewed transcript layer, but native/offline speech recognition, wake-word listening, broader command languages and audio storage are intentionally not implemented. Also still missing: broader business growth content generation.
 Build order should follow the roadmap in the master documentation (Phase 1 → Phase 2 →
 …), not be improvised per-feature.
 

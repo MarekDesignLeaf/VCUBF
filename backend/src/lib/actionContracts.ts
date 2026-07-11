@@ -104,7 +104,8 @@ export const CONVERT_LEAD_ACTION: ActionContract = {
 // this one, which captures how the raw text was interpreted.
 export const EXECUTE_TEXT_COMMAND_ACTION: ActionContract = {
   actionName: "execute_text_command",
-  purpose: "Interpret a natural-language text command and dispatch it to the matching Action Contract.",
+  purpose:
+    "Interpret a typed command or user-reviewed voice transcript and dispatch it through the same deterministic parser to the matching Action Contract.",
   requiredPermission: "voice.execute",
   riskLevel: 2,
   confirmationRequired: false,

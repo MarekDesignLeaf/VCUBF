@@ -54,6 +54,23 @@ describe("command/text", () => {
     assert.equal(audit?.interpretedIntent, "create_client");
   });
 
+  it("records a reviewed voice transcript while using the same deterministic command path", async () => {
+    const res = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "list clients", input_method: "voice_transcript" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.intent, "list_clients");
+    assert.equal(res.body.ok, true);
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { actionName: "execute_text_command", result: "success" },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.equal((audit?.inputPayload as any)?.inputMethod, "voice_transcript");
+    assert.equal(audit?.interpretedIntent, "list_clients");
+  });
+
   it("creates a job via text command by resolving the client name", async () => {
     const res = await request(app)
       .post("/command/text")

@@ -12,7 +12,10 @@ export const commandRouter = Router();
 
 commandRouter.use(requireAuth);
 
-const commandSchema = z.object({ text: z.string().min(1, "text is required") });
+const commandSchema = z.object({
+  text: z.string().min(1, "text is required"),
+  input_method: z.enum(["text", "voice_transcript"]).default("text"),
+});
 
 // POST /command/text — Voice and Text Command Layer entry point.
 // Learning Engine alias resolution -> deterministic parse -> Action Engine
@@ -26,7 +29,7 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
   if (!parsedBody.success) {
     return res.status(400).json({ error: "VALIDATION_FAILED", message: parsedBody.error.message });
   }
-  const { text } = parsedBody.data;
+  const { text, input_method } = parsedBody.data;
   const user = req.user!;
 
   const alias = await resolveLearningAliases(user, text);
@@ -39,7 +42,12 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
     userId: user.id,
     actionName: EXECUTE_TEXT_COMMAND_ACTION.actionName,
     interpretedIntent: response.intent,
-    inputPayload: { text, resolvedText: alias.resolvedText, appliedAliases: alias.appliedRules },
+    inputPayload: {
+      text,
+      inputMethod: input_method,
+      resolvedText: alias.resolvedText,
+      appliedAliases: alias.appliedRules,
+    },
     dataAfter: { interpreted: response.interpreted },
     riskLevel: EXECUTE_TEXT_COMMAND_ACTION.riskLevel,
     confirmationRequired: EXECUTE_TEXT_COMMAND_ACTION.confirmationRequired,
