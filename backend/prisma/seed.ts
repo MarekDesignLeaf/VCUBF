@@ -13,7 +13,8 @@ async function main() {
     },
   });
 
-  const passwordHash = await bcrypt.hash("ChangeMe123!", 10);
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe123!";
+  const passwordHash = await bcrypt.hash(adminPassword, 10);
   const adminPermissions = [
     "crm.read",
     "crm.manage",
@@ -27,7 +28,7 @@ async function main() {
 
   await prisma.user.upsert({
     where: { email: "admin@example.com" },
-    update: { permissions: adminPermissions },
+    update: { permissions: adminPermissions, passwordHash },
     create: {
       companyId: company.id,
       email: "admin@example.com",
@@ -38,7 +39,7 @@ async function main() {
     },
   });
 
-  console.log("Seed complete. Login with admin@example.com / ChangeMe123!");
+  console.log(`Seed complete. Login with admin@example.com / ${process.env.SEED_ADMIN_PASSWORD ? "the configured SEED_ADMIN_PASSWORD" : "ChangeMe123!"}`);
 }
 
 main().finally(() => prisma.$disconnect());

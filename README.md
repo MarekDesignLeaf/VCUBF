@@ -40,6 +40,9 @@ npm run seed                # creates admin@example.com / ChangeMe123!
 npm run dev                 # http://localhost:4000
 ```
 
+Production deployments must set `SEED_ADMIN_PASSWORD` to a strong random value before
+running the seed. The development fallback exists only for the local quick start.
+
 Run tests (needs a real Postgres reachable via `DATABASE_URL`):
 
 ```bash
