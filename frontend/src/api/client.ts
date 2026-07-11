@@ -561,7 +561,7 @@ export interface MetricsOverview {
     averageQuoteValueGbp: { current: number | null; previous: number | null };
     completedJobs: { current: number; previous: number; delta: number };
   };
-  leads: { newCount: number; convertedCount: number; lostCount: number; sources: { source: string; count: number }[] };
+  leads: { newCount: number; convertedCount: number; lostCount: number; sources: { source: string; count: number; convertedCount: number; lostCount: number; conversionRatePct: number | null; lossRatePct: number | null }[] };
   quotes: { count: number; decidedCount: number; acceptedCount: number; conversionRatePct: number | null; averageValueGbp: number | null };
   jobs: { acceptedCount: number; completedCount: number; cancelledCount: number; lostDueToAvailability: { available: false; value: null; reason: string } };
   revenueByService: { rows: { serviceId: string; serviceName: string; acceptedValueGbp: number; lineCount: number; linesWithKnownCost: number; costKnown: boolean; marginGbp: number | null; marginPct: number | null }[]; unlinkedAcceptedValueGbp: number; basis: string };

@@ -26,6 +26,7 @@ describe("Measurement and KPI Module", () => {
       { companyId: TEST_COMPANY_ID, name: "Three", source: "Referral", leadStatus: "converted" },
       { companyId: TEST_COMPANY_ID, name: "Four", source: "Referral", leadStatus: "qualified" },
       { companyId: TEST_COMPANY_ID, name: "Five", source: null, leadStatus: "new" },
+      { companyId: TEST_COMPANY_ID, name: "Six", source: "Google", leadStatus: "lost" },
     ] });
     const client = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Metrics Client" } });
     const service = await prisma.serviceCatalogueItem.create({ data: { companyId: TEST_COMPANY_ID, name: "Fencing" } });
@@ -60,11 +61,15 @@ describe("Measurement and KPI Module", () => {
   it("computes real company KPIs, reports unavailable fields and gives evidenced recommendations", async () => {
     const res = await request(app).get("/metrics/overview").set("Authorization", `Bearer ${adminToken}`);
     assert.equal(res.status, 200);
-    assert.equal(res.body.leads.newCount, 5);
-    assert.deepEqual(res.body.leads.sources, [{ source: "Google", count: 2 }, { source: "Referral", count: 2 }, { source: "Unknown", count: 1 }]);
+    assert.equal(res.body.leads.newCount, 6);
+    assert.deepEqual(res.body.leads.sources, [
+      { source: "Google", count: 3, convertedCount: 0, lostCount: 3, conversionRatePct: 0, lossRatePct: 100 },
+      { source: "Referral", count: 2, convertedCount: 1, lostCount: 0, conversionRatePct: 50, lossRatePct: 0 },
+      { source: "Unknown", count: 1, convertedCount: 0, lostCount: 0, conversionRatePct: 0, lossRatePct: 0 },
+    ]);
     assert.equal(res.body.quotes.conversionRatePct, 25);
     assert.equal(res.body.quotes.averageValueGbp, 262.5);
-    assert.deepEqual(res.body.trends.newLeads, { current: 5, previous: 1, delta: 4 });
+    assert.deepEqual(res.body.trends.newLeads, { current: 6, previous: 1, delta: 5 });
     assert.equal(res.body.trends.quoteConversionRatePct.previous, 100);
     assert.deepEqual(res.body.revenueByService.rows, [{ serviceId: res.body.revenueByService.rows[0].serviceId, serviceName: "Fencing", acceptedValueGbp: 150, lineCount: 2, linesWithKnownCost: 1, costKnown: false, marginGbp: null, marginPct: null }]);
     assert.equal(res.body.revenueByService.unlinkedAcceptedValueGbp, 0);
@@ -74,5 +79,6 @@ describe("Measurement and KPI Module", () => {
     assert.ok(res.body.recommendations.some((item: any) => item.title === "Lead loss is elevated"));
     assert.ok(res.body.recommendations.some((item: any) => item.title === "Quote conversion is below 40%"));
     assert.ok(res.body.recommendations.some((item: any) => item.title === "Current team capacity is tight"));
+    assert.ok(res.body.recommendations.some((item: any) => item.title === "Lead source needs review: Google"));
   });
 });

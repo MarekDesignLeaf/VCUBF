@@ -29,7 +29,7 @@ Use **Enquiries** to monitor unresolved items and **Communications** to keep the
 
 Use **Leads** before a prospect becomes a client. Conversion preserves the lead as the source and checks for matching clients.
 
-Use **Business Metrics** to review a selected date range of saved lead, quote and job activity plus current-week team capacity. The page compares this period with the immediately preceding equal-length period. Accepted quote value is grouped only when a line is linked to a real catalogue service; unlinked value remains separate and is not silently classified. Service quote margin appears only if every included line has a unit cost; the cost-coverage count shows what is missing. Recommendations are threshold-based and show their evidence. A metric marked unknown is not an error: Secretary states which source data or module is missing rather than estimating a value.
+Use **Business Metrics** to review a selected date range of saved lead, quote and job activity plus current-week team capacity. The page compares this period with the immediately preceding equal-length period. Lead sources show converted and lost counts and rates; source-specific advice requires a minimum sample of three leads. Accepted quote value is grouped only when a line is linked to a real catalogue service; unlinked value remains separate and is not silently classified. Service quote margin appears only if every included line has a unit cost; the cost-coverage count shows what is missing. Recommendations are threshold-based and show their evidence. A metric marked unknown is not an error: Secretary states which source data or module is missing rather than estimating a value.
 
 Use **Clients** for client accounts. Use **Contacts** for individual people:
 

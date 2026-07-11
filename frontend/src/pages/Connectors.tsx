@@ -9,7 +9,7 @@ import {
   type ExternalCalendarEvent,
   type ExternalDriveImage,
 } from "../api/client";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth";
 
 interface PickerBuilder {
   addView(view: unknown): PickerBuilder; setOAuthToken(token: string): PickerBuilder;

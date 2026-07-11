@@ -31,8 +31,15 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
     prisma.job.findMany({ where: { companyId: user.companyId, createdAt: previousCreatedAt }, select: { jobStatus: true } }),
   ]);
 
-  const leadSources = new Map<string, number>();
-  for (const lead of leads) leadSources.set(lead.source?.trim() || "Unknown", (leadSources.get(lead.source?.trim() || "Unknown") ?? 0) + 1);
+  const leadSources = new Map<string, { source: string; count: number; convertedCount: number; lostCount: number }>();
+  for (const lead of leads) {
+    const source = lead.source?.trim() || "Unknown";
+    const row = leadSources.get(source) ?? { source, count: 0, convertedCount: 0, lostCount: 0 };
+    row.count += 1;
+    if (lead.leadStatus === "converted") row.convertedCount += 1;
+    if (lead.leadStatus === "lost") row.lostCount += 1;
+    leadSources.set(source, row);
+  }
   const quoteDecisions = quotes.filter((quote) => ["accepted", "rejected", "expired"].includes(quote.quoteStatus));
   const acceptedQuotes = quoteDecisions.filter((quote) => quote.quoteStatus === "accepted").length;
   const quoteValues = quotes.map((quote) => quote.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0));
@@ -64,6 +71,9 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
   const recommendations: { severity: "info" | "warning"; title: string; evidence: string; action: string }[] = [];
   const lostLeads = leads.filter((lead) => lead.leadStatus === "lost").length;
   if (leads.length >= 5 && lostLeads / leads.length >= 0.3) recommendations.push({ severity: "warning", title: "Lead loss is elevated", evidence: `${lostLeads} of ${leads.length} new leads in the selected period are marked lost.`, action: "Review lost-lead notes and source quality before changing marketing or pricing." });
+  for (const source of leadSources.values()) {
+    if (source.count >= 3 && source.lostCount / source.count >= 0.5) recommendations.push({ severity: "warning", title: `Lead source needs review: ${source.source}`, evidence: `${source.lostCount} of ${source.count} leads from this source are marked lost; ${source.convertedCount} are converted.`, action: "Review this source's lead quality and follow-up evidence before reducing or increasing spend." });
+  }
   if (quoteDecisions.length >= 3 && acceptedQuotes / quoteDecisions.length < 0.4) recommendations.push({ severity: "warning", title: "Quote conversion is below 40%", evidence: `${acceptedQuotes} of ${quoteDecisions.length} decided quotes were accepted.`, action: "Review rejected and expired quotes and follow-up timing; do not change prices without evidence." });
   if (utilization != null && utilization >= 85) recommendations.push({ severity: "warning", title: "Current team capacity is tight", evidence: `${totalLoad} of ${totalCapacity} entered hours are allocated this week (${utilization}%).`, action: "Review scheduling, subcontracting or recruitment capacity before accepting urgent dates." });
   if (recommendations.length === 0) recommendations.push({ severity: "info", title: "No threshold-based issue detected", evidence: `Analysis used ${leads.length} leads, ${quotes.length} quotes and ${jobs.length} jobs in the selected period.`, action: "Keep collecting complete source, status, price, cost and duration data to improve decisions." });
@@ -78,7 +88,7 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
       averageQuoteValueGbp: { current: quoteValues.length ? Math.round((quoteValues.reduce((a, b) => a + b, 0) / quoteValues.length) * 100) / 100 : null, previous: previousQuoteValues.length ? Math.round((previousQuoteValues.reduce((a, b) => a + b, 0) / previousQuoteValues.length) * 100) / 100 : null },
       completedJobs: { current: jobs.filter((job) => job.jobStatus === "dokonceno").length, previous: previousJobs.filter((job) => job.jobStatus === "dokonceno").length, delta: jobs.filter((job) => job.jobStatus === "dokonceno").length - previousJobs.filter((job) => job.jobStatus === "dokonceno").length },
     },
-    leads: { newCount: leads.length, convertedCount: leads.filter((lead) => lead.leadStatus === "converted").length, lostCount: lostLeads, sources: [...leadSources.entries()].map(([source, count]) => ({ source, count })).sort((a, b) => b.count - a.count || a.source.localeCompare(b.source)) },
+    leads: { newCount: leads.length, convertedCount: leads.filter((lead) => lead.leadStatus === "converted").length, lostCount: lostLeads, sources: [...leadSources.values()].map((row) => ({ ...row, conversionRatePct: row.count ? Math.round((row.convertedCount / row.count) * 1000) / 10 : null, lossRatePct: row.count ? Math.round((row.lostCount / row.count) * 1000) / 10 : null })).sort((a, b) => b.count - a.count || a.source.localeCompare(b.source)) },
     quotes: { count: quotes.length, decidedCount: quoteDecisions.length, acceptedCount: acceptedQuotes, conversionRatePct: quoteDecisions.length ? Math.round((acceptedQuotes / quoteDecisions.length) * 1000) / 10 : null, averageValueGbp: quoteValues.length ? Math.round((quoteValues.reduce((a, b) => a + b, 0) / quoteValues.length) * 100) / 100 : null },
     jobs: { acceptedCount: jobs.filter((job) => ["prijato", "naplanovano", "v_realizaci", "dokonceno"].includes(job.jobStatus)).length, completedCount: jobs.filter((job) => job.jobStatus === "dokonceno").length, cancelledCount: jobs.filter((job) => job.jobStatus === "zruseno").length, lostDueToAvailability: unavailable("Jobs do not currently record a cancellation reason.") },
     revenueByService: { rows: [...serviceRevenue.values()].map((row) => { const costKnown = row.linesWithKnownCost === row.lineCount; const margin = costKnown ? row.acceptedValueGbp - row.knownCostGbp : null; return { serviceId: row.serviceId, serviceName: row.serviceName, acceptedValueGbp: Math.round(row.acceptedValueGbp * 100) / 100, lineCount: row.lineCount, linesWithKnownCost: row.linesWithKnownCost, costKnown, marginGbp: margin == null ? null : Math.round(margin * 100) / 100, marginPct: margin == null || row.acceptedValueGbp === 0 ? (margin === 0 ? 0 : null) : Math.round((margin / row.acceptedValueGbp) * 1000) / 10 }; }).sort((a, b) => b.acceptedValueGbp - a.acceptedValueGbp || a.serviceName.localeCompare(b.serviceName)), unlinkedAcceptedValueGbp: Math.round(unlinkedAcceptedValueGbp * 100) / 100, basis: "Accepted quote line value, not recognized accounting revenue. Margin is available only when every included line has an entered unit cost." },

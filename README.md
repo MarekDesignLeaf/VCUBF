@@ -101,6 +101,9 @@ npm run dev                 # http://localhost:5173
   shown only when every included accepted line has an entered cost; otherwise cost
   coverage and an unknown margin are returned. The **Business Metrics** page includes
   an explicit date-range selector and renders the backend results.
+  Lead-source rows include real converted/lost counts and rates; a source-specific
+  warning requires at least three leads and a loss rate of 50% or more, avoiding
+  recommendations based on a one-record sample.
 - **Backend — services layer refactor**: business logic extracted out of route handlers
   into `backend/src/services/*Service.ts` (clients, jobs, leads), each returning a
   uniform `ServiceResult<T>` (`ok()`/`fail()`). Routes are now thin wrappers that call a
@@ -731,8 +734,9 @@ audit evidence and cross-tenant isolation; parser/integration coverage proves ta
 and listing through the shared Voice/Text Action Engine. The complete 40-suite
 database-backed run above was verified against a real PostgreSQL instance.
 
-Frontend: `npm run lint` and `npm run build` verified working. Lint remains clean apart
-from the pre-existing Fast Refresh warning in `src/context/AuthContext.tsx`.
+Frontend: `npm run lint` and `npm run build` verified working with no warnings. The auth
+provider, context state and `useAuth` hook live in separate modules so Fast Refresh can
+identify the component-only provider module correctly.
 
 ## What's deliberately NOT here yet
 
