@@ -742,7 +742,7 @@ job/communication-derived CRM links, assignment, capacity contribution/overload 
 calendar visibility, status completion/reopening, overdue filtering and notification,
 audit evidence and cross-tenant isolation; parser/integration coverage proves task creation
 and listing through the shared Voice/Text Action Engine. The complete 45-suite,
-371-test database-backed run above was verified against a real PostgreSQL instance.
+372-test database-backed run above was verified against a real PostgreSQL instance.
 
 Frontend: `npm run lint` and `npm run build` verified working with no warnings. The auth
 provider, context state and `useAuth` hook live in separate modules so Fast Refresh can

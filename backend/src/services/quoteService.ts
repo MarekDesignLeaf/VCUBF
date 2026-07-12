@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
-import { nonnegativeMoney } from "../lib/money.js";
+import { moneyLinesFit, nonnegativeMoney } from "../lib/money.js";
 import {
   CREATE_QUOTE_ACTION,
   UPDATE_QUOTE_ACTION,
@@ -26,6 +26,10 @@ const quoteItemSchema = z.object({
   unit_cost: nonnegativeMoney.optional(),
 });
 
+const quoteTotalsFit = (items: z.infer<typeof quoteItemSchema>[]) =>
+  moneyLinesFit(items.map((item) => ({ quantity: item.quantity, unitAmount: item.unit_price }))) &&
+  moneyLinesFit(items.filter((item) => item.unit_cost != null).map((item) => ({ quantity: item.quantity, unitAmount: item.unit_cost! })));
+
 export const createQuoteSchema = z.object({
   client_id: z.string().uuid(),
   job_id: z.string().uuid().optional(),
@@ -33,14 +37,14 @@ export const createQuoteSchema = z.object({
   notes: z.string().optional(),
   valid_until: z.string().datetime().optional(),
   items: z.array(quoteItemSchema).min(1, "at least one line item is required"),
-});
+}).refine((data) => quoteTotalsFit(data.items), { message: "quote total exceeds the supported money range", path: ["items"] });
 
 export const updateQuoteSchema = z.object({
   title: z.string().min(1).optional(),
   notes: z.string().optional(),
   valid_until: z.string().datetime().nullable().optional(),
   items: z.array(quoteItemSchema).min(1).optional(),
-});
+}).refine((data) => data.items == null || quoteTotalsFit(data.items), { message: "quote total exceeds the supported money range", path: ["items"] });
 
 export const changeQuoteStatusSchema = z.object({
   quote_status: z.enum(QUOTE_STATUSES),

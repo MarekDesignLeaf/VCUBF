@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MAX_MONEY, nonnegativeMoney, positiveMoney } from "../src/lib/money.js";
+import { MAX_MONEY, moneyLinesFit, nonnegativeMoney, positiveMoney } from "../src/lib/money.js";
 
 describe("Money input validation", () => {
   it("accepts exact currency values and rejects silent rounding or NUMERIC overflow", () => {
@@ -10,5 +10,8 @@ describe("Money input validation", () => {
     }
     assert.equal(positiveMoney.safeParse(0).success, false);
     assert.equal(positiveMoney.safeParse(0.01).success, true);
+    assert.equal(moneyLinesFit([{ quantity: 3, unitAmount: 0.1 }]), true);
+    assert.equal(moneyLinesFit([{ quantity: 2, unitAmount: MAX_MONEY }]), false);
+    assert.equal(moneyLinesFit([{ quantity: Number.MAX_VALUE, unitAmount: MAX_MONEY }]), false);
   });
 });

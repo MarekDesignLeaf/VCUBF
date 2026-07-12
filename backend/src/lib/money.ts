@@ -11,3 +11,14 @@ export const nonnegativeMoney = boundedMoney.nonnegative()
   .refine(hasAtMostTwoDecimalPlaces, "amount must have at most two decimal places");
 export const positiveMoney = boundedMoney.positive()
   .refine(hasAtMostTwoDecimalPlaces, "amount must have at most two decimal places");
+
+export const moneyLinesFit = (lines: readonly { quantity: number; unitAmount: number }[]) => {
+  let total = 0;
+  for (const line of lines) {
+    const lineTotal = line.quantity * line.unitAmount;
+    if (!Number.isFinite(lineTotal) || lineTotal > MAX_MONEY) return false;
+    total += lineTotal;
+    if (!Number.isFinite(total) || total > MAX_MONEY) return false;
+  }
+  return true;
+};

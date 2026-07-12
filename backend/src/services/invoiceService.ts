@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
-import { nonnegativeMoney, positiveMoney } from "../lib/money.js";
+import { moneyLinesFit, nonnegativeMoney, positiveMoney } from "../lib/money.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 import { RECORD_INVOICE_PAYMENT_ACTION } from "../lib/actionContracts.js";
 
 const item = z.object({ description: z.string().min(1), quantity: z.number().positive().default(1), unit_price: nonnegativeMoney });
-const createSchema = z.object({ client_id: z.string().uuid(), invoice_number: z.string().min(1), title: z.string().min(1), issue_date: z.string().datetime().optional(), due_date: z.string().datetime().optional(), notes: z.string().optional(), items: z.array(item).min(1) });
+const createSchema = z.object({ client_id: z.string().uuid(), invoice_number: z.string().min(1), title: z.string().min(1), issue_date: z.string().datetime().optional(), due_date: z.string().datetime().optional(), notes: z.string().optional(), items: z.array(item).min(1) }).refine(d=>moneyLinesFit(d.items.map(i=>({quantity:i.quantity,unitAmount:i.unit_price}))),{message:"invoice total exceeds the supported money range",path:["items"]});
 const paymentSchema = z.object({ amount: positiveMoney, paid_at: z.string().datetime(), method: z.string().optional(), reference: z.string().optional(), confirmed:z.boolean().optional() });
 const statusSchema = z.object({ invoice_status: z.enum(["draft", "issued", "void"]) });
 const include = { client: { select: { id: true, displayName: true } }, items: { orderBy: { sortOrder: "asc" as const } }, payments: { orderBy: { paidAt: "asc" as const } } };
