@@ -1339,7 +1339,7 @@ export interface Lead {
 }
 
 export const api = {
-  invoices: { list:()=>request<Invoice[]>("/invoices"), create:(data:Record<string,unknown>)=>request<Invoice>("/invoices",{method:"POST",body:JSON.stringify(data)}), status:(id:string,invoice_status:string)=>request<Invoice>(`/invoices/${id}/status`,{method:"PUT",body:JSON.stringify({invoice_status})}), payment:(id:string,data:Record<string,unknown>)=>request<Invoice>(`/invoices/${id}/payments`,{method:"POST",body:JSON.stringify(data)}), downloadPdf:(id:string)=>download(`/invoices/${id}/pdf`) },
+  invoices: { list:()=>request<Invoice[]>("/invoices"), create:(data:Record<string,unknown>)=>request<Invoice>("/invoices",{method:"POST",body:JSON.stringify(data)}), status:(id:string,invoice_status:string)=>request<Invoice>(`/invoices/${id}/status`,{method:"PUT",body:JSON.stringify({invoice_status})}), payment:(id:string,data:Record<string,unknown>,confirmed=false)=>request<Invoice>(`/invoices/${id}/payments`,{method:"POST",body:JSON.stringify({...data,confirmed})}), downloadPdf:(id:string)=>download(`/invoices/${id}/pdf`) },
   metrics: {
     overview: (params?: { from?: string; to?: string }) => {
       const qs = new URLSearchParams();
