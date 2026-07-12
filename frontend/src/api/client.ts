@@ -186,6 +186,8 @@ export interface Job {
   assignedUser?: { id: string; displayName: string } | null;
   serviceCatalogueItem?: { id: string; name: string } | null;
 }
+export interface JobResource {id:string;resourceType:string;name:string;quantity?:number|null;unit?:string|null;requirementStatus:string;estimatedCost?:number|null;actualCost?:number|null;notes?:string|null}
+export interface JobResources {items:JobResource[];readiness:{ready:boolean;total:number;notReady:number;estimatedCostKnown:boolean;estimatedCost:number|null;actualCost:number}}
 
 // Job Allocation and Capacity Management Module.
 export interface CapacityResult {
@@ -890,6 +892,7 @@ export const NOTIFICATION_TYPES = [
   "stuck_job",
   "overdue_task",
   "invoice_overdue",
+  "resource_not_ready",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -905,6 +908,7 @@ export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   stuck_job: "Stuck job",
   overdue_task: "Overdue task",
   invoice_overdue: "Invoice overdue",
+  resource_not_ready: "Resources not ready",
 };
 
 export const NOTIFICATION_SEVERITIES = ["info", "warning", "urgent"] as const;
@@ -1467,6 +1471,9 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ assigned_user_id: assignedUserId }),
       }),
+    resources:(id:string)=>request<JobResources>(`/crm/jobs/${id}/resources`),
+    addResource:(id:string,data:Record<string,unknown>)=>request<JobResource>(`/crm/jobs/${id}/resources`,{method:"POST",body:JSON.stringify(data)}),
+    updateResource:(jobId:string,id:string,data:Record<string,unknown>)=>request<JobResource>(`/crm/jobs/${jobId}/resources/${id}`,{method:"PUT",body:JSON.stringify(data)}),
   },
   employees: {
     list: () => request<Employee[]>("/crm/employees"),

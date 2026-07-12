@@ -234,6 +234,7 @@ model Job {
   portfolioPhotos      PortfolioPhoto[]
   tasks                Task[]
   documentRecords      DocumentRecord[]
+  resourceRequirements JobResourceRequirement[]
 
   @@index([companyId])
   @@index([clientId])
@@ -245,6 +246,24 @@ model Job {
 // Contact Directory — people are independent records rather than fields on
 // a client. A contact may be linked to a client, but can also exist before a
 // client account is created. Source fields keep every fact traceable.
+model JobResourceRequirement {
+  id String @id @default(uuid())
+  jobId String @map("job_id")
+  resourceType String @map("resource_type")
+  name String
+  quantity Float?
+  unit String?
+  requirementStatus String @default("needed") @map("requirement_status")
+  estimatedCost Float? @map("estimated_cost")
+  actualCost Float? @map("actual_cost")
+  notes String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  @@index([jobId])
+  @@map("job_resource_requirements")
+}
+
 model Contact {
   id                String   @id @default(uuid())
   companyId         String   @map("company_id")

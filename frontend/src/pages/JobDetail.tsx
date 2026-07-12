@@ -6,6 +6,7 @@ import {
   type Employee,
   type CommunicationRecord,
   type PortfolioPhoto,
+  type JobResources,
   JOB_STATUSES,
   JOB_STATUS_LABELS,
   COMMUNICATION_CHANNEL_LABELS,
@@ -22,6 +23,8 @@ export function JobDetail() {
   const [missingSkills, setMissingSkills] = useState<string[]>([]);
   const [communications, setCommunications] = useState<CommunicationRecord[]>([]);
   const [photos, setPhotos] = useState<PortfolioPhoto[]>([]);
+  const [resources,setResources]=useState<JobResources|null>(null);
+  const [resourceName,setResourceName]=useState(""); const [resourceType,setResourceType]=useState("material");
 
   function load() {
     if (!id) return;
@@ -39,6 +42,9 @@ export function JobDetail() {
     if (!id) return;
     api.communications.list({ jobId: id }).then(setCommunications).catch(() => undefined);
   }, [id]);
+  useEffect(()=>{if(id)api.jobs.resources(id).then(setResources).catch(()=>undefined)},[id]);
+  async function addResource(e:React.FormEvent){e.preventDefault();if(!id)return;await api.jobs.addResource(id,{resource_type:resourceType,name:resourceName});setResourceName("");setResources(await api.jobs.resources(id))}
+  async function ready(resourceId:string){if(!id)return;await api.jobs.updateResource(id,resourceId,{requirement_status:"ready"});setResources(await api.jobs.resources(id))}
   useEffect(() => {
     if (!id) return;
     api.portfolio.list({ jobId: id }).then(setPhotos).catch(() => undefined);
@@ -161,6 +167,10 @@ export function JobDetail() {
         <dt>Notes</dt>
         <dd>{job.notes ?? "—"}</dd>
       </dl>
+      <div className="page-header"><h2>Materials and resources</h2></div>
+      {resources&&<div className={resources.readiness.ready?"success-banner":"warning-banner"}>{resources.readiness.total===0?"No resource requirements recorded.":resources.readiness.ready?"All recorded resources are ready.":`${resources.readiness.notReady} of ${resources.readiness.total} resources are not ready.`}</div>}
+      <form className="inline-form" onSubmit={addResource}><select value={resourceType} onChange={e=>setResourceType(e.target.value)}><option value="material">Material</option><option value="equipment">Equipment</option><option value="vehicle">Vehicle</option><option value="hire">Hire</option><option value="waste">Waste</option></select><input placeholder="Requirement name" value={resourceName} onChange={e=>setResourceName(e.target.value)} required/><button>Add</button></form>
+      {resources&&resources.items.length>0&&<table className="data-table"><thead><tr><th>Type</th><th>Name</th><th>Status</th><th>Cost</th><th></th></tr></thead><tbody>{resources.items.map(r=><tr key={r.id}><td>{r.resourceType}</td><td>{r.name}</td><td>{r.requirementStatus}</td><td>{r.estimatedCost==null?"Unknown":`£${r.estimatedCost.toFixed(2)}`}</td><td>{r.requirementStatus!=="ready"&&<button onClick={()=>ready(r.id)}>Mark ready</button>}</td></tr>)}</tbody></table>}
 
       <div className="page-header">
         <h2>Communications</h2>

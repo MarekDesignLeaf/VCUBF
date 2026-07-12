@@ -3,6 +3,7 @@ import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { ASSIGN_JOB_ACTION, CHANGE_JOB_STATUS_ACTION, CREATE_JOB_ACTION } from "../../lib/actionContracts.js";
 import * as jobService from "../../services/jobService.js";
+import * as resources from "../../services/jobResourceService.js";
 
 export const jobsRouter = Router();
 
@@ -23,6 +24,9 @@ jobsRouter.get("/:id", requirePermission("crm.read"), async (req, res) => {
   if (!job) return res.status(404).json({ error: "NOT_FOUND" });
   res.json(job);
 });
+jobsRouter.get("/:id/resources",requirePermission("crm.read"),async(req,res)=>{const x=await resources.list(req.user!,req.params.id);if(!x)return res.status(404).json({error:"JOB_NOT_FOUND"});res.json(x)});
+jobsRouter.post("/:id/resources",requirePermission("crm.manage"),async(req,res)=>{const x=await resources.add(req.user!,req.params.id,req.body);if(!x.ok)return res.status(x.httpStatus).json({error:x.error,message:x.message});res.status(x.httpStatus).json(x.data)});
+jobsRouter.put("/:id/resources/:resourceId",requirePermission("crm.manage"),async(req,res)=>{const x=await resources.change(req.user!,req.params.id,req.params.resourceId,req.body);if(!x.ok)return res.status(x.httpStatus).json({error:x.error,message:x.message});res.json(x.data)});
 
 jobsRouter.post("/", requirePermission(CREATE_JOB_ACTION.requiredPermission), async (req, res) => {
   const result = await jobService.createJob(req.user!, req.body);
