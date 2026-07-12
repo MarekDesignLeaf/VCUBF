@@ -186,6 +186,8 @@ h2 { font-size: 1.1rem; margin-top: 24px; }
 .voice-settings { margin-top: 24px; }
 .checkbox-label { flex-direction: row; align-items: center; }
 .checkbox-label input { width: auto; }
+.pairing-card { background: var(--card); border: 2px solid var(--accent); border-radius: 10px; padding: 20px; margin: 0 0 24px; max-width: 520px; }
+.pairing-code { font: 700 1.8rem monospace; letter-spacing: .18em; margin: 12px 0; }
 
 .link-button {
   background: none;

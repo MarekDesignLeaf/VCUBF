@@ -1358,6 +1358,7 @@ export const api = {
     request<void>("/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
   updateVoicePreferences: (wakeWord: string, continuousListening: boolean, language: "en-GB" | "en-US") =>
     request<Pick<LoginResponse["user"], "voiceWakeWord" | "voiceContinuous" | "voiceLanguage">>("/auth/voice-preferences", { method: "PUT", body: JSON.stringify({ wake_word: wakeWord, continuous_listening: continuousListening, language }) }),
+  approveDevicePairing: (code: string) => request<{status:string;expires_at:string}>("/auth/device/approve", { method: "POST", body: JSON.stringify({ code }) }),
   clients: {
     list: () => request<Client[]>("/crm/clients"),
     get: (id: string) => request<Client>(`/crm/clients/${id}`),

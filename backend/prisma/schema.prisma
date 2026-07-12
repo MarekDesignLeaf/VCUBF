@@ -49,6 +49,7 @@ model Company {
   websiteAuditFindings         WebsiteAuditFinding[]
   websiteContentProposals      WebsiteContentProposal[]
   tasks                        Task[]
+  devicePairings               DevicePairing[]
 
   @@map("companies")
 }
@@ -158,8 +159,28 @@ model User {
   auditLogs     AuditLog[]
   assignedJobs  Job[]      @relation("AssignedJobs")
   assignedTasks Task[]     @relation("AssignedTasks")
+  devicePairings DevicePairing[]
 
   @@map("users")
+}
+
+model DevicePairing {
+  id         String    @id @default(uuid())
+  code       String    @unique
+  secretHash String    @map("secret_hash")
+  status     String    @default("pending")
+  userId     String?   @map("user_id")
+  companyId  String?   @map("company_id")
+  expiresAt  DateTime  @map("expires_at")
+  approvedAt DateTime? @map("approved_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user    User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt, status])
+  @@map("device_pairings")
 }
 
 model Client {

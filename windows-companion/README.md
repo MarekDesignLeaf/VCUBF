@@ -10,7 +10,7 @@ Open Windows PowerShell in this directory and run:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -StartNow
 ```
 
-Sign in when prompted. The password is used only for login and is not saved. The resulting API token is encrypted with Windows DPAPI for the current Windows user. Right-click the tray icon to pause/resume listening, change the wake word, sign in again, open VCUBF or exit.
+The companion opens the normal VCUBF login in your default browser, so browser password autofill works. After login, approve the matching eight-character code on the Account page. The browser hands back a short-lived one-time token; no password is entered into or saved by the companion. The resulting API token is encrypted with Windows DPAPI for the current Windows user. Right-click the tray icon to pause/resume listening, change the wake word, reconnect in the browser, open VCUBF or exit.
 
 ## Voice flow
 

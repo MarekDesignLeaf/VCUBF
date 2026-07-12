@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 import { ApiError } from "../api/client";
 
 export function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +18,8 @@ export function Login() {
     setSubmitting(true);
     try {
       const user = await login(email, password);
-      navigate(user.mustChangePassword ? "/account" : "/");
+      const requested=params.get("returnTo");
+      navigate(user.mustChangePassword ? "/account" : requested?.startsWith("/") ? requested : "/");
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.code === "INVALID_CREDENTIALS" ? "Invalid email or password." : err.message);
@@ -36,11 +38,11 @@ export function Login() {
         <p className="subtitle">Sign in to VCUF</p>
         <label>
           Email
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </label>
         <label>
           Password
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </label>
         {error && <div className="error-banner">{error}</div>}
         <button type="submit" disabled={submitting}>

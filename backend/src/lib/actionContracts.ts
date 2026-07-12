@@ -33,6 +33,16 @@ export const UPDATE_VOICE_PREFERENCES_ACTION: ActionContract = {
   possibleErrors: ["VALIDATION_FAILED", "USER_NOT_FOUND"],
 };
 
+export const APPROVE_DEVICE_PAIRING_ACTION: ActionContract = {
+  actionName: "approve_device_pairing",
+  purpose: "Approve a short-lived one-time token handoff from an authenticated browser session to the Windows Emma companion.",
+  requiredPermission: "authenticated",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "auth.users", "auth.device_pairings"],
+  possibleErrors: ["VALIDATION_FAILED", "PAIRING_NOT_FOUND", "PAIRING_EXPIRED", "PAIRING_ALREADY_USED"],
+};
+
 export const CREATE_CLIENT_ACTION: ActionContract = {
   actionName: "create_client",
   purpose: "Create a new client record in CRM Core from a verified or manually entered source.",

@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../context/useAuth";
 
 export function Account() {
   const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -18,6 +19,9 @@ export function Account() {
   const [voiceMessage, setVoiceMessage] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [savingVoice, setSavingVoice] = useState(false);
+  const pairingCode = (searchParams.get("pair") ?? "").toUpperCase();
+  const [pairingState, setPairingState] = useState<"idle"|"approving"|"approved"|"error">(pairingCode ? "idle" : "idle");
+  const [pairingError, setPairingError] = useState<string | null>(null);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -48,9 +52,23 @@ export function Account() {
     } finally { setSavingVoice(false); }
   }
 
+  async function approvePairing() {
+    setPairingState("approving");setPairingError(null);
+    try { await api.approveDevicePairing(pairingCode);setPairingState("approved"); }
+    catch(caught){setPairingState("error");setPairingError(caught instanceof ApiError?caught.message:"Could not approve the Windows companion.");}
+  }
+
   return <div>
     <h1>Account</h1>
     <p>Signed in as <strong>{user?.displayName}</strong> ({user?.email}).</p>
+    {pairingCode && <section className="pairing-card">
+      <h2>Connect Windows Emma</h2>
+      <p>The Windows companion is requesting access to your VCUBF account.</p>
+      <div className="pairing-code">{pairingCode}</div>
+      <p className="hint">Approve only if this code matches the code shown by the Emma companion on this computer.</p>
+      {pairingError && <div className="error-banner">{pairingError}</div>}
+      {pairingState==="approved" ? <div className="success-banner">Windows Emma is connected. You may close this page.</div> : <button type="button" onClick={approvePairing} disabled={pairingState==="approving"}>{pairingState==="approving"?"Connecting…":"Approve Windows Emma"}</button>}
+    </section>}
     {user?.mustChangePassword && <div className="warning-banner">You are using a temporary password. Change it before continuing to Secretary.</div>}
     <form className="inline-form" onSubmit={submit} style={{ display: "grid", maxWidth: 520 }}>
       <h2>Change password</h2>

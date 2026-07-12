@@ -86,23 +86,27 @@ function Speak([string]$Text) {
 }
 
 function Show-Login {
-  $form = New-Object Windows.Forms.Form -Property @{ Text = 'VCUBF Emma sign in'; Size = New-Object Drawing.Size(430,240); StartPosition = 'CenterScreen'; TopMost = $true; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false }
-  $email = New-Object Windows.Forms.TextBox -Property @{ Left=130; Top=30; Width=250; Text=$script:Config.Email }
-  $password = New-Object Windows.Forms.TextBox -Property @{ Left=130; Top=70; Width=250; UseSystemPasswordChar=$true }
-  $server = New-Object Windows.Forms.TextBox -Property @{ Left=130; Top=110; Width=250; Text=$script:Config.ServerUrl }
-  foreach ($pair in @(@('Email',30),@('Password',70),@('Server',110))) { $form.Controls.Add((New-Object Windows.Forms.Label -Property @{ Left=20; Top=$pair[1]; Width=100; Text=$pair[0] })) }
-  $button = New-Object Windows.Forms.Button -Property @{ Left=260; Top=155; Width=120; Text='Sign in'; DialogResult='OK' }
-  $form.Controls.AddRange(@($email,$password,$server,$button)); $form.AcceptButton=$button
-  if ($form.ShowDialog() -ne 'OK') { return $false }
-  try {
-    $script:Config.ServerUrl = $server.Text.TrimEnd('/'); $script:Config.Email = $email.Text.Trim(); Save-Config $script:Config
-    $result = Invoke-Vcubf POST '/auth/login' @{ email=$email.Text.Trim(); password=$password.Text } -Anonymous
-    Save-Token $result.token
-    $script:Config.WakeWord = $result.user.voiceWakeWord
-    $script:Config.Language = $result.user.voiceLanguage
-    Save-Config $script:Config
-    return $true
-  } catch { [Windows.Forms.MessageBox]::Show('Sign-in failed. Check the server, email and password.','VCUBF Emma','OK','Error') | Out-Null; Write-EmmaLog "Login failed: $($_.Exception.Message)"; return $false }
+  try { $pairing=Invoke-Vcubf POST '/auth/device/start' @{} -Anonymous }
+  catch { [Windows.Forms.MessageBox]::Show('Could not start browser sign-in. Check the server connection.','VCUBF Emma','OK','Error')|Out-Null;Write-EmmaLog "Pairing start failed: $($_.Exception.Message)";return $false }
+  $form=New-Object Windows.Forms.Form -Property @{Text='Connect VCUBF Emma';Size=New-Object Drawing.Size(500,285);StartPosition='CenterScreen';TopMost=$true;FormBorderStyle='FixedDialog';MaximizeBox=$false}
+  $title=New-Object Windows.Forms.Label -Property @{Left=20;Top=20;Width=440;Height=42;Text='Sign in in your browser using its saved passwords, then approve this matching code.'}
+  $code=New-Object Windows.Forms.Label -Property @{Left=100;Top=75;Width=300;Height=45;Text=$pairing.code;Font=New-Object Drawing.Font('Consolas',22,[Drawing.FontStyle]::Bold);TextAlign='MiddleCenter'}
+  $status=New-Object Windows.Forms.Label -Property @{Left=20;Top=135;Width=440;Height=35;Text='Waiting for browser approval…';TextAlign='MiddleCenter'}
+  $open=New-Object Windows.Forms.Button -Property @{Left=90;Top=185;Width=145;Text='Open browser again'}
+  $copy=New-Object Windows.Forms.Button -Property @{Left=245;Top=185;Width=145;Text='Copy code'}
+  $cancel=New-Object Windows.Forms.Button -Property @{Left=365;Top=225;Width=95;Text='Cancel';DialogResult='Cancel'}
+  $form.Controls.AddRange(@($title,$code,$status,$open,$copy,$cancel));$form.CancelButton=$cancel
+  $open.Add_Click({Start-Process $pairing.verification_url});$copy.Add_Click({[Windows.Forms.Clipboard]::SetText($pairing.code)})
+  $timer=New-Object Windows.Forms.Timer -Property @{Interval=2000}
+  $timer.Add_Tick({
+    try {
+      $result=Invoke-Vcubf POST '/auth/device/token' @{pairing_id=$pairing.pairing_id;secret=$pairing.secret} -Anonymous
+      if($result.token){Save-Token $result.token;$script:Config.WakeWord=$result.user.voiceWakeWord;Save-Config $script:Config;$status.Text='Connected successfully.';$timer.Stop();$form.DialogResult='OK';$form.Close()}
+    } catch { if($_.Exception.Message -match 'PAIRING_EXPIRED|PAIRING_ALREADY_USED'){$status.Text='The pairing expired. Close and try again.';$timer.Stop()} }
+  })
+  Start-Process $pairing.verification_url
+  $timer.Start();$dialog=$form.ShowDialog();$timer.Stop();$timer.Dispose();$form.Dispose()
+  return $dialog -eq 'OK'
 }
 
 function Ensure-Login {
@@ -215,7 +219,7 @@ try {
   Initialize-Recognizer
   $script:Notify=New-Object Windows.Forms.NotifyIcon -Property @{ Icon=[Drawing.SystemIcons]::Information; Visible=$true; Text='VCUBF Emma — starting' }
   $menu=New-Object Windows.Forms.ContextMenuStrip
-  $start=$menu.Items.Add('Start listening'); $stop=$menu.Items.Add('Stop listening'); $settings=$menu.Items.Add('Settings'); $open=$menu.Items.Add('Open VCUBF'); $signin=$menu.Items.Add('Sign in again'); $menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))|Out-Null; $exit=$menu.Items.Add('Exit')
+  $start=$menu.Items.Add('Start listening'); $stop=$menu.Items.Add('Stop listening'); $settings=$menu.Items.Add('Settings'); $open=$menu.Items.Add('Open VCUBF'); $signin=$menu.Items.Add('Connect in browser'); $menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))|Out-Null; $exit=$menu.Items.Add('Exit')
   $start.Add_Click({Start-Listening}); $stop.Add_Click({Stop-Listening}); $settings.Add_Click({Show-Settings}); $open.Add_Click({Start-Process 'https://frontend-production-ee13.up.railway.app'}); $signin.Add_Click({Remove-Item -LiteralPath $script:TokenPath -Force -ErrorAction SilentlyContinue; Show-Login|Out-Null}); $exit.Add_Click({$script:Context.ExitThread()})
   $script:Notify.ContextMenuStrip=$menu; $script:Notify.Add_DoubleClick({Start-Process 'https://frontend-production-ee13.up.railway.app'})
   Set-AutoStart ([bool]$script:Config.AutoStart)

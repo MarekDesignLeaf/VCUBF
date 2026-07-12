@@ -88,6 +88,18 @@ describe("auth", () => {
     assert.equal((audit?.dataAfter as any)?.voiceWakeWord, "Ema Assistant");
   });
 
+  it("pairs the Windows companion through a one-time browser approval", async () => {
+    const started=await request(app).post("/auth/device/start").send({});
+    assert.equal(started.status,201);assert.match(started.body.code,/^[A-Z2-9]{8}$/);assert.ok(started.body.secret);
+    const pending=await request(app).post("/auth/device/token").send({pairing_id:started.body.pairing_id,secret:started.body.secret});assert.equal(pending.status,202);
+    const wrong=await request(app).post("/auth/device/token").send({pairing_id:started.body.pairing_id,secret:"x".repeat(43)});assert.equal(wrong.status,401);
+    const login=await request(app).post("/auth/login").send({email:"admin@test.local",password:"Password123!"});
+    const approved=await request(app).post("/auth/device/approve").set("Authorization",`Bearer ${login.body.token}`).send({code:started.body.code});assert.equal(approved.status,200);
+    const connected=await request(app).post("/auth/device/token").send({pairing_id:started.body.pairing_id,secret:started.body.secret});assert.equal(connected.status,200);assert.ok(connected.body.token);assert.equal(connected.body.user.email,"admin@test.local");
+    const reused=await request(app).post("/auth/device/token").send({pairing_id:started.body.pairing_id,secret:started.body.secret});assert.equal(reused.status,409);assert.equal(reused.body.error,"PAIRING_ALREADY_USED");
+    const audit=await prisma.auditLog.findFirst({where:{actionName:"approve_device_pairing"}});assert.equal(audit?.confirmed,true);
+  });
+
   it("rejects a weak new password without storing password values in audit", async () => {
     const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
     const res = await request(app).post("/auth/change-password").set("Authorization", `Bearer ${login.body.token}`).send({ current_password: "Password123!", new_password: "short" });

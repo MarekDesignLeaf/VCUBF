@@ -29,6 +29,7 @@ import { industriesRouter } from "./modules/industries/routes.js";
 import { connectorsRouter } from "./modules/connectors/routes.js";
 import { metricsRouter } from "./modules/metrics/routes.js";
 import { invoicesRouter } from "./modules/invoices/routes.js";
+import { devicePairingRouter } from "./modules/auth/devicePairing.js";
 
 export function createServer() {
   const app = express();
@@ -46,6 +47,7 @@ export function createServer() {
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
   app.use("/auth", authRouter);
+  app.use("/auth/device", devicePairingRouter);
   app.use("/crm/clients", clientsRouter);
   app.use("/crm/jobs", jobsRouter);
   app.use("/crm/leads", leadsRouter);
