@@ -175,6 +175,11 @@ async function buildQuoteExpiryItems(user: AuthedUser): Promise<AttentionItemBas
   });
 }
 
+async function buildOverdueInvoiceItems(user: AuthedUser): Promise<AttentionItemBase[]> {
+  const now=new Date(); const rows=await prisma.invoice.findMany({where:{companyId:user.companyId,invoiceStatus:"issued",dueDate:{lt:now}},include:{client:{select:{displayName:true}},items:true,payments:true}});
+  return rows.flatMap(x=>{const total=x.items.reduce((s,i)=>s+i.quantity*i.unitPrice,0),paid=x.payments.reduce((s,p)=>s+p.amount,0),balance=Math.max(0,total-paid);if(balance===0)return [];return [{key:`invoice_overdue:${x.id}`,type:"invoice_overdue" as const,severity:"urgent" as const,title:`Invoice ${x.invoiceNumber} is overdue`,message:`${x.client.displayName} has an outstanding balance of £${balance.toFixed(2)}. Due ${x.dueDate!.toISOString().slice(0,10)}.`,dueAt:x.dueDate!.toISOString(),entity:{type:"invoice",id:x.id,label:x.invoiceNumber}}];});
+}
+
 // Portfolio marketing-readiness gap — completed jobs (Job.jobStatus ===
 // JOB_STATUS_COMPLETED, i.e. "dokonceno") that have zero linked
 // PortfolioPhoto rows. This is a real, structural, count-based signal only:
@@ -333,12 +338,13 @@ export async function getAttentionFeed(
   user: AuthedUser,
   options: { includeAcknowledged?: boolean } = {}
 ): Promise<AttentionItem[]> {
-  const [unresolvedEnquiries, followUps, overloads, expiringQuotes, dataQualityItems, portfolioGapItems, staleLeads, stuckJobs, overdueTasks] =
+  const [unresolvedEnquiries, followUps, overloads, expiringQuotes, overdueInvoices, dataQualityItems, portfolioGapItems, staleLeads, stuckJobs, overdueTasks] =
     await Promise.all([
       buildUnresolvedEnquiryItems(user),
       buildFollowUpItems(user),
       buildOverloadItems(user),
       buildQuoteExpiryItems(user),
+      buildOverdueInvoiceItems(user),
       buildDataQualityItems(user),
       buildPortfolioGapItems(user),
       buildStaleLeadItems(user),
@@ -351,6 +357,7 @@ export async function getAttentionFeed(
     ...followUps,
     ...overloads,
     ...expiringQuotes,
+    ...overdueInvoices,
     ...dataQualityItems,
     ...portfolioGapItems,
     ...staleLeads,

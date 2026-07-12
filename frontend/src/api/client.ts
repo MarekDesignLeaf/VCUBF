@@ -889,6 +889,7 @@ export const NOTIFICATION_TYPES = [
   "stale_lead",
   "stuck_job",
   "overdue_task",
+  "invoice_overdue",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -903,6 +904,7 @@ export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   stale_lead: "Stale lead",
   stuck_job: "Stuck job",
   overdue_task: "Overdue task",
+  invoice_overdue: "Invoice overdue",
 };
 
 export const NOTIFICATION_SEVERITIES = ["info", "warning", "urgent"] as const;
@@ -1333,7 +1335,7 @@ export interface Lead {
 }
 
 export const api = {
-  invoices: { list:()=>request<Invoice[]>("/invoices"), create:(data:Record<string,unknown>)=>request<Invoice>("/invoices",{method:"POST",body:JSON.stringify(data)}), status:(id:string,invoice_status:string)=>request<Invoice>(`/invoices/${id}/status`,{method:"PUT",body:JSON.stringify({invoice_status})}), payment:(id:string,data:Record<string,unknown>)=>request<Invoice>(`/invoices/${id}/payments`,{method:"POST",body:JSON.stringify(data)}) },
+  invoices: { list:()=>request<Invoice[]>("/invoices"), create:(data:Record<string,unknown>)=>request<Invoice>("/invoices",{method:"POST",body:JSON.stringify(data)}), status:(id:string,invoice_status:string)=>request<Invoice>(`/invoices/${id}/status`,{method:"PUT",body:JSON.stringify({invoice_status})}), payment:(id:string,data:Record<string,unknown>)=>request<Invoice>(`/invoices/${id}/payments`,{method:"POST",body:JSON.stringify(data)}), downloadPdf:(id:string)=>download(`/invoices/${id}/pdf`) },
   metrics: {
     overview: (params?: { from?: string; to?: string }) => {
       const qs = new URLSearchParams();

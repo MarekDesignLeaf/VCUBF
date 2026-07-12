@@ -75,7 +75,7 @@ Use **Tasks** for administrative and delivery work. A task with an assignee, due
 
 Use **Quotes** to prepare itemised quote records. Prices and costs come from entered values or the service catalogue. If any line cost is missing, margin is shown as unknown. Open a saved quote and select **Download PDF** to export a client-facing copy from the saved data. The PDF excludes internal cost and margin data and does not invent VAT, tax or payment terms. Changing a quote to sent or accepted records status only; it does not contact the client.
 
-Use **Invoices** to create an itemised draft linked to a real client. Invoice numbers are unique within the company. Issuing an invoice records its internal state but does not send it. Record only payments actually received; Secretary calculates total, paid amount and remaining balance, rejects overpayments and marks a fully settled invoice paid. An issued invoice with an entered due date and an outstanding balance is shown as overdue after that date.
+Use **Invoices** to create an itemised draft linked to a real client. Invoice numbers are unique within the company. Issue a draft, record only payments actually received and download a client-facing PDF from the saved record. Secretary calculates total, paid amount and remaining balance, rejects overpayments and marks a fully settled invoice paid. An issued invoice with an entered due date and an outstanding balance is shown as overdue and appears in Notifications after that date. Issuing or exporting does not send the invoice automatically.
 
 Use **Documents** to register metadata:
 

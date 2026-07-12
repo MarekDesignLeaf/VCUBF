@@ -1179,6 +1179,7 @@ export const NOTIFICATION_TYPES = [
   "stale_lead",
   "stuck_job",
   "overdue_task",
+  "invoice_overdue",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
