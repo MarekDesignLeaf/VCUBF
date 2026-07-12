@@ -69,7 +69,7 @@ A worker can be assigned only while the job status is **Accepted**. This is the 
 
 Assignment checks declared employee skills and weekly capacity. A warning is evidence for review, not an automatic business decision. Secretary may permit a deliberate overload but records the warning in the audit trail. If a date or duration is missing, capacity cannot be fully evaluated and is shown as unknown.
 
-Open a job to record required materials, equipment, vehicles, hire and waste handling. Each requirement has an explicit readiness state and optional entered costs; missing costs remain unknown. A job planned to start within three days appears in Notifications when any recorded requirement is not ready. Marking an item ready records the real operational state but does not order or hire anything externally.
+Open a job to record required materials, equipment, vehicles, hire and waste handling, including quantity, unit, estimated cost and later actual cost. Each requirement has an explicit readiness state; missing costs and cost variance remain unknown until all relevant values are entered. A job planned to start within three days appears in Notifications when any recorded requirement is not ready. Changing a state records the real operational state but does not order or hire anything externally.
 
 Use **Tasks** for administrative and delivery work. A task with an assignee, due date and estimated duration contributes to capacity and appears in **Calendar**.
 

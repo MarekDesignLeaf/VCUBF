@@ -187,7 +187,7 @@ export interface Job {
   serviceCatalogueItem?: { id: string; name: string } | null;
 }
 export interface JobResource {id:string;resourceType:string;name:string;quantity?:number|null;unit?:string|null;requirementStatus:string;estimatedCost?:number|null;actualCost?:number|null;notes?:string|null}
-export interface JobResources {items:JobResource[];readiness:{ready:boolean;total:number;notReady:number;estimatedCostKnown:boolean;estimatedCost:number|null;actualCost:number}}
+export interface JobResources {items:JobResource[];readiness:{ready:boolean;total:number;notReady:number;estimatedCostKnown:boolean;estimatedCost:number|null;actualCostKnown:boolean;actualCost:number|null;costVariance:number|null}}
 
 // Job Allocation and Capacity Management Module.
 export interface CapacityResult {
