@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
 import { moneyLinesFit, nonnegativeMoney, positiveMoney } from "../lib/money.js";
@@ -17,5 +18,32 @@ function totals<T extends { items: { quantity:number;unitPrice:MoneyValue }[];pa
 export async function listInvoices(u:AuthedUser){return (await prisma.invoice.findMany({where:{companyId:u.companyId},include,orderBy:{createdAt:"desc"}})).map(totals);}
 export async function getInvoice(u:AuthedUser,id:string){const x=await prisma.invoice.findFirst({where:{id,companyId:u.companyId},include});return x?totals(x):null;}
 export async function createInvoice(u:AuthedUser,raw:unknown):Promise<ServiceResult<unknown>>{const p=createSchema.safeParse(raw);if(!p.success)return fail(400,"VALIDATION_FAILED",p.error.message);const d=p.data;if(!await prisma.client.findFirst({where:{id:d.client_id,companyId:u.companyId}}))return fail(404,"CLIENT_NOT_FOUND");if(await prisma.invoice.findUnique({where:{companyId_invoiceNumber:{companyId:u.companyId,invoiceNumber:d.invoice_number}}}))return fail(409,"INVOICE_NUMBER_EXISTS");const x=await prisma.invoice.create({data:{companyId:u.companyId,clientId:d.client_id,invoiceNumber:d.invoice_number,title:d.title,issueDate:d.issue_date?new Date(d.issue_date):undefined,dueDate:d.due_date?new Date(d.due_date):undefined,notes:d.notes,createdBy:u.id,items:{create:d.items.map((i,n)=>({description:i.description,quantity:i.quantity,unitPrice:i.unit_price,sortOrder:n}))}},include});await recordAudit({companyId:u.companyId,userId:u.id,actionName:"create_invoice",inputPayload:d,dataAfter:x,riskLevel:2,confirmationRequired:false,result:"success"});return ok(201,totals(x));}
-export async function changeInvoiceStatus(u:AuthedUser,id:string,raw:unknown):Promise<ServiceResult<unknown>>{const p=statusSchema.safeParse(raw);if(!p.success)return fail(400,"VALIDATION_FAILED");const old=await prisma.invoice.findFirst({where:{id,companyId:u.companyId}});if(!old)return fail(404,"INVOICE_NOT_FOUND");const x=await prisma.invoice.update({where:{id},data:{invoiceStatus:p.data.invoice_status,issueDate:p.data.invoice_status==="issued"?(old.issueDate??new Date()):old.issueDate},include});await recordAudit({companyId:u.companyId,userId:u.id,actionName:"change_invoice_status",inputPayload:{id,...p.data},dataBefore:old,dataAfter:x,riskLevel:2,confirmationRequired:false,result:"success"});return ok(200,totals(x));}
-export async function addPayment(u:AuthedUser,id:string,raw:unknown):Promise<ServiceResult<unknown>>{const p=paymentSchema.safeParse(raw);if(!p.success)return fail(400,"VALIDATION_FAILED",p.error.message);const inv=await getInvoice(u,id);if(!inv)return fail(404,"INVOICE_NOT_FOUND");if(inv.invoiceStatus==="void")return fail(409,"INVOICE_VOID");if(p.data.amount>inv.totals.balance)return fail(409,"PAYMENT_EXCEEDS_BALANCE");const input={invoiceId:id,amount:p.data.amount,paid_at:p.data.paid_at,method:p.data.method,reference:p.data.reference};const preview={invoiceId:id,invoiceNumber:inv.invoiceNumber,client:inv.client.displayName,amount:p.data.amount,balanceBefore:inv.totals.balance,balanceAfter:inv.totals.balance-p.data.amount,willMarkPaid:inv.totals.balance===p.data.amount};if(!p.data.confirmed){await recordAudit({companyId:u.companyId,userId:u.id,actionName:RECORD_INVOICE_PAYMENT_ACTION.actionName,inputPayload:input,dataBefore:{balance:inv.totals.balance},riskLevel:RECORD_INVOICE_PAYMENT_ACTION.riskLevel,confirmationRequired:true,result:"rejected",errorMessage:"CONFIRMATION_REQUIRED"});return fail(409,"CONFIRMATION_REQUIRED","Review the payment preview and confirm.",{preview})}await prisma.payment.create({data:{invoiceId:id,amount:p.data.amount,paidAt:new Date(p.data.paid_at),method:p.data.method,reference:p.data.reference}});const updated=await getInvoice(u,id);if(updated&&updated.totals.balance===0)await prisma.invoice.update({where:{id},data:{invoiceStatus:"paid"}});await recordAudit({companyId:u.companyId,userId:u.id,actionName:RECORD_INVOICE_PAYMENT_ACTION.actionName,inputPayload:input,dataBefore:{balance:inv.totals.balance},dataAfter:{balance:preview.balanceAfter},riskLevel:RECORD_INVOICE_PAYMENT_ACTION.riskLevel,confirmationRequired:true,confirmed:true,result:"success"});return ok(201,await getInvoice(u,id));}
+export async function changeInvoiceStatus(u:AuthedUser,id:string,raw:unknown):Promise<ServiceResult<unknown>>{
+  const p=statusSchema.safeParse(raw);if(!p.success)return fail(400,"VALIDATION_FAILED");
+  const old=await prisma.invoice.findFirst({where:{id,companyId:u.companyId}});if(!old)return fail(404,"INVOICE_NOT_FOUND");
+  const allowed=(old.invoiceStatus==="draft"&&(p.data.invoice_status==="issued"||p.data.invoice_status==="void"))||(old.invoiceStatus==="issued"&&p.data.invoice_status==="void")||old.invoiceStatus===p.data.invoice_status;
+  if(!allowed)return fail(409,"INVALID_INVOICE_STATUS_TRANSITION");
+  const x=await prisma.invoice.update({where:{id},data:{invoiceStatus:p.data.invoice_status,issueDate:p.data.invoice_status==="issued"?(old.issueDate??new Date()):old.issueDate},include});
+  await recordAudit({companyId:u.companyId,userId:u.id,actionName:"change_invoice_status",inputPayload:{id,...p.data},dataBefore:old,dataAfter:x,riskLevel:2,confirmationRequired:false,result:"success"});return ok(200,totals(x));
+}
+export async function addPayment(u:AuthedUser,id:string,raw:unknown):Promise<ServiceResult<unknown>>{
+  const p=paymentSchema.safeParse(raw);if(!p.success)return fail(400,"VALIDATION_FAILED",p.error.message);
+  const inv=await getInvoice(u,id);if(!inv)return fail(404,"INVOICE_NOT_FOUND");
+  if(inv.invoiceStatus!=="issued")return fail(409,"INVOICE_NOT_PAYABLE");
+  if(p.data.amount>inv.totals.balance)return fail(409,"PAYMENT_EXCEEDS_BALANCE");
+  const input={invoiceId:id,amount:p.data.amount,paid_at:p.data.paid_at,method:p.data.method,reference:p.data.reference};
+  const preview={invoiceId:id,invoiceNumber:inv.invoiceNumber,client:inv.client.displayName,amount:p.data.amount,balanceBefore:inv.totals.balance,balanceAfter:moneyRound(inv.totals.balance-p.data.amount),willMarkPaid:inv.totals.balance===p.data.amount};
+  if(!p.data.confirmed){await recordAudit({companyId:u.companyId,userId:u.id,actionName:RECORD_INVOICE_PAYMENT_ACTION.actionName,inputPayload:input,dataBefore:{balance:inv.totals.balance},riskLevel:RECORD_INVOICE_PAYMENT_ACTION.riskLevel,confirmationRequired:true,result:"rejected",errorMessage:"CONFIRMATION_REQUIRED"});return fail(409,"CONFIRMATION_REQUIRED","Review the payment preview and confirm.",{preview})}
+  const result=await prisma.$transaction(async(tx)=>{
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM invoices WHERE id = ${id} AND company_id = ${u.companyId} FOR UPDATE`);
+    const current=await tx.invoice.findFirst({where:{id,companyId:u.companyId},include});if(!current)return {error:"INVOICE_NOT_FOUND" as const};
+    const before=totals(current);if(before.invoiceStatus!=="issued")return {error:"INVOICE_NOT_PAYABLE" as const};
+    if(p.data.amount>before.totals.balance)return {error:"PAYMENT_EXCEEDS_BALANCE" as const};
+    await tx.payment.create({data:{invoiceId:id,amount:p.data.amount,paidAt:new Date(p.data.paid_at),method:p.data.method,reference:p.data.reference}});
+    const refreshed=await tx.invoice.findUniqueOrThrow({where:{id},include});const after=totals(refreshed);
+    if(after.totals.balance===0){const paid=await tx.invoice.update({where:{id},data:{invoiceStatus:"paid"},include});return {before,after:totals(paid)}}
+    return {before,after};
+  });
+  if("error" in result&&result.error)return fail(result.error==="INVOICE_NOT_FOUND"?404:409,result.error);
+  await recordAudit({companyId:u.companyId,userId:u.id,actionName:RECORD_INVOICE_PAYMENT_ACTION.actionName,inputPayload:input,dataBefore:{balance:result.before.totals.balance},dataAfter:{balance:result.after.totals.balance},riskLevel:RECORD_INVOICE_PAYMENT_ACTION.riskLevel,confirmationRequired:true,confirmed:true,result:"success"});return ok(201,result.after);
+}
