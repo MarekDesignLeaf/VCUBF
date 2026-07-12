@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
+import { nonnegativeMoney } from "../lib/money.js";
 import { CREATE_SERVICE_ACTION, UPDATE_SERVICE_ACTION } from "../lib/actionContracts.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
@@ -12,8 +13,8 @@ export const createServiceSchema = z.object({
   name: z.string().min(1, "name is required"),
   description: z.string().optional(),
   category: z.string().optional(),
-  base_price_min: z.number().nonnegative().optional(),
-  base_price_max: z.number().nonnegative().optional(),
+  base_price_min: nonnegativeMoney.optional(),
+  base_price_max: nonnegativeMoney.optional(),
   price_unit: z.string().optional(),
   default_duration_hours: z.number().positive().optional(),
   default_required_skills: z.array(z.string()).optional(),
@@ -23,8 +24,8 @@ export const updateServiceSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   category: z.string().optional(),
-  base_price_min: z.number().nonnegative().nullable().optional(),
-  base_price_max: z.number().nonnegative().nullable().optional(),
+  base_price_min: nonnegativeMoney.nullable().optional(),
+  base_price_max: nonnegativeMoney.nullable().optional(),
   price_unit: z.string().optional(),
   default_duration_hours: z.number().positive().nullable().optional(),
   default_required_skills: z.array(z.string()).optional(),

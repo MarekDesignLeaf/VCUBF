@@ -9,6 +9,7 @@ import {
   LIST_REFERENCE_ACTIVITIES_ACTION,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import { nonnegativeMoney } from "../lib/money.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -138,8 +139,8 @@ export const activateReferenceActivitySchema = z
   .object({
     confirmed: z.boolean().optional(),
     description: z.string().trim().max(5000).optional(),
-    base_price_min: z.number().nonnegative().optional(),
-    base_price_max: z.number().nonnegative().optional(),
+    base_price_min: nonnegativeMoney.optional(),
+    base_price_max: nonnegativeMoney.optional(),
     price_unit: z.string().trim().max(100).optional(),
     default_duration_hours: z.number().positive().optional(),
     default_required_skills: z.array(z.string().trim().min(1).max(100)).max(50).optional(),

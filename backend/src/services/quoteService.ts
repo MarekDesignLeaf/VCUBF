@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
+import { nonnegativeMoney } from "../lib/money.js";
 import {
   CREATE_QUOTE_ACTION,
   UPDATE_QUOTE_ACTION,
@@ -21,8 +22,8 @@ const quoteItemSchema = z.object({
   service_catalogue_item_id: z.string().uuid().optional(),
   description: z.string().min(1, "line item description is required"),
   quantity: z.number().positive().default(1),
-  unit_price: z.number().nonnegative(),
-  unit_cost: z.number().nonnegative().optional(),
+  unit_price: nonnegativeMoney,
+  unit_cost: nonnegativeMoney.optional(),
 });
 
 export const createQuoteSchema = z.object({
