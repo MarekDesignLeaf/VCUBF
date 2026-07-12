@@ -13,6 +13,16 @@ export interface ActionContract {
   possibleErrors: string[];
 }
 
+export const CHANGE_OWN_PASSWORD_ACTION: ActionContract = {
+  actionName: "change_own_password",
+  purpose: "Allow an authenticated user to replace their own password after verifying the current password.",
+  requiredPermission: "authenticated",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "auth.users"],
+  possibleErrors: ["VALIDATION_FAILED", "CURRENT_PASSWORD_INVALID", "PASSWORD_UNCHANGED", "USER_NOT_FOUND"],
+};
+
 export const CREATE_CLIENT_ACTION: ActionContract = {
   actionName: "create_client",
   purpose: "Create a new client record in CRM Core from a verified or manually entered source.",

@@ -12,6 +12,7 @@ export function Layout() {
         <div className="brand">VCUF Secretary</div>
         <nav>
           <NavLink to="/" end>Dashboard</NavLink>
+          <NavLink to="/account">Account</NavLink>
           <NavLink to="/notifications">Notifications</NavLink>
           <NavLink to="/data-quality">Data Quality</NavLink>
           <NavLink to="/metrics">Business Metrics</NavLink>

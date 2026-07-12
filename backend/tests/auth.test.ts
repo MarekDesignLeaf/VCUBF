@@ -44,4 +44,38 @@ describe("auth", () => {
     const res = await request(app).get("/auth/me");
     assert.equal(res.status, 401);
   });
+
+  it("requires authentication to change a password", async () => {
+    const res = await request(app).post("/auth/change-password").send({ current_password: "Password123!", new_password: "AValidPassword456" });
+    assert.equal(res.status, 401);
+  });
+
+  it("rejects a weak new password without storing password values in audit", async () => {
+    const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
+    const res = await request(app).post("/auth/change-password").set("Authorization", `Bearer ${login.body.token}`).send({ current_password: "Password123!", new_password: "short" });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, "VALIDATION_FAILED");
+    const audit = await prisma.auditLog.findFirst({ where: { actionName: "change_own_password", errorMessage: "VALIDATION_FAILED" }, orderBy: { createdAt: "desc" } });
+    assert.deepEqual(audit?.inputPayload, { passwordFieldsRedacted: true });
+  });
+
+  it("rejects an incorrect current password", async () => {
+    const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
+    const res = await request(app).post("/auth/change-password").set("Authorization", `Bearer ${login.body.token}`).send({ current_password: "NotThePassword1", new_password: "AValidPassword456" });
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error, "CURRENT_PASSWORD_INVALID");
+  });
+
+  it("changes the authenticated user's password, audits safely and invalidates the old credential", async () => {
+    const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
+    const changed = await request(app).post("/auth/change-password").set("Authorization", `Bearer ${login.body.token}`).send({ current_password: "Password123!", new_password: "AValidPassword456" });
+    assert.equal(changed.status, 204);
+    const oldLogin = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
+    assert.equal(oldLogin.status, 401);
+    const newLogin = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "AValidPassword456" });
+    assert.equal(newLogin.status, 200);
+    const audit = await prisma.auditLog.findFirst({ where: { actionName: "change_own_password", result: "success" }, orderBy: { createdAt: "desc" } });
+    assert.deepEqual(audit?.inputPayload, { passwordFieldsRedacted: true });
+    assert.deepEqual(audit?.dataAfter, { passwordChanged: true });
+  });
 });

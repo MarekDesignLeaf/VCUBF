@@ -1341,6 +1341,8 @@ export const api = {
   login: (email: string, password: string) =>
     request<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   me: () => request<LoginResponse["user"]>("/auth/me"),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<void>("/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
   clients: {
     list: () => request<Client[]>("/crm/clients"),
     get: (id: string) => request<Client>(`/crm/clients/${id}`),

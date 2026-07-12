@@ -8,6 +8,8 @@ Open the frontend URL supplied by your administrator and sign in with your Secre
 
 If an action is refused with `MISSING_PERMISSION`, ask an administrator to review your role. Do not share credentials or use another person's account.
 
+Use **Account** to change your own password. You must enter the current password, and the new password must contain at least 12 characters with uppercase, lowercase and a number. Password values are never written to the audit log.
+
 ## 2. Safe command and voice input
 
 The Dashboard command bar supports a defined set of deterministic text commands. Unsupported wording is rejected; Secretary does not guess an action.
