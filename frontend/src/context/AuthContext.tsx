@@ -22,6 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await api.login(email, password);
     setToken(res.token);
     setUser(res.user);
+    return res.user;
   }
 
   function logout() {

@@ -9,6 +9,7 @@ export interface AuthedUser {
   displayName: string;
   role: string;
   permissions: string[];
+  mustChangePassword: boolean;
 }
 
 declare global {
@@ -45,6 +46,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       displayName: user.displayName,
       role: user.role,
       permissions: user.permissions,
+      mustChangePassword: user.mustChangePassword,
     };
     next();
   } catch {

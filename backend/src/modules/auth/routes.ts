@@ -56,6 +56,7 @@ authRouter.post("/login", loginRateLimiter, async (req, res) => {
     displayName: user.displayName,
     role: user.role,
     permissions: user.permissions,
+    mustChangePassword: user.mustChangePassword,
   }, user.authVersion);
 
   res.json({
@@ -66,6 +67,7 @@ authRouter.post("/login", loginRateLimiter, async (req, res) => {
       displayName: user.displayName,
       role: user.role,
       permissions: user.permissions,
+      mustChangePassword: user.mustChangePassword,
     },
   });
 });
@@ -95,7 +97,7 @@ authRouter.post("/change-password", requireAuth, async (req, res) => {
     await recordAudit({ ...auditBase, inputPayload: { passwordFieldsRedacted: true }, result: "rejected", errorMessage: "PASSWORD_UNCHANGED" });
     return res.status(409).json({ error: "PASSWORD_UNCHANGED" });
   }
-  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(parsed.data.new_password, 12), authVersion: { increment: 1 } } });
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(parsed.data.new_password, 12), authVersion: { increment: 1 }, mustChangePassword: false } });
   await recordAudit({ ...auditBase, inputPayload: { passwordFieldsRedacted: true }, dataAfter: { passwordChanged: true }, result: "success" });
   res.status(204).send();
 });

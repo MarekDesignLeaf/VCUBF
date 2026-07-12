@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
-import { CHECK_CAPACITY_ACTION, CREATE_EMPLOYEE_ACTION, KNOWN_PERMISSIONS, UPDATE_EMPLOYEE_ACTION } from "../../lib/actionContracts.js";
+import { CHECK_CAPACITY_ACTION, CREATE_EMPLOYEE_ACTION, KNOWN_PERMISSIONS, RESET_EMPLOYEE_PASSWORD_ACTION, UPDATE_EMPLOYEE_ACTION } from "../../lib/actionContracts.js";
 import * as employeeService from "../../services/employeeService.js";
 import { computeEmployeeCapacity } from "../../services/capacityService.js";
 
@@ -41,6 +41,12 @@ employeesRouter.put("/:id", requirePermission(UPDATE_EMPLOYEE_ACTION.requiredPer
   if (!result.ok) {
     return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   }
+  res.status(result.httpStatus).json(result.data);
+});
+
+employeesRouter.post("/:id/reset-password", requirePermission(RESET_EMPLOYEE_PASSWORD_ACTION.requiredPermission), async (req, res) => {
+  const result = await employeeService.resetEmployeePassword(req.user!, req.params.id, req.body);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   res.status(result.httpStatus).json(result.data);
 });
 

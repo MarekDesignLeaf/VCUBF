@@ -138,6 +138,7 @@ model User {
   email               String   @unique
   passwordHash        String   @map("password_hash")
   authVersion         Int      @default(0) @map("auth_version")
+  mustChangePassword  Boolean  @default(false) @map("must_change_password")
   displayName         String   @map("display_name")
   role                String   @default("worker")
   permissions         String[]

@@ -742,7 +742,7 @@ job/communication-derived CRM links, assignment, capacity contribution/overload 
 calendar visibility, status completion/reopening, overdue filtering and notification,
 audit evidence and cross-tenant isolation; parser/integration coverage proves task creation
 and listing through the shared Voice/Text Action Engine. The complete 42-suite,
-359-test database-backed run above was verified against a real PostgreSQL instance.
+361-test database-backed run above was verified against a real PostgreSQL instance.
 
 Frontend: `npm run lint` and `npm run build` verified working with no warnings. The auth
 provider, context state and `useAuth` hook live in separate modules so Fast Refresh can
@@ -753,8 +753,8 @@ identify the component-only provider module correctly.
 A day-level scheduling grid with travel time, tool/material/vehicle requirements, and
 staged multi-visit scheduling is not implemented — the calendar slice works at weekly
 granularity, matching the capacity engine underneath it. Employee creation issues no
-invitation email and generates no temporary password reset flow — an admin sets the
-initial password directly, since there is no outbound email action. Quotes have no
+invitation email — an admin sets the initial temporary password directly and Secretary
+forces the employee to replace it before continuing, since there is no outbound email action. Quotes have no
 "send to client" action — PDF export is manual and status is tracked internally only, since the Gmail
 adapter is read-only and cannot deliver anything. Recruitment adverts are
 drafted text only — there is no job-board connector to place them, no candidate-sourcing

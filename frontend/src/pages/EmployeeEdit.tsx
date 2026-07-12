@@ -26,6 +26,9 @@ export function EmployeeEdit() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [loaded, setLoaded] = useState(isNew);
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [resetPreview, setResetPreview] = useState<Record<string, unknown> | null>(null);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (isNew || !id) return;
@@ -115,6 +118,19 @@ export function EmployeeEdit() {
     }
   }
 
+  async function resetPassword(confirmed: boolean) {
+    if (!id) return;
+    setSubmitting(true); setError(null); setResetMessage(null);
+    try {
+      await api.employees.resetPassword(id, temporaryPassword, confirmed);
+      setTemporaryPassword(""); setResetPreview(null);
+      if (confirmed) setResetMessage("Password reset complete. Give the temporary password to the employee securely.");
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "CONFIRMATION_REQUIRED") setResetPreview((err.details?.preview as Record<string, unknown>) ?? null);
+      else setError(err instanceof ApiError ? err.message : "Could not reset password.");
+    } finally { setSubmitting(false); }
+  }
+
   if (!loaded) return <p>Loading…</p>;
 
   return (
@@ -194,6 +210,22 @@ export function EmployeeEdit() {
             {submitting ? "Checking…" : "Review changes"}
           </button>
         </form>
+      )}
+      {!isNew && (
+        <section style={{ maxWidth: 480, marginTop: 32 }}>
+          <h2>Reset password</h2>
+          <p className="hint">This invalidates existing sessions. The employee must change the temporary password after signing in.</p>
+          {resetMessage && <div className="success-banner">{resetMessage}</div>}
+          {resetPreview ? <div className="warning-banner">
+            <strong>Confirm password reset:</strong>
+            <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.85rem" }}>{JSON.stringify(resetPreview, null, 2)}</pre>
+            <button type="button" onClick={() => resetPassword(true)} disabled={submitting}>Confirm reset</button>{" "}
+            <button type="button" onClick={() => setResetPreview(null)} disabled={submitting}>Cancel</button>
+          </div> : <div className="inline-form">
+            <input type="password" autoComplete="new-password" minLength={12} placeholder="Temporary password" value={temporaryPassword} onChange={(e) => setTemporaryPassword(e.target.value)} />
+            <button type="button" onClick={() => resetPassword(false)} disabled={submitting || temporaryPassword.length < 12}>Review reset</button>
+          </div>}
+        </section>
       )}
     </div>
   );

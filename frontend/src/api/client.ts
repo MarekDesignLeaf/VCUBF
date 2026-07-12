@@ -54,6 +54,7 @@ export interface LoginResponse {
     displayName: string;
     role: string;
     permissions: string[];
+    mustChangePassword: boolean;
   };
 }
 
@@ -90,6 +91,7 @@ export interface Contact {
   sourceReference?: string | null;
   notes?: string | null;
   isActive: boolean;
+  mustChangePassword: boolean;
   createdAt: string;
   client?: { id: string; displayName: string } | null;
 }
@@ -1473,6 +1475,11 @@ export const api = {
       request<ManagedEmployee>("/crm/employees", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Record<string, unknown>) =>
       request<ManagedEmployee>(`/crm/employees/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    resetPassword: (id: string, temporaryPassword: string, confirmed: boolean) =>
+      request<{ employeeId: string; passwordReset: boolean; mustChangePassword: boolean }>(`/crm/employees/${id}/reset-password`, {
+        method: "POST",
+        body: JSON.stringify({ temporary_password: temporaryPassword, confirmed }),
+      }),
   },
   calendar: {
     jobs: (from: string, to: string) =>

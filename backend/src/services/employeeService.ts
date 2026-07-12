@@ -45,17 +45,22 @@ export async function findEmployeesByName(user: AuthedUser, name: string) {
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { recordAudit } from "../lib/audit.js";
-import { CREATE_EMPLOYEE_ACTION, KNOWN_PERMISSIONS, UPDATE_EMPLOYEE_ACTION } from "../lib/actionContracts.js";
+import { CREATE_EMPLOYEE_ACTION, KNOWN_PERMISSIONS, RESET_EMPLOYEE_PASSWORD_ACTION, UPDATE_EMPLOYEE_ACTION } from "../lib/actionContracts.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
 export const createEmployeeSchema = z.object({
   display_name: z.string().min(1, "display_name is required"),
   email: z.string().email("a valid email is required"),
-  password: z.string().min(8, "password must be at least 8 characters"),
+  password: z.string().min(12).regex(/[a-z]/).regex(/[A-Z]/).regex(/[0-9]/),
   role: z.string().min(1).default("worker"),
   permissions: z.array(z.enum(KNOWN_PERMISSIONS)).default([]),
   skills: z.array(z.string()).default([]),
   weekly_capacity_hours: z.number().int().positive().default(40),
+  confirmed: z.boolean().optional(),
+});
+
+export const resetEmployeePasswordSchema = z.object({
+  temporary_password: z.string().min(12).regex(/[a-z]/).regex(/[A-Z]/).regex(/[0-9]/),
   confirmed: z.boolean().optional(),
 });
 
@@ -83,6 +88,7 @@ export async function getEmployeeForManagement(user: AuthedUser, id: string) {
       skills: true,
       weeklyCapacityHours: true,
       isActive: true,
+      mustChangePassword: true,
     },
   });
 }
@@ -146,7 +152,7 @@ export async function createEmployee(user: AuthedUser, rawInput: unknown): Promi
     return fail(409, "CONFIRMATION_REQUIRED", "Review the preview and resubmit with confirmed: true.", { preview });
   }
 
-  const passwordHash = await bcrypt.hash(data.password, 10);
+  const passwordHash = await bcrypt.hash(data.password, 12);
   const created = await prisma.user.create({
     data: {
       companyId: user.companyId,
@@ -157,6 +163,7 @@ export async function createEmployee(user: AuthedUser, rawInput: unknown): Promi
       permissions: data.permissions,
       skills: data.skills,
       weeklyCapacityHours: data.weekly_capacity_hours,
+      mustChangePassword: true,
     },
     select: {
       id: true,
@@ -167,6 +174,7 @@ export async function createEmployee(user: AuthedUser, rawInput: unknown): Promi
       skills: true,
       weeklyCapacityHours: true,
       isActive: true,
+      mustChangePassword: true,
     },
   });
 
@@ -268,6 +276,7 @@ export async function updateEmployee(
       skills: true,
       weeklyCapacityHours: true,
       isActive: true,
+      mustChangePassword: true,
     },
   });
 
@@ -285,4 +294,45 @@ export async function updateEmployee(
   });
 
   return ok(200, updated);
+}
+
+export async function resetEmployeePassword(user: AuthedUser, employeeId: string, rawInput: unknown): Promise<ServiceResult<unknown>> {
+  const parsed = resetEmployeePasswordSchema.safeParse(rawInput);
+  const auditBase = {
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: RESET_EMPLOYEE_PASSWORD_ACTION.actionName,
+    inputPayload: { employeeId, passwordFieldsRedacted: true },
+    riskLevel: RESET_EMPLOYEE_PASSWORD_ACTION.riskLevel,
+    confirmationRequired: RESET_EMPLOYEE_PASSWORD_ACTION.confirmationRequired,
+  } as const;
+  if (!parsed.success) {
+    await recordAudit({ ...auditBase, result: "error", errorMessage: "VALIDATION_FAILED" });
+    return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  }
+  const employee = await prisma.user.findFirst({ where: { id: employeeId, companyId: user.companyId } });
+  if (!employee) {
+    await recordAudit({ ...auditBase, result: "error", errorMessage: "EMPLOYEE_NOT_FOUND" });
+    return fail(404, "EMPLOYEE_NOT_FOUND");
+  }
+  if (employee.id === user.id) {
+    await recordAudit({ ...auditBase, result: "rejected", errorMessage: "SELF_PASSWORD_RESET_NOT_ALLOWED" });
+    return fail(409, "SELF_PASSWORD_RESET_NOT_ALLOWED", "Use Account to change your own password.");
+  }
+  if (!employee.isActive) {
+    await recordAudit({ ...auditBase, result: "rejected", errorMessage: "EMPLOYEE_INACTIVE" });
+    return fail(409, "EMPLOYEE_INACTIVE");
+  }
+  const preview = { employeeId: employee.id, email: employee.email, displayName: employee.displayName, invalidatesExistingSessions: true, requiresPasswordChange: true };
+  if (!parsed.data.confirmed) {
+    await recordAudit({ ...auditBase, dataBefore: { authVersion: employee.authVersion, mustChangePassword: employee.mustChangePassword }, result: "rejected", errorMessage: "CONFIRMATION_REQUIRED" });
+    return fail(409, "CONFIRMATION_REQUIRED", "Review the preview and resubmit with confirmed: true.", { preview });
+  }
+  await prisma.user.update({
+    where: { id: employee.id },
+    data: { passwordHash: await bcrypt.hash(parsed.data.temporary_password, 12), authVersion: { increment: 1 }, mustChangePassword: true },
+  });
+  const result = { employeeId: employee.id, passwordReset: true, mustChangePassword: true };
+  await recordAudit({ ...auditBase, dataBefore: { authVersion: employee.authVersion, mustChangePassword: employee.mustChangePassword }, dataAfter: { authVersion: employee.authVersion + 1, mustChangePassword: true }, confirmed: true, result: "success" });
+  return ok(200, result);
 }

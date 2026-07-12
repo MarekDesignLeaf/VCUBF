@@ -12,6 +12,8 @@ Repeated failed sign-in attempts for the same account and network are temporaril
 
 Use **Account** to change your own password. You must enter the current password, and the new password must contain at least 12 characters with uppercase, lowercase and a number. Password values are never written to the audit log. Changing the password invalidates previously issued sign-in tokens, so other active sessions must sign in again.
 
+Administrators can reset another active employee's password from the employee edit page. The reset requires a preview and explicit confirmation, invalidates that employee's existing sessions and marks the supplied password as temporary. The employee is restricted to the Account page until they replace it. Share temporary passwords through a secure channel; they are never displayed again or written to the audit log.
+
 ## 2. Safe command and voice input
 
 The Dashboard command bar supports a defined set of deterministic text commands. Unsupported wording is rejected; Secretary does not guess an action.

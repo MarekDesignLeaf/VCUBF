@@ -16,8 +16,8 @@ export function Login() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
-      navigate("/");
+      const user = await login(email, password);
+      navigate(user.mustChangePassword ? "/account" : "/");
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.code === "INVALID_CREDENTIALS" ? "Invalid email or password." : err.message);

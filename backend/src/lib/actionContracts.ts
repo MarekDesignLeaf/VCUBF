@@ -224,6 +224,16 @@ export const UPDATE_EMPLOYEE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "EMPLOYEE_NOT_FOUND", "VALIDATION_FAILED", "CONFIRMATION_REQUIRED"],
 };
 
+export const RESET_EMPLOYEE_PASSWORD_ACTION: ActionContract = {
+  actionName: "reset_employee_password",
+  purpose: "Replace an employee password with an administrator-supplied temporary password and require the employee to change it before using Secretary.",
+  requiredPermission: "users.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.users"],
+  possibleErrors: ["MISSING_PERMISSION", "EMPLOYEE_NOT_FOUND", "EMPLOYEE_INACTIVE", "SELF_PASSWORD_RESET_NOT_ALLOWED", "VALIDATION_FAILED", "CONFIRMATION_REQUIRED"],
+};
+
 // The fixed set of permission strings the system understands. Kept as
 // structured data (not invented per-request) so the UI can offer exactly
 // these as checkboxes and the backend can validate against exactly these.
