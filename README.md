@@ -144,6 +144,13 @@ npm run dev                 # http://localhost:5173
   input remains available when speech recognition is unsupported. Both paths therefore
   use the same deterministic backend parser, permission checks and audit trail; the audit
   records `text` versus `voice_transcript` as the input method, never audio.
+- **Windows 11 Emma companion**: `windows-companion/VCUBF-Emma.ps1` is a native
+  system-tray listener built on the locally installed Windows Speech API. It keeps
+  listening when the browser is minimized or closed, detects the per-user wake word
+  (`Emma` by default), pauses for an editable native review dialog, sends only an
+  approved transcript to `/command/text`, speaks the deterministic result and stores
+  its API token encrypted for the current Windows user with DPAPI. `Install.ps1`
+  installs auto-start for the current user; no password or audio is persisted.
 
 - **Job Allocation and Capacity Management Module**: `backend/src/services/
   capacityService.ts` computes an employee's **real** current-week workload from actual

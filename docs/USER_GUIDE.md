@@ -29,6 +29,8 @@ Recognition never submits automatically. Secretary receives the reviewed transcr
 
 For wake-word listening, open **Account**, enable wake-word controls and save. The default wake word is **Emma**, but you can replace it at any time. Select **Listen for Emma**, then say the wake word followed by a command. You can also say the wake word alone and speak the command within eight seconds. Listening pauses as soon as a command is captured; review and correct the transcript and select **Run**. The browser page must remain open, microphone permission must stay enabled, and the browser or operating system may suspend listening in the background.
 
+On Windows 11, install the native companion from `windows-companion` with `Install.ps1 -StartNow`. Its tray icon keeps local wake-word recognition active even when the browser is closed. Sign in once, right-click the icon for listening/settings controls, and allow desktop microphone access in Windows Privacy settings. The password is never saved; the API token is encrypted by Windows for the signed-in Windows account. The same review-before-run rule still applies.
+
 ## 3. Enquiries, leads, clients and contacts
 
 Use **Communication Intake** to enter an authorised inbound message. Extraction identifies only deterministic contact/service evidence from the entered text. Review the proposed match before converting it into a client and communication record.
