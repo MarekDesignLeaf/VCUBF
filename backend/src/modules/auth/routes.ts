@@ -1,5 +1,6 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import { ipKeyGenerator, rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import { requireAuth, signToken } from "../../middleware/auth.js";
@@ -18,8 +19,21 @@ const changePasswordSchema = z.object({
   new_password: z.string().min(12).regex(/[a-z]/, "new password must contain a lowercase letter").regex(/[A-Z]/, "new password must contain an uppercase letter").regex(/[0-9]/, "new password must contain a number"),
 });
 
+const loginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: (req) => {
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "invalid";
+    return `${ipKeyGenerator(req.ip ?? "unknown")}:${email}`;
+  },
+  handler: (_req, res) => res.status(429).json({ error: "TOO_MANY_LOGIN_ATTEMPTS" }),
+});
+
 // POST /auth/login
-authRouter.post("/login", async (req, res) => {
+authRouter.post("/login", loginRateLimiter, async (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });

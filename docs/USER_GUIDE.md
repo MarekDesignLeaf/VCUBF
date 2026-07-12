@@ -8,6 +8,8 @@ Open the frontend URL supplied by your administrator and sign in with your Secre
 
 If an action is refused with `MISSING_PERMISSION`, ask an administrator to review your role. Do not share credentials or use another person's account.
 
+Repeated failed sign-in attempts for the same account and network are temporarily limited. Wait for the indicated retry period before trying again; successful sign-ins do not consume the failure allowance.
+
 Use **Account** to change your own password. You must enter the current password, and the new password must contain at least 12 characters with uppercase, lowercase and a number. Password values are never written to the audit log. Changing the password invalidates previously issued sign-in tokens, so other active sessions must sign in again.
 
 ## 2. Safe command and voice input

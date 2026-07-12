@@ -40,6 +40,22 @@ describe("auth", () => {
     assert.equal(res.body.error, "VALIDATION_FAILED");
   });
 
+  it("rate limits repeated failed login attempts without revealing account existence", async () => {
+    for (let attempt = 1; attempt <= 10; attempt += 1) {
+      const res = await request(app)
+        .post("/auth/login")
+        .send({ email: "blocked@test.local", password: "wrong" });
+      assert.equal(res.status, 401);
+      assert.equal(res.body.error, "INVALID_CREDENTIALS");
+    }
+    const blocked = await request(app)
+      .post("/auth/login")
+      .send({ email: "blocked@test.local", password: "wrong" });
+    assert.equal(blocked.status, 429);
+    assert.equal(blocked.body.error, "TOO_MANY_LOGIN_ATTEMPTS");
+    assert.ok(blocked.headers["ratelimit"]);
+  });
+
   it("returns 401 for /auth/me without a token", async () => {
     const res = await request(app).get("/auth/me");
     assert.equal(res.status, 401);
