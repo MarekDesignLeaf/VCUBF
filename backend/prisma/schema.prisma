@@ -137,6 +137,7 @@ model User {
   companyId           String   @map("company_id")
   email               String   @unique
   passwordHash        String   @map("password_hash")
+  authVersion         Int      @default(0) @map("auth_version")
   displayName         String   @map("display_name")
   role                String   @default("worker")
   permissions         String[]

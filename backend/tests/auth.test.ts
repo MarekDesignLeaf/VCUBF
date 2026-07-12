@@ -70,10 +70,14 @@ describe("auth", () => {
     const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
     const changed = await request(app).post("/auth/change-password").set("Authorization", `Bearer ${login.body.token}`).send({ current_password: "Password123!", new_password: "AValidPassword456" });
     assert.equal(changed.status, 204);
+    const oldSession = await request(app).get("/auth/me").set("Authorization", `Bearer ${login.body.token}`);
+    assert.equal(oldSession.status, 401);
     const oldLogin = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
     assert.equal(oldLogin.status, 401);
     const newLogin = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "AValidPassword456" });
     assert.equal(newLogin.status, 200);
+    const newSession = await request(app).get("/auth/me").set("Authorization", `Bearer ${newLogin.body.token}`);
+    assert.equal(newSession.status, 200);
     const audit = await prisma.auditLog.findFirst({ where: { actionName: "change_own_password", result: "success" }, orderBy: { createdAt: "desc" } });
     assert.deepEqual(audit?.inputPayload, { passwordFieldsRedacted: true });
     assert.deepEqual(audit?.dataAfter, { passwordChanged: true });
