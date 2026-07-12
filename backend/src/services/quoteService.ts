@@ -57,27 +57,30 @@ interface QuoteTotals {
 // only sums lines where a unit cost was actually entered. If ANY line is
 // missing a cost, margin is reported as null (unknown) rather than computed
 // from a partial, misleading cost total.
-function computeTotals(items: { quantity: number; unitPrice: number; unitCost: number | null }[]): QuoteTotals {
+type MoneyValue = number | { toNumber(): number };
+const moneyNumber = (value: MoneyValue) => typeof value === "number" ? value : value.toNumber();
+function computeTotals(items: { quantity: number; unitPrice: MoneyValue; unitCost: MoneyValue | null }[]): QuoteTotals {
   let subtotal = 0;
   let costTotal = 0;
   let costKnown = items.length > 0;
   for (const item of items) {
-    subtotal += item.quantity * item.unitPrice;
+    subtotal += item.quantity * moneyNumber(item.unitPrice);
     if (item.unitCost == null) {
       costKnown = false;
     } else {
-      costTotal += item.quantity * item.unitCost;
+      costTotal += item.quantity * moneyNumber(item.unitCost);
     }
   }
   const marginAmount = costKnown ? subtotal - costTotal : null;
   const marginPct = costKnown && subtotal > 0 ? (marginAmount! / subtotal) * 100 : costKnown && subtotal === 0 ? 0 : null;
-  return { subtotal, costTotal, costKnown, marginAmount, marginPct };
+  const round = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
+  return { subtotal: round(subtotal), costTotal: round(costTotal), costKnown, marginAmount: marginAmount == null ? null : round(marginAmount), marginPct };
 }
 
-function withTotals<T extends { items: { quantity: number; unitPrice: number; unitCost: number | null }[] }>(
+function withTotals<T extends { items: { quantity: number; unitPrice: MoneyValue; unitCost: MoneyValue | null }[] }>(
   quote: T
 ) {
-  return { ...quote, totals: computeTotals(quote.items) };
+  return { ...quote, items: quote.items.map(i => ({...i, unitPrice: moneyNumber(i.unitPrice), unitCost: i.unitCost == null ? null : moneyNumber(i.unitCost)})), totals: computeTotals(quote.items) };
 }
 
 const quoteInclude = {

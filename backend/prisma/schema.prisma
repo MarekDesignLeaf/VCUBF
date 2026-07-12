@@ -254,8 +254,8 @@ model JobResourceRequirement {
   quantity Float?
   unit String?
   requirementStatus String @default("needed") @map("requirement_status")
-  estimatedCost Float? @map("estimated_cost")
-  actualCost Float? @map("actual_cost")
+  estimatedCost Decimal? @db.Decimal(14, 2) @map("estimated_cost")
+  actualCost Decimal? @db.Decimal(14, 2) @map("actual_cost")
   notes String?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -485,8 +485,8 @@ model ServiceCatalogueItem {
   name                    String
   description             String?
   category                String?
-  basePriceMin            Float?   @map("base_price_min")
-  basePriceMax            Float?   @map("base_price_max")
+  basePriceMin            Decimal? @db.Decimal(14, 2) @map("base_price_min")
+  basePriceMax            Decimal? @db.Decimal(14, 2) @map("base_price_max")
   priceUnit               String?  @map("price_unit")
   defaultDurationHours    Float?   @map("default_duration_hours")
   defaultRequiredSkills   String[] @default([]) @map("default_required_skills")
@@ -497,7 +497,7 @@ model ServiceCatalogueItem {
   referenceSubtypeCode    String?  @map("reference_subtype_code")
   referencePricingMethod  String?  @map("reference_pricing_method")
   referenceRateUnit       String?  @map("reference_rate_unit")
-  referenceRateGbp        Float?   @map("reference_rate_gbp")
+  referenceRateGbp        Decimal? @db.Decimal(14, 2) @map("reference_rate_gbp")
   referencePricingMethods String[] @default([]) @map("reference_pricing_methods")
   isActive                Boolean  @default(true) @map("is_active")
   createdBy               String?  @map("created_by")
@@ -551,8 +551,8 @@ model QuoteItem {
   serviceCatalogueItemId String?  @map("service_catalogue_item_id")
   description            String
   quantity               Float    @default(1)
-  unitPrice              Float    @map("unit_price")
-  unitCost               Float?   @map("unit_cost")
+  unitPrice              Decimal  @db.Decimal(14, 2) @map("unit_price")
+  unitCost               Decimal? @db.Decimal(14, 2) @map("unit_cost")
   sortOrder              Int      @default(0) @map("sort_order")
   createdAt              DateTime @default(now()) @map("created_at")
 
@@ -591,7 +591,7 @@ model InvoiceItem {
   invoiceId String @map("invoice_id")
   description String
   quantity Float @default(1)
-  unitPrice Float @map("unit_price")
+  unitPrice Decimal @db.Decimal(14, 2) @map("unit_price")
   sortOrder Int @default(0) @map("sort_order")
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   @@index([invoiceId])
@@ -601,7 +601,7 @@ model InvoiceItem {
 model Payment {
   id String @id @default(uuid())
   invoiceId String @map("invoice_id")
-  amount Float
+  amount Decimal @db.Decimal(14, 2)
   paidAt DateTime @map("paid_at")
   method String?
   reference String?

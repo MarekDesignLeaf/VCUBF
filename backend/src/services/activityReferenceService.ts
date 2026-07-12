@@ -341,7 +341,16 @@ export async function activateReferenceActivity(
           createdBy: user.id,
         },
       });
-      return { service, industry, link };
+      return {
+        service: {
+          ...service,
+          basePriceMin: service.basePriceMin == null ? null : Number(service.basePriceMin),
+          basePriceMax: service.basePriceMax == null ? null : Number(service.basePriceMax),
+          referenceRateGbp: service.referenceRateGbp == null ? null : Number(service.referenceRateGbp),
+        },
+        industry,
+        link,
+      };
     });
     await recordAudit({
       companyId: user.companyId,

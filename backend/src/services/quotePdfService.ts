@@ -104,14 +104,14 @@ export function renderQuotePdf(quote: QuotePdfData): Promise<Buffer> {
       const y = doc.y;
       doc.fillColor("#111827").font("Helvetica").fontSize(9).text(description, columns.description + 6, y + 5, { width: 270 });
       doc.text(String(item.quantity), columns.quantity, y + 5, { width: 45, align: "right" });
-      doc.text(money.format(item.unitPrice), columns.unitPrice, y + 5, { width: 70, align: "right" });
-      doc.font("Helvetica-Bold").text(money.format(item.quantity * item.unitPrice), columns.total, y + 5, { width: 66, align: "right" });
+      doc.text(money.format(Number(item.unitPrice)), columns.unitPrice, y + 5, { width: 70, align: "right" });
+      doc.font("Helvetica-Bold").text(money.format(item.quantity * Number(item.unitPrice)), columns.total, y + 5, { width: 66, align: "right" });
       doc.moveTo(left, y + height).lineTo(right, y + height).lineWidth(0.5).strokeColor("#d1d5db").stroke();
       doc.y = y + height + 1;
     }
 
     ensureSpace(85);
-    const subtotal = quote.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const subtotal = quote.items.reduce((sum, item) => sum + item.quantity * Number(item.unitPrice), 0);
     doc.moveDown(0.8).fillColor("#4b5563").font("Helvetica-Bold").fontSize(10).text("SUBTOTAL", 365, doc.y, { width: 90, align: "right" });
     doc.fillColor("#17324d").fontSize(14).text(money.format(subtotal), 462, doc.y - 2, { width: 85, align: "right" });
     doc.moveDown(1.5).fillColor("#6b7280").font("Helvetica").fontSize(8).text("Tax/VAT is not specified in this quote. Currency: GBP.", 315, doc.y, { width: 232, align: "right" });

@@ -30,28 +30,29 @@ export const updateServiceSchema = z.object({
   default_required_skills: z.array(z.string()).optional(),
   is_active: z.boolean().optional(),
 });
+function numericPrices<T extends { basePriceMin: unknown; basePriceMax: unknown; referenceRateGbp: unknown }>(x:T){return {...x,basePriceMin:x.basePriceMin==null?null:Number(x.basePriceMin),basePriceMax:x.basePriceMax==null?null:Number(x.basePriceMax),referenceRateGbp:x.referenceRateGbp==null?null:Number(x.referenceRateGbp)}}
 
 export async function listServices(user: AuthedUser, filters: { activeOnly?: boolean } = {}) {
-  return prisma.serviceCatalogueItem.findMany({
+  return (await prisma.serviceCatalogueItem.findMany({
     where: {
       companyId: user.companyId,
       ...(filters.activeOnly ? { isActive: true } : {}),
     },
     orderBy: { name: "asc" },
-  });
+  })).map(numericPrices);
 }
 
 export async function getService(user: AuthedUser, id: string) {
-  return prisma.serviceCatalogueItem.findFirst({ where: { id, companyId: user.companyId } });
+  const x=await prisma.serviceCatalogueItem.findFirst({ where: { id, companyId: user.companyId } });return x?numericPrices(x):null;
 }
 
 // Case-insensitive substring match on name — used by the Text Command Layer
 // to resolve "create job X based on service Y" style references (and for
 // simple "create service" duplicate-name awareness later, if needed).
 export async function findServicesByName(user: AuthedUser, name: string) {
-  return prisma.serviceCatalogueItem.findMany({
+  return (await prisma.serviceCatalogueItem.findMany({
     where: { companyId: user.companyId, name: { contains: name, mode: "insensitive" } },
-  });
+  })).map(numericPrices);
 }
 
 // create_service_catalogue_item — Action Contract driven.
@@ -98,7 +99,7 @@ export async function createService(user: AuthedUser, rawInput: unknown): Promis
     result: "success",
   });
 
-  return ok(201, created);
+  return ok(201, numericPrices(created));
 }
 
 // update_service_catalogue_item — Action Contract driven.
@@ -163,5 +164,5 @@ export async function updateService(
     result: "success",
   });
 
-  return ok(200, updated);
+  return ok(200, numericPrices(updated));
 }

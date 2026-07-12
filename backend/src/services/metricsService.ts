@@ -46,7 +46,7 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
   }
   const quoteDecisions = quotes.filter((quote) => ["accepted", "rejected", "expired"].includes(quote.quoteStatus));
   const acceptedQuotes = quoteDecisions.filter((quote) => quote.quoteStatus === "accepted").length;
-  const quoteValues = quotes.map((quote) => quote.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0));
+  const quoteValues = quotes.map((quote) => quote.items.reduce((sum, item) => sum + item.quantity * Number(item.unitPrice), 0));
   const demand = new Map<string, { serviceRequested: string; current: number; previous: number }>();
   for (const lead of leads) {
     const label = lead.serviceRequested?.trim();
@@ -77,18 +77,18 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
   };
   const previousQuoteDecisions = previousQuotes.filter((quote) => ["accepted", "rejected", "expired"].includes(quote.quoteStatus));
   const previousAcceptedQuotes = previousQuoteDecisions.filter((quote) => quote.quoteStatus === "accepted").length;
-  const previousQuoteValues = previousQuotes.map((quote) => quote.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0));
+  const previousQuoteValues = previousQuotes.map((quote) => quote.items.reduce((sum, item) => sum + item.quantity * Number(item.unitPrice), 0));
   const serviceRevenue = new Map<string, { serviceId: string; serviceName: string; acceptedValueGbp: number; knownCostGbp: number; lineCount: number; linesWithKnownCost: number }>();
   let unlinkedAcceptedValueGbp = 0;
   for (const quote of quotes.filter((value) => value.quoteStatus === "accepted")) {
     for (const item of quote.items) {
-      const lineValue = item.quantity * item.unitPrice;
+      const lineValue = item.quantity * Number(item.unitPrice);
       if (!item.serviceCatalogueItem) { unlinkedAcceptedValueGbp += lineValue; continue; }
       const existing = serviceRevenue.get(item.serviceCatalogueItem.id) ?? { serviceId: item.serviceCatalogueItem.id, serviceName: item.serviceCatalogueItem.name, acceptedValueGbp: 0, knownCostGbp: 0, lineCount: 0, linesWithKnownCost: 0 };
       existing.acceptedValueGbp += lineValue;
       existing.lineCount += 1;
       if (item.unitCost != null) {
-        existing.knownCostGbp += item.quantity * item.unitCost;
+        existing.knownCostGbp += item.quantity * Number(item.unitCost);
         existing.linesWithKnownCost += 1;
       }
       serviceRevenue.set(existing.serviceId, existing);
