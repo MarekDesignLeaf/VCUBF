@@ -1,4 +1,4 @@
-param([switch]$Diagnostic)
+param([switch]$Diagnostic,[string]$CommandTest)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -17,6 +17,7 @@ $script:Listening = $false
 $script:ArmedUntil = [datetime]::MinValue
 $script:Busy = $false
 $script:Notify = $null
+$script:LastResponse = ''
 
 New-Item -ItemType Directory -Path $script:AppDir -Force | Out-Null
 
@@ -26,7 +27,7 @@ function Write-EmmaLog([string]$Message) {
 }
 
 function Default-Config {
-  [pscustomobject]@{ ServerUrl = 'https://backend-production-7952.up.railway.app'; Email = ''; WakeWord = 'Emma'; Language = 'en-GB'; Confidence = 0.62; AutoStart = $true }
+  [pscustomobject]@{ ServerUrl = 'https://backend-production-7952.up.railway.app'; Email = ''; WakeWord = 'Emma'; Language = 'en-GB'; Confidence = 0.62; AutoStart = $true; HandsFree = $true; ConversationSeconds = 12 }
 }
 
 function Load-Config {
@@ -85,6 +86,46 @@ function Speak([string]$Text) {
   } catch { Write-EmmaLog "Speech synthesis failed: $($_.Exception.Message)" }
 }
 
+function Spoken-Result($Response) {
+  if (!$Response.ok) { if ($Response.message) { return $Response.message }; return "I could not complete that. $($Response.error)" }
+  if ($Response.message) { return $Response.message }
+  $count = if ($null -ne $Response.data -and $null -ne $Response.data.Count) { [int]$Response.data.Count } else { -1 }
+  $noun = { param($singular,$plural) if($count -eq 1){"$count $singular"}else{"$count $plural"} }
+  switch ([string]$Response.intent) {
+    'list_clients' { return "You have $(& $noun 'client' 'clients')." }
+    'list_jobs' { return "You have $(& $noun 'job' 'jobs')." }
+    'list_leads' { return "You have $(& $noun 'lead' 'leads')." }
+    'list_tasks' { return "You have $(& $noun 'task' 'tasks')." }
+    'list_quotes' { return "I found $(& $noun 'quote' 'quotes')." }
+    'list_job_openings' { return "I found $(& $noun 'job opening' 'job openings')." }
+    'list_learning_rules' { return "You have $(& $noun 'learning rule' 'learning rules')." }
+    'list_communications' { return "I found $(& $noun 'communication record' 'communication records')." }
+    'list_portfolio_photos' { return "I found $(& $noun 'photo' 'photos')." }
+    'list_follow_ups' { return "You have $(& $noun 'follow up' 'follow ups') due." }
+    'list_unresolved_enquiries' { return "You have $(& $noun 'unresolved enquiry' 'unresolved enquiries')." }
+    'list_notifications' { return "You have $(& $noun 'notification' 'notifications')." }
+    'create_client' { return "The client was created." }
+    'create_lead' { return "The lead was created." }
+    'create_job' { return "The job was created." }
+    'create_task' { return "The task was created." }
+    'create_service' { return "The service was created." }
+    'assign_job' { return "The job was assigned." }
+    'change_job_status' { return "The job status was updated." }
+    'convert_lead' { return "The lead was converted." }
+    default { return "$(([string]$Response.intent).Replace('_',' ')) completed successfully." }
+  }
+}
+
+function Handle-LocalConversation([string]$Command) {
+  $normal=$Command.Trim().ToLowerInvariant()
+  if($normal -match '^(hello|hi|good morning|good afternoon)[.! ]*$'){Speak 'Hello. How can I help?';$script:ArmedUntil=[datetime]::UtcNow.AddSeconds([int]$script:Config.ConversationSeconds);return $true}
+  if($normal -match '^(what can you do|help|commands)[?!. ]*$'){Speak 'I can create and list clients, leads, jobs, tasks and services, assign jobs, change job status, list quotes, communications, follow ups, notifications and more.';$script:ArmedUntil=[datetime]::UtcNow.AddSeconds([int]$script:Config.ConversationSeconds);return $true}
+  if($normal -match '^(repeat|say that again)[?!. ]*$'){Speak $(if($script:LastResponse){$script:LastResponse}else{'There is nothing to repeat yet.'});$script:ArmedUntil=[datetime]::UtcNow.AddSeconds([int]$script:Config.ConversationSeconds);return $true}
+  if($normal -match '^(thank you|thanks)[?!. ]*$'){Speak "You're welcome.";$script:ArmedUntil=[datetime]::UtcNow.AddSeconds([int]$script:Config.ConversationSeconds);return $true}
+  if($normal -match '^(stop|cancel|that is all|goodbye)[?!. ]*$'){Speak 'Okay.';$script:ArmedUntil=[datetime]::MinValue;return $true}
+  return $false
+}
+
 function Show-Login {
   try { $pairing=Invoke-Vcubf POST '/auth/device/start' @{} -Anonymous }
   catch { [Windows.Forms.MessageBox]::Show('Could not start browser sign-in. Check the server connection.','VCUBF Emma','OK','Error')|Out-Null;Write-EmmaLog "Pairing start failed: $($_.Exception.Message)";return $false }
@@ -131,13 +172,14 @@ function Show-Settings {
   $wake = New-Object Windows.Forms.TextBox -Property @{ Left=150; Top=30; Width=230; Text=$script:Config.WakeWord }
   $confidence = New-Object Windows.Forms.NumericUpDown -Property @{ Left=150; Top=70; Width=100; DecimalPlaces=2; Minimum=.30; Maximum=.95; Increment=.05; Value=[decimal]$script:Config.Confidence }
   $auto = New-Object Windows.Forms.CheckBox -Property @{ Left=150; Top=110; Width=230; Text='Start with Windows'; Checked=[bool]$script:Config.AutoStart }
-  $server = New-Object Windows.Forms.TextBox -Property @{ Left=150; Top=150; Width=230; Text=$script:Config.ServerUrl }
-  foreach ($pair in @(@('Wake word',30),@('Confidence',70),@('Startup',110),@('Server',150))) { $form.Controls.Add((New-Object Windows.Forms.Label -Property @{ Left=20; Top=$pair[1]; Width=120; Text=$pair[0] })) }
-  $save = New-Object Windows.Forms.Button -Property @{ Left=260; Top=205; Width=120; Text='Save'; DialogResult='OK' }
-  $form.Controls.AddRange(@($wake,$confidence,$auto,$server,$save)); $form.AcceptButton=$save
+  $hands = New-Object Windows.Forms.CheckBox -Property @{ Left=150; Top=140; Width=260; Text='Hands-free automatic execution'; Checked=[bool]$script:Config.HandsFree }
+  $server = New-Object Windows.Forms.TextBox -Property @{ Left=150; Top=175; Width=230; Text=$script:Config.ServerUrl }
+  foreach ($pair in @(@('Wake word',30),@('Confidence',70),@('Startup',110),@('Mode',140),@('Server',175))) { $form.Controls.Add((New-Object Windows.Forms.Label -Property @{ Left=20; Top=$pair[1]; Width=120; Text=$pair[0] })) }
+  $save = New-Object Windows.Forms.Button -Property @{ Left=260; Top=220; Width=120; Text='Save'; DialogResult='OK' }
+  $form.Controls.AddRange(@($wake,$confidence,$auto,$hands,$server,$save)); $form.AcceptButton=$save
   if ($form.ShowDialog() -ne 'OK') { return }
   if ($wake.Text.Trim().Length -lt 2) { [Windows.Forms.MessageBox]::Show('Wake word must contain at least two characters.') | Out-Null; return }
-  $script:Config.WakeWord=$wake.Text.Trim(); $script:Config.Confidence=[double]$confidence.Value; $script:Config.AutoStart=$auto.Checked; $script:Config.ServerUrl=$server.Text.TrimEnd('/'); Save-Config $script:Config; Set-AutoStart $script:Config.AutoStart
+  $script:Config.WakeWord=$wake.Text.Trim(); $script:Config.Confidence=[double]$confidence.Value; $script:Config.AutoStart=$auto.Checked; $script:Config.HandsFree=$hands.Checked; $script:Config.ServerUrl=$server.Text.TrimEnd('/'); Save-Config $script:Config; Set-AutoStart $script:Config.AutoStart
   try { Invoke-Vcubf PUT '/auth/voice-preferences' @{ wake_word=$script:Config.WakeWord; continuous_listening=$true; language=$script:Config.Language } | Out-Null } catch { Write-EmmaLog "Could not sync voice preferences: $($_.Exception.Message)" }
   Initialize-Recognizer
   $script:Notify.ShowBalloonTip(2500,'VCUBF Emma',"Wake word changed to $($script:Config.WakeWord).",'Info')
@@ -160,6 +202,17 @@ function Show-Review([string]$RecognizedText) {
   } catch { Write-EmmaLog "Command failed: $($_.Exception.Message)"; $script:Notify.ShowBalloonTip(4000,'VCUBF Emma','The command could not be sent.','Error'); Speak 'The command could not be sent' }
 }
 
+function Execute-VoiceCommand([string]$Command) {
+  if(Handle-LocalConversation $Command){return}
+  try {
+    if (!(Ensure-Login)) { return }
+    $response=Invoke-Vcubf POST '/command/text' @{text=$Command.Trim();input_method='voice_transcript'}
+    $message=Spoken-Result $response;$script:LastResponse=$message
+    $script:Notify.ShowBalloonTip(4000,'VCUBF Emma',$message,$(if($response.ok){'Info'}else{'Warning'}));Speak $message
+    $script:ArmedUntil=[datetime]::UtcNow.AddSeconds([int]$script:Config.ConversationSeconds)
+  } catch {Write-EmmaLog "Command failed: $($_.Exception.Message)";$message='The command could not be sent.';$script:LastResponse=$message;$script:Notify.ShowBalloonTip(4000,'VCUBF Emma',$message,'Error');Speak $message}
+}
+
 function Find-WakeCommand([string]$Text) {
   $wake = [regex]::Escape($script:Config.WakeWord)
   $match = [regex]::Match($Text, "(?i)(?:^|\W)$wake(?:\W|$)(?<command>.*)$")
@@ -176,7 +229,7 @@ function Handle-Recognition($sender, $event) {
     if (!$command) { $script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8); Speak 'Yes?'; return }
   } elseif ([datetime]::UtcNow -lt $script:ArmedUntil) { $command=$text } else { return }
   $script:ArmedUntil=[datetime]::MinValue; $script:Busy=$true
-  try { $script:Recognizer.RecognizeAsyncCancel(); $script:Listening=$false; Show-Review $command } finally { $script:Busy=$false; Start-Listening }
+  try { $script:Recognizer.RecognizeAsyncCancel(); $script:Listening=$false; if([bool]$script:Config.HandsFree){Execute-VoiceCommand $command}else{Show-Review $command} } finally { $script:Busy=$false; Start-Listening }
 }
 
 function Initialize-Recognizer {
@@ -202,10 +255,15 @@ function Stop-Listening {
 }
 
 $script:Config = Load-Config
+if ($CommandTest) {
+  $response=Invoke-Vcubf POST '/command/text' @{text=$CommandTest;input_method='voice_transcript'}
+  [pscustomobject]@{Status=$(if($response.ok){'ok'}else{'failed'});Intent=$response.intent;SpokenResponse=(Spoken-Result $response)}|ConvertTo-Json -Compress
+  if(!$response.ok){exit 1};exit 0
+}
 if ($Diagnostic) {
   $recognizers=[System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers() | ForEach-Object { "$($_.Culture.Name): $($_.Description)" }
   $wakeTests = (Find-WakeCommand "$($script:Config.WakeWord) list clients") -eq 'list clients' -and (Find-WakeCommand "x$($script:Config.WakeWord) list clients") -eq $null
-  [pscustomobject]@{ Status=$(if($wakeTests){'ok'}else{'failed'}); WakeWord=$script:Config.WakeWord; Server=$script:Config.ServerUrl; Recognizers=$recognizers; WakeParser=$wakeTests; TokenProtected=(Test-Path $script:TokenPath) } | ConvertTo-Json -Depth 4
+  [pscustomobject]@{ Status=$(if($wakeTests){'ok'}else{'failed'}); WakeWord=$script:Config.WakeWord; Server=$script:Config.ServerUrl; HandsFree=[bool]$script:Config.HandsFree; ConversationSeconds=[int]$script:Config.ConversationSeconds; Recognizers=$recognizers; WakeParser=$wakeTests; TokenProtected=(Test-Path $script:TokenPath) } | ConvertTo-Json -Depth 4
   if(!$wakeTests){exit 1}
   exit 0
 }
