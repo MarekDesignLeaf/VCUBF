@@ -39,6 +39,7 @@ import { Industries } from "./pages/Industries";
 import { Connectors } from "./pages/Connectors";
 import { Metrics } from "./pages/Metrics";
 import { Account } from "./pages/Account";
+import { Invoices } from "./pages/Invoices";
 
 export default function App() {
   return (
@@ -73,6 +74,7 @@ export default function App() {
             <Route path="/quotes" element={<Quotes />} />
             <Route path="/quotes/new" element={<QuoteEdit />} />
             <Route path="/quotes/:id" element={<QuoteEdit />} />
+            <Route path="/invoices" element={<Invoices />} />
             <Route path="/recruitment" element={<Recruitment />} />
             <Route path="/recruitment/:id" element={<JobOpeningDetail />} />
             <Route path="/playbooks" element={<Playbooks />} />

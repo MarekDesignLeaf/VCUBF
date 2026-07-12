@@ -28,6 +28,7 @@ import { documentsRouter } from "./modules/documents/routes.js";
 import { industriesRouter } from "./modules/industries/routes.js";
 import { connectorsRouter } from "./modules/connectors/routes.js";
 import { metricsRouter } from "./modules/metrics/routes.js";
+import { invoicesRouter } from "./modules/invoices/routes.js";
 
 export function createServer() {
   const app = express();
@@ -71,6 +72,7 @@ export function createServer() {
   app.use("/industries", industriesRouter);
   app.use("/connectors", connectorsRouter);
   app.use("/metrics", metricsRouter);
+  app.use("/invoices", invoicesRouter);
 
   // Fallback error handler — the system must fail safely, never crash silently.
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

@@ -57,6 +57,7 @@ export interface LoginResponse {
     mustChangePassword: boolean;
   };
 }
+export interface Invoice { id:string; invoiceNumber:string; title:string; invoiceStatus:string; dueDate?:string|null; isOverdue:boolean; client:{id:string;displayName:string}; totals:{total:number;paid:number;balance:number}; }
 
 export interface Client {
   id: string;
@@ -1332,6 +1333,7 @@ export interface Lead {
 }
 
 export const api = {
+  invoices: { list:()=>request<Invoice[]>("/invoices"), create:(data:Record<string,unknown>)=>request<Invoice>("/invoices",{method:"POST",body:JSON.stringify(data)}), status:(id:string,invoice_status:string)=>request<Invoice>(`/invoices/${id}/status`,{method:"PUT",body:JSON.stringify({invoice_status})}), payment:(id:string,data:Record<string,unknown>)=>request<Invoice>(`/invoices/${id}/payments`,{method:"POST",body:JSON.stringify(data)}) },
   metrics: {
     overview: (params?: { from?: string; to?: string }) => {
       const qs = new URLSearchParams();

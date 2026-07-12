@@ -33,6 +33,7 @@ model Company {
   auditLogs                    AuditLog[]
   serviceCatalogueItems        ServiceCatalogueItem[]
   quotes                       Quote[]
+  invoices                     Invoice[]
   jobOpenings                  JobOpening[]
   candidates                   Candidate[]
   playbooks                    Playbook[]
@@ -186,6 +187,7 @@ model Client {
   company              Company               @relation(fields: [companyId], references: [id])
   jobs                 Job[]
   quotes               Quote[]
+  invoices             Invoice[]
   communicationRecords CommunicationRecord[]
   communicationIntakes CommunicationIntake[]
   portfolioPhotos      PortfolioPhoto[]
@@ -541,6 +543,53 @@ model QuoteItem {
   @@index([quoteId])
   @@index([serviceCatalogueItemId])
   @@map("quote_items")
+}
+
+model Invoice {
+  id String @id @default(uuid())
+  companyId String @map("company_id")
+  clientId String @map("client_id")
+  invoiceNumber String @map("invoice_number")
+  title String
+  invoiceStatus String @default("draft") @map("invoice_status")
+  issueDate DateTime? @map("issue_date")
+  dueDate DateTime? @map("due_date")
+  notes String?
+  createdBy String? @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  company Company @relation(fields: [companyId], references: [id])
+  client Client @relation(fields: [clientId], references: [id])
+  items InvoiceItem[]
+  payments Payment[]
+  @@unique([companyId, invoiceNumber])
+  @@index([companyId])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id String @id @default(uuid())
+  invoiceId String @map("invoice_id")
+  description String
+  quantity Float @default(1)
+  unitPrice Float @map("unit_price")
+  sortOrder Int @default(0) @map("sort_order")
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+model Payment {
+  id String @id @default(uuid())
+  invoiceId String @map("invoice_id")
+  amount Float
+  paidAt DateTime @map("paid_at")
+  method String?
+  reference String?
+  createdAt DateTime @default(now()) @map("created_at")
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  @@index([invoiceId])
+  @@map("payments")
 }
 
 // Recruitment and Workforce Expansion Module — see project instructions
