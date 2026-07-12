@@ -10,6 +10,9 @@ export interface AuthedUser {
   role: string;
   permissions: string[];
   mustChangePassword: boolean;
+  voiceWakeWord: string;
+  voiceContinuous: boolean;
+  voiceLanguage: string;
 }
 
 declare global {
@@ -47,6 +50,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       role: user.role,
       permissions: user.permissions,
       mustChangePassword: user.mustChangePassword,
+      voiceWakeWord: user.voiceWakeWord,
+      voiceContinuous: user.voiceContinuous,
+      voiceLanguage: user.voiceLanguage,
     };
     next();
   } catch {

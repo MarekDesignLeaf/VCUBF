@@ -143,6 +143,9 @@ model User {
   displayName         String   @map("display_name")
   role                String   @default("worker")
   permissions         String[]
+  voiceWakeWord       String   @default("Emma") @map("voice_wake_word")
+  voiceContinuous     Boolean  @default(false) @map("voice_continuous")
+  voiceLanguage       String   @default("en-GB") @map("voice_language")
   // Job Allocation and Capacity Management Module — real capacity inputs.
   // Skills are free-text technical tags (e.g. "electrical", "plastering"),
   // entered by the user/admin — never invented by the system.

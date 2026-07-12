@@ -181,6 +181,11 @@ h2 { font-size: 1.1rem; margin-top: 24px; }
 .voice-button-listening { background: var(--error-text); color: white; }
 .voice-button-listening:hover { background: #8f1f19; }
 .voice-privacy-note { margin-top: -10px; }
+.voice-status { margin: -10px 0 12px; padding: 7px 10px; border-radius: 6px; background: #eef0f3; }
+.voice-status-live { background: var(--error-bg); color: var(--error-text); font-weight: 600; }
+.voice-settings { margin-top: 24px; }
+.checkbox-label { flex-direction: row; align-items: center; }
+.checkbox-label input { width: auto; }
 
 .link-button {
   background: none;

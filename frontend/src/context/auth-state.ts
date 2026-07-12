@@ -6,6 +6,7 @@ export interface AuthState {
   loading: boolean;
   login: (email: string, password: string) => Promise<LoginResponse["user"]>;
   logout: () => void;
+  updateUser: (patch: Partial<LoginResponse["user"]>) => void;
 }
 
 export const AuthContext = createContext<AuthState | undefined>(undefined);

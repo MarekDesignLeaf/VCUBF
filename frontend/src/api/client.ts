@@ -55,6 +55,9 @@ export interface LoginResponse {
     role: string;
     permissions: string[];
     mustChangePassword: boolean;
+    voiceWakeWord: string;
+    voiceContinuous: boolean;
+    voiceLanguage: "en-GB" | "en-US";
   };
 }
 export interface Invoice { id:string; invoiceNumber:string; title:string; invoiceStatus:string; dueDate?:string|null; isOverdue:boolean; client:{id:string;displayName:string}; totals:{total:number;paid:number;balance:number}; }
@@ -1353,6 +1356,8 @@ export const api = {
   me: () => request<LoginResponse["user"]>("/auth/me"),
   changePassword: (currentPassword: string, newPassword: string) =>
     request<void>("/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
+  updateVoicePreferences: (wakeWord: string, continuousListening: boolean, language: "en-GB" | "en-US") =>
+    request<Pick<LoginResponse["user"], "voiceWakeWord" | "voiceContinuous" | "voiceLanguage">>("/auth/voice-preferences", { method: "PUT", body: JSON.stringify({ wake_word: wakeWord, continuous_listening: continuousListening, language }) }),
   clients: {
     list: () => request<Client[]>("/crm/clients"),
     get: (id: string) => request<Client>(`/crm/clients/${id}`),

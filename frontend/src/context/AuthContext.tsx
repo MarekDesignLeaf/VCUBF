@@ -30,5 +30,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
-  return <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>;
+  function updateUser(patch: Partial<LoginResponse["user"]>) {
+    setUser((current) => current ? { ...current, ...patch } : current);
+  }
+
+  return <AuthContext.Provider value={{ user, loading, login, logout, updateUser }}>{children}</AuthContext.Provider>;
 }

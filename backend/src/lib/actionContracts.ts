@@ -23,6 +23,16 @@ export const CHANGE_OWN_PASSWORD_ACTION: ActionContract = {
   possibleErrors: ["VALIDATION_FAILED", "CURRENT_PASSWORD_INVALID", "PASSWORD_UNCHANGED", "USER_NOT_FOUND"],
 };
 
+export const UPDATE_VOICE_PREFERENCES_ACTION: ActionContract = {
+  actionName: "update_voice_preferences",
+  purpose: "Store the authenticated user's wake word, browser recognition language and availability of continuous listening controls.",
+  requiredPermission: "authenticated",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["user_input", "auth.users"],
+  possibleErrors: ["VALIDATION_FAILED", "USER_NOT_FOUND"],
+};
+
 export const CREATE_CLIENT_ACTION: ActionContract = {
   actionName: "create_client",
   purpose: "Create a new client record in CRM Core from a verified or manually entered source.",

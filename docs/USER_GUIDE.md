@@ -16,7 +16,7 @@ Administrators can reset another active employee's password from the employee ed
 
 ## 2. Safe command and voice input
 
-The Dashboard command bar supports a defined set of deterministic text commands. Unsupported wording is rejected; Secretary does not guess an action.
+The command centre above every signed-in page supports a defined set of deterministic text commands. Unsupported wording is rejected; Secretary does not guess an action.
 
 Browser voice input is optional:
 
@@ -26,6 +26,8 @@ Browser voice input is optional:
 4. Select **Run** yourself.
 
 Recognition never submits automatically. Secretary receives the reviewed transcript, not an audio recording. Browser speech recognition may use the browser vendor's online service. Use typed input when speech recognition is unavailable or unsuitable.
+
+For wake-word listening, open **Account**, enable wake-word controls and save. The default wake word is **Emma**, but you can replace it at any time. Select **Listen for Emma**, then say the wake word followed by a command. You can also say the wake word alone and speak the command within eight seconds. Listening pauses as soon as a command is captured; review and correct the transcript and select **Run**. The browser page must remain open, microphone permission must stay enabled, and the browser or operating system may suspend listening in the background.
 
 ## 3. Enquiries, leads, clients and contacts
 

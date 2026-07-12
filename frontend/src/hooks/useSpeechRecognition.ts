@@ -63,16 +63,21 @@ function speechErrorMessage(error: string) {
   }
 }
 
-export function useSpeechRecognition(onTranscript: (transcript: string) => void) {
+export function useSpeechRecognition(onTranscript: (transcript: string, isFinal: boolean) => void, language = "en-GB") {
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const onTranscriptRef = useRef(onTranscript);
+  const languageRef = useRef(language);
+  const keepListeningRef = useRef(false);
+  const restartTimerRef = useRef<number | null>(null);
   const supported = Boolean(recognitionConstructor());
 
   useEffect(() => {
     onTranscriptRef.current = onTranscript;
   }, [onTranscript]);
+
+  useEffect(() => { languageRef.current = language; }, [language]);
 
   useEffect(() => {
     const Recognition = recognitionConstructor();
@@ -81,14 +86,23 @@ export function useSpeechRecognition(onTranscript: (transcript: string) => void)
     const recognition = new Recognition();
     recognition.continuous = false;
     recognition.interimResults = true;
-    recognition.lang = "en-GB";
+    recognition.lang = languageRef.current;
     recognition.onstart = () => {
       setError(null);
       setIsListening(true);
     };
-    recognition.onend = () => setIsListening(false);
+    recognition.onend = () => {
+      setIsListening(false);
+      if (keepListeningRef.current) {
+        restartTimerRef.current = window.setTimeout(() => {
+          if (!keepListeningRef.current || !recognitionRef.current) return;
+          try { recognition.lang = languageRef.current; recognition.start(); } catch { /* browser is still closing the previous session */ }
+        }, 250);
+      }
+    };
     recognition.onerror = (event) => {
-      setError(speechErrorMessage(event.error));
+      if (event.error !== "no-speech" || !keepListeningRef.current) setError(speechErrorMessage(event.error));
+      if (["not-allowed", "service-not-allowed", "audio-capture"].includes(event.error)) keepListeningRef.current = false;
       setIsListening(false);
     };
     recognition.onresult = (event) => {
@@ -96,7 +110,8 @@ export function useSpeechRecognition(onTranscript: (transcript: string) => void)
       for (let index = 0; index < event.results.length; index += 1) {
         transcript += `${event.results[index][0]?.transcript ?? ""} `;
       }
-      onTranscriptRef.current(transcript.trim());
+      const last = event.results[event.results.length - 1];
+      onTranscriptRef.current(transcript.trim(), Boolean(last?.isFinal));
     };
     recognitionRef.current = recognition;
 
@@ -106,11 +121,13 @@ export function useSpeechRecognition(onTranscript: (transcript: string) => void)
       recognition.onresult = null;
       recognition.onerror = null;
       recognition.abort();
+      keepListeningRef.current = false;
+      if (restartTimerRef.current != null) window.clearTimeout(restartTimerRef.current);
       recognitionRef.current = null;
     };
   }, []);
 
-  const start = useCallback(() => {
+  const start = useCallback((continuous = false) => {
     setError(null);
     const recognition = recognitionRef.current;
     if (!recognition) {
@@ -118,13 +135,19 @@ export function useSpeechRecognition(onTranscript: (transcript: string) => void)
       return;
     }
     try {
+      keepListeningRef.current = continuous;
+      recognition.continuous = continuous;
+      recognition.lang = languageRef.current;
       recognition.start();
     } catch {
+      keepListeningRef.current = false;
       setError("Voice input could not start. Stop any active recording and try again.");
     }
   }, []);
 
   const stop = useCallback(() => {
+    keepListeningRef.current = false;
+    if (restartTimerRef.current != null) window.clearTimeout(restartTimerRef.current);
     recognitionRef.current?.stop();
   }, []);
 

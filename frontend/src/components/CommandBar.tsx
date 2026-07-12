@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useSpeechRecognition } from "../hooks/useSpeechRecognition";
+import { useAuth } from "../context/useAuth";
+import { extractWakeCommand } from "../lib/voice";
 
 interface HistoryEntry {
   text: string;
@@ -20,16 +22,43 @@ const EXAMPLES = [
 ];
 
 export function CommandBar() {
+  const { user } = useAuth();
   const [text, setText] = useState("");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [inputMethod, setInputMethod] = useState<"text" | "voice_transcript">("text");
   const voiceBaseText = useRef("");
-  const handleVoiceTranscript = useCallback((transcript: string) => {
+  const stopSpeechRef = useRef<() => void>(() => undefined);
+  const wakeUntilRef = useRef(0);
+  const lastFinalRef = useRef("");
+  const [wakeListening, setWakeListening] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<string | null>(null);
+  const handleVoiceTranscript = useCallback((transcript: string, isFinal: boolean) => {
+    if (wakeListening) {
+      if (!isFinal || !transcript || transcript === lastFinalRef.current) return;
+      lastFinalRef.current = transcript;
+      const command = extractWakeCommand(transcript, user?.voiceWakeWord ?? "Emma");
+      if (command !== null) {
+        if (!command) {
+          wakeUntilRef.current = Date.now() + 8000;
+          setVoiceStatus(`Wake word heard. Say the command within 8 seconds.`);
+          return;
+        }
+        setText(command); setInputMethod("voice_transcript"); setVoiceStatus("Command captured. Review the transcript, then choose Run.");
+        setWakeListening(false); stopSpeechRef.current(); return;
+      }
+      if (Date.now() <= wakeUntilRef.current) {
+        setText(transcript); setInputMethod("voice_transcript"); setVoiceStatus("Command captured. Review the transcript, then choose Run.");
+        setWakeListening(false); stopSpeechRef.current(); return;
+      }
+      setVoiceStatus(`Listening for “${user?.voiceWakeWord ?? "Emma"}”…`);
+      return;
+    }
     setText([voiceBaseText.current, transcript].filter(Boolean).join(" "));
     setInputMethod("voice_transcript");
-  }, []);
-  const speech = useSpeechRecognition(handleVoiceTranscript);
+  }, [user?.voiceWakeWord, wakeListening]);
+  const speech = useSpeechRecognition(handleVoiceTranscript, user?.voiceLanguage ?? "en-GB");
+  stopSpeechRef.current = speech.stop;
 
   function toggleVoiceInput() {
     if (speech.isListening) {
@@ -37,7 +66,14 @@ export function CommandBar() {
       return;
     }
     voiceBaseText.current = text.trim();
-    speech.start();
+    setVoiceStatus("Listening for one command…");
+    speech.start(false);
+  }
+
+  function toggleWakeListening() {
+    if (wakeListening) { setWakeListening(false); setVoiceStatus(null); speech.stop(); return; }
+    setText(""); setInputMethod("voice_transcript"); lastFinalRef.current = ""; wakeUntilRef.current = 0;
+    setWakeListening(true); setVoiceStatus(`Listening for “${user?.voiceWakeWord ?? "Emma"}”…`); speech.start(true);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -52,6 +88,7 @@ export function CommandBar() {
       ].slice(0, 8));
       setText("");
       setInputMethod("text");
+      setVoiceStatus(null);
     } catch {
       setHistory((h) => [
         { text, inputMethod, ok: false, intent: "unrecognized", message: "Request failed." },
@@ -63,7 +100,7 @@ export function CommandBar() {
   }
 
   return (
-    <div className="command-bar">
+    <div className="command-bar" aria-label="Voice and text command centre">
       <form onSubmit={handleSubmit} className="inline-form">
         <input
           placeholder='Try: "create client Jane Smith, email jane@example.com"'
@@ -77,20 +114,24 @@ export function CommandBar() {
           type="button"
           className={speech.isListening ? "voice-button voice-button-listening" : "voice-button"}
           onClick={toggleVoiceInput}
-          disabled={!speech.supported || submitting}
+          disabled={!speech.supported || submitting || wakeListening}
           aria-pressed={speech.isListening}
           title={speech.supported ? undefined : "Voice input is not supported by this browser."}
         >
           {speech.isListening ? "Stop listening" : "Voice input"}
         </button>
+        {user?.voiceContinuous && <button type="button" className={wakeListening ? "voice-button voice-button-listening" : "voice-button"} onClick={toggleWakeListening} disabled={!speech.supported || submitting || (speech.isListening && !wakeListening)} aria-pressed={wakeListening}>
+          {wakeListening ? `Stop ${user.voiceWakeWord}` : `Listen for ${user.voiceWakeWord}`}
+        </button>}
         <button type="submit" disabled={submitting || speech.isListening || !text.trim()}>
           {submitting ? "Running…" : "Run"}
         </button>
       </form>
+      {voiceStatus && <div className={wakeListening ? "voice-status voice-status-live" : "voice-status"} role="status">{voiceStatus}</div>}
       <p id="voice-input-privacy" className="hint voice-privacy-note" aria-live="polite">
         {speech.supported
           ? speech.isListening
-            ? "Listening for one English command… Stop, review the transcript, then choose Run."
+            ? wakeListening ? `Wake-word mode is active. Say “${user?.voiceWakeWord ?? "Emma"}” followed by a command.` : "Listening for one English command… Stop, review the transcript, then choose Run."
             : "Voice input is handled by your browser and may use its online speech service. Secretary stores no audio, and its backend receives nothing until you review the transcript and choose Run."
           : "This browser does not provide speech recognition. Text commands remain fully available."}
       </p>
