@@ -207,7 +207,8 @@ if ($Diagnostic) {
 }
 
 [Windows.Forms.Application]::EnableVisualStyles()
-$mutex=New-Object Threading.Mutex($true,'Local\VCUBFEmmaCompanion',[ref]$createdNew)
+$createdNew=$false
+$mutex=[Threading.Mutex]::new($true,'Local\VCUBFEmmaCompanion',[ref]$createdNew)
 if(!$createdNew){[Windows.Forms.MessageBox]::Show('VCUBF Emma is already running.','VCUBF Emma')|Out-Null;exit 0}
 
 try {
