@@ -31,6 +31,8 @@ For wake-word listening, open **Account**, enable wake-word controls and save. T
 
 On Windows 11, install the native companion from `windows-companion` with `Install.ps1 -StartNow`. Its tray icon keeps local wake-word recognition active even when the browser is closed. Emma opens the normal VCUBF login in your default browser, where saved-password autofill works. Sign in and approve the matching eight-character code on Account; the pairing expires after ten minutes and can be consumed only once. No password is entered into or saved by the companion, and its API token is encrypted by Windows for the signed-in Windows account. The default Windows hands-free mode executes a supported deterministic command immediately after the wake word, speaks the result and accepts follow-up speech for twelve seconds; say `stop` to end. Disable hands-free mode in tray Settings when an editable pre-run transcript is preferred. Backend permissions, ambiguity rejection and any action-specific confirmation remain active. Allow desktop microphone access in Windows Privacy settings.
 
+The installer also creates a single **VCUBF Secretary** desktop icon. Double-clicking it starts Emma silently when needed and opens the production login directly in the default browser. After the first successful login, the page pre-fills the last-used email on this PC; the browser remains responsible for offering any saved password.
+
 ## 3. Enquiries, leads, clients and contacts
 
 Use **Communication Intake** to enter an authorised inbound message. Extraction identifies only deterministic contact/service evidence from the entered text. Review the proposed match before converting it into a client and communication record.

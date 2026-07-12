@@ -7,7 +7,7 @@ export function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => params.get("email") ?? localStorage.getItem("vcuf_last_email") ?? "");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -18,6 +18,7 @@ export function Login() {
     setSubmitting(true);
     try {
       const user = await login(email, password);
+      localStorage.setItem("vcuf_last_email", email.trim());
       const requested=params.get("returnTo");
       navigate(user.mustChangePassword ? "/account" : requested?.startsWith("/") ? requested : "/");
     } catch (err) {

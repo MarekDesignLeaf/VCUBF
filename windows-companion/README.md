@@ -10,6 +10,8 @@ Open Windows PowerShell in this directory and run:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -StartNow
 ```
 
+The installer creates one **VCUBF Secretary** icon on the Windows desktop. Double-clicking it silently ensures that Emma is running and opens the production login in the default browser. The page remembers the last successful email address on this PC and the browser can offer its saved password through standard password autofill.
+
 The companion opens the normal VCUBF login in your default browser, so browser password autofill works. After login, approve the matching eight-character code on the Account page. The browser hands back a short-lived one-time token; no password is entered into or saved by the companion. The resulting API token is encrypted with Windows DPAPI for the current Windows user. Right-click the tray icon to pause/resume listening, change the wake word, reconnect in the browser, open VCUBF or exit.
 
 ## Voice flow

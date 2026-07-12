@@ -142,7 +142,7 @@ function Show-Login {
   $timer.Add_Tick({
     try {
       $result=Invoke-Vcubf POST '/auth/device/token' @{pairing_id=$pairing.pairing_id;secret=$pairing.secret} -Anonymous
-      if($result.token){Save-Token $result.token;$script:Config.WakeWord=$result.user.voiceWakeWord;Save-Config $script:Config;$status.Text='Connected successfully.';$timer.Stop();$form.DialogResult='OK';$form.Close()}
+      if($result.token){Save-Token $result.token;$script:Config.WakeWord=$result.user.voiceWakeWord;$script:Config.Email=$result.user.email;Save-Config $script:Config;$status.Text='Connected successfully.';$timer.Stop();$form.DialogResult='OK';$form.Close()}
     } catch { if($_.Exception.Message -match 'PAIRING_EXPIRED|PAIRING_ALREADY_USED'){$status.Text='The pairing expired. Close and try again.';$timer.Stop()} }
   })
   Start-Process $pairing.verification_url
