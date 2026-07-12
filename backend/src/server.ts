@@ -31,6 +31,10 @@ import { metricsRouter } from "./modules/metrics/routes.js";
 
 export function createServer() {
   const app = express();
+  // Railway terminates the public connection at one reverse-proxy hop. Trusting
+  // exactly that hop keeps req.ip tied to the real client for login throttling
+  // without accepting an arbitrary client-supplied forwarding chain.
+  app.set("trust proxy", 1);
   const allowedOrigins = (process.env.FRONTEND_URL ?? "http://localhost:5173")
     .split(",")
     .map((origin) => origin.trim())

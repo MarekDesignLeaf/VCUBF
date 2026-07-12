@@ -44,16 +44,23 @@ describe("auth", () => {
     for (let attempt = 1; attempt <= 10; attempt += 1) {
       const res = await request(app)
         .post("/auth/login")
+        .set("X-Forwarded-For", "203.0.113.10")
         .send({ email: "blocked@test.local", password: "wrong" });
       assert.equal(res.status, 401);
       assert.equal(res.body.error, "INVALID_CREDENTIALS");
     }
     const blocked = await request(app)
       .post("/auth/login")
+      .set("X-Forwarded-For", "203.0.113.10")
       .send({ email: "blocked@test.local", password: "wrong" });
     assert.equal(blocked.status, 429);
     assert.equal(blocked.body.error, "TOO_MANY_LOGIN_ATTEMPTS");
     assert.ok(blocked.headers["ratelimit"]);
+    const otherNetwork = await request(app)
+      .post("/auth/login")
+      .set("X-Forwarded-For", "203.0.113.11")
+      .send({ email: "blocked@test.local", password: "wrong" });
+    assert.equal(otherNetwork.status, 401);
   });
 
   it("returns 401 for /auth/me without a token", async () => {
