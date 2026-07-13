@@ -417,9 +417,10 @@ model Contact {
   @@map("contacts")
 }
 
-// Read-only Google Contacts are staged here before a human explicitly imports
-// one into CRM. Provider deletions archive only this staging record and never
-// delete or modify an already-confirmed CRM Contact.
+// Connector contacts are staged here with provider provenance. Google Contacts
+// needs a human-confirmed import; signed WhatsApp sender contacts can be
+// linked or created automatically under the connector's duplicate safeguards.
+// Provider updates never delete or modify an already-confirmed CRM Contact.
 model ExternalContact {
   id                   String   @id @default(uuid())
   companyId            String   @map("company_id")

@@ -156,7 +156,7 @@ connectorsRouter.post(
   async (req, res) => {
     const source = await connectorService.getConnectorSource(req.user!, req.params.id);
     if (source?.connectorKey === "whatsapp_business") {
-      return res.status(409).json({ error: "SYNC_NOT_SUPPORTED", message: "WhatsApp messages arrive automatically through the signed webhook." });
+      return res.status(409).json({ error: "SYNC_NOT_SUPPORTED", message: "WhatsApp messages and sender contacts arrive automatically through the signed webhook." });
     }
     if (source?.connectorKey === "google_drive" || source?.connectorKey === "google_photos") {
       return res.status(409).json({ error: "SYNC_NOT_SUPPORTED", message: "Select images directly through the applicable Google picker." });
@@ -279,7 +279,14 @@ connectorsRouter.get(
   "/sources/:id/external-contacts",
   requirePermission("connectors.read"),
   async (req, res) => {
-    const result = await googleContactsConnectorService.listExternalContacts(req.user!, req.params.id, req.query);
+    const source = await connectorService.getConnectorSource(req.user!, req.params.id);
+    if (!source) return res.status(404).json({ error: "CONNECTOR_SOURCE_NOT_FOUND" });
+    if (!["google_contacts", "whatsapp_business"].includes(source.connectorKey)) {
+      return res.status(409).json({ error: "EXTERNAL_CONTACTS_NOT_SUPPORTED", message: "This connector does not provide external contacts." });
+    }
+    const result = source.connectorKey === "whatsapp_business"
+      ? await whatsappBusinessConnectorService.listWhatsAppContacts(req.user!, req.params.id, req.query)
+      : await googleContactsConnectorService.listExternalContacts(req.user!, req.params.id, req.query);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
   }
@@ -290,6 +297,13 @@ connectorsRouter.post(
   requirePermission("connectors.manage"),
   requirePermission(IMPORT_GOOGLE_CONTACT_ACTION.requiredPermission),
   async (req, res) => {
+    const source = await connectorService.getConnectorSource(req.user!, req.params.id);
+    if (source?.connectorKey === "whatsapp_business") {
+      return res.status(409).json({
+        error: "CONTACT_IMPORT_NOT_SUPPORTED",
+        message: "WhatsApp sender contacts are synchronised automatically. Resolve only possible duplicate matches in CRM.",
+      });
+    }
     const result = await googleContactsConnectorService.importGoogleContact(
       req.user!, req.params.id, req.params.externalContactId, req.body
     );

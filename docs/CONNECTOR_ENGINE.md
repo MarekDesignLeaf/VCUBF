@@ -26,7 +26,7 @@ Google Drive deliberately uses non-sensitive `drive.file` rather than broad rest
 
 Google Photos is a separate connector. It uses the Google Photos Picker scope `photospicker.mediaitems.readonly`, creates a short-lived server-side Picker session and opens the returned Google-controlled picker in a new tab (never an iframe). The user selects exact Photos items; the backend polls the session, retrieves only the selected item metadata, ignores the temporary `baseUrl` byte-download URL and deletes the completed session when possible. It never scans, searches or imports a whole Google Photos library. Only selected `PHOTO`/`image/*` items can become internal Portfolio Photo references after a separate confirmation.
 
-WhatsApp Business uses a direct, deployment-level Cloud API connection for one business phone number. Meta webhook ownership is verified with a private verify token and every POST body must pass `X-Hub-Signature-256` verification with the Meta app secret. Inbound text and supported message captions are imported idempotently into `CommunicationIntake`; media bytes are not downloaded. Outgoing text is previewed first and is sent only after explicit confirmation. Meta delivery status webhooks are accepted but currently remain audit/result metadata rather than a separate message-status table.
+WhatsApp Business uses a direct, deployment-level Cloud API connection for one business phone number. Meta webhook ownership is verified with a private verify token and every POST body must pass `X-Hub-Signature-256` verification with the Meta app secret. Inbound text and supported message captions are imported idempotently into `CommunicationIntake`; media bytes are not downloaded. Each signed inbound sender is also staged as an external contact. A valid number creates one CRM contact only when there is no active match; exactly one active normalized-phone match is linked, and multiple matches remain staged for duplicate review. Existing CRM contacts are never overwritten. The connector cannot backfill a complete historic WhatsApp address book: it synchronises only sender metadata delivered with new inbound webhooks. Outgoing text is previewed first and is sent only after explicit confirmation. Meta delivery status webhooks are accepted but currently remain audit/result metadata rather than a separate message-status table.
 
 ## API
 
@@ -48,7 +48,7 @@ WhatsApp Business uses a direct, deployment-level Cloud API connection for one b
 | `POST` | `/connectors/sources/:id/gmail/drafts` | `connectors.manage` | Creates a Gmail draft without sending it. |
 | `POST` | `/connectors/sources/:id/gmail/messages/send` | `connectors.manage` | Previews, then sends a Gmail message after explicit confirmation. |
 | `GET` | `/connectors/whatsapp/webhook` | Meta verify token | Verifies webhook ownership and returns Meta's challenge. |
-| `POST` | `/connectors/whatsapp/webhook` | Meta signature | Imports signed inbound WhatsApp messages idempotently. |
+| `POST` | `/connectors/whatsapp/webhook` | Meta signature | Imports signed inbound WhatsApp messages and synchronises sender contacts idempotently. |
 | `POST` | `/connectors/sources/:id/whatsapp/messages/send` | `connectors.manage` | Previews, then sends a WhatsApp text after explicit confirmation. |
 | `POST` | `/connectors/sources/:id/disconnect` | `connectors.manage` | Confirmation-gated Google token revocation and local credential/cursor deletion. |
 | `GET` | `/connectors/sources/:id/drive-picker-token` | `connectors.manage` | Returns a short-lived Drive Picker configuration without a refresh token. |
@@ -60,7 +60,7 @@ WhatsApp Business uses a direct, deployment-level Cloud API connection for one b
 | `POST` | `/connectors/sources/:id/google-photos/picker-sessions/:sessionId/import` | `connectors.manage` | Stages metadata from completed user-selected Google Photos items and cleans up the session. |
 | `GET` | `/connectors/sources/:id/google-photos/items` | `connectors.read` | Lists staged Google Photos metadata. |
 | `POST` | `/connectors/sources/:id/google-photos/items/:photoId/register` | `connectors.manage` + `crm.manage` | Confirmation-gated Portfolio Photo reference from one Google Photos item. |
-| `GET` | `/connectors/sources/:id/external-contacts` | `connectors.read` | Lists company-scoped staged Google contacts without creating CRM data. |
+| `GET` | `/connectors/sources/:id/external-contacts` | `connectors.read` | Lists company-scoped staged Google contacts or synchronised WhatsApp sender contacts. |
 | `POST` | `/connectors/sources/:id/external-contacts/:contactId/import` | `connectors.manage` + `crm.manage` | Confirmation-gated import of one reviewed contact into CRM. |
 | `POST` | `/connectors/sources/:id/disable` | `connectors.manage` | Immediately prevents further synchronisation. |
 
@@ -132,7 +132,7 @@ The same lifecycle can be completed manually:
 5. For Contacts, choose **Review contacts** and explicitly confirm any CRM import.
 6. Use **Disable** to stop access temporarily, or confirmed **Disconnect** to revoke and delete authorization.
 
-For WhatsApp, configure the six server variables, register and enable one source, then set the Meta callback URL to `/connectors/whatsapp/webhook` with the same verify token. Inbound messages arrive automatically; there is no manual sync button.
+For WhatsApp, configure the six server variables, register and enable one source, then set the Meta callback URL to `/connectors/whatsapp/webhook` with the same verify token. Inbound messages and sender-contact synchronisation arrive automatically; there is no manual sync button.
 
 Cross-company source IDs resolve as not found. Provider failures set `lastSyncStatus` and a non-secret `lastErrorCode`. Registration, OAuth start/completion, enable/disable and sync are audited without provider secrets or message content.
 
@@ -145,4 +145,4 @@ Cross-company source IDs resolve as not found. Provider failures set `lastSyncSt
 - WhatsApp approved-template sending outside the customer-service window and persisted delivery-state history;
 - multi-business WhatsApp Embedded Signup (the current direct connection intentionally supports one phone number).
 
-Official implementation references: [Google OAuth 2.0 for web server applications and revocation](https://developers.google.com/identity/protocols/oauth2/web-server), [People API connections.list](https://developers.google.com/people/api/rest/v1/people.connections/list), [Calendar events.list](https://developers.google.com/workspace/calendar/api/v3/reference/events/list), [Drive API scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth), [Google Picker](https://developers.google.com/workspace/drive/picker/reference/picker), [Drive files metadata](https://developers.google.com/workspace/drive/api/guides/file-metadata), [Gmail synchronization guide](https://developers.google.com/workspace/gmail/api/guides/sync), and [Google restricted scopes](https://support.google.com/cloud/answer/13464325).
+Official implementation references: [Google OAuth 2.0 for web server applications and revocation](https://developers.google.com/identity/protocols/oauth2/web-server), [People API connections.list](https://developers.google.com/people/api/rest/v1/people.connections/list), [Calendar events.list](https://developers.google.com/workspace/calendar/api/v3/reference/events/list), [Drive API scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth), [Google Picker](https://developers.google.com/workspace/drive/picker/reference/picker), [Drive files metadata](https://developers.google.com/workspace/drive/api/guides/file-metadata), [Gmail synchronization guide](https://developers.google.com/workspace/gmail/api/guides/sync), [WhatsApp Cloud API webhook contact payload](https://www.postman.com/meta/whatsapp-business-platform/request/36ymkut/received-contact-messages), and [Google restricted scopes](https://support.google.com/cloud/answer/13464325).

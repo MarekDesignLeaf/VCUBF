@@ -78,7 +78,7 @@ function enableImpact(source: ConnectorSource) {
     : source.connectorKey === "google_calendar"
       ? "Enable read-only Google Calendar access? Synchronisation will stage event previews but will not change jobs, tasks or capacity."
       : source.connectorKey === "whatsapp_business"
-        ? "Enable WhatsApp Business? Signed inbound messages will be imported automatically; every outgoing message will still require a separate confirmation."
+        ? "Enable WhatsApp Business? Signed inbound messages and sender contacts will be synchronised automatically. A new valid number becomes a CRM contact only when no active match exists; existing contacts are linked but never overwritten. Every outgoing message still needs a separate confirmation."
         : source.connectorKey === "google_drive"
           ? "Enable per-file Google Drive access? Secretary will only use image files you explicitly select."
           : source.connectorKey === "google_photos"
@@ -124,6 +124,10 @@ export function Connectors() {
   const googlePhotosPollTimer = useRef<number | null>(null);
   const [composeSourceId, setComposeSourceId] = useState<string | null>(null);
   const guidedSetupRunning = useRef(false);
+  const selectedContactSource = contactSourceId
+    ? sources?.find((source) => source.id === contactSourceId) ?? null
+    : null;
+  const isWhatsAppContactSource = selectedContactSource?.connectorKey === "whatsapp_business";
 
   function loadSources() {
     return api.connectors.sources(activeOnly).then(setSources);
@@ -366,12 +370,12 @@ export function Connectors() {
       const result = await api.connectors.externalContacts(source.id);
       setExternalContacts(result.items);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not load staged Google contacts.");
+      setError(err instanceof ApiError ? err.message : "Could not load connector contacts.");
     }
   }
 
   async function importExternalContact(contact: ExternalContact) {
-    if (!contactSourceId) return;
+    if (!contactSourceId || selectedContactSource?.connectorKey !== "google_contacts") return;
     setError(null);
     try {
       await api.connectors.importExternalContact(contactSourceId, contact.id, false);
@@ -483,7 +487,7 @@ export function Connectors() {
         ) : null}
       </div>
       <p className="hint">
-        Gmail can read mail, create drafts and send only after confirmation. Contacts and Calendar are read-only. Google Drive uses per-file access; Google Photos opens its own picker for exact user-selected photos. WhatsApp imports signed inbound webhooks and confirms every send.
+        Gmail can read mail, create drafts and send only after confirmation. Contacts and Calendar are read-only. Google Drive uses per-file access; Google Photos opens its own picker for exact user-selected photos. WhatsApp imports signed inbound webhooks, synchronises valid sender contacts without overwriting CRM data, and confirms every send.
         Never paste an OAuth token, client secret or password here.
       </p>
 
@@ -546,8 +550,10 @@ export function Connectors() {
                         {source.incrementalSyncConfigured ? "Sync changes" : "Initial sync"}
                       </button>
                     ) : null}
-                    {source.connectorKey === "google_contacts" ? (
-                      <button className="secondary" onClick={() => showExternalContacts(source)}>Review contacts</button>
+                    {["google_contacts", "whatsapp_business"].includes(source.connectorKey) ? (
+                      <button className="secondary" onClick={() => showExternalContacts(source)}>
+                        {source.connectorKey === "whatsapp_business" ? "View synced contacts" : "Review contacts"}
+                      </button>
                     ) : null}
                     {source.connectorKey === "google_calendar" ? <button className="secondary" onClick={() => showExternalEvents(source)}>Review events</button> : null}
                     {source.connectorKey === "google_drive" && source.isEnabled ? <button onClick={() => openDrivePicker(source)} disabled={busySourceId === source.id}>Select Drive images</button> : null}
@@ -581,19 +587,23 @@ export function Connectors() {
       {contactSourceId ? (
         <section className="card" style={{ marginTop: 20 }}>
           <div className="page-header">
-            <h2>Staged Google contacts</h2>
+            <h2>{isWhatsAppContactSource ? "Synced WhatsApp contacts" : "Staged Google contacts"}</h2>
             <button className="secondary" onClick={() => { setContactSourceId(null); setExternalContacts(null); }}>Close</button>
           </div>
-          <p className="hint">Read-only provider data. Nothing becomes a CRM contact until you review and confirm it.</p>
-          {!externalContacts ? <p>Loading…</p> : externalContacts.length === 0 ? <p className="hint">No active contacts staged.</p> : (
+          <p className="hint">{isWhatsAppContactSource
+            ? "Contacts come from signed inbound WhatsApp messages. A valid new number creates a CRM contact only when no active match exists; one exact match is linked without changing it. Multiple matches remain here for duplicate review. This connector cannot backfill a complete historical WhatsApp address book."
+            : "Read-only provider data. Nothing becomes a CRM contact until you review and confirm it."}</p>
+          {!externalContacts ? <p>Loading…</p> : externalContacts.length === 0 ? <p className="hint">{isWhatsAppContactSource ? "No sender contacts have arrived through WhatsApp yet." : "No active contacts staged."}</p> : (
             <table className="data-table">
               <thead><tr><th>Name</th><th>Contact</th><th>Organisation</th><th>Status</th><th></th></tr></thead>
               <tbody>{externalContacts.map((contact) => <tr key={contact.id}>
                 <td><strong>{contact.displayName ?? "Unnamed contact"}</strong><div className="hint">{contact.jobTitle ?? ""}</div></td>
                 <td>{contact.email ?? "—"}<div className="hint">{contact.phone ?? ""}</div></td>
                 <td>{contact.organisation ?? "—"}<div className="hint">{contact.department ?? ""}</div></td>
-                <td>{contact.importedContactId ? "Imported" : !contact.phoneValid ? "Invalid phone format" : contact.importable ? "Ready for review" : "Missing email/phone"}</td>
-                <td>{canImportContacts && contact.importable && !contact.importedContactId ? <button onClick={() => importExternalContact(contact)}>Import to CRM</button> : "—"}</td>
+                <td>{isWhatsAppContactSource
+                  ? contact.importedContactId ? "Synced to CRM" : !contact.phoneValid ? "Invalid WhatsApp number" : "Needs duplicate review"
+                  : contact.importedContactId ? "Imported" : !contact.phoneValid ? "Invalid phone format" : contact.importable ? "Ready for review" : "Missing email/phone"}</td>
+                <td>{!isWhatsAppContactSource && canImportContacts && contact.importable && !contact.importedContactId ? <button onClick={() => importExternalContact(contact)}>Import to CRM</button> : "—"}</td>
               </tr>)}</tbody>
             </table>
           )}

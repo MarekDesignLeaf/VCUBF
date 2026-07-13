@@ -382,6 +382,16 @@ export const RECEIVE_WHATSAPP_MESSAGE_ACTION: ActionContract = {
   possibleErrors: ["CONNECTOR_CONFIGURATION_MISSING", "WEBHOOK_SIGNATURE_INVALID", "PROVIDER_RESPONSE_INVALID", "CONNECTOR_SOURCE_NOT_FOUND"],
 };
 
+export const SYNC_WHATSAPP_CONTACTS_ACTION: ActionContract = {
+  actionName: "sync_whatsapp_sender_contacts",
+  purpose: "Stage sender metadata from signed inbound WhatsApp Business webhooks, create a CRM contact only for a new valid number, or link exactly one existing contact without modifying existing CRM data.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["meta.whatsapp_webhook", "connector_sources", "external_contacts", "crm.contacts"],
+  possibleErrors: ["CONNECTOR_CONFIGURATION_MISSING", "WEBHOOK_SIGNATURE_INVALID", "PROVIDER_RESPONSE_INVALID", "CONNECTOR_SOURCE_NOT_FOUND"],
+};
+
 export const SEND_WHATSAPP_MESSAGE_ACTION: ActionContract = {
   actionName: "send_whatsapp_message",
   purpose: "Send a WhatsApp Business text to an explicit recipient only after the user reviews the final number and message and confirms the external action.",
@@ -894,7 +904,7 @@ export const UPDATE_BUSINESS_CONTEXT_ITEM_ACTION: ActionContract = {
 
 // Contact Directory — explicit, traceable people records independent from a
 // client's primary contact fields.
-export const CONTACT_SOURCES = ["user_input", "communication", "client_record", "google_contacts", "other"] as const;
+export const CONTACT_SOURCES = ["user_input", "communication", "client_record", "google_contacts", "whatsapp_business", "other"] as const;
 export type ContactSource = (typeof CONTACT_SOURCES)[number];
 
 export const CONTACT_CHANNELS = ["email", "phone_call", "whatsapp", "sms", "messenger", "other"] as const;
