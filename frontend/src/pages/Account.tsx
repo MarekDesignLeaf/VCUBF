@@ -96,7 +96,7 @@ export function Account() {
     </form>
     <form className="inline-form voice-settings" onSubmit={saveVoice} style={{ display: "grid", maxWidth: 520 }}>
       <h2>Voice control</h2>
-      <p className="hint">The Windows companion listens locally for the wake word whenever it is running. Realtime mode starts a hands-free conversation after you say Emma; reviewed transcript mode remains available in the tray settings.</p>
+      <p className="hint">The Windows companion listens locally for the wake word whenever it is running. Say Emma alone to start Realtime listening, then speak naturally. The <strong>What Emma hears</strong> monitor opens automatically and can be reopened from the tray with <strong>Show live hearing</strong>; its pre-wake recognition is not uploaded or saved.</p>
       <label>Wake word<input value={wakeWord} minLength={2} maxLength={30} onChange={(event) => setWakeWord(event.target.value)} required /></label>
       <label>Recognition language<select value={voiceLanguage} onChange={(event) => setVoiceLanguage(event.target.value as "en-GB" | "en-US")}><option value="en-GB">English (United Kingdom)</option><option value="en-US">English (United States)</option></select></label>
       <label className="checkbox-label"><input type="checkbox" checked={continuous} onChange={(event) => setContinuous(event.target.checked)} /> Enable wake-word listening controls</label>

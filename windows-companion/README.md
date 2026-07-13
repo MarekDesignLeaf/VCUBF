@@ -20,6 +20,8 @@ Realtime audio mode is also enabled by default. Wake-word detection remains loca
 
 Every signed-in VCUBF page includes a **Windows Emma** control centre. It reports the live device state and stores the complete final text transcript of each activated conversation: ordered user/Emma turns, timestamps, mode and completion state. Background speech that does not activate Emma is not sent to this history. The web controls can pause or resume local wake-word listening, end the current Realtime conversation and delete all saved transcript text after confirmation; device commands are acknowledged so the page shows the applied state rather than only the requested state. Audio is streamed only during an activated Realtime session and is never stored by VCUBF.
 
+The local-only **What Emma hears** monitor opens by default and shows microphone level, recognition hypotheses and activated Realtime turns. Close it when it is not needed and reopen it with the tray command **Show live hearing**; pre-wake text shown there is not uploaded or saved. The wake word uses a dedicated high-priority grammar; say `Emma` alone to start Realtime audio, then speak naturally even when the installed Windows recognizer does not support the conversation language.
+
 Program-navigation and usage questions are routed through the backend just like business-data questions. The backend supplies Emma with a tested map covering every implemented frontend route, primary control labels, prerequisites and confirmation boundaries. This lets her guide the user to an outcome without granting the Realtime model direct database access or allowing it to invent unavailable UI.
 
 ## Voice flow

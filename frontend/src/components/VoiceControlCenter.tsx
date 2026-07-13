@@ -75,8 +75,14 @@ export function VoiceControlCenter() {
           <button type="button" className="voice-button" disabled={busy || (!state.lastTranscript && !state.lastResponse && conversations.length === 0)} onClick={clearHistory}>Delete transcript history</button>
         </div>
       </div>
+      <div className={`voice-listening-assurance ${state.listening ? "is-active" : ""}`} role="status">
+        <span aria-hidden="true" />
+        {state.listening
+          ? "Microphone active. Say “Emma” clearly; saying Emma alone starts a Realtime conversation."
+          : state.status === "paused" ? "Microphone reactions are paused." : "Emma is not receiving microphone input."}
+      </div>
       <div className="voice-observation-grid" aria-live="polite">
-        <div><span className="voice-observation-label">Emma heard</span><div>{state.lastTranscript || "Nothing captured yet."}</div></div>
+        <div><span className="voice-observation-label">Emma heard after activation</span><div>{state.lastTranscript || "Waiting for Emma to be activated."}</div></div>
         <div><span className="voice-observation-label">Emma answered</span><div>{state.lastResponse || "No response yet."}</div></div>
       </div>
       <details className="voice-transcript-history">
@@ -97,7 +103,7 @@ export function VoiceControlCenter() {
           </section>
         ))}
       </details>
-      <p className="hint voice-control-privacy">Complete final text turns are saved after Emma is activated. Background speech is not retained, and VCUBF does not store microphone audio. Pause listening disables wake-word reactions; Delete transcript history ends the active conversation and removes all saved text conversations.</p>
+      <p className="hint voice-control-privacy">Complete final text turns are saved after Emma is activated. The private <strong>What Emma hears</strong> monitor opens with the Windows companion; close it when it is not needed and reopen it from the tray with <strong>Show live hearing</strong>. Its pre-wake preview stays on this PC and is not saved or uploaded. Background speech is not retained, and VCUBF does not store microphone audio. Pause listening disables wake-word reactions; Delete transcript history ends the active conversation and removes all saved text conversations.</p>
       {state.pendingControl && <div className="voice-control-pending">Waiting for Emma to apply: {state.pendingControl.replace("_", " ")}…</div>}
       {error && <div className="error-banner" role="alert">{error}</div>}
     </section>

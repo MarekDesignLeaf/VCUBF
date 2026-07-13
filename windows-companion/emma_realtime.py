@@ -33,6 +33,7 @@ APP_DIR = Path(os.environ["LOCALAPPDATA"]) / "VCUBF" / "Emma"
 CONFIG_PATH = APP_DIR / "config.json"
 TOKEN_PATH = APP_DIR / "token.bin"
 LOG_PATH = APP_DIR / "emma-realtime.log"
+LIVE_PATH = APP_DIR / "emma-live.json"
 
 
 class DATA_BLOB(ctypes.Structure):
@@ -43,6 +44,20 @@ def log(message: str) -> None:
     APP_DIR.mkdir(parents=True, exist_ok=True)
     with LOG_PATH.open("a", encoding="utf-8") as handle:
         handle.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {message}\n")
+
+
+def write_live_preview(role: str = "", text: str = "", status: str = "Realtime active — speak now") -> None:
+    """Expose only the latest activated-session text to the local monitor."""
+    try:
+        APP_DIR.mkdir(parents=True, exist_ok=True)
+        temporary = LIVE_PATH.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps({"role": role, "text": text.strip()[:8000], "status": status}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        temporary.replace(LIVE_PATH)
+    except OSError:
+        pass
 
 
 def unprotect_dpapi(data: bytes) -> bytes:
@@ -126,6 +141,8 @@ class RealtimeEmma:
         self.input_stream = None
         self.output_stream = None
         self.ws = None
+        configured_language = str(load_config().get("Language", "en-GB"))
+        self.transcription_language = configured_language.split("-", 1)[0].lower() or "en"
 
     async def send(self, payload: dict) -> None:
         async with self.send_lock:
@@ -173,9 +190,13 @@ class RealtimeEmma:
             log(f"transcript start error: {type(exc).__name__}")
 
     async def append_transcript(self, role: str, content: str, sequence: int, source_event_id: str = "") -> None:
-        if not self.conversation_id or not content.strip():
+        content = content.strip()
+        if not content:
             return
-        body = {"role": role, "content": content.strip()[:8000], "sequence": sequence}
+        write_live_preview(role, content, "You spoke" if role == "user" else "Emma is answering")
+        if not self.conversation_id:
+            return
+        body = {"role": role, "content": content[:8000], "sequence": sequence}
         if source_event_id:
             body["source_event_id"] = source_event_id[:200]
         try:
@@ -226,7 +247,11 @@ If interrupted, stop speaking immediately and listen to the new request."""
                     "audio": {
                         "input": {
                             "format": {"type": "audio/pcm", "rate": RATE},
-                            "transcription": {"model": "gpt-4o-mini-transcribe"},
+                            "transcription": {
+                                "model": "gpt-4o-transcribe",
+                                "language": self.transcription_language,
+                                "prompt": "Transcribe in English. VCUBF Secretary voice command. The assistant wake word is Emma. Common requests include show me contacts, list clients, list jobs, create a task, and navigate the application. Preserve contact names, company names, and application terms exactly.",
+                            },
                             "turn_detection": {
                                 "type": "semantic_vad",
                                 "eagerness": "medium",
@@ -444,6 +469,7 @@ If interrupted, stop speaking immediately and listen to the new request."""
 
     async def run(self) -> None:
         transcript_status = "completed"
+        write_live_preview(status="Realtime active — speak now")
         await self.start_transcript()
         try:
             session = await asyncio.to_thread(backend_json, "POST", "/command/realtime/session", {})
@@ -472,6 +498,7 @@ If interrupted, stop speaking immediately and listen to the new request."""
             raise
         finally:
             await self.end_transcript(transcript_status)
+            write_live_preview(status="Realtime conversation ended")
 
     def close(self) -> None:
         for stream in (self.input_stream, self.output_stream):

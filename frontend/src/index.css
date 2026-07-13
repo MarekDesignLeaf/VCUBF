@@ -186,6 +186,10 @@ h2 { font-size: 1.1rem; margin-top: 24px; }
 .voice-control-center { background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
 .voice-control-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .voice-control-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.voice-listening-assurance { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px; border-radius: 6px; background: #eef0f3; color: var(--muted); font-size: .88rem; }
+.voice-listening-assurance > span { width: 10px; height: 10px; border-radius: 50%; background: #8a9099; flex: 0 0 auto; }
+.voice-listening-assurance.is-active { background: #e8f5ed; color: #175c35; }
+.voice-listening-assurance.is-active > span { background: #1c8a4b; box-shadow: 0 0 0 4px rgb(28 138 75 / 14%); }
 .voice-device-status { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: .78rem; font-weight: 700; background: #eef0f3; }
 .voice-device-status.status-listening { background: #e8f5ed; color: #175c35; }
 .voice-device-status.status-hearing, .voice-device-status.status-speaking { background: #e5edff; color: #2c4a9a; }

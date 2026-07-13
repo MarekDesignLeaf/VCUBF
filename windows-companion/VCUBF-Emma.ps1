@@ -1,10 +1,62 @@
-param([switch]$Diagnostic,[string]$CommandTest,[switch]$DesktopLaunch,[switch]$Announce)
+param([switch]$Diagnostic,[string]$CommandTest,[switch]$DesktopLaunch,[switch]$Announce,[switch]$ShowMonitor)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Speech
 Add-Type -AssemblyName System.Security
+Add-Type -ReferencedAssemblies System.Speech -TypeDefinition @'
+using System.Collections.Concurrent;
+using System.Speech.Recognition;
+
+public sealed class VcubfSpeechEvent {
+  public string Kind { get; set; }
+  public string Text { get; set; }
+  public float Confidence { get; set; }
+  public int AudioLevel { get; set; }
+}
+
+public sealed class VcubfSpeechBridge {
+  private readonly ConcurrentQueue<VcubfSpeechEvent> queue = new ConcurrentQueue<VcubfSpeechEvent>();
+  private SpeechRecognitionEngine engine;
+
+  public void Attach(SpeechRecognitionEngine value) {
+    Detach();
+    engine = value;
+    engine.SpeechRecognized += OnRecognized;
+    engine.SpeechHypothesized += OnHypothesized;
+    engine.SpeechRecognitionRejected += OnRejected;
+    engine.AudioLevelUpdated += OnAudioLevel;
+  }
+
+  public void Detach() {
+    if (engine == null) return;
+    engine.SpeechRecognized -= OnRecognized;
+    engine.SpeechHypothesized -= OnHypothesized;
+    engine.SpeechRecognitionRejected -= OnRejected;
+    engine.AudioLevelUpdated -= OnAudioLevel;
+    engine = null;
+  }
+
+  public VcubfSpeechEvent Next() {
+    VcubfSpeechEvent item;
+    return queue.TryDequeue(out item) ? item : null;
+  }
+
+  private void OnRecognized(object sender, SpeechRecognizedEventArgs e) {
+    queue.Enqueue(new VcubfSpeechEvent { Kind = "recognized", Text = e.Result.Text, Confidence = e.Result.Confidence });
+  }
+  private void OnHypothesized(object sender, SpeechHypothesizedEventArgs e) {
+    queue.Enqueue(new VcubfSpeechEvent { Kind = "hypothesized", Text = e.Result.Text, Confidence = e.Result.Confidence });
+  }
+  private void OnRejected(object sender, SpeechRecognitionRejectedEventArgs e) {
+    queue.Enqueue(new VcubfSpeechEvent { Kind = "rejected", Text = e.Result == null ? "" : e.Result.Text, Confidence = e.Result == null ? 0 : e.Result.Confidence });
+  }
+  private void OnAudioLevel(object sender, AudioLevelUpdatedEventArgs e) {
+    queue.Enqueue(new VcubfSpeechEvent { Kind = "audio", AudioLevel = e.AudioLevel });
+  }
+}
+'@
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $script:AppDir = Join-Path $env:LOCALAPPDATA 'VCUBF\Emma'
@@ -12,6 +64,7 @@ $script:ConfigPath = Join-Path $script:AppDir 'config.json'
 $script:TokenPath = Join-Path $script:AppDir 'token.bin'
 $script:LogPath = Join-Path $script:AppDir 'emma.log'
 $script:Recognizer = $null
+$script:DictationGrammar = $null
 $script:Synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
 $script:Listening = $false
 $script:ArmedUntil = [datetime]::MinValue
@@ -24,6 +77,14 @@ $script:StateTimer = $null
 $script:TranscriptConversationId = $null
 $script:LaunchStartedAt = try { (Get-Process -Id $PID).StartTime.ToUniversalTime() } catch { [datetime]::UtcNow }
 $script:InitialListeningLogged = $false
+$script:SpeechBridge = $null
+$script:RecognitionTimer = $null
+$script:HearingMonitor = $null
+$script:HearingMonitorStatus = $null
+$script:HearingMonitorText = $null
+$script:HearingMonitorLevel = $null
+$script:LastLocalHypothesis = ''
+$script:RealtimePreviewPath = Join-Path $script:AppDir 'emma-live.json'
 
 New-Item -ItemType Directory -Path $script:AppDir -Force | Out-Null
 
@@ -33,7 +94,7 @@ function Write-EmmaLog([string]$Message) {
 }
 
 function Default-Config {
-  [pscustomobject]@{ ServerUrl = 'https://backend-production-7952.up.railway.app'; Email = ''; WakeWord = 'Emma'; Language = 'en-GB'; Confidence = 0.62; AutoStart = $true; HandsFree = $true; ConversationSeconds = 12; Assistant = $true; Realtime = $true; VoiceRate = 0; VoiceVolume = 90 }
+  [pscustomobject]@{ ServerUrl = 'https://backend-production-7952.up.railway.app'; Email = ''; WakeWord = 'Emma'; Language = 'en-GB'; Confidence = 0.62; AutoStart = $true; ShowMonitor = $true; HandsFree = $true; ConversationSeconds = 12; Assistant = $true; Realtime = $true; VoiceRate = 0; VoiceVolume = 90 }
 }
 
 function Load-Config {
@@ -150,6 +211,53 @@ function Speak([string]$Text) {
   } catch { Write-EmmaLog "Speech synthesis failed: $($_.Exception.Message)" }
 }
 
+function Update-HearingMonitor([string]$Text,[string]$Status='Listening locally') {
+  if($Text){$script:LastLocalHypothesis=$Text.Trim()}
+  if(!$script:HearingMonitor -or $script:HearingMonitor.IsDisposed){return}
+  $script:HearingMonitorStatus.Text=$Status
+  $script:HearingMonitorText.Text=$(if($script:LastLocalHypothesis){$script:LastLocalHypothesis}else{"Waiting for $($script:Config.WakeWord)…"})
+  $script:HearingMonitor.Refresh()
+}
+
+function Update-HearingLevel([int]$Level) {
+  if(!$script:HearingMonitorLevel -or $script:HearingMonitorLevel.IsDisposed){return}
+  $script:HearingMonitorLevel.Value=[math]::Max(0,[math]::Min(100,$Level))
+}
+
+function Position-HearingMonitor($Form) {
+  $area=[Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+  $x=$area.Left+[math]::Max(0,[int](($area.Width-$Form.Width)/2))
+  $y=$area.Top+[math]::Max(0,[int](($area.Height-$Form.Height)/2))
+  $Form.StartPosition='Manual'
+  $Form.Location=New-Object Drawing.Point($x,$y)
+}
+
+function Show-HearingMonitor {
+  if($script:DictationGrammar){$script:DictationGrammar.Enabled=$true}
+  if($script:HearingMonitor -and !$script:HearingMonitor.IsDisposed){Position-HearingMonitor $script:HearingMonitor;$script:HearingMonitor.Show();$script:HearingMonitor.Activate();return}
+  $form=New-Object Windows.Forms.Form -Property @{Text='What Emma hears';Size=New-Object Drawing.Size(560,250);StartPosition='Manual';TopMost=$true;FormBorderStyle='FixedDialog';MaximizeBox=$false}
+  $title=New-Object Windows.Forms.Label -Property @{Left=20;Top=18;Width=500;Text="Live local recognition — say $($script:Config.WakeWord)";Font=New-Object Drawing.Font('Segoe UI',11,[Drawing.FontStyle]::Bold)}
+  $status=New-Object Windows.Forms.Label -Property @{Left=20;Top=52;Width=500;Text=$(if($script:Listening){'Microphone active'}else{'Microphone paused'})}
+  $level=New-Object Windows.Forms.ProgressBar -Property @{Left=20;Top=76;Width=500;Height=12;Minimum=0;Maximum=100;Value=0;Style='Continuous'}
+  $heard=New-Object Windows.Forms.TextBox -Property @{Left=20;Top=100;Width=500;Height=55;Multiline=$true;ReadOnly=$true;Text=$(if($script:LastLocalHypothesis){$script:LastLocalHypothesis}else{"Waiting for $($script:Config.WakeWord)…"})}
+  $privacy=New-Object Windows.Forms.Label -Property @{Left=20;Top=168;Width=500;Height=36;Text='This live pre-wake text stays on this PC. It is not uploaded or saved in conversation history.'}
+  $form.Controls.AddRange(@($title,$status,$level,$heard,$privacy))
+  $script:HearingMonitor=$form;$script:HearingMonitorStatus=$status;$script:HearingMonitorText=$heard;$script:HearingMonitorLevel=$level
+  $form.Add_FormClosed({$script:HearingMonitor=$null;$script:HearingMonitorStatus=$null;$script:HearingMonitorText=$null;$script:HearingMonitorLevel=$null;if($script:DictationGrammar -and [datetime]::UtcNow -ge $script:ArmedUntil){$script:DictationGrammar.Enabled=$false}})
+  Position-HearingMonitor $form
+  $form.Show()
+}
+
+function Sync-RealtimePreview {
+  if(!(Test-Path -LiteralPath $script:RealtimePreviewPath)){return}
+  try{
+    $preview=Get-Content -LiteralPath $script:RealtimePreviewPath -Raw | ConvertFrom-Json
+    $prefix=if($preview.role -eq 'assistant'){'Emma'}else{'You'}
+    if($preview.text){Update-HearingMonitor ("$prefix`: $($preview.text)") ([string]$preview.status)}
+    elseif($preview.status){Update-HearingMonitor '' ([string]$preview.status)}
+  }catch{}
+}
+
 function Spoken-Result($Response) {
   if (!$Response.ok) { if ($Response.message) { return $Response.message }; return "I could not complete that. $($Response.error)" }
   if ($Response.message) { return $Response.message }
@@ -232,7 +340,7 @@ function Set-AutoStart([bool]$Enabled) {
 }
 
 function Show-Settings {
-  $form = New-Object Windows.Forms.Form -Property @{ Text='VCUBF Emma settings'; Size=New-Object Drawing.Size(470,465); StartPosition='CenterScreen'; TopMost=$true; FormBorderStyle='FixedDialog'; MaximizeBox=$false }
+  $form = New-Object Windows.Forms.Form -Property @{ Text='VCUBF Emma settings'; Size=New-Object Drawing.Size(470,500); StartPosition='CenterScreen'; TopMost=$true; FormBorderStyle='FixedDialog'; MaximizeBox=$false }
   $wake = New-Object Windows.Forms.TextBox -Property @{ Left=150; Top=30; Width=230; Text=$script:Config.WakeWord }
   $confidence = New-Object Windows.Forms.NumericUpDown -Property @{ Left=150; Top=70; Width=100; DecimalPlaces=2; Minimum=.30; Maximum=.95; Increment=.05; Value=[decimal]$script:Config.Confidence }
   $auto = New-Object Windows.Forms.CheckBox -Property @{ Left=150; Top=110; Width=230; Text='Start with Windows'; Checked=[bool]$script:Config.AutoStart }
@@ -243,13 +351,14 @@ function Show-Settings {
   @('en-GB','en-US') | ForEach-Object {[void]$language.Items.Add($_)}; $language.SelectedItem=$script:Config.Language
   $rate = New-Object Windows.Forms.NumericUpDown -Property @{ Left=150; Top=270; Width=100; Minimum=-5; Maximum=5; Value=[decimal]$script:Config.VoiceRate }
   $volume = New-Object Windows.Forms.NumericUpDown -Property @{ Left=150; Top=305; Width=100; Minimum=0; Maximum=100; Increment=5; Value=[decimal]$script:Config.VoiceVolume }
-  $server = New-Object Windows.Forms.TextBox -Property @{ Left=150; Top=340; Width=270; Text=$script:Config.ServerUrl }
-  foreach ($pair in @(@('Wake word',30),@('Confidence',70),@('Startup',110),@('Mode',140),@('Assistant',170),@('Realtime',200),@('Language',235),@('Voice speed',270),@('Voice volume',305),@('Server',340))) { $form.Controls.Add((New-Object Windows.Forms.Label -Property @{ Left=20; Top=$pair[1]; Width=120; Text=$pair[0] })) }
-  $save = New-Object Windows.Forms.Button -Property @{ Left=300; Top=385; Width=120; Text='Save'; DialogResult='OK' }
-  $form.Controls.AddRange(@($wake,$confidence,$auto,$hands,$assistant,$realtime,$language,$rate,$volume,$server,$save)); $form.AcceptButton=$save
+  $showMonitor = New-Object Windows.Forms.CheckBox -Property @{ Left=150; Top=335; Width=260; Text='Show live hearing on startup'; Checked=[bool]$script:Config.ShowMonitor }
+  $server = New-Object Windows.Forms.TextBox -Property @{ Left=150; Top=370; Width=270; Text=$script:Config.ServerUrl }
+  foreach ($pair in @(@('Wake word',30),@('Confidence',70),@('Startup',110),@('Mode',140),@('Assistant',170),@('Realtime',200),@('Language',235),@('Voice speed',270),@('Voice volume',305),@('Monitor',335),@('Server',370))) { $form.Controls.Add((New-Object Windows.Forms.Label -Property @{ Left=20; Top=$pair[1]; Width=120; Text=$pair[0] })) }
+  $save = New-Object Windows.Forms.Button -Property @{ Left=300; Top=415; Width=120; Text='Save'; DialogResult='OK' }
+  $form.Controls.AddRange(@($wake,$confidence,$auto,$hands,$assistant,$realtime,$language,$rate,$volume,$showMonitor,$server,$save)); $form.AcceptButton=$save
   if ($form.ShowDialog() -ne 'OK') { return }
   if ($wake.Text.Trim().Length -lt 2) { [Windows.Forms.MessageBox]::Show('Wake word must contain at least two characters.') | Out-Null; return }
-  $script:Config.WakeWord=$wake.Text.Trim(); $script:Config.Confidence=[double]$confidence.Value; $script:Config.AutoStart=$auto.Checked; $script:Config.HandsFree=$hands.Checked; $script:Config.Assistant=$assistant.Checked; $script:Config.Realtime=$realtime.Checked; $script:Config.Language=[string]$language.SelectedItem; $script:Config.VoiceRate=[int]$rate.Value; $script:Config.VoiceVolume=[int]$volume.Value; $script:Config.ServerUrl=$server.Text.TrimEnd('/'); Save-Config $script:Config; Set-AutoStart $script:Config.AutoStart
+  $script:Config.WakeWord=$wake.Text.Trim(); $script:Config.Confidence=[double]$confidence.Value; $script:Config.AutoStart=$auto.Checked; $script:Config.ShowMonitor=$showMonitor.Checked; $script:Config.HandsFree=$hands.Checked; $script:Config.Assistant=$assistant.Checked; $script:Config.Realtime=$realtime.Checked; $script:Config.Language=[string]$language.SelectedItem; $script:Config.VoiceRate=[int]$rate.Value; $script:Config.VoiceVolume=[int]$volume.Value; $script:Config.ServerUrl=$server.Text.TrimEnd('/'); Save-Config $script:Config; Set-AutoStart $script:Config.AutoStart
   try { Invoke-Vcubf PUT '/auth/voice-preferences' @{ wake_word=$script:Config.WakeWord; continuous_listening=$true; language=$script:Config.Language } | Out-Null } catch { Write-EmmaLog "Could not sync voice preferences: $($_.Exception.Message)" }
   Initialize-Recognizer
   $script:Notify.ShowBalloonTip(2500,'VCUBF Emma',"Wake word changed to $($script:Config.WakeWord).",'Info')
@@ -283,18 +392,42 @@ function Show-Review([string]$RecognizedText) {
   }
 }
 
+function Invoke-RealtimeProcess([string]$RealtimeScript,[string]$Command) {
+  Remove-Item -LiteralPath $script:RealtimePreviewPath -Force -ErrorAction SilentlyContinue
+  Update-HearingMonitor $script:Config.WakeWord 'Realtime active — speak now'
+  $startInfo=New-Object Diagnostics.ProcessStartInfo
+  $startInfo.FileName='python.exe'
+  $startInfo.Arguments='"'+$RealtimeScript+'"'+$(if($Command){' --stdin'}else{''})
+  $startInfo.UseShellExecute=$false
+  $startInfo.CreateNoWindow=$true
+  $startInfo.RedirectStandardInput=[bool]$Command
+  $process=New-Object Diagnostics.Process
+  $process.StartInfo=$startInfo
+  if(!$process.Start()){throw 'REALTIME_START_FAILED'}
+  if($Command){$process.StandardInput.WriteLine($Command);$process.StandardInput.Close()}
+  while(!$process.WaitForExit(100)){
+    [Windows.Forms.Application]::DoEvents()
+    Sync-RealtimePreview
+  }
+  Sync-RealtimePreview
+  $exitCode=$process.ExitCode
+  Remove-Item -LiteralPath $script:RealtimePreviewPath -Force -ErrorAction SilentlyContinue
+  return $exitCode
+}
+
 function Execute-VoiceCommand([string]$Command) {
-  if(Handle-LocalConversation $Command){return}
+  if($Command -and (Handle-LocalConversation $Command)){return}
   try {
     if (!(Ensure-Login)) { return }
     $realtimeScript=Join-Path (Split-Path -Parent $PSCommandPath) 'emma_realtime.py'
     if([bool]$script:Config.Realtime -and (Test-Path -LiteralPath $realtimeScript)){
       End-TranscriptConversation 'interrupted'
-      $Command | & python.exe $realtimeScript --stdin
-      if($LASTEXITCODE -eq 10){$script:RemotePaused=$true;Update-VoiceState 'paused' $false 'wake_word' '' '' 'pause'|Out-Null;return}
-      if($LASTEXITCODE -eq 0){$script:ArmedUntil=[datetime]::MinValue;return}
+      $realtimeExitCode=Invoke-RealtimeProcess $realtimeScript $Command
+      if($realtimeExitCode -eq 10){$script:RemotePaused=$true;Update-VoiceState 'paused' $false 'wake_word' '' '' 'pause'|Out-Null;return}
+      if($realtimeExitCode -eq 0){$script:ArmedUntil=[datetime]::MinValue;return}
       Write-EmmaLog 'Realtime session failed; falling back to text assistant.'
     }
+    if([string]::IsNullOrWhiteSpace($Command)){throw 'REALTIME_START_FAILED'}
     $path=if([bool]$script:Config.Assistant){'/command/assistant'}else{'/command/text'}
     Start-TranscriptConversation 'reviewed_text'
     Add-TranscriptMessage 'user' $Command.Trim()
@@ -313,6 +446,18 @@ function Execute-VoiceCommand([string]$Command) {
   } catch {Write-EmmaLog "Command failed: $($_.Exception.Message)";$message='The command could not be sent.';$script:LastResponse=$message;Add-TranscriptMessage 'assistant' $message;End-TranscriptConversation 'error';$script:Notify.ShowBalloonTip(4000,'VCUBF Emma',$message,'Error');Speak $message}
 }
 
+function Start-HandsFreeRealtime {
+  if($script:Busy){return}
+  $script:ArmedUntil=[datetime]::MinValue;$script:Busy=$true
+  try{
+    try{$script:Recognizer.RecognizeAsyncCancel()}catch{}
+    $script:Listening=$false
+    Update-VoiceState 'hearing' $true 'wake_word' $script:Config.WakeWord|Out-Null
+    Speak 'Yes?'
+    Execute-VoiceCommand ''
+  } finally {$script:Busy=$false;Start-Listening}
+}
+
 function Find-WakeCommand([string]$Text) {
   $wake = [regex]::Escape($script:Config.WakeWord)
   $match = [regex]::Match($Text, "(?i)(?:^|\W)$wake(?:\W|$)(?<command>.*)$")
@@ -320,34 +465,64 @@ function Find-WakeCommand([string]$Text) {
   return $match.Groups['command'].Value.Trim(' ',',','.',':',';','!','-')
 }
 
-function Handle-Recognition($sender, $event) {
-  if ($script:Busy -or !$script:Listening -or $event.Result.Confidence -lt [double]$script:Config.Confidence) { return }
-  $text = $event.Result.Text.Trim(); if (!$text) { return }
+function Handle-Recognition([string]$Text,[double]$Confidence) {
+  if ($script:Busy -or !$script:Listening) { return }
+  $text = $Text.Trim(); if (!$text) { return }
+  $confidence=$Confidence
+  Update-HearingMonitor $text ("Recognized locally ({0:P0} confidence)" -f $confidence)
   $command = Find-WakeCommand $text
+  $minimumConfidence=if($null -ne $command){[math]::Min([double]$script:Config.Confidence,0.35)}else{[double]$script:Config.Confidence}
+  if($confidence -lt $minimumConfidence){return}
   if ($null -ne $command) {
+    if (!$command -and [bool]$script:Config.HandsFree -and [bool]$script:Config.Realtime) {
+      Write-EmmaLog ("Wake word accepted ({0:N2}); starting Realtime listening." -f $confidence)
+      Start-HandsFreeRealtime
+      return
+    }
     if (!$command) { $script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8); Speak 'Yes?'; return }
   } elseif ([datetime]::UtcNow -lt $script:ArmedUntil) { $command=$text } else { return }
-  Write-EmmaLog ("Accepted ({0:N2}): {1}" -f $event.Result.Confidence,$command)
+  Write-EmmaLog ("Accepted ({0:N2}): {1}" -f $confidence,$command)
   Update-VoiceState 'hearing' $true 'wake_word' $command|Out-Null
   $script:ArmedUntil=[datetime]::MinValue; $script:Busy=$true
   try { $script:Recognizer.RecognizeAsyncCancel(); $script:Listening=$false; if([bool]$script:Config.HandsFree){Execute-VoiceCommand $command}else{Show-Review $command} } finally { $script:Busy=$false; Start-Listening }
 }
 
+function Drain-SpeechEvents {
+  if(!$script:SpeechBridge){return}
+  while($true){
+    $item=$script:SpeechBridge.Next()
+    if(!$item){break}
+    switch($item.Kind){
+      'recognized' {Handle-Recognition ([string]$item.Text) ([double]$item.Confidence)}
+      'hypothesized' {if($item.Text){Update-HearingMonitor ([string]$item.Text) ("Hearing locally ({0:P0})" -f $item.Confidence)}}
+      'rejected' {Update-HearingMonitor ([string]$item.Text) 'Speech detected but not understood'}
+      'audio' {Update-HearingLevel ([int]$item.AudioLevel)}
+    }
+  }
+}
+
 function Initialize-Recognizer {
   $wasListening=$script:Listening
+  if($script:SpeechBridge){$script:SpeechBridge.Detach()}
   if ($script:Recognizer) { try { $script:Recognizer.RecognizeAsyncCancel(); $script:Recognizer.Dispose() } catch {} }
   $info=[System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers() | Where-Object { $_.Culture.Name -eq $script:Config.Language } | Select-Object -First 1
   if (!$info) { throw "No Windows speech recognizer is installed for $($script:Config.Language)." }
   $script:Recognizer=New-Object System.Speech.Recognition.SpeechRecognitionEngine($info)
-  $script:Recognizer.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
+  $script:DictationGrammar=New-Object System.Speech.Recognition.DictationGrammar;$script:DictationGrammar.Name='VCUBF Dictation';$script:DictationGrammar.Enabled=$false;$script:Recognizer.LoadGrammar($script:DictationGrammar)
+  $wakeOnlyBuilder=[System.Speech.Recognition.GrammarBuilder]::new();$wakeOnlyBuilder.Culture=$info.Culture;$wakeOnlyBuilder.Append([string]$script:Config.WakeWord)
+  $wakeOnly=[System.Speech.Recognition.Grammar]::new($wakeOnlyBuilder);$wakeOnly.Name='VCUBF Wake Only';$wakeOnly.Priority=127;$wakeOnly.Weight=1.0;$script:Recognizer.LoadGrammar($wakeOnly)
+  $wakeCommandBuilder=[System.Speech.Recognition.GrammarBuilder]::new();$wakeCommandBuilder.Culture=$info.Culture;$wakeCommandBuilder.Append([string]$script:Config.WakeWord);$wakeCommandBuilder.AppendDictation()
+  $wakeCommand=[System.Speech.Recognition.Grammar]::new($wakeCommandBuilder);$wakeCommand.Name='VCUBF Wake Command';$wakeCommand.Priority=126;$wakeCommand.Weight=1.0;$script:Recognizer.LoadGrammar($wakeCommand)
   $script:Recognizer.SetInputToDefaultAudioDevice()
-  Register-ObjectEvent -InputObject $script:Recognizer -EventName SpeechRecognized -Action { Handle-Recognition $sender $event } | Out-Null
+  $script:SpeechBridge=New-Object VcubfSpeechBridge
+  $script:SpeechBridge.Attach($script:Recognizer)
   if ($wasListening) { Start-Listening }
 }
 
 function Start-Listening {
   if ($script:Listening -or $script:Busy -or $script:RemotePaused) { return }
   try {
+    if($script:DictationGrammar){$script:DictationGrammar.Enabled=(($script:HearingMonitor -and !$script:HearingMonitor.IsDisposed) -or [datetime]::UtcNow -lt $script:ArmedUntil)}
     $script:Recognizer.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple)
     $script:Listening=$true
     if(!$script:InitialListeningLogged){
@@ -386,22 +561,31 @@ $mutex=[Threading.Mutex]::new($true,'Local\VCUBFEmmaCompanion',[ref]$createdNew)
 if(!$createdNew){[Windows.Forms.MessageBox]::Show('VCUBF Emma is already running.','VCUBF Emma')|Out-Null;exit 0}
 
 try {
+  Write-EmmaLog 'Startup: initializing speech recognizer.'
   Initialize-Recognizer
+  Write-EmmaLog 'Startup: speech recognizer initialized.'
   $script:Notify=New-Object Windows.Forms.NotifyIcon -Property @{ Icon=[Drawing.SystemIcons]::Information; Visible=$true; Text='VCUBF Emma — starting' }
   $menu=New-Object Windows.Forms.ContextMenuStrip
-  $talk=$menu.Items.Add('Talk to Emma now'); $start=$menu.Items.Add('Start listening'); $stop=$menu.Items.Add('Stop listening'); $settings=$menu.Items.Add('Settings'); $open=$menu.Items.Add('Open VCUBF'); $signin=$menu.Items.Add('Connect in browser'); $menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))|Out-Null; $exit=$menu.Items.Add('Exit')
-  $talk.Add_Click({$script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8);Speak 'Yes?'})
-  $start.Add_Click({$script:RemotePaused=$false;Start-Listening}); $stop.Add_Click({Stop-Listening}); $settings.Add_Click({Show-Settings}); $open.Add_Click({Start-Process 'https://frontend-production-ee13.up.railway.app'}); $signin.Add_Click({Remove-Item -LiteralPath $script:TokenPath -Force -ErrorAction SilentlyContinue; Show-Login|Out-Null}); $exit.Add_Click({$script:Context.ExitThread()})
+  $talk=$menu.Items.Add('Talk to Emma now'); $monitor=$menu.Items.Add('Show live hearing'); $start=$menu.Items.Add('Start listening'); $stop=$menu.Items.Add('Stop listening'); $settings=$menu.Items.Add('Settings'); $open=$menu.Items.Add('Open VCUBF'); $signin=$menu.Items.Add('Connect in browser'); $menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))|Out-Null; $exit=$menu.Items.Add('Exit')
+  $talk.Add_Click({if([bool]$script:Config.HandsFree -and [bool]$script:Config.Realtime){Start-HandsFreeRealtime}else{$script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8);Speak 'Yes?'}})
+  $monitor.Add_Click({Show-HearingMonitor});$start.Add_Click({$script:RemotePaused=$false;Start-Listening}); $stop.Add_Click({Stop-Listening}); $settings.Add_Click({Show-Settings}); $open.Add_Click({Start-Process 'https://frontend-production-ee13.up.railway.app'}); $signin.Add_Click({Remove-Item -LiteralPath $script:TokenPath -Force -ErrorAction SilentlyContinue; Show-Login|Out-Null}); $exit.Add_Click({$script:Context.ExitThread()})
   $script:Notify.ContextMenuStrip=$menu; $script:Notify.Add_DoubleClick({Start-Process 'https://frontend-production-ee13.up.railway.app'})
   $script:StateTimer=New-Object Windows.Forms.Timer -Property @{Interval=3000}
   $script:StateTimer.Add_Tick({$state=Update-VoiceState $(if($script:RemotePaused){'paused'}elseif($script:Listening){'listening'}else{'thinking'}) (!$script:RemotePaused -and $script:Listening) 'wake_word';Apply-RemoteControl $state;if($script:TranscriptConversationId -and !$script:Busy -and $script:ArmedUntil -ne [datetime]::MinValue -and [datetime]::UtcNow -ge $script:ArmedUntil){End-TranscriptConversation 'completed'}})
   $script:StateTimer.Start()
+  $script:RecognitionTimer=New-Object Windows.Forms.Timer -Property @{Interval=100}
+  $script:RecognitionTimer.Add_Tick({Drain-SpeechEvents})
+  $script:RecognitionTimer.Start()
   Set-AutoStart ([bool]$script:Config.AutoStart)
+  Write-EmmaLog 'Startup: loading saved connection.'
   if (!(Load-Token) -and !$DesktopLaunch) { Show-Login | Out-Null }
+  Write-EmmaLog 'Startup: starting microphone.'
   Start-Listening
+  Write-EmmaLog 'Startup: microphone initialization finished.'
+  if($ShowMonitor -or [bool]$script:Config.ShowMonitor){Show-HearingMonitor;Write-EmmaLog 'Startup: live hearing monitor shown.'}
   $script:Notify.ShowBalloonTip(3000,'VCUBF Emma',"Listening locally for $($script:Config.WakeWord).",'Info')
   if($Announce){Speak 'Emma is active and listening.'}
   $script:Context=New-Object Windows.Forms.ApplicationContext
   [Windows.Forms.Application]::Run($script:Context)
 } catch { Write-EmmaLog "Fatal: $($_.Exception)"; [Windows.Forms.MessageBox]::Show($_.Exception.Message,'VCUBF Emma','OK','Error')|Out-Null }
-finally { if($script:StateTimer){$script:StateTimer.Stop();$script:StateTimer.Dispose()};End-TranscriptConversation 'interrupted';Stop-Listening;Update-VoiceState 'offline' $false 'wake_word'|Out-Null;if($script:Notify){$script:Notify.Visible=$false;$script:Notify.Dispose()}; if($script:Recognizer){$script:Recognizer.Dispose()};$script:Synth.Dispose();$mutex.ReleaseMutex();$mutex.Dispose() }
+finally { if($script:StateTimer){$script:StateTimer.Stop();$script:StateTimer.Dispose()};if($script:RecognitionTimer){$script:RecognitionTimer.Stop();$script:RecognitionTimer.Dispose()};End-TranscriptConversation 'interrupted';Stop-Listening;Update-VoiceState 'offline' $false 'wake_word'|Out-Null;if($script:SpeechBridge){$script:SpeechBridge.Detach()};if($script:HearingMonitor -and !$script:HearingMonitor.IsDisposed){$script:HearingMonitor.Dispose()};if($script:Notify){$script:Notify.Visible=$false;$script:Notify.Dispose()}; if($script:Recognizer){$script:Recognizer.Dispose()};$script:Synth.Dispose();$mutex.ReleaseMutex();$mutex.Dispose() }
