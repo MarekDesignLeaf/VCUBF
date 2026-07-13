@@ -71,6 +71,17 @@ describe("command/text", () => {
     assert.equal(audit?.interpretedIntent, "list_clients");
   });
 
+  it("executes an already-supported request through the assistant endpoint without an AI round trip", async () => {
+    const res = await request(app)
+      .post("/command/assistant")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "list clients", input_method: "voice_transcript", language: "en-GB", history: [] });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.kind, "action");
+    assert.equal(res.body.intent, "list_clients");
+    assert.equal(res.body.ok, true);
+  });
+
   it("creates a job via text command by resolving the client name", async () => {
     const res = await request(app)
       .post("/command/text")
