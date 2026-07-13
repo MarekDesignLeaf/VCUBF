@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import jwt from "jsonwebtoken";
+import jwt, { type SignOptions } from "jsonwebtoken";
 import { prisma } from "../db.js";
 
 export interface AuthedUser {
@@ -26,8 +26,8 @@ declare global {
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-me";
 
-export function signToken(user: AuthedUser, authVersion: number): string {
-  return jwt.sign({ sub: user.id, authVersion }, JWT_SECRET, { expiresIn: "12h" });
+export function signToken(user: AuthedUser, authVersion: number, expiresIn: SignOptions["expiresIn"] = "12h"): string {
+  return jwt.sign({ sub: user.id, authVersion }, JWT_SECRET, { expiresIn });
 }
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {

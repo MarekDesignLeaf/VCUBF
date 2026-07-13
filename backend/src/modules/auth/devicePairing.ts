@@ -54,5 +54,8 @@ devicePairingRouter.post("/token", limiter, async (req,res) => {
   if(claimed.count!==1)return res.status(409).json({error:"PAIRING_ALREADY_USED"});
   const user=await prisma.user.findUniqueOrThrow({where:{id:pairing.userId}});
   const authUser={...publicUser(user),companyId:user.companyId};
-  res.json({status:"connected",token:signToken(authUser,user.authVersion),user:publicUser(user)});
+  // The companion starts with Windows and must not require browser pairing
+  // every 12 hours. Password changes, account disablement and authVersion
+  // invalidation still revoke this device token immediately.
+  res.json({status:"connected",token:signToken(authUser,user.authVersion,"30d"),user:publicUser(user)});
 });

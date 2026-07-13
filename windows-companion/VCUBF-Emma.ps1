@@ -1,4 +1,4 @@
-param([switch]$Diagnostic,[string]$CommandTest)
+param([switch]$Diagnostic,[string]$CommandTest,[switch]$DesktopLaunch,[switch]$Announce)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -305,9 +305,10 @@ try {
   $start.Add_Click({Start-Listening}); $stop.Add_Click({Stop-Listening}); $settings.Add_Click({Show-Settings}); $open.Add_Click({Start-Process 'https://frontend-production-ee13.up.railway.app'}); $signin.Add_Click({Remove-Item -LiteralPath $script:TokenPath -Force -ErrorAction SilentlyContinue; Show-Login|Out-Null}); $exit.Add_Click({$script:Context.ExitThread()})
   $script:Notify.ContextMenuStrip=$menu; $script:Notify.Add_DoubleClick({Start-Process 'https://frontend-production-ee13.up.railway.app'})
   Set-AutoStart ([bool]$script:Config.AutoStart)
-  if (!(Load-Token)) { Show-Login | Out-Null }
+  if (!(Load-Token) -and !$DesktopLaunch) { Show-Login | Out-Null }
   Start-Listening
   $script:Notify.ShowBalloonTip(3000,'VCUBF Emma',"Listening locally for $($script:Config.WakeWord).",'Info')
+  if($Announce){Speak 'Emma is active and listening.'}
   $script:Context=New-Object Windows.Forms.ApplicationContext
   [Windows.Forms.Application]::Run($script:Context)
 } catch { Write-EmmaLog "Fatal: $($_.Exception)"; [Windows.Forms.MessageBox]::Show($_.Exception.Message,'VCUBF Emma','OK','Error')|Out-Null }

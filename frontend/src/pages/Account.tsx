@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../context/useAuth";
@@ -22,6 +22,20 @@ export function Account() {
   const pairingCode = (searchParams.get("pair") ?? "").toUpperCase();
   const [pairingState, setPairingState] = useState<"idle"|"approving"|"approved"|"error">(pairingCode ? "idle" : "idle");
   const [pairingError, setPairingError] = useState<string | null>(null);
+  const pairingAttempted = useRef(false);
+
+  useEffect(() => {
+    if (!pairingCode || pairingAttempted.current) return;
+    pairingAttempted.current = true;
+    setPairingState("approving");
+    setPairingError(null);
+    api.approveDevicePairing(pairingCode)
+      .then(() => setPairingState("approved"))
+      .catch((caught) => {
+        setPairingState("error");
+        setPairingError(caught instanceof ApiError ? caught.message : "Could not connect the Windows companion.");
+      });
+  }, [pairingCode]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -63,11 +77,11 @@ export function Account() {
     <p>Signed in as <strong>{user?.displayName}</strong> ({user?.email}).</p>
     {pairingCode && <section className="pairing-card">
       <h2>Connect Windows Emma</h2>
-      <p>The Windows companion is requesting access to your VCUBF account.</p>
+      <p>The Windows companion launched from this PC is being connected to your signed-in VCUBF account.</p>
       <div className="pairing-code">{pairingCode}</div>
-      <p className="hint">Approve only if this code matches the code shown by the Emma companion on this computer.</p>
+      <p className="hint">This one-time code came from the desktop launcher and expires after ten minutes.</p>
       {pairingError && <div className="error-banner">{pairingError}</div>}
-      {pairingState==="approved" ? <div className="success-banner">Windows Emma is connected. You may close this page.</div> : <button type="button" onClick={approvePairing} disabled={pairingState==="approving"}>{pairingState==="approving"?"Connecting…":"Approve Windows Emma"}</button>}
+      {pairingState==="approved" ? <div className="success-banner">Emma is connected, active and listening. You may close this page.</div> : pairingState==="error" ? <button type="button" onClick={approvePairing}>Try again</button> : <div className="hint">Connecting Emma…</div>}
     </section>}
     {user?.mustChangePassword && <div className="warning-banner">You are using a temporary password. Change it before continuing to Secretary.</div>}
     <form className="inline-form" onSubmit={submit} style={{ display: "grid", maxWidth: 520 }}>
@@ -82,7 +96,7 @@ export function Account() {
     </form>
     <form className="inline-form voice-settings" onSubmit={saveVoice} style={{ display: "grid", maxWidth: 520 }}>
       <h2>Voice control</h2>
-      <p className="hint">The default wake word is Emma. Listening starts only after you press the listening button and always pauses for transcript review before a command runs.</p>
+      <p className="hint">The Windows companion listens locally for the wake word whenever it is running. Realtime mode starts a hands-free conversation after you say Emma; reviewed transcript mode remains available in the tray settings.</p>
       <label>Wake word<input value={wakeWord} minLength={2} maxLength={30} onChange={(event) => setWakeWord(event.target.value)} required /></label>
       <label>Recognition language<select value={voiceLanguage} onChange={(event) => setVoiceLanguage(event.target.value as "en-GB" | "en-US")}><option value="en-GB">English (United Kingdom)</option><option value="en-US">English (United States)</option></select></label>
       <label className="checkbox-label"><input type="checkbox" checked={continuous} onChange={(event) => setContinuous(event.target.checked)} /> Enable wake-word listening controls</label>
