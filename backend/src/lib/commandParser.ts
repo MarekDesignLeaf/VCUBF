@@ -11,6 +11,7 @@
 // produce.
 //
 import { resolveVoicePage, type VoicePage } from "./voiceNavigation.js";
+import type { ConnectorKey } from "../connectors/registry.js";
 
 // If nothing matches, the result is `unrecognized` — the system must not
 // guess (VCUF error handling rule).
@@ -51,6 +52,9 @@ export type ParsedCommand =
   | { intent: "list_clients"; entities: Record<string, never> }
   | { intent: "list_contacts"; entities: Record<string, never> }
   | { intent: "list_channel_messages"; entities: { channel: "email" | "whatsapp" } }
+  | { intent: "connector_status"; entities: { connector_key: ConnectorKey | "all" } }
+  | { intent: "setup_connectors"; entities: { connector_key: ConnectorKey | "all" } }
+  | { intent: "sync_connectors"; entities: { connector_key: ConnectorKey | "all" } }
   | { intent: "list_jobs"; entities: Record<string, never> }
   | { intent: "list_leads"; entities: Record<string, never> }
   | { intent: "navigate"; entities: { page: VoicePage } }
@@ -65,8 +69,42 @@ function extractLabelled(text: string, label: string): { value?: string; rest: s
   return { value, rest };
 }
 
+function resolveConnectorTarget(raw: string): ConnectorKey | "all" | undefined {
+  const normalized = raw.trim().toLowerCase().replace(/[.!?]+$/g, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ")
+    .replace(/^(?:the|my)\s+/, "").replace(/\s+(?:connector|integration)$/, "");
+  const aliases: Record<string, ConnectorKey | "all"> = {
+    all: "all", connectors: "all", integrations: "all", "all connectors": "all", "all integrations": "all",
+    gmail: "gmail", email: "gmail", mail: "gmail",
+    "google contacts": "google_contacts", contacts: "google_contacts",
+    "google calendar": "google_calendar", calendar: "google_calendar",
+    "google drive": "google_drive_photos", "google drive photos": "google_drive_photos", drive: "google_drive_photos", photos: "google_drive_photos",
+    whatsapp: "whatsapp_business", "whatsapp business": "whatsapp_business",
+  };
+  return aliases[normalized];
+}
+
 export function parseTextCommand(rawText: string): ParsedCommand {
   const text = rawText.trim();
+
+  let connectorMatch = text.match(/^(?:check|show|list)\s+(.+?)\s+(?:connector\s+)?status$/i);
+  if (connectorMatch) {
+    const connectorKey = resolveConnectorTarget(connectorMatch[1]);
+    if (connectorKey) return { intent: "connector_status", entities: { connector_key: connectorKey } };
+  }
+  if (/^(?:check|show|list)\s+(?:my\s+)?(?:connectors?|integrations?)(?:\s+status)?$/i.test(text))
+    return { intent: "connector_status", entities: { connector_key: "all" } };
+
+  connectorMatch = text.match(/^(?:set\s*up|setup|configure|connect|start|activate)\s+(.+)$/i);
+  if (connectorMatch) {
+    const connectorKey = resolveConnectorTarget(connectorMatch[1]);
+    if (connectorKey) return { intent: "setup_connectors", entities: { connector_key: connectorKey } };
+  }
+
+  connectorMatch = text.match(/^(?:sync|synchronise|synchronize|refresh)\s+(.+)$/i);
+  if (connectorMatch) {
+    const connectorKey = resolveConnectorTarget(connectorMatch[1]);
+    if (connectorKey) return { intent: "sync_connectors", entities: { connector_key: connectorKey } };
+  }
 
   let m = text.match(/^(?:create|add|new)\s+client\s+(.+)$/i);
   if (m) {

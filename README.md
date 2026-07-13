@@ -135,22 +135,19 @@ npm run dev                 # http://localhost:5173
   Every call writes its own audit entry recording the raw text, the interpreted intent,
   and the result, in addition to the audit entry the underlying action (e.g.
   `create_client`) writes itself.
-- **Frontend — Voice and Text Command Bar**: a command box on the dashboard with example
-  quick-fill buttons, opt-in browser speech recognition and a running history of the last
-  8 submitted commands. Voice recognition only fills the text field; it never submits or
-  executes automatically. The user must stop listening, review the exact transcript and
-  choose Run. The browser may use its own online speech service, but Secretary stores no
-  audio and the Secretary backend receives only the reviewed text after Run is chosen. Text
-  input remains available when speech recognition is unsupported. Both paths therefore
-  use the same deterministic backend parser, permission checks and audit trail; the audit
-  records `text` versus `voice_transcript` as the input method, never audio.
+- **Frontend — Emma and keyboard fallback**: the signed-in layout exposes Windows Emma state,
+  saved text conversation transcripts and an optional keyboard command field. Normal voice
+  interaction has no browser microphone or Run button; the Windows companion executes an
+  activated command automatically through the same deterministic backend parser, permission
+  checks and audit trail. VCUBF persists transcript text but never microphone audio.
 - **Windows 11 Emma companion**: `windows-companion/VCUBF-Emma.ps1` is a native
   system-tray listener built on the locally installed Windows Speech API. It keeps
-  listening when the browser is minimized or closed, detects the per-user wake word
-  (`Emma` by default), pauses for an editable native review dialog, sends only an
-  approved transcript to `/command/text`, speaks the deterministic result and stores
-  its API token encrypted for the current Windows user with DPAPI. `Install.ps1`
-  installs auto-start for the current user; no password or audio is persisted.
+  listening when the browser is minimized or closed and detects the per-user wake word
+  (`Emma` by default). A same-phrase utterance is held in memory while the authenticated
+  backend obtains an accurate transcription; the returned text enters the Realtime assistant
+  automatically and the WAV is not stored. The companion supports follow-up speech and
+  interruption, speaks responses and stores its API token encrypted for the current Windows
+  user with DPAPI. `Install.ps1` installs auto-start; no password or audio is persisted.
 
 - **Job Allocation and Capacity Management Module**: `backend/src/services/
   capacityService.ts` computes an employee's **real** current-week workload from actual

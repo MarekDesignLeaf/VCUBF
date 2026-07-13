@@ -15,6 +15,7 @@ import {
 } from "../connectors/registry.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { whatsAppConfigurationAvailable } from "../connectors/whatsappBusinessAdapter.js";
+import { assertConnectorEncryptionConfigured } from "../connectors/connectorCrypto.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
 const credentialReferenceSchema = z
@@ -72,10 +73,34 @@ export function publicConnectorSource<T extends {
   return {
     ...safe,
     credentialReferenceConfigured: Boolean(credentialReference),
+    configurationAvailable: connectorConfigurationAvailable(source.connectorKey),
     authorizationConfigured: Boolean(credential) || (source.connectorKey === "whatsapp_business" && whatsAppConfigurationAvailable()),
     incrementalSyncConfigured: Boolean(syncCursor),
     definition: getConnectorDefinition(source.connectorKey),
   };
+}
+
+function validProviderRedirect(value: string | undefined) {
+  if (!value?.trim()) return false;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(url.hostname));
+  } catch {
+    return false;
+  }
+}
+
+export function connectorConfigurationAvailable(connectorKey: string) {
+  if (connectorKey === "whatsapp_business") return whatsAppConfigurationAvailable();
+  try { assertConnectorEncryptionConfigured(); } catch { return false; }
+  const requiredByConnector: Record<string, [string | undefined, string | undefined, string | undefined]> = {
+    gmail: [process.env.GMAIL_OAUTH_CLIENT_ID, process.env.GMAIL_OAUTH_CLIENT_SECRET, process.env.GMAIL_OAUTH_REDIRECT_URI],
+    google_contacts: [process.env.GOOGLE_CONTACTS_OAUTH_CLIENT_ID, process.env.GOOGLE_CONTACTS_OAUTH_CLIENT_SECRET, process.env.GOOGLE_CONTACTS_OAUTH_REDIRECT_URI],
+    google_calendar: [process.env.GOOGLE_CALENDAR_OAUTH_CLIENT_ID, process.env.GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET, process.env.GOOGLE_CALENDAR_OAUTH_REDIRECT_URI],
+    google_drive_photos: [process.env.GOOGLE_DRIVE_OAUTH_CLIENT_ID, process.env.GOOGLE_DRIVE_OAUTH_CLIENT_SECRET, process.env.GOOGLE_DRIVE_OAUTH_REDIRECT_URI],
+  };
+  const required = requiredByConnector[connectorKey];
+  return Boolean(required?.[0]?.trim() && required?.[1]?.trim() && validProviderRedirect(required?.[2]));
 }
 
 async function auditError(

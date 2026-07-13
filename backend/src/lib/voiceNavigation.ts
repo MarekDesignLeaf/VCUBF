@@ -169,6 +169,12 @@ export function buildCommandUiAction(intent: string, data: unknown, interpreted:
       const label = channel === "whatsapp" ? "WhatsApp Messages" : "Email Messages";
       return { kind: "navigate", path: `/enquiries?resolution=all&channel=${channel}`, label };
     }
+    case "connector_status": return { kind: "navigate", path: "/connectors", label: "Connector Status" };
+    case "setup_connectors": {
+      const target = typeof entities.connector_key === "string" ? entities.connector_key : "all";
+      return { kind: "navigate", path: `/connectors?setup=${encodeURIComponent(target)}`, label: "Guided Connector Setup" };
+    }
+    case "sync_connectors": return { kind: "navigate", path: "/connectors", label: "Connectors" };
     case "list_jobs": return { kind: "navigate", path: "/jobs", label: "Jobs" };
     case "list_leads": return { kind: "navigate", path: "/leads", label: "Leads" };
     default: return undefined;

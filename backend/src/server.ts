@@ -85,6 +85,9 @@ export function createServer() {
 
   // Fallback error handler — the system must fail safely, never crash silently.
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    if (err && typeof err === "object" && "type" in err && err.type === "entity.too.large") {
+      return res.status(413).json({ error: "PAYLOAD_TOO_LARGE", message: "The request body is too large." });
+    }
     console.error(err);
     res.status(500).json({ error: "INTERNAL_ERROR" });
   });

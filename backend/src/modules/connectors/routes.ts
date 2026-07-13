@@ -22,6 +22,7 @@ import * as googleContactsConnectorService from "../../services/googleContactsCo
 import * as googleCalendarConnectorService from "../../services/googleCalendarConnectorService.js";
 import * as googleDriveConnectorService from "../../services/googleDriveConnectorService.js";
 import * as whatsappBusinessConnectorService from "../../services/whatsappBusinessConnectorService.js";
+import * as connectorSetupService from "../../services/connectorSetupService.js";
 
 export const connectorsRouter = Router();
 
@@ -68,6 +69,17 @@ connectorsRouter.get("/google-drive/oauth/callback", async (req, res) => {
 connectorsRouter.use(requireAuth);
 
 const listQuerySchema = z.object({ active_only: z.enum(["true", "false"]).optional() });
+const setupSchema = z.object({
+  connector_key: z.enum(["gmail", "google_contacts", "google_calendar", "google_drive_photos", "whatsapp_business", "all"]),
+});
+
+connectorsRouter.post("/setup/prepare", requirePermission("connectors.manage"), async (req, res) => {
+  const parsed = setupSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
+  const result = await connectorSetupService.prepareConnectorSetup(req.user!, parsed.data.connector_key as connectorSetupService.ConnectorSetupTarget);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.status(result.httpStatus).json(result.data);
+});
 
 connectorsRouter.get("/definitions", requirePermission("connectors.read"), (_req, res) => {
   res.json(connectorService.listConnectorDefinitions());

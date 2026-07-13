@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
   ApiError,
@@ -10,6 +10,7 @@ import {
   type ExternalDriveImage,
 } from "../api/client";
 import { useAuth } from "../context/useAuth";
+import { useLocation, useNavigate } from "react-router-dom";
 
 interface PickerBuilder {
   addView(view: unknown): PickerBuilder; setOAuthToken(token: string): PickerBuilder;
@@ -44,8 +45,49 @@ function defaultScopes(key: ConnectorKey) {
   return ["read:messages", "send:messages"];
 }
 
+const SETUP_SESSION_KEY = "vcubf-guided-connector-setup";
+const connectorOrder: ConnectorKey[] = ["gmail", "google_contacts", "google_calendar", "google_drive_photos", "whatsapp_business"];
+type SetupTarget = ConnectorKey | "all";
+interface SetupSession { target: SetupTarget; pending: ConnectorKey[]; blockers: string[]; paused?: boolean; }
+
+function setupTarget(value: string | null): SetupTarget | null {
+  return value === "all" || connectorOrder.includes(value as ConnectorKey) ? value as SetupTarget : null;
+}
+
+function readSetupSession(): SetupSession | null {
+  try {
+    const raw = window.sessionStorage.getItem(SETUP_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SetupSession;
+    return setupTarget(parsed.target) && Array.isArray(parsed.pending) && Array.isArray(parsed.blockers) ? parsed : null;
+  } catch { return null; }
+}
+
+function writeSetupSession(session: SetupSession | null) {
+  try {
+    if (session) window.sessionStorage.setItem(SETUP_SESSION_KEY, JSON.stringify(session));
+    else window.sessionStorage.removeItem(SETUP_SESSION_KEY);
+  } catch { /* Browser storage is optional; the current setup step still works. */ }
+}
+
+function enableImpact(source: ConnectorSource) {
+  return source.connectorKey === "google_contacts"
+    ? "Enable read-only Google Contacts access? Synchronisation will stage contact previews but will not create CRM contacts."
+    : source.connectorKey === "google_calendar"
+      ? "Enable read-only Google Calendar access? Synchronisation will stage event previews but will not change jobs, tasks or capacity."
+      : source.connectorKey === "whatsapp_business"
+        ? "Enable WhatsApp Business? Signed inbound messages will be imported automatically; every outgoing message will still require a separate confirmation."
+        : source.connectorKey === "google_drive_photos"
+          ? "Enable per-file Google Drive access? Secretary will only use image files you explicitly select."
+          : source.configuredScopes.some((scope) => scope.startsWith("write:") || scope.startsWith("send:"))
+            ? "Enable Gmail read/write access? Inbox synchronisation and draft creation will be available; every outgoing email will still require a separate confirmation."
+            : "Enable read-only Gmail access? Synchronisation will import messages into Communication Intake.";
+}
+
 export function Connectors() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const canManage = user?.permissions.includes("connectors.manage") ?? false;
   const canImportContacts = user?.permissions.includes("crm.manage") ?? false;
   const [definitions, setDefinitions] = useState<ConnectorDefinition[] | null>(null);
@@ -72,6 +114,7 @@ export function Connectors() {
   const [driveSourceId, setDriveSourceId] = useState<string | null>(null);
   const [driveImages, setDriveImages] = useState<ExternalDriveImage[] | null>(null);
   const [composeSourceId, setComposeSourceId] = useState<string | null>(null);
+  const guidedSetupRunning = useRef(false);
 
   function loadSources() {
     return api.connectors.sources(activeOnly).then(setSources);
@@ -92,6 +135,103 @@ export function Connectors() {
       cancelled = true;
     };
   }, [activeOnly]);
+
+  const runGuidedSetup = useCallback(async (requested: SetupTarget | null, initialSources: ConnectorSource[]) => {
+    if (guidedSetupRunning.current) return;
+    guidedSetupRunning.current = true;
+    try {
+      let session = readSetupSession();
+      let currentSources = initialSources;
+      if (requested && session?.target === requested && session.paused) {
+        session.paused = false;
+        writeSetupSession(session);
+      }
+      if (requested && (!session || session.target !== requested)) {
+        const prepared = await api.connectors.prepareSetup(requested);
+        session = {
+          target: requested,
+          pending: requested === "all" ? [...connectorOrder] : [requested],
+          blockers: [],
+        };
+        writeSetupSession(session);
+        currentSources = prepared.items.flatMap((item) => item.source ? [item.source] : []);
+        setNotice(`Emma prepared ${prepared.created.length} new connector source${prepared.created.length === 1 ? "" : "s"}. Continuing setup automatically.`);
+      }
+      if (!session) return;
+
+      while (session.pending.length) {
+        const key = session.pending[0];
+        let source = currentSources.find((item) => item.connectorKey === key && item.isActive);
+        if (!source) {
+          const prepared = await api.connectors.prepareSetup(key);
+          source = prepared.items.find((item) => item.connectorKey === key)?.source ?? undefined;
+        }
+        if (!source) {
+          session.blockers.push(`${key}: source could not be prepared`);
+          session.pending.shift(); writeSetupSession(session); continue;
+        }
+        if (!source.isActive) {
+          session.blockers.push(`${source.definition.serviceName}: the existing source is archived and requires an administrator review`);
+          session.pending.shift(); writeSetupSession(session); continue;
+        }
+        if (!source.configurationAvailable) {
+          session.blockers.push(`${source.definition.serviceName}: protected deployment credentials are not configured`);
+          session.pending.shift(); writeSetupSession(session); continue;
+        }
+        if (!source.authorizationConfigured) {
+          setNotice(`Emma prepared ${source.definition.serviceName}. Complete the provider consent page; setup will resume automatically when you return.`);
+          writeSetupSession(session);
+          const oauth = await api.connectors.startOAuth(source.id);
+          window.location.assign(oauth.authorizationUrl);
+          return;
+        }
+        if (!source.isEnabled) {
+          try { await api.connectors.enableSource(source.id, false); }
+          catch (err) {
+            if (!(err instanceof ApiError) || err.code !== "CONFIRMATION_REQUIRED") throw err;
+          }
+          if (!window.confirm(enableImpact(source))) {
+            session.paused = true;
+            writeSetupSession(session);
+            setNotice(`Guided setup paused before enabling ${source.definition.serviceName}. Say “set up ${source.definition.serviceName}” when you want to continue.`);
+            navigate("/connectors", { replace: true });
+            return;
+          }
+          source = await api.connectors.enableSource(source.id, true);
+        }
+        if (["gmail", "google_contacts", "google_calendar"].includes(source.connectorKey)) {
+          try {
+            await api.connectors.syncSource(source.id, source.connectorKey === "gmail" ? { max_results: 25 } : {});
+          } catch (err) {
+            session.blockers.push(`${source.definition.serviceName}: ${err instanceof ApiError ? err.message : "synchronisation failed"}`);
+          }
+        }
+        session.pending.shift();
+        writeSetupSession(session);
+        currentSources = await api.connectors.sources(true);
+      }
+
+      const blockerText = session.blockers.length
+        ? ` Remaining requirements: ${session.blockers.join("; ")}.`
+        : " All requested connectors are enabled and available connectors were synchronised.";
+      writeSetupSession(null);
+      navigate("/connectors", { replace: true });
+      setSources(await api.connectors.sources(activeOnly));
+      setNotice(`Emma finished the guided connector setup.${blockerText}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Guided connector setup could not continue.");
+    } finally {
+      guidedSetupRunning.current = false;
+    }
+  }, [activeOnly, navigate]);
+
+  useEffect(() => {
+    if (!canManage || !definitions || !sources || guidedSetupRunning.current) return;
+    const requested = setupTarget(new URLSearchParams(location.search).get("setup"));
+    const stored = readSetupSession();
+    if (!requested && (!stored || stored.paused)) return;
+    void runGuidedSetup(requested, sources);
+  }, [canManage, definitions, sources, location.search, runGuidedSetup]);
 
   async function disable(source: ConnectorSource) {
     setError(null);
@@ -128,16 +268,7 @@ export function Connectors() {
         setBusySourceId(null);
         return;
       }
-      const impact = source.connectorKey === "google_contacts"
-        ? "Enable read-only Google Contacts access? Synchronisation will stage contact previews but will not create CRM contacts."
-        : source.connectorKey === "google_calendar"
-          ? "Enable read-only Google Calendar access? Synchronisation will stage event previews but will not change jobs, tasks or capacity."
-        : source.connectorKey === "whatsapp_business"
-          ? "Enable WhatsApp Business? Signed inbound messages will be imported automatically; every outgoing message will still require a separate confirmation."
-          : source.configuredScopes.some((scope) => scope.startsWith("write:") || scope.startsWith("send:"))
-            ? "Enable Gmail read/write access? Inbox synchronisation and draft creation will be available; every outgoing email will still require a separate confirmation."
-            : "Enable read-only Gmail access? Synchronisation will import messages into Communication Intake.";
-      if (!window.confirm(impact)) {
+      if (!window.confirm(enableImpact(source))) {
         setBusySourceId(null);
         return;
       }
@@ -317,6 +448,7 @@ export function Connectors() {
               <th>Source</th>
               <th>Type</th>
               <th>Scopes</th>
+              <th>Server setup</th>
               <th>Authorization</th>
               <th>Status</th>
               <th>Adapter</th>
@@ -329,6 +461,7 @@ export function Connectors() {
                 <td><strong>{source.displayName}</strong><div className="hint">{source.definition.serviceName}</div></td>
                 <td>{source.serviceType.replaceAll("_", " ")}</td>
                 <td>{source.configuredScopes.length ? source.configuredScopes.join(", ") : "None configured"}</td>
+                <td>{source.configurationAvailable ? "Ready" : "Missing protected credentials"}</td>
                 <td>{source.authorizationConfigured ? "Configured" : "Not configured"}</td>
                 <td>{source.connectionStatus.replaceAll("_", " ")}</td>
                 <td>{source.definition.adapterAvailable ? "Available" : "Contract only"}</td>

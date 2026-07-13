@@ -276,6 +276,7 @@ export interface ConnectorSource {
   lastErrorCode?: string | null;
   lastFullSyncAt?: string | null;
   credentialReferenceConfigured: boolean;
+  configurationAvailable: boolean;
   authorizationConfigured: boolean;
   incrementalSyncConfigured: boolean;
   definition: ConnectorDefinition;
@@ -1469,6 +1470,10 @@ export const api = {
     getSource: (id: string) => request<ConnectorSource>(`/connectors/sources/${id}`),
     registerSource: (data: Record<string, unknown>) =>
       request<ConnectorSource>("/connectors/sources", { method: "POST", body: JSON.stringify(data) }),
+    prepareSetup: (connectorKey: ConnectorKey | "all") =>
+      request<{ target: ConnectorKey | "all"; items: Array<{ connectorKey: ConnectorKey; source: ConnectorSource | null; setupState: string }>; created: ConnectorKey[] }>("/connectors/setup/prepare", {
+        method: "POST", body: JSON.stringify({ connector_key: connectorKey }),
+      }),
     updateSource: (id: string, data: Record<string, unknown>) =>
       request<ConnectorSource>(`/connectors/sources/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     disableSource: (id: string) =>

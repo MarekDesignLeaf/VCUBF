@@ -15,6 +15,11 @@ export interface RealtimeClientSession {
   model: string;
 }
 
+export interface VoiceTranscription {
+  text: string;
+  model: string;
+}
+
 const supportedCommands = `
 create client NAME, email EMAIL, phone PHONE
 create lead NAME for SERVICE, email EMAIL, phone PHONE
@@ -42,6 +47,11 @@ list notifications
 list contacts
 show emails
 show whatsapp messages
+check connectors
+set up all connectors
+set up CONNECTOR (Gmail, Google Contacts, Google Calendar, Google Drive Photos, WhatsApp Business)
+sync all connectors
+sync CONNECTOR
 show data quality issues
 show action patterns
 open PAGE (dashboard, account, notifications, data quality, business metrics, leads, clients, contacts, documents, jobs, tasks, enquiries, communication intake, communications, photos, photo selection, business context, industries, connectors, website audit, website content, employees, calendar, services, quotes, invoices, recruitment, playbooks, learning, memory model)
@@ -57,6 +67,35 @@ function outputText(payload: any): string | undefined {
     }
   }
   return undefined;
+}
+
+export async function transcribeVoiceAudio(
+  audio: Buffer,
+  language: string,
+  wakeWord: string
+): Promise<VoiceTranscription> {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
+
+  const model = process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-mini-transcribe";
+  const form = new FormData();
+  form.append("file", new Blob([new Uint8Array(audio)], { type: "audio/wav" }), "emma-command.wav");
+  form.append("model", model);
+  const isoLanguage = language.trim().split("-", 1)[0]?.toLowerCase();
+  if (/^[a-z]{2}$/.test(isoLanguage)) form.append("language", isoLanguage);
+  if (wakeWord.trim()) form.append("prompt", wakeWord.trim().slice(0, 80));
+
+  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}` },
+    body: form,
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error(`OPENAI_TRANSCRIPTION_FAILED_${response.status}`);
+  const payload = z.object({ text: z.string() }).parse(await response.json());
+  const text = payload.text.trim();
+  if (!text) throw new Error("OPENAI_EMPTY_TRANSCRIPTION");
+  return { text, model };
 }
 
 export async function interpretVoiceRequest(input: {

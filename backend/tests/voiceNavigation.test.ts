@@ -26,4 +26,10 @@ describe("voice application navigation", () => {
       kind: "navigate", path: "/clients/client-2", label: "Client",
     });
   });
+
+  it("opens guided connector setup with the requested target", () => {
+    assert.deepEqual(buildCommandUiAction("setup_connectors", {}, { connector_key: "google_contacts" }), {
+      kind: "navigate", path: "/connectors?setup=google_contacts", label: "Guided Connector Setup",
+    });
+  });
 });

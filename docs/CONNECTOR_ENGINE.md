@@ -33,6 +33,7 @@ WhatsApp Business uses a direct, deployment-level Cloud API connection for one b
 | `GET` | `/connectors/definitions` | `connectors.read` | Lists static connector contracts and honest adapter availability. |
 | `GET` | `/connectors/sources` | `connectors.read` | Lists company-scoped source registrations without credentials. |
 | `GET` | `/connectors/sources/:id` | `connectors.read` | Gets one company-scoped source without credentials. |
+| `POST` | `/connectors/setup/prepare` | `connectors.manage` | Idempotently registers missing disabled sources for one or all connectors and returns non-secret setup state. |
 | `POST` | `/connectors/sources` | `connectors.manage` | Registers a disabled source. |
 | `PUT` | `/connectors/sources/:id` | `connectors.manage` | Updates disabled source metadata and logical scopes. |
 | `POST` | `/connectors/sources/:id/oauth/start` | `connectors.manage` | Creates an expiring one-time state and returns Google's authorization URL. |
@@ -81,7 +82,7 @@ Configure these values outside source control:
 
 The redirect URI must exactly match the Google Cloud OAuth web-client configuration. Real values must never be committed.
 
-OAuth states are random, valid for ten minutes, stored only as SHA-256 hashes and consumed atomically before code exchange. Starting a new flow suspends the source and invalidates older states; disabling also removes pending states. The callback rechecks that the initiating user is still active and still has `connectors.manage`. Provider token bundles are encrypted with AES-256-GCM and authenticated against their company/source/provider context. APIs and audit snapshots expose only `authorizationConfigured: true|false`; authorization codes, access tokens, refresh tokens, client secrets, search text and message content are excluded.
+OAuth states are random, valid for ten minutes, stored only as SHA-256 hashes and consumed atomically before code exchange. Starting a new flow suspends the source and invalidates older states; disabling also removes pending states. The callback rechecks that the initiating user is still active and still has `connectors.manage`. Provider token bundles are encrypted with AES-256-GCM and authenticated against their company/source/provider context. APIs and audit snapshots expose only non-secret booleans such as `configurationAvailable` and `authorizationConfigured`; authorization codes, access tokens, refresh tokens, client secrets, search text and message content are excluded.
 
 Disconnect is separate from Disable. Disable immediately blocks Secretary access but retains the encrypted credential. Disconnect requires risk-3 confirmation, disables first, revokes the refresh token at Google, then deletes the encrypted credential and sync cursor. Google documents that revocation can remove every OAuth scope granted to that Google Cloud project for the account, so this impact is shown before confirmation. If provider revocation fails, the source stays disabled and the encrypted credential is retained for a safe retry.
 
@@ -103,6 +104,10 @@ Each imported Gmail message creates one `CommunicationIntake`:
 The database unique key `(companyId, connectorSourceId, externalMessageId)` prevents duplicate intake records. Repeated synchronisation reports existing messages as skipped. Message text is capped at 100,000 characters to bound local storage.
 
 ## Source lifecycle
+
+Say **Emma, set up all connectors** (or name one connector) to use the guided path. It prepares missing disabled sources, skips and reports unavailable deployment configuration, opens each Google OAuth flow in sequence, resumes after callback, obtains the mandatory Enable confirmation, and performs the first supported Gmail/Contacts/Calendar sync. It never approves provider consent, confirms external access, selects Drive files or creates missing provider credentials on the user's behalf.
+
+The same lifecycle can be completed manually:
 
 1. Register Gmail (choose read, draft and/or send scopes), Google Contacts (`read:contacts`) or WhatsApp Business (`read:messages`, `send:messages`).
 2. Choose **Authorize Gmail/Contacts** and complete Google's consent screen.

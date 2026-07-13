@@ -5,8 +5,9 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Speech
 Add-Type -AssemblyName System.Security
-Add-Type -ReferencedAssemblies System.Speech -TypeDefinition @'
+Add-Type -ReferencedAssemblies @('System.Speech','System.Collections.Concurrent') -TypeDefinition @'
 using System.Collections.Concurrent;
+using System.IO;
 using System.Speech.Recognition;
 
 public sealed class VcubfSpeechEvent {
@@ -14,6 +15,7 @@ public sealed class VcubfSpeechEvent {
   public string Text { get; set; }
   public float Confidence { get; set; }
   public int AudioLevel { get; set; }
+  public byte[] AudioWav { get; set; }
 }
 
 public sealed class VcubfSpeechBridge {
@@ -44,7 +46,14 @@ public sealed class VcubfSpeechBridge {
   }
 
   private void OnRecognized(object sender, SpeechRecognizedEventArgs e) {
-    queue.Enqueue(new VcubfSpeechEvent { Kind = "recognized", Text = e.Result.Text, Confidence = e.Result.Confidence });
+    byte[] audioWav = null;
+    if (e.Result.Audio != null) {
+      using (MemoryStream stream = new MemoryStream()) {
+        e.Result.Audio.WriteToWaveStream(stream);
+        audioWav = stream.ToArray();
+      }
+    }
+    queue.Enqueue(new VcubfSpeechEvent { Kind = "recognized", Text = e.Result.Text, Confidence = e.Result.Confidence, AudioWav = audioWav });
   }
   private void OnHypothesized(object sender, SpeechHypothesizedEventArgs e) {
     queue.Enqueue(new VcubfSpeechEvent { Kind = "hypothesized", Text = e.Result.Text, Confidence = e.Result.Confidence });
@@ -138,6 +147,20 @@ function Invoke-Vcubf([string]$Method, [string]$Path, $Body = $null, [switch]$An
   if ($null -ne $Body) { $params.ContentType = 'application/json'; $params.Body = ($Body | ConvertTo-Json -Depth 8) }
   try { return Invoke-RestMethod @params }
   catch {
+    if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401) { Remove-Item -LiteralPath $script:TokenPath -Force -ErrorAction SilentlyContinue; throw 'LOGIN_REQUIRED' }
+    throw
+  }
+}
+
+function Invoke-VcubfAudio([byte[]]$Audio) {
+  $token = Load-Token
+  if (!$token) { throw 'LOGIN_REQUIRED' }
+  $language = [Uri]::EscapeDataString([string]$script:Config.Language)
+  $wakeWord = [Uri]::EscapeDataString([string]$script:Config.WakeWord)
+  $headers = @{ Authorization = "Bearer $token" }
+  try {
+    return Invoke-RestMethod -Method POST -Uri "$($script:Config.ServerUrl)/command/transcribe?language=$language&wake_word=$wakeWord" -Headers $headers -ContentType 'audio/wav' -Body $Audio -UseBasicParsing -TimeoutSec 30
+  } catch {
     if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401) { Remove-Item -LiteralPath $script:TokenPath -Force -ErrorAction SilentlyContinue; throw 'LOGIN_REQUIRED' }
     throw
   }
@@ -470,7 +493,7 @@ function Find-WakeCommand([string]$Text) {
   return $match.Groups['command'].Value.Trim(' ',',','.',':',';','!','-')
 }
 
-function Handle-Recognition([string]$Text,[double]$Confidence) {
+function Handle-Recognition([string]$Text,[double]$Confidence,[byte[]]$AudioWav) {
   if ($script:Busy -or !$script:Listening) { return }
   $text = $Text.Trim(); if (!$text) { return }
   $confidence=$Confidence
@@ -486,6 +509,24 @@ function Handle-Recognition([string]$Text,[double]$Confidence) {
     }
     if (!$command) { $script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8); Speak 'Yes?'; return }
   } elseif ([datetime]::UtcNow -lt $script:ArmedUntil) { $command=$text } else { return }
+  if($AudioWav -and $AudioWav.Length -ge 44){
+    try {
+      $transcription=Invoke-VcubfAudio $AudioWav
+      $accurateText=([string]$transcription.text).Trim()
+      if(!$accurateText){throw 'EMPTY_TRANSCRIPTION'}
+      $accurateCommand=Find-WakeCommand $accurateText
+      if($null -eq $accurateCommand){$accurateCommand=$accurateText.Trim(' ',',','.',':',';','!','-')}
+      if(!$accurateCommand){throw 'EMPTY_COMMAND'}
+      $command=$accurateCommand
+      Update-HearingMonitor $accurateText 'Accurate online transcription'
+    } catch {
+      Write-EmmaLog "Accurate command transcription failed: $($_.Exception.Message)"
+      Update-HearingMonitor $text 'Online transcription failed — please repeat the command'
+      $script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8)
+      Speak 'I did not catch that accurately. Please say the command again.'
+      return
+    }
+  }
   Write-EmmaLog ("Accepted ({0:N2}): {1}" -f $confidence,$command)
   Update-VoiceState 'hearing' $true 'wake_word' $command|Out-Null
   $script:ArmedUntil=[datetime]::MinValue; $script:Busy=$true
@@ -498,7 +539,7 @@ function Drain-SpeechEvents {
     $item=$script:SpeechBridge.Next()
     if(!$item){break}
     switch($item.Kind){
-      'recognized' {Handle-Recognition ([string]$item.Text) ([double]$item.Confidence)}
+      'recognized' {Handle-Recognition ([string]$item.Text) ([double]$item.Confidence) ([byte[]]$item.AudioWav)}
       'hypothesized' {if($item.Text){Update-HearingMonitor ([string]$item.Text) ("Hearing locally ({0:P0})" -f $item.Confidence)}}
       'rejected' {Update-HearingMonitor ([string]$item.Text) 'Speech detected but not understood'}
       'audio' {Update-HearingLevel ([int]$item.AudioLevel)}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { createRealtimeClientSession, interpretVoiceRequest } from "../src/services/voiceAssistantService.js";
+import { createRealtimeClientSession, interpretVoiceRequest, transcribeVoiceAudio } from "../src/services/voiceAssistantService.js";
 
 const originalFetch = globalThis.fetch;
 const originalKey = process.env.OPENAI_API_KEY;
@@ -70,5 +70,26 @@ describe("voice assistant interpretation", () => {
     const session = await createRealtimeClientSession();
     assert.equal(session.clientSecret, "ek_test_ephemeral");
     assert.equal(session.expiresAt, 1234);
+  });
+
+  it("transcribes an in-memory WAV without persisting or exposing the server key", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    globalThis.fetch = async (url, init) => {
+      assert.equal(String(url), "https://api.openai.com/v1/audio/transcriptions");
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer server-only-test-key");
+      const form = init?.body as FormData;
+      assert.equal(form.get("model"), "gpt-4o-mini-transcribe");
+      assert.equal(form.get("language"), "en");
+      assert.equal(form.get("prompt"), "Emma");
+      const file = form.get("file") as Blob;
+      assert.equal(file.type, "audio/wav");
+      assert.equal(file.size, 48);
+      return new Response(JSON.stringify({ text: " Emma, show contacts. " }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    const result = await transcribeVoiceAudio(Buffer.alloc(48), "en-GB", "Emma");
+    assert.deepEqual(result, { text: "Emma, show contacts.", model: "gpt-4o-mini-transcribe" });
   });
 });

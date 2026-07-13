@@ -36,6 +36,16 @@ describe("command/text", () => {
     assert.equal(res.status, 403);
   });
 
+  it("rejects invalid command audio before contacting the transcription provider", async () => {
+    const res = await request(app)
+      .post("/command/transcribe?language=en-GB&wake_word=Emma")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .set("Content-Type", "audio/wav")
+      .send(Buffer.from("not a WAV"));
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, "INVALID_AUDIO");
+  });
+
   it("creates a client via a text command and audits it", async () => {
     const res = await request(app)
       .post("/command/text")

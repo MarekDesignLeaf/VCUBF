@@ -16,6 +16,7 @@ import * as portfolioService from "../services/portfolioService.js";
 import * as memoryModelService from "../services/memoryModelService.js";
 import * as taskService from "../services/taskService.js";
 import * as contactService from "../services/contactService.js";
+import * as connectorSetupService from "../services/connectorSetupService.js";
 import { buildCommandUiAction, VOICE_PAGE_ROUTES, type CommandUiAction } from "./voiceNavigation.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
@@ -599,6 +600,54 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
     case "list_channel_messages": {
       const data = await communicationService.listEnquiries(user, { resolution: "all", channel: command.entities.channel });
       response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "connector_status": {
+      const result = await connectorSetupService.connectorSetupStatus(user, command.entities.connector_key);
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? "Opening connector status." : result.message,
+      };
+      break;
+    }
+
+    case "setup_connectors": {
+      const result = await connectorSetupService.prepareConnectorSetup(user, command.entities.connector_key);
+      const created = result.ok ? ((result.data as any)?.created?.length ?? 0) : 0;
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok
+          ? `I prepared ${created} new connector source${created === 1 ? "" : "s"}. Opening guided setup now; I will continue each available step and ask only for provider consent or required confirmation.`
+          : result.message,
+      };
+      break;
+    }
+
+    case "sync_connectors": {
+      const result = await connectorSetupService.syncConnectors(user, command.entities.connector_key);
+      const failures = result.ok ? ((result.data as any)?.failures ?? 0) : 0;
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok
+          ? failures ? `Connector sync finished with ${failures} connector${failures === 1 ? "" : "s"} needing attention.` : "Connector sync completed."
+          : result.message,
+      };
       break;
     }
 

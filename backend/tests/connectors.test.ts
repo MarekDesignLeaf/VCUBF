@@ -198,4 +198,28 @@ describe("Connector Engine registry and source lifecycle", () => {
       .send({ display_name: "Hijacked" });
     assert.equal(updateForeign.status, 404);
   });
+
+  it("prepares every missing connector source without inventing provider authorization", async () => {
+    const prepared = await request(app)
+      .post("/connectors/setup/prepare")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ connector_key: "all" });
+    assert.equal(prepared.status, 201);
+    assert.deepEqual(prepared.body.items.map((item: any) => item.connectorKey), [
+      "gmail", "google_contacts", "google_calendar", "google_drive_photos", "whatsapp_business",
+    ]);
+    assert.equal(prepared.body.items.length, 5);
+    assert.ok(prepared.body.items.every((item: any) => item.source && item.source.isEnabled === false));
+    assert.ok(prepared.body.items.every((item: any) => typeof item.source.configurationAvailable === "boolean"));
+    assert.ok(prepared.body.items.every((item: any) => !JSON.stringify(item).includes("CLIENT_SECRET")));
+
+    const byVoice = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "set up all connectors", input_method: "voice_transcript" });
+    assert.equal(byVoice.status, 200);
+    assert.equal(byVoice.body.intent, "setup_connectors");
+    assert.equal(byVoice.body.uiAction.path, "/connectors?setup=all");
+    assert.deepEqual(byVoice.body.data.created, []);
+  });
 });

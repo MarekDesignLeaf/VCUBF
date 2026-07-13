@@ -67,6 +67,14 @@ describe("commandParser", () => {
     assert.equal(parseTextCommand("list leads").intent, "list_leads");
   });
 
+  it("parses connector status, guided setup and synchronisation commands", () => {
+    assert.deepEqual(parseTextCommand("check connectors"), { intent: "connector_status", entities: { connector_key: "all" } });
+    assert.deepEqual(parseTextCommand("set up all connectors"), { intent: "setup_connectors", entities: { connector_key: "all" } });
+    assert.deepEqual(parseTextCommand("configure Google Contacts"), { intent: "setup_connectors", entities: { connector_key: "google_contacts" } });
+    assert.deepEqual(parseTextCommand("start WhatsApp Business connector"), { intent: "setup_connectors", entities: { connector_key: "whatsapp_business" } });
+    assert.deepEqual(parseTextCommand("sync Gmail"), { intent: "sync_connectors", entities: { connector_key: "gmail" } });
+  });
+
   it("parses direct navigation across the Secretary hierarchy", () => {
     assert.deepEqual(parseTextCommand("open dashboard"), { intent: "navigate", entities: { page: "dashboard" } });
     assert.deepEqual(parseTextCommand("go to invoices"), { intent: "navigate", entities: { page: "invoices" } });

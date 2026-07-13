@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, raw } from "express";
 import { z } from "zod";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
@@ -7,7 +7,7 @@ import { EXECUTE_TEXT_COMMAND_ACTION } from "../../lib/actionContracts.js";
 import { parseTextCommand } from "../../lib/commandParser.js";
 import { dispatchParsedCommand } from "../../lib/commandExecutor.js";
 import { resolveLearningAliases } from "../../services/learningService.js";
-import { createRealtimeClientSession, interpretVoiceRequest } from "../../services/voiceAssistantService.js";
+import { createRealtimeClientSession, interpretVoiceRequest, transcribeVoiceAudio } from "../../services/voiceAssistantService.js";
 import { publishVoiceUiAction } from "../../services/voiceUiActionService.js";
 
 export const commandRouter = Router();
@@ -26,6 +26,42 @@ const assistantSchema = commandSchema.extend({
     .max(6)
     .default([]),
 });
+
+const transcriptionQuerySchema = z.object({
+  language: z.string().trim().min(2).max(20).default("en-GB"),
+  wake_word: z.string().trim().min(1).max(80).default("Emma"),
+});
+
+commandRouter.post(
+  "/transcribe",
+  requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission),
+  raw({ type: ["audio/wav", "audio/x-wav"], limit: "2mb" }),
+  async (req, res) => {
+    const query = transcriptionQuerySchema.safeParse(req.query);
+    if (!query.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: query.error.message });
+    const audio = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const isWave = audio.length >= 44 && audio.subarray(0, 4).toString("ascii") === "RIFF" && audio.subarray(8, 12).toString("ascii") === "WAVE";
+    if (!isWave) return res.status(400).json({ error: "INVALID_AUDIO", message: "A valid WAV command recording is required." });
+    try {
+      const transcription = await transcribeVoiceAudio(audio, query.data.language, query.data.wake_word);
+      await recordAudit({
+        companyId: req.user!.companyId,
+        userId: req.user!.id,
+        actionName: "transcribe_voice_command",
+        inputPayload: { audioBytes: audio.length, language: query.data.language, model: transcription.model },
+        dataAfter: { transcriptCharacters: transcription.text.length },
+        riskLevel: 0,
+        confirmationRequired: false,
+        result: "success",
+      });
+      res.set("Cache-Control", "no-store");
+      return res.json({ text: transcription.text });
+    } catch (error) {
+      console.error("Voice command transcription failed", error instanceof Error ? error.message : error);
+      return res.status(503).json({ error: "TRANSCRIPTION_UNAVAILABLE", message: "Voice transcription is temporarily unavailable." });
+    }
+  }
+);
 
 commandRouter.post("/realtime/session", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission), async (req, res) => {
   try {
