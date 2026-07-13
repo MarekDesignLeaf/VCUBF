@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { interpretVoiceRequest } from "../src/services/voiceAssistantService.js";
+import { createRealtimeClientSession, interpretVoiceRequest } from "../src/services/voiceAssistantService.js";
 
 const originalFetch = globalThis.fetch;
 const originalKey = process.env.OPENAI_API_KEY;
@@ -53,5 +53,18 @@ describe("voice assistant interpretation", () => {
     });
     assert.equal(result.kind, "command");
     assert.equal(result.canonical_command, "list clients");
+  });
+
+  it("creates a short-lived realtime client secret without exposing the server key", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    globalThis.fetch = async (_url, init) => {
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer server-only-test-key");
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.session.type, "realtime");
+      return new Response(JSON.stringify({ value: "ek_test_ephemeral", expires_at: 1234, session: { model: "gpt-realtime-1.5" } }), { status: 200 });
+    };
+    const session = await createRealtimeClientSession();
+    assert.equal(session.clientSecret, "ek_test_ephemeral");
+    assert.equal(session.expiresAt, 1234);
   });
 });

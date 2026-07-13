@@ -8,6 +8,12 @@ const assistantResultSchema = z.object({
 
 export type VoiceAssistantResult = z.infer<typeof assistantResultSchema>;
 
+export interface RealtimeClientSession {
+  clientSecret: string;
+  expiresAt?: number;
+  model: string;
+}
+
 const supportedCommands = `
 create client NAME, email EMAIL, phone PHONE
 create lead NAME for SERVICE, email EMAIL, phone PHONE
@@ -102,4 +108,31 @@ ${supportedCommands}`,
   const raw = outputText(await response.json());
   if (!raw) throw new Error("OPENAI_EMPTY_RESPONSE");
   return assistantResultSchema.parse(JSON.parse(raw));
+}
+
+export async function createRealtimeClientSession(): Promise<RealtimeClientSession> {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
+  const model = process.env.OPENAI_REALTIME_MODEL ?? "gpt-realtime-1.5";
+  const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session: {
+        type: "realtime",
+        model,
+        audio: { output: { voice: process.env.OPENAI_REALTIME_VOICE ?? "marin" } },
+      },
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`OPENAI_REALTIME_SESSION_FAILED_${response.status}`);
+  const payload: any = await response.json();
+  const clientSecret = payload?.value ?? payload?.client_secret?.value;
+  if (typeof clientSecret !== "string" || !clientSecret) throw new Error("OPENAI_REALTIME_SECRET_MISSING");
+  return {
+    clientSecret,
+    expiresAt: payload?.expires_at ?? payload?.client_secret?.expires_at,
+    model: payload?.session?.model ?? payload?.model ?? model,
+  };
 }

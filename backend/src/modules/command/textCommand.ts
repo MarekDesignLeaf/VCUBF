@@ -7,7 +7,7 @@ import { EXECUTE_TEXT_COMMAND_ACTION } from "../../lib/actionContracts.js";
 import { parseTextCommand } from "../../lib/commandParser.js";
 import { dispatchParsedCommand } from "../../lib/commandExecutor.js";
 import { resolveLearningAliases } from "../../services/learningService.js";
-import { interpretVoiceRequest } from "../../services/voiceAssistantService.js";
+import { createRealtimeClientSession, interpretVoiceRequest } from "../../services/voiceAssistantService.js";
 
 export const commandRouter = Router();
 
@@ -24,6 +24,26 @@ const assistantSchema = commandSchema.extend({
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().min(1).max(800) }))
     .max(6)
     .default([]),
+});
+
+commandRouter.post("/realtime/session", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission), async (req, res) => {
+  try {
+    const session = await createRealtimeClientSession();
+    await recordAudit({
+      companyId: req.user!.companyId,
+      userId: req.user!.id,
+      actionName: "start_realtime_voice_session",
+      inputPayload: { model: session.model },
+      riskLevel: 0,
+      confirmationRequired: false,
+      result: "success",
+    });
+    res.set("Cache-Control", "no-store");
+    return res.json({ client_secret: session.clientSecret, expires_at: session.expiresAt, model: session.model });
+  } catch (error) {
+    console.error("Realtime session creation failed", error instanceof Error ? error.message : error);
+    return res.status(503).json({ error: "REALTIME_UNAVAILABLE", message: "Realtime voice is temporarily unavailable." });
+  }
 });
 
 commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission), async (req, res) => {

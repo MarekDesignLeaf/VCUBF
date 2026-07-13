@@ -14,7 +14,9 @@ The installer creates one **VCUBF Secretary** icon on the Windows desktop. Doubl
 
 The companion opens the normal VCUBF login in your default browser, so browser password autofill works. After login, approve the matching eight-character code on the Account page. The browser hands back a short-lived one-time token; no password is entered into or saved by the companion. The resulting API token is encrypted with Windows DPAPI for the current Windows user. Right-click the tray icon to pause/resume listening, change the wake word, reconnect in the browser, open VCUBF or exit.
 
-Natural assistant mode is enabled by default. Exact supported commands stay on the fast deterministic path. Other natural wording is sent as text to the backend OpenAI integration, which may translate it into one supported canonical command, ask one clarifying question, answer conversationally, or describe a safe plan for a complex objective. The model never writes to the database directly and cannot bypass permissions, reference disambiguation or confirmation-gated actions. Audio is not sent to OpenAI in this Windows version.
+Natural assistant mode is enabled by default. Exact supported commands stay on the fast deterministic path. Other natural wording is sent as text to the backend OpenAI integration, which may translate it into one supported canonical command, ask one clarifying question, answer conversationally, or describe a safe plan for a complex objective. The model never writes to the database directly and cannot bypass permissions, reference disambiguation or confirmation-gated actions. When Realtime mode is disabled, OpenAI receives recognized text rather than microphone audio.
+
+Realtime audio mode is also enabled by default. Wake-word detection remains local and no microphone audio leaves the PC before activation. After `Emma` is recognised, the companion obtains a short-lived Realtime credential from the authenticated VCUBF backend and opens a temporary speech-to-speech session. Server voice-activity detection ends turns automatically, and speaking while Emma is responding interrupts playback immediately. The permanent OpenAI API key remains only on the backend. Every company-data request is returned to the normal `/command/assistant` endpoint as a tool call, so permissions, audit, ambiguity rejection and risk controls remain authoritative. The audio session closes after inactivity or after three minutes.
 
 ## Voice flow
 
@@ -26,9 +28,9 @@ Natural assistant mode is enabled by default. Exact supported commands stay on t
 
 Hands-free mode can be disabled in tray **Settings** to restore the editable review dialog. Backend permissions, deterministic ambiguity checks and confirmation requirements remain authoritative in either mode.
 
-Settings also control natural assistant mode, recognizer language, spoken-response speed and volume. The default wake word remains editable at any time.
+Settings also control natural assistant mode, Realtime audio, recognizer language, fallback spoken-response speed and volume. The default wake word remains editable at any time. If Realtime cannot connect, the companion automatically falls back to the text assistant and Windows speech synthesis.
 
-The recognizer is local and continues while browsers are minimized or closed, but Windows must be running and the user must be signed in. Microphone privacy settings must allow desktop applications. The current command parser supports English command forms.
+The wake-word recognizer is local and continues while browsers are minimized or closed, but Windows must be running and the user must be signed in. Microphone privacy settings must allow desktop applications. Realtime audio requires internet access. The deterministic command parser supports English canonical forms; the natural assistant can translate ordinary supported phrasing into them.
 
 ## Diagnostics
 

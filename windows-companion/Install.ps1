@@ -5,6 +5,7 @@ $target=Join-Path $env:LOCALAPPDATA 'VCUBF\Emma\app'
 New-Item -ItemType Directory -Path $target -Force|Out-Null
 Copy-Item -LiteralPath (Join-Path $source 'VCUBF-Emma.ps1') -Destination $target -Force
 Copy-Item -LiteralPath (Join-Path $source 'Open-VCUBF.ps1') -Destination $target -Force
+Copy-Item -LiteralPath (Join-Path $source 'emma_realtime.py') -Destination $target -Force
 $script=Join-Path $target 'VCUBF-Emma.ps1'
 $shell=New-Object -ComObject WScript.Shell
 $shortcut=$shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Startup')) 'VCUBF Emma.lnk'))

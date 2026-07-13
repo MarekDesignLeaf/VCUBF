@@ -28,7 +28,7 @@ function Write-EmmaLog([string]$Message) {
 }
 
 function Default-Config {
-  [pscustomobject]@{ ServerUrl = 'https://backend-production-7952.up.railway.app'; Email = ''; WakeWord = 'Emma'; Language = 'en-GB'; Confidence = 0.62; AutoStart = $true; HandsFree = $true; ConversationSeconds = 12; Assistant = $true; VoiceRate = 0; VoiceVolume = 90 }
+  [pscustomobject]@{ ServerUrl = 'https://backend-production-7952.up.railway.app'; Email = ''; WakeWord = 'Emma'; Language = 'en-GB'; Confidence = 0.62; AutoStart = $true; HandsFree = $true; ConversationSeconds = 12; Assistant = $true; Realtime = $true; VoiceRate = 0; VoiceVolume = 90 }
 }
 
 function Load-Config {
@@ -171,23 +171,24 @@ function Set-AutoStart([bool]$Enabled) {
 }
 
 function Show-Settings {
-  $form = New-Object Windows.Forms.Form -Property @{ Text='VCUBF Emma settings'; Size=New-Object Drawing.Size(470,430); StartPosition='CenterScreen'; TopMost=$true; FormBorderStyle='FixedDialog'; MaximizeBox=$false }
+  $form = New-Object Windows.Forms.Form -Property @{ Text='VCUBF Emma settings'; Size=New-Object Drawing.Size(470,465); StartPosition='CenterScreen'; TopMost=$true; FormBorderStyle='FixedDialog'; MaximizeBox=$false }
   $wake = New-Object Windows.Forms.TextBox -Property @{ Left=150; Top=30; Width=230; Text=$script:Config.WakeWord }
   $confidence = New-Object Windows.Forms.NumericUpDown -Property @{ Left=150; Top=70; Width=100; DecimalPlaces=2; Minimum=.30; Maximum=.95; Increment=.05; Value=[decimal]$script:Config.Confidence }
   $auto = New-Object Windows.Forms.CheckBox -Property @{ Left=150; Top=110; Width=230; Text='Start with Windows'; Checked=[bool]$script:Config.AutoStart }
   $hands = New-Object Windows.Forms.CheckBox -Property @{ Left=150; Top=140; Width=260; Text='Hands-free automatic execution'; Checked=[bool]$script:Config.HandsFree }
   $assistant = New-Object Windows.Forms.CheckBox -Property @{ Left=150; Top=170; Width=270; Text='Natural conversation with OpenAI'; Checked=[bool]$script:Config.Assistant }
-  $language = New-Object Windows.Forms.ComboBox -Property @{ Left=150; Top=205; Width=120; DropDownStyle='DropDownList' }
+  $realtime = New-Object Windows.Forms.CheckBox -Property @{ Left=150; Top=200; Width=270; Text='Realtime audio and interruption'; Checked=[bool]$script:Config.Realtime }
+  $language = New-Object Windows.Forms.ComboBox -Property @{ Left=150; Top=235; Width=120; DropDownStyle='DropDownList' }
   @('en-GB','en-US') | ForEach-Object {[void]$language.Items.Add($_)}; $language.SelectedItem=$script:Config.Language
-  $rate = New-Object Windows.Forms.NumericUpDown -Property @{ Left=150; Top=240; Width=100; Minimum=-5; Maximum=5; Value=[decimal]$script:Config.VoiceRate }
-  $volume = New-Object Windows.Forms.NumericUpDown -Property @{ Left=150; Top=275; Width=100; Minimum=0; Maximum=100; Increment=5; Value=[decimal]$script:Config.VoiceVolume }
-  $server = New-Object Windows.Forms.TextBox -Property @{ Left=150; Top=310; Width=270; Text=$script:Config.ServerUrl }
-  foreach ($pair in @(@('Wake word',30),@('Confidence',70),@('Startup',110),@('Mode',140),@('Assistant',170),@('Language',205),@('Voice speed',240),@('Voice volume',275),@('Server',310))) { $form.Controls.Add((New-Object Windows.Forms.Label -Property @{ Left=20; Top=$pair[1]; Width=120; Text=$pair[0] })) }
-  $save = New-Object Windows.Forms.Button -Property @{ Left=300; Top=350; Width=120; Text='Save'; DialogResult='OK' }
-  $form.Controls.AddRange(@($wake,$confidence,$auto,$hands,$assistant,$language,$rate,$volume,$server,$save)); $form.AcceptButton=$save
+  $rate = New-Object Windows.Forms.NumericUpDown -Property @{ Left=150; Top=270; Width=100; Minimum=-5; Maximum=5; Value=[decimal]$script:Config.VoiceRate }
+  $volume = New-Object Windows.Forms.NumericUpDown -Property @{ Left=150; Top=305; Width=100; Minimum=0; Maximum=100; Increment=5; Value=[decimal]$script:Config.VoiceVolume }
+  $server = New-Object Windows.Forms.TextBox -Property @{ Left=150; Top=340; Width=270; Text=$script:Config.ServerUrl }
+  foreach ($pair in @(@('Wake word',30),@('Confidence',70),@('Startup',110),@('Mode',140),@('Assistant',170),@('Realtime',200),@('Language',235),@('Voice speed',270),@('Voice volume',305),@('Server',340))) { $form.Controls.Add((New-Object Windows.Forms.Label -Property @{ Left=20; Top=$pair[1]; Width=120; Text=$pair[0] })) }
+  $save = New-Object Windows.Forms.Button -Property @{ Left=300; Top=385; Width=120; Text='Save'; DialogResult='OK' }
+  $form.Controls.AddRange(@($wake,$confidence,$auto,$hands,$assistant,$realtime,$language,$rate,$volume,$server,$save)); $form.AcceptButton=$save
   if ($form.ShowDialog() -ne 'OK') { return }
   if ($wake.Text.Trim().Length -lt 2) { [Windows.Forms.MessageBox]::Show('Wake word must contain at least two characters.') | Out-Null; return }
-  $script:Config.WakeWord=$wake.Text.Trim(); $script:Config.Confidence=[double]$confidence.Value; $script:Config.AutoStart=$auto.Checked; $script:Config.HandsFree=$hands.Checked; $script:Config.Assistant=$assistant.Checked; $script:Config.Language=[string]$language.SelectedItem; $script:Config.VoiceRate=[int]$rate.Value; $script:Config.VoiceVolume=[int]$volume.Value; $script:Config.ServerUrl=$server.Text.TrimEnd('/'); Save-Config $script:Config; Set-AutoStart $script:Config.AutoStart
+  $script:Config.WakeWord=$wake.Text.Trim(); $script:Config.Confidence=[double]$confidence.Value; $script:Config.AutoStart=$auto.Checked; $script:Config.HandsFree=$hands.Checked; $script:Config.Assistant=$assistant.Checked; $script:Config.Realtime=$realtime.Checked; $script:Config.Language=[string]$language.SelectedItem; $script:Config.VoiceRate=[int]$rate.Value; $script:Config.VoiceVolume=[int]$volume.Value; $script:Config.ServerUrl=$server.Text.TrimEnd('/'); Save-Config $script:Config; Set-AutoStart $script:Config.AutoStart
   try { Invoke-Vcubf PUT '/auth/voice-preferences' @{ wake_word=$script:Config.WakeWord; continuous_listening=$true; language=$script:Config.Language } | Out-Null } catch { Write-EmmaLog "Could not sync voice preferences: $($_.Exception.Message)" }
   Initialize-Recognizer
   $script:Notify.ShowBalloonTip(2500,'VCUBF Emma',"Wake word changed to $($script:Config.WakeWord).",'Info')
@@ -214,6 +215,12 @@ function Execute-VoiceCommand([string]$Command) {
   if(Handle-LocalConversation $Command){return}
   try {
     if (!(Ensure-Login)) { return }
+    $realtimeScript=Join-Path (Split-Path -Parent $PSCommandPath) 'emma_realtime.py'
+    if([bool]$script:Config.Realtime -and (Test-Path -LiteralPath $realtimeScript)){
+      $Command | & python.exe $realtimeScript --stdin
+      if($LASTEXITCODE -eq 0){$script:ArmedUntil=[datetime]::MinValue;return}
+      Write-EmmaLog 'Realtime session failed; falling back to text assistant.'
+    }
     $path=if([bool]$script:Config.Assistant){'/command/assistant'}else{'/command/text'}
     $body=@{text=$Command.Trim();input_method='voice_transcript'}
     if([bool]$script:Config.Assistant){$body.language=$script:Config.Language;$body.history=@($script:ConversationHistory | Select-Object -Last 6)}
@@ -278,7 +285,8 @@ if ($CommandTest) {
 if ($Diagnostic) {
   $recognizers=[System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers() | ForEach-Object { "$($_.Culture.Name): $($_.Description)" }
   $wakeTests = (Find-WakeCommand "$($script:Config.WakeWord) list clients") -eq 'list clients' -and (Find-WakeCommand "x$($script:Config.WakeWord) list clients") -eq $null
-  [pscustomobject]@{ Status=$(if($wakeTests){'ok'}else{'failed'}); WakeWord=$script:Config.WakeWord; Server=$script:Config.ServerUrl; HandsFree=[bool]$script:Config.HandsFree; Assistant=[bool]$script:Config.Assistant; ConversationSeconds=[int]$script:Config.ConversationSeconds; Recognizers=$recognizers; WakeParser=$wakeTests; TokenProtected=(Test-Path $script:TokenPath) } | ConvertTo-Json -Depth 4
+  $realtimeScript=Join-Path (Split-Path -Parent $PSCommandPath) 'emma_realtime.py'
+  [pscustomobject]@{ Status=$(if($wakeTests -and (Test-Path -LiteralPath $realtimeScript)){'ok'}else{'failed'}); WakeWord=$script:Config.WakeWord; Server=$script:Config.ServerUrl; HandsFree=[bool]$script:Config.HandsFree; Assistant=[bool]$script:Config.Assistant; Realtime=[bool]$script:Config.Realtime; RealtimeRuntime=(Test-Path -LiteralPath $realtimeScript); ConversationSeconds=[int]$script:Config.ConversationSeconds; Recognizers=$recognizers; WakeParser=$wakeTests; TokenProtected=(Test-Path $script:TokenPath) } | ConvertTo-Json -Depth 4
   if(!$wakeTests){exit 1}
   exit 0
 }
