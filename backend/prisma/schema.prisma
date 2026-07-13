@@ -50,6 +50,7 @@ model Company {
   websiteContentProposals      WebsiteContentProposal[]
   tasks                        Task[]
   devicePairings               DevicePairing[]
+  voiceDeviceStates            VoiceDeviceState[]
 
   @@map("companies")
 }
@@ -158,10 +159,36 @@ model User {
   company       Company    @relation(fields: [companyId], references: [id])
   auditLogs     AuditLog[]
   assignedJobs  Job[]      @relation("AssignedJobs")
+  voiceDeviceState VoiceDeviceState?
   assignedTasks Task[]     @relation("AssignedTasks")
   devicePairings DevicePairing[]
 
   @@map("users")
+}
+
+// Current native Emma status for user visibility and control. Only final text
+// transcripts and short responses are retained; microphone audio is never
+// stored. One row per user is enough because the Windows companion is a
+// single-instance application for that signed-in Windows account.
+model VoiceDeviceState {
+  id             String    @id @default(uuid())
+  companyId      String    @map("company_id")
+  userId         String    @unique @map("user_id")
+  status         String    @default("offline")
+  mode           String    @default("wake_word")
+  listening      Boolean   @default(false)
+  lastTranscript String?   @map("last_transcript")
+  lastResponse   String?   @map("last_response")
+  lastHeardAt    DateTime? @map("last_heard_at")
+  pendingControl String?   @map("pending_control")
+  heartbeatAt    DateTime  @default(now()) @map("heartbeat_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, heartbeatAt])
+  @@map("voice_device_states")
 }
 
 model DevicePairing {

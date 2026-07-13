@@ -1,6 +1,6 @@
 # VCUBF Emma for Windows 11
 
-Native Windows tray companion for VCUBF. It uses the locally installed Windows Speech Recognizer, listens for the configured wake word (`Emma` by default), pauses for an editable review dialog, and sends only the approved transcript to the existing audited `/command/text` endpoint.
+Native Windows tray companion for VCUBF. It uses the locally installed Windows Speech Recognizer for the configurable wake word (`Emma` by default), then starts a hands-free Realtime conversation or falls back to the audited text-assistant path. The editable review dialog remains available when hands-free mode is disabled.
 
 ## Install
 
@@ -17,6 +17,10 @@ The companion opens the normal VCUBF login in your default browser, so browser p
 Natural assistant mode is enabled by default. Exact supported commands stay on the fast deterministic path. Other natural wording is sent as text to the backend OpenAI integration, which may translate it into one supported canonical command, ask one clarifying question, answer conversationally, or describe a safe plan for a complex objective. The model never writes to the database directly and cannot bypass permissions, reference disambiguation or confirmation-gated actions. When Realtime mode is disabled, OpenAI receives recognized text rather than microphone audio.
 
 Realtime audio mode is also enabled by default. Wake-word detection remains local and no microphone audio leaves the PC before activation. After `Emma` is recognised, the companion obtains a short-lived Realtime credential from the authenticated VCUBF backend and opens a temporary speech-to-speech session. Server voice-activity detection ends turns automatically, and speaking while Emma is responding interrupts playback immediately. The permanent OpenAI API key remains only on the backend. Every company-data request is returned to the normal `/command/assistant` endpoint as a tool call, so permissions, audit, ambiguity rejection and risk controls remain authoritative. The audio session closes after inactivity or after three minutes.
+
+Every signed-in VCUBF page includes a **Windows Emma** control centre. It reports the live device state, the final command accepted after wake-word activation and Emma's final answer. Background speech that does not activate Emma is not sent to this history. The web controls can pause or resume local wake-word listening, end the current Realtime conversation and clear the retained transcript/answer; device commands are acknowledged so the page shows the applied state rather than only the requested state. Audio is streamed only during an activated Realtime session and is not stored by VCUBF.
+
+Program-navigation and usage questions are routed through the backend just like business-data questions. The backend supplies Emma with a tested map covering every implemented frontend route, primary control labels, prerequisites and confirmation boundaries. This lets her guide the user to an outcome without granting the Realtime model direct database access or allowing it to invent unavailable UI.
 
 ## Voice flow
 

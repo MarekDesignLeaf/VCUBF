@@ -19,6 +19,8 @@ $script:Busy = $false
 $script:Notify = $null
 $script:LastResponse = ''
 $script:ConversationHistory = @()
+$script:RemotePaused = $false
+$script:StateTimer = $null
 
 New-Item -ItemType Directory -Path $script:AppDir -Force | Out-Null
 
@@ -74,6 +76,33 @@ function Invoke-Vcubf([string]$Method, [string]$Path, $Body = $null, [switch]$An
   catch {
     if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401) { Remove-Item -LiteralPath $script:TokenPath -Force -ErrorAction SilentlyContinue; throw 'LOGIN_REQUIRED' }
     throw
+  }
+}
+
+function Update-VoiceState([string]$Status,[bool]$IsListening,[string]$Mode='wake_word',[string]$Transcript='',[string]$Response='',[string]$Ack='') {
+  try {
+    $body=@{status=$Status;mode=$Mode;listening=$IsListening}
+    if($Transcript){$body.last_transcript=$Transcript}
+    if($Response){$body.last_response=$Response}
+    if($Ack){$body.ack_control=$Ack}
+    return Invoke-Vcubf PUT '/command/voice-state' $body
+  } catch { return $null }
+}
+
+function Apply-RemoteControl($State) {
+  $control=[string]$State.pendingControl
+  if(!$control){return}
+  if($control -eq 'pause'){
+    $script:RemotePaused=$true
+    try{$script:Recognizer.RecognizeAsyncCancel()}catch{};$script:Listening=$false
+    Update-VoiceState 'paused' $false 'wake_word' '' '' 'pause'|Out-Null
+  } elseif($control -eq 'resume'){
+    $script:RemotePaused=$false
+    Update-VoiceState 'listening' $true 'wake_word' '' '' 'resume'|Out-Null
+    Start-Listening
+  } elseif($control -eq 'end_conversation'){
+    $script:ArmedUntil=[datetime]::MinValue
+    Update-VoiceState $(if($script:RemotePaused){'paused'}else{'listening'}) (!$script:RemotePaused) 'wake_word' '' '' 'end_conversation'|Out-Null
   }
 }
 
@@ -218,6 +247,7 @@ function Execute-VoiceCommand([string]$Command) {
     $realtimeScript=Join-Path (Split-Path -Parent $PSCommandPath) 'emma_realtime.py'
     if([bool]$script:Config.Realtime -and (Test-Path -LiteralPath $realtimeScript)){
       $Command | & python.exe $realtimeScript --stdin
+      if($LASTEXITCODE -eq 10){$script:RemotePaused=$true;Update-VoiceState 'paused' $false 'wake_word' '' '' 'pause'|Out-Null;return}
       if($LASTEXITCODE -eq 0){$script:ArmedUntil=[datetime]::MinValue;return}
       Write-EmmaLog 'Realtime session failed; falling back to text assistant.'
     }
@@ -230,6 +260,7 @@ function Execute-VoiceCommand([string]$Command) {
     $script:ConversationHistory += [pscustomobject]@{role='assistant';content=$message}
     $script:ConversationHistory = @($script:ConversationHistory | Select-Object -Last 6)
     $script:LastResponse=$message
+    Update-VoiceState $(if($response.kind -eq 'error'){'error'}else{'listening'}) $true 'reviewed_text' $Command.Trim() $message|Out-Null
     $script:Notify.ShowBalloonTip(4000,'VCUBF Emma',$message,$(if($response.ok){'Info'}else{'Warning'}));Speak $message
     $script:ArmedUntil=[datetime]::UtcNow.AddSeconds([int]$script:Config.ConversationSeconds)
   } catch {Write-EmmaLog "Command failed: $($_.Exception.Message)";$message='The command could not be sent.';$script:LastResponse=$message;$script:Notify.ShowBalloonTip(4000,'VCUBF Emma',$message,'Error');Speak $message}
@@ -245,11 +276,12 @@ function Find-WakeCommand([string]$Text) {
 function Handle-Recognition($sender, $event) {
   if ($script:Busy -or !$script:Listening -or $event.Result.Confidence -lt [double]$script:Config.Confidence) { return }
   $text = $event.Result.Text.Trim(); if (!$text) { return }
-  Write-EmmaLog ("Heard ({0:N2}): {1}" -f $event.Result.Confidence,$text)
   $command = Find-WakeCommand $text
   if ($null -ne $command) {
     if (!$command) { $script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8); Speak 'Yes?'; return }
   } elseif ([datetime]::UtcNow -lt $script:ArmedUntil) { $command=$text } else { return }
+  Write-EmmaLog ("Accepted ({0:N2}): {1}" -f $event.Result.Confidence,$command)
+  Update-VoiceState 'hearing' $true 'wake_word' $command|Out-Null
   $script:ArmedUntil=[datetime]::MinValue; $script:Busy=$true
   try { $script:Recognizer.RecognizeAsyncCancel(); $script:Listening=$false; if([bool]$script:Config.HandsFree){Execute-VoiceCommand $command}else{Show-Review $command} } finally { $script:Busy=$false; Start-Listening }
 }
@@ -267,13 +299,13 @@ function Initialize-Recognizer {
 }
 
 function Start-Listening {
-  if ($script:Listening -or $script:Busy) { return }
-  try { $script:Recognizer.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple); $script:Listening=$true; if($script:Notify){$script:Notify.Text="VCUBF Emma — listening for $($script:Config.WakeWord)"} }
-  catch { Write-EmmaLog "Microphone start failed: $($_.Exception.Message)"; if($script:Notify){$script:Notify.ShowBalloonTip(4000,'VCUBF Emma','Microphone listening could not start.','Error')} }
+  if ($script:Listening -or $script:Busy -or $script:RemotePaused) { return }
+  try { $script:Recognizer.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple); $script:Listening=$true; if($script:Notify){$script:Notify.Text="VCUBF Emma — listening for $($script:Config.WakeWord)"};Update-VoiceState 'listening' $true 'wake_word'|Out-Null }
+  catch { Write-EmmaLog "Microphone start failed: $($_.Exception.Message)"; Update-VoiceState 'error' $false 'wake_word'|Out-Null; if($script:Notify){$script:Notify.ShowBalloonTip(4000,'VCUBF Emma','Microphone listening could not start.','Error')} }
 }
 
 function Stop-Listening {
-  try { $script:Recognizer.RecognizeAsyncCancel() } catch {}; $script:Listening=$false; if($script:Notify){$script:Notify.Text='VCUBF Emma — paused'}
+  $script:RemotePaused=$true;try { $script:Recognizer.RecognizeAsyncCancel() } catch {}; $script:Listening=$false; if($script:Notify){$script:Notify.Text='VCUBF Emma — paused'};Update-VoiceState 'paused' $false 'wake_word'|Out-Null
 }
 
 $script:Config = Load-Config
@@ -302,8 +334,11 @@ try {
   $menu=New-Object Windows.Forms.ContextMenuStrip
   $talk=$menu.Items.Add('Talk to Emma now'); $start=$menu.Items.Add('Start listening'); $stop=$menu.Items.Add('Stop listening'); $settings=$menu.Items.Add('Settings'); $open=$menu.Items.Add('Open VCUBF'); $signin=$menu.Items.Add('Connect in browser'); $menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))|Out-Null; $exit=$menu.Items.Add('Exit')
   $talk.Add_Click({$script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8);Speak 'Yes?'})
-  $start.Add_Click({Start-Listening}); $stop.Add_Click({Stop-Listening}); $settings.Add_Click({Show-Settings}); $open.Add_Click({Start-Process 'https://frontend-production-ee13.up.railway.app'}); $signin.Add_Click({Remove-Item -LiteralPath $script:TokenPath -Force -ErrorAction SilentlyContinue; Show-Login|Out-Null}); $exit.Add_Click({$script:Context.ExitThread()})
+  $start.Add_Click({$script:RemotePaused=$false;Start-Listening}); $stop.Add_Click({Stop-Listening}); $settings.Add_Click({Show-Settings}); $open.Add_Click({Start-Process 'https://frontend-production-ee13.up.railway.app'}); $signin.Add_Click({Remove-Item -LiteralPath $script:TokenPath -Force -ErrorAction SilentlyContinue; Show-Login|Out-Null}); $exit.Add_Click({$script:Context.ExitThread()})
   $script:Notify.ContextMenuStrip=$menu; $script:Notify.Add_DoubleClick({Start-Process 'https://frontend-production-ee13.up.railway.app'})
+  $script:StateTimer=New-Object Windows.Forms.Timer -Property @{Interval=3000}
+  $script:StateTimer.Add_Tick({$state=Update-VoiceState $(if($script:RemotePaused){'paused'}elseif($script:Listening){'listening'}else{'thinking'}) (!$script:RemotePaused -and $script:Listening) 'wake_word';Apply-RemoteControl $state})
+  $script:StateTimer.Start()
   Set-AutoStart ([bool]$script:Config.AutoStart)
   if (!(Load-Token) -and !$DesktopLaunch) { Show-Login | Out-Null }
   Start-Listening
@@ -312,4 +347,4 @@ try {
   $script:Context=New-Object Windows.Forms.ApplicationContext
   [Windows.Forms.Application]::Run($script:Context)
 } catch { Write-EmmaLog "Fatal: $($_.Exception)"; [Windows.Forms.MessageBox]::Show($_.Exception.Message,'VCUBF Emma','OK','Error')|Out-Null }
-finally { Stop-Listening; if($script:Notify){$script:Notify.Visible=$false;$script:Notify.Dispose()}; if($script:Recognizer){$script:Recognizer.Dispose()};$script:Synth.Dispose();$mutex.ReleaseMutex();$mutex.Dispose() }
+finally { if($script:StateTimer){$script:StateTimer.Stop();$script:StateTimer.Dispose()};Stop-Listening;Update-VoiceState 'offline' $false 'wake_word'|Out-Null;if($script:Notify){$script:Notify.Visible=$false;$script:Notify.Dispose()}; if($script:Recognizer){$script:Recognizer.Dispose()};$script:Synth.Dispose();$mutex.ReleaseMutex();$mutex.Dispose() }

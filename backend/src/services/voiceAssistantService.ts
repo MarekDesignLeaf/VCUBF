@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PROGRAM_KNOWLEDGE } from "../lib/programKnowledge.js";
 
 const assistantResultSchema = z.object({
   kind: z.enum(["command", "reply", "clarification", "plan"]),
@@ -81,7 +82,10 @@ If it is a complex objective, return plan with a short numbered spoken plan and 
 If it is conversation or a capability question, return reply. Be brief and honest.
 
 Supported canonical commands:
-${supportedCommands}`,
+${supportedCommands}
+
+Use this implemented application map when the user asks how to do something, where a feature is, what a page means, or how to reach an outcome. Guide step by step and never invent UI:
+${PROGRAM_KNOWLEDGE}`,
       input: [...history, { role: "user", content: input.text }],
       text: {
         format: {

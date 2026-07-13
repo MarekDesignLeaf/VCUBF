@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 import { CommandBar } from "./CommandBar";
+import { VoiceControlCenter } from "./VoiceControlCenter";
 
 export function Layout() {
   const { user, logout } = useAuth();
@@ -49,7 +50,7 @@ export function Layout() {
         </div>
       </aside>
       <main className="content">
-        {user?.permissions?.includes("voice.execute") && <CommandBar />}
+        {user?.permissions?.includes("voice.execute") && <><VoiceControlCenter /><CommandBar /></>}
         <Outlet />
       </main>
     </div>

@@ -30,6 +30,7 @@ import { connectorsRouter } from "./modules/connectors/routes.js";
 import { metricsRouter } from "./modules/metrics/routes.js";
 import { invoicesRouter } from "./modules/invoices/routes.js";
 import { devicePairingRouter } from "./modules/auth/devicePairing.js";
+import { voiceStateRouter } from "./modules/command/voiceState.js";
 
 export function createServer() {
   const app = express();
@@ -53,6 +54,7 @@ export function createServer() {
   app.use("/crm/leads", leadsRouter);
   app.use("/audit", auditRouter);
   app.use("/command", commandRouter);
+  app.use("/command", voiceStateRouter);
   app.use("/crm/employees", employeesRouter);
   app.use("/calendar", calendarRouter);
   app.use("/service-catalogue", catalogueRouter);

@@ -1341,6 +1341,17 @@ export interface Lead {
   createdAt: string;
 }
 
+export interface VoiceDeviceState {
+  status: "offline" | "listening" | "hearing" | "thinking" | "speaking" | "paused" | "error";
+  mode: "wake_word" | "realtime" | "reviewed_text";
+  listening: boolean;
+  lastTranscript: string | null;
+  lastResponse: string | null;
+  lastHeardAt: string | null;
+  pendingControl: "pause" | "resume" | "end_conversation" | null;
+  heartbeatAt: string | null;
+}
+
 export const api = {
   invoices: { list:()=>request<Invoice[]>("/invoices"), create:(data:Record<string,unknown>)=>request<Invoice>("/invoices",{method:"POST",body:JSON.stringify(data)}), status:(id:string,invoice_status:string)=>request<Invoice>(`/invoices/${id}/status`,{method:"PUT",body:JSON.stringify({invoice_status})}), payment:(id:string,data:Record<string,unknown>,confirmed=false)=>request<Invoice>(`/invoices/${id}/payments`,{method:"POST",body:JSON.stringify({...data,confirmed})}), downloadPdf:(id:string)=>download(`/invoices/${id}/pdf`) },
   metrics: {
@@ -1805,6 +1816,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ text, input_method: inputMethod }),
       }),
+    voiceState: () => request<VoiceDeviceState>("/command/voice-state"),
+    controlVoice: (control: "pause" | "resume" | "end_conversation") =>
+      request<VoiceDeviceState>("/command/voice-state/control", {
+        method: "POST",
+        body: JSON.stringify({ control }),
+      }),
+    clearVoiceHistory: () => request<VoiceDeviceState>("/command/voice-state/history", { method: "DELETE" }),
   },
 };
 

@@ -9,6 +9,7 @@ export async function resetDb() {
   // catalogue items; jobs must go before the catalogue items they may
   // reference.
   await prisma.auditLog.deleteMany({});
+  await prisma.voiceDeviceState.deleteMany({});
   await prisma.devicePairing.deleteMany({});
   await prisma.connectorOAuthState.deleteMany({});
   await prisma.connectorCredential.deleteMany({});

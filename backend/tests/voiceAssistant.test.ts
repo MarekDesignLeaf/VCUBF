@@ -26,6 +26,9 @@ describe("voice assistant interpretation", () => {
       const body = JSON.parse(String(init?.body));
       assert.equal(body.store, false);
       assert.equal(body.text.format.type, "json_schema");
+      assert.match(body.instructions, /\/communication-intake/);
+      assert.match(body.instructions, /\/invoices/);
+      assert.match(body.instructions, /never invent UI/i);
       return new Response(
         JSON.stringify({
           output: [

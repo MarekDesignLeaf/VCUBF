@@ -88,6 +88,19 @@ def compact_tool_result(payload: dict) -> str:
     return encoded[:12_000]
 
 
+def response_text(event: dict) -> str:
+    """Extract the assistant transcript from a completed Realtime response."""
+    parts: list[str] = []
+    for item in (event.get("response") or {}).get("output") or []:
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content") or []:
+            text = content.get("transcript") or content.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+    return " ".join(parts)
+
+
 class RealtimeEmma:
     def __init__(self, initial_command: str):
         self.initial_command = initial_command.strip()
@@ -96,6 +109,12 @@ class RealtimeEmma:
         self.output_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=100)
         self.last_activity = time.monotonic()
         self.response_complete_at: float | None = None
+        self.current_response_text = ""
+        self.current_status = "listening"
+        self.current_listening = True
+        self.reported_speaking = False
+        self.exit_code = 0
+        self.state_lock = asyncio.Lock()
         self.audio = pyaudio.PyAudio()
         self.input_stream = None
         self.output_stream = None
@@ -105,13 +124,49 @@ class RealtimeEmma:
         async with self.send_lock:
             await self.ws.send(json.dumps(payload, separators=(",", ":")))
 
+    async def update_state(
+        self,
+        status: str,
+        listening: bool,
+        transcript: str = "",
+        response: str = "",
+        ack_control: str = "",
+    ) -> dict:
+        self.current_status = status
+        self.current_listening = listening
+        body = {"status": status, "mode": "realtime", "listening": listening}
+        if transcript:
+            body["last_transcript"] = transcript[:2000]
+        if response:
+            body["last_response"] = response[:4000]
+        if ack_control:
+            body["ack_control"] = ack_control
+        try:
+            async with self.state_lock:
+                return await asyncio.to_thread(backend_json, "PUT", "/command/voice-state", body)
+        except Exception as exc:
+            log(f"voice state error: {type(exc).__name__}")
+            return {}
+
+    async def heartbeat_state(self) -> dict:
+        """Refresh liveness without overwriting a newer event state."""
+        try:
+            async with self.state_lock:
+                body = {"status": self.current_status, "mode": "realtime", "listening": self.current_listening}
+                return await asyncio.to_thread(backend_json, "PUT", "/command/voice-state", body)
+        except Exception as exc:
+            log(f"voice heartbeat error: {type(exc).__name__}")
+            return {}
+
     async def configure(self) -> None:
         instructions = """You are Emma, a concise, warm voice assistant for VCUBF Secretary.
 Speak naturally in the user's language. Keep normal answers short enough for speech.
 For every request involving company records, clients, jobs, leads, tasks, schedules,
 communications, quotes, invoices, employees, services, notifications, or any business
-operation, call execute_business_request with the user's exact request. Never invent
-business data and never claim an action succeeded before the tool result confirms it.
+operation, call execute_business_request with the user's exact request. Also call it
+whenever the user asks where a VCUBF feature is, how to use the program, or needs help
+reaching an outcome; the backend owns the current program map and usage instructions.
+Never invent business data and never claim an action succeeded before the tool result confirms it.
 The backend enforces identity, permissions, ambiguity checks and confirmations.
 Never attempt to bypass it. Legal, payment, deletion, publishing, hiring, salary,
 invoice-sending and other risky actions must remain in a reviewed confirmation flow.
@@ -143,7 +198,7 @@ If interrupted, stop speaking immediately and listen to the new request."""
                         {
                             "type": "function",
                             "name": "execute_business_request",
-                            "description": "Read or change VCUBF business data through the authenticated, permission-checked and audited backend.",
+                            "description": "Read or change VCUBF data, or obtain current program navigation and usage guidance, through the authenticated, permission-checked and audited backend.",
                             "parameters": {
                                 "type": "object",
                                 "additionalProperties": False,
@@ -157,6 +212,7 @@ If interrupted, stop speaking immediately and listen to the new request."""
             }
         )
         if self.initial_command:
+            await self.update_state("thinking", False, transcript=self.initial_command)
             await self.send(
                 {
                     "type": "conversation.item.create",
@@ -168,6 +224,8 @@ If interrupted, stop speaking immediately and listen to the new request."""
                 }
             )
             await self.send({"type": "response.create"})
+        else:
+            await self.update_state("listening", True)
 
     async def microphone(self) -> None:
         self.input_stream = self.audio.open(
@@ -201,6 +259,7 @@ If interrupted, stop speaking immediately and listen to the new request."""
 
     async def run_tool(self, event: dict) -> None:
         call_id = event.get("call_id")
+        await self.update_state("thinking", False)
         try:
             arguments = json.loads(event.get("arguments") or "{}")
             request_text = str(arguments.get("request") or "").strip()
@@ -230,12 +289,27 @@ If interrupted, stop speaking immediately and listen to the new request."""
             event_type = event.get("type", "")
             self.last_activity = time.monotonic()
             if event_type in ("response.output_audio.delta", "response.audio.delta"):
+                if not self.reported_speaking:
+                    self.reported_speaking = True
+                    await self.update_state("speaking", True)
                 chunk = base64.b64decode(event.get("delta", ""))
                 if chunk:
                     await self.output_queue.put(chunk)
+            elif event_type in ("response.output_audio_transcript.delta", "response.audio_transcript.delta"):
+                self.current_response_text += str(event.get("delta") or "")
+                if not self.reported_speaking:
+                    self.reported_speaking = True
+                    await self.update_state("speaking", True)
+            elif event_type in ("response.output_audio_transcript.done", "response.audio_transcript.done"):
+                transcript = str(event.get("transcript") or "").strip()
+                if transcript:
+                    self.current_response_text = transcript
             elif event_type == "input_audio_buffer.speech_started":
                 self.clear_playback()
                 self.response_complete_at = None
+                self.current_response_text = ""
+                self.reported_speaking = False
+                await self.update_state("hearing", True)
                 # Current Realtime sessions interrupt automatically when
                 # interrupt_response is true. Cancel is harmless if no response is active.
                 try:
@@ -245,14 +319,43 @@ If interrupted, stop speaking immediately and listen to the new request."""
             elif event_type == "response.function_call_arguments.done":
                 asyncio.create_task(self.run_tool(event))
             elif event_type == "conversation.item.input_audio_transcription.completed":
-                transcript = str(event.get("transcript") or "").strip().lower().rstrip(".!?")
-                if transcript in {"stop", "goodbye", "that's all", "that is all"}:
+                heard = str(event.get("transcript") or "").strip()
+                if heard:
+                    await self.update_state("thinking", False, transcript=heard)
+                normalized = heard.lower().rstrip(".!?")
+                if normalized in {"stop", "goodbye", "that's all", "that is all"}:
                     self.stop.set()
             elif event_type == "response.done":
                 self.response_complete_at = time.monotonic()
+                completed_text = response_text(event) or self.current_response_text.strip()
+                output = (event.get("response") or {}).get("output") or []
+                if completed_text:
+                    await self.update_state("listening", True, response=completed_text)
+                elif any(item.get("type") == "function_call" for item in output):
+                    await self.update_state("thinking", False)
+                else:
+                    await self.update_state("listening", True)
+                self.current_response_text = ""
+                self.reported_speaking = False
             elif event_type == "error":
                 error = event.get("error") or {}
                 log(f"realtime error: {error.get('code', 'unknown')} {error.get('message', '')[:300]}")
+
+    async def control_watchdog(self) -> None:
+        while not self.stop.is_set():
+            await asyncio.sleep(2)
+            state = await self.heartbeat_state()
+            control = str(state.get("pendingControl") or "")
+            if control == "pause":
+                # PowerShell acknowledges after this process exits so it can
+                # atomically return to a genuinely paused wake-word listener.
+                self.exit_code = 10
+                self.stop.set()
+            elif control == "end_conversation":
+                await self.update_state("listening", True, ack_control="end_conversation")
+                self.stop.set()
+            elif control == "resume":
+                await self.update_state(self.current_status, self.current_listening, ack_control="resume")
 
     async def watchdog(self) -> None:
         started = time.monotonic()
@@ -277,6 +380,7 @@ If interrupted, stop speaking immediately and listen to the new request."""
                 asyncio.create_task(self.playback()),
                 asyncio.create_task(self.receive()),
                 asyncio.create_task(self.watchdog()),
+                asyncio.create_task(self.control_watchdog()),
             ]
             await self.stop.wait()
             await self.output_queue.put(None)
@@ -316,7 +420,7 @@ def main() -> int:
     runtime = RealtimeEmma(initial)
     try:
         asyncio.run(runtime.run())
-        return 0
+        return runtime.exit_code
     except (urllib.error.URLError, OSError, KeyError, websockets.WebSocketException) as exc:
         log(f"session failed: {type(exc).__name__}")
         return 1
