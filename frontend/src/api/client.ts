@@ -243,12 +243,12 @@ export interface ManagedEmployee {
   isActive: boolean;
 }
 
-export type ConnectorKey = "gmail" | "google_contacts" | "google_calendar" | "google_drive_photos";
+export type ConnectorKey = "gmail" | "google_contacts" | "google_calendar" | "google_drive_photos" | "whatsapp_business";
 
 export interface ConnectorDefinition {
   key: ConnectorKey;
   serviceName: string;
-  serviceType: "email" | "contacts" | "calendar" | "photo_storage";
+  serviceType: "email" | "contacts" | "calendar" | "photo_storage" | "messaging";
   canRead: string[];
   canWrite: string[];
   logicalScopes: string[];
@@ -310,7 +310,7 @@ export interface ConnectorSyncResult {
 
 export interface ConnectorDisconnectResult {
   sourceId: string;
-  provider: "gmail" | "google_contacts" | "google_calendar";
+  provider: "gmail" | "google_contacts" | "google_calendar" | "google_drive_photos" | "whatsapp_business";
   disconnectedAt: string;
   providerGrantRevoked: boolean;
 }
@@ -350,6 +350,17 @@ export interface ExternalDriveImage {
   thumbnailLink?: string | null; sizeBytes?: string | null; width?: number | null; height?: number | null;
   portfolioPhotoId?: string | null; stagedAt: string;
 }
+
+export interface GmailMessageInput {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  body: string;
+}
+
+export interface GmailDraftResult { sourceId: string; draftId: string; messageId: string | null; threadId: string | null }
+export interface ProviderSendResult { sourceId: string; messageId: string; threadId?: string | null; sentAt: string }
 
 export interface AssignJobResult {
   job: Job;
@@ -1486,6 +1497,12 @@ export const api = {
     driveImages: (id: string) => request<ExternalDriveImage[]>(`/connectors/sources/${id}/drive-images`),
     registerDrivePhoto: (sourceId: string, imageId: string, confirmed: boolean) =>
       request<PortfolioPhoto>(`/connectors/sources/${sourceId}/drive-images/${imageId}/register`, { method: "POST", body: JSON.stringify({ confirmed }) }),
+    createGmailDraft: (sourceId: string, data: GmailMessageInput) =>
+      request<GmailDraftResult>(`/connectors/sources/${sourceId}/gmail/drafts`, { method: "POST", body: JSON.stringify(data) }),
+    sendGmailMessage: (sourceId: string, data: GmailMessageInput, confirmed: boolean) =>
+      request<ProviderSendResult>(`/connectors/sources/${sourceId}/gmail/messages/send`, { method: "POST", body: JSON.stringify({ ...data, confirmed }) }),
+    sendWhatsAppMessage: (sourceId: string, data: { to: string; body: string }, confirmed: boolean) =>
+      request<ProviderSendResult>(`/connectors/sources/${sourceId}/whatsapp/messages/send`, { method: "POST", body: JSON.stringify({ ...data, confirmed }) }),
   },
   jobs: {
     list: (params?: { clientId?: string; status?: string }) => {

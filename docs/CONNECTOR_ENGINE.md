@@ -1,26 +1,30 @@
-# Connector Engine — Phase 3 Google read-only adapters
+# Connector Engine — Google Workspace and WhatsApp Business
 
 ## Current status
 
-The connector registry covers Gmail, Google Contacts, Google Calendar and Google Drive photo storage. All four have real least-privilege adapters.
+The connector registry covers Gmail, Google Contacts, Google Calendar, Google Drive photo storage and WhatsApp Business Cloud API. All five have real least-privilege adapters.
 
 The Gmail adapter can:
 
-- authorize a Google account with OAuth 2.0 using only `gmail.readonly`;
+- authorize a Google account with OAuth 2.0 using the exact selected Gmail scopes (`gmail.readonly`, `gmail.compose` and/or `gmail.send`);
 - refresh an expired access token using an encrypted offline refresh token;
 - list and read Gmail messages;
 - establish a full-sync Gmail `historyId`, then import only added-message history changes;
 - fall back to a safe full sync when Gmail reports an expired history cursor;
 - idempotently import messages into `CommunicationIntake` with source, message and thread provenance;
+- create reviewable Gmail drafts without sending;
+- send a final email only through a separate confirmation-gated action;
 - explicitly revoke and disconnect Gmail through a confirmation-gated action.
 
-It cannot draft, send, delete, label or otherwise change Gmail data. No attachment bytes are imported. External write actions remain separate future work and must retain explicit confirmation boundaries.
+It cannot delete or label Gmail data. No attachment bytes are imported. Draft and send scopes are optional; a source configured only with `read:messages` remains read-only. Recipient, subject and body are shown in the send preview, while audit records retain only counts, lengths and provider result IDs rather than message content.
 
 The Google Contacts adapter uses only `contacts.readonly`. It stages People API contact previews in `ExternalContact`; synchronisation never creates a CRM contact. A user holding both connector and CRM management permissions must review one staged record and confirm its import. Provider deletions archive only the staged record and never delete or deactivate a previously imported CRM contact. Initial sync requests `nextSyncToken`; later calls retrieve only changes. Google's `EXPIRED_SYNC_TOKEN` response triggers a safe full-sync fallback.
 
 Google Calendar uses only `calendar.readonly`. Calendar and event metadata is staged separately from Secretary jobs and tasks. CalendarList and every calendar keep independent sync tokens; HTTP 410 clears only that calendar's stale event staging before a full reload. Provider cancellations never change internal scheduling or capacity records.
 
 Google Drive/Photos deliberately uses non-sensitive `drive.file` rather than broad restricted Drive scopes. Google Picker grants access only to images the user explicitly selects. The backend verifies each selected ID with `files.get`, accepts only `image/*`, stores metadata but no bytes, and requires confirmation before creating a Portfolio Photo reference. Registration leaves marketing use false and all review/permission states unreviewed or unknown.
+
+WhatsApp Business uses a direct, deployment-level Cloud API connection for one business phone number. Meta webhook ownership is verified with a private verify token and every POST body must pass `X-Hub-Signature-256` verification with the Meta app secret. Inbound text and supported message captions are imported idempotently into `CommunicationIntake`; media bytes are not downloaded. Outgoing text is previewed first and is sent only after explicit confirmation. Meta delivery status webhooks are accepted but currently remain audit/result metadata rather than a separate message-status table.
 
 ## API
 
@@ -36,6 +40,11 @@ Google Drive/Photos deliberately uses non-sensitive `drive.file` rather than bro
 | `GET` | `/connectors/google-contacts/oauth/callback` | one-time OAuth state | Exchanges the provider code, verifies `contacts.readonly`, encrypts tokens and redirects to the frontend. |
 | `POST` | `/connectors/sources/:id/enable` | `connectors.manage` | Confirmation-gated enable after verified authorization. |
 | `POST` | `/connectors/sources/:id/sync` | `connectors.manage` | Reads up to 50 Gmail messages and imports unseen messages. |
+| `POST` | `/connectors/sources/:id/gmail/drafts` | `connectors.manage` | Creates a Gmail draft without sending it. |
+| `POST` | `/connectors/sources/:id/gmail/messages/send` | `connectors.manage` | Previews, then sends a Gmail message after explicit confirmation. |
+| `GET` | `/connectors/whatsapp/webhook` | Meta verify token | Verifies webhook ownership and returns Meta's challenge. |
+| `POST` | `/connectors/whatsapp/webhook` | Meta signature | Imports signed inbound WhatsApp messages idempotently. |
+| `POST` | `/connectors/sources/:id/whatsapp/messages/send` | `connectors.manage` | Previews, then sends a WhatsApp text after explicit confirmation. |
 | `POST` | `/connectors/sources/:id/disconnect` | `connectors.manage` | Confirmation-gated Google token revocation and local credential/cursor deletion. |
 | `GET` | `/connectors/sources/:id/external-contacts` | `connectors.read` | Lists company-scoped staged Google contacts without creating CRM data. |
 | `POST` | `/connectors/sources/:id/external-contacts/:contactId/import` | `connectors.manage` + `crm.manage` | Confirmation-gated import of one reviewed contact into CRM. |
@@ -63,6 +72,12 @@ Configure these values outside source control:
 - `GOOGLE_DRIVE_PICKER_API_KEY` — browser-restricted Picker API key
 - `CONNECTOR_ENCRYPTION_KEY` — exactly 32 random bytes encoded as base64
 - `FRONTEND_URL`
+- `WHATSAPP_GRAPH_API_VERSION`
+- `WHATSAPP_PHONE_NUMBER_ID`
+- `WHATSAPP_BUSINESS_ACCOUNT_ID`
+- `WHATSAPP_ACCESS_TOKEN`
+- `WHATSAPP_WEBHOOK_VERIFY_TOKEN`
+- `META_APP_SECRET`
 
 The redirect URI must exactly match the Google Cloud OAuth web-client configuration. Real values must never be committed.
 
@@ -70,7 +85,7 @@ OAuth states are random, valid for ten minutes, stored only as SHA-256 hashes an
 
 Disconnect is separate from Disable. Disable immediately blocks Secretary access but retains the encrypted credential. Disconnect requires risk-3 confirmation, disables first, revokes the refresh token at Google, then deletes the encrypted credential and sync cursor. Google documents that revocation can remove every OAuth scope granted to that Google Cloud project for the account, so this impact is shown before confirmation. If provider revocation fails, the source stays disabled and the encrypted credential is retained for a safe retry.
 
-`gmail.readonly` is a Google restricted scope. A public production deployment may require Google OAuth verification and, depending on how restricted data is stored or transmitted, an additional security assessment. Deployment approval is an operational prerequisite, not something the application can self-certify.
+`gmail.readonly` and `gmail.compose` are Google restricted scopes; `gmail.send` is sensitive. A public production deployment may require Google OAuth verification and, depending on how restricted data is stored or transmitted, an additional security assessment. Deployment approval is an operational prerequisite, not something the application can self-certify.
 
 `contacts.readonly` is requested separately with its own redirect URI. Public use of Google user-data scopes may require OAuth app verification. Contacts credentials must remain outside source control and are encrypted with the same connector key boundary as Gmail.
 
@@ -89,12 +104,14 @@ The database unique key `(companyId, connectorSourceId, externalMessageId)` prev
 
 ## Source lifecycle
 
-1. Register a Gmail (`read:messages`) or Google Contacts (`read:contacts`) source.
+1. Register Gmail (choose read, draft and/or send scopes), Google Contacts (`read:contacts`) or WhatsApp Business (`read:messages`, `send:messages`).
 2. Choose **Authorize Gmail/Contacts** and complete Google's consent screen.
 3. Review and explicitly enable the source.
 4. Use **Initial sync**, then **Sync changes**. Gmail imports Communication Intake; Contacts creates reviewable staging records only.
 5. For Contacts, choose **Review contacts** and explicitly confirm any CRM import.
 6. Use **Disable** to stop access temporarily, or confirmed **Disconnect** to revoke and delete authorization.
+
+For WhatsApp, configure the six server variables, register and enable one source, then set the Meta callback URL to `/connectors/whatsapp/webhook` with the same verify token. Inbound messages arrive automatically; there is no manual sync button.
 
 Cross-company source IDs resolve as not found. Provider failures set `lastSyncStatus` and a non-secret `lastErrorCode`. Registration, OAuth start/completion, enable/disable and sync are audited without provider secrets or message content.
 
@@ -104,6 +121,7 @@ Cross-company source IDs resolve as not found. Provider failures set `lastSyncSt
 - encryption-key rotation workflow;
 - attachment metadata and separately authorized attachment ingestion;
 - provider sandbox verification plus production Google Picker origin/API-key restrictions;
-- separate confirmation-gated Gmail draft/send actions if later authorized.
+- WhatsApp approved-template sending outside the customer-service window and persisted delivery-state history;
+- multi-business WhatsApp Embedded Signup (the current direct connection intentionally supports one phone number).
 
 Official implementation references: [Google OAuth 2.0 for web server applications and revocation](https://developers.google.com/identity/protocols/oauth2/web-server), [People API connections.list](https://developers.google.com/people/api/rest/v1/people.connections/list), [Calendar events.list](https://developers.google.com/workspace/calendar/api/v3/reference/events/list), [Drive API scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth), [Google Picker](https://developers.google.com/workspace/drive/picker/reference/picker), [Drive files metadata](https://developers.google.com/workspace/drive/api/guides/file-metadata), [Gmail synchronization guide](https://developers.google.com/workspace/gmail/api/guides/sync), and [Google restricted scopes](https://support.google.com/cloud/answer/13464325).

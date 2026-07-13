@@ -36,6 +36,14 @@ function loadPickerScript() {
   });
 }
 
+function defaultScopes(key: ConnectorKey) {
+  if (key === "gmail") return ["read:messages", "write:drafts", "send:messages"];
+  if (key === "google_contacts") return ["read:contacts"];
+  if (key === "google_calendar") return ["read:calendar"];
+  if (key === "google_drive_photos") return ["select:image_files"];
+  return ["read:messages", "send:messages"];
+}
+
 export function Connectors() {
   const { user } = useAuth();
   const canManage = user?.permissions.includes("connectors.manage") ?? false;
@@ -63,6 +71,7 @@ export function Connectors() {
   const [externalEvents, setExternalEvents] = useState<ExternalCalendarEvent[] | null>(null);
   const [driveSourceId, setDriveSourceId] = useState<string | null>(null);
   const [driveImages, setDriveImages] = useState<ExternalDriveImage[] | null>(null);
+  const [composeSourceId, setComposeSourceId] = useState<string | null>(null);
 
   function loadSources() {
     return api.connectors.sources(activeOnly).then(setSources);
@@ -123,7 +132,11 @@ export function Connectors() {
         ? "Enable read-only Google Contacts access? Synchronisation will stage contact previews but will not create CRM contacts."
         : source.connectorKey === "google_calendar"
           ? "Enable read-only Google Calendar access? Synchronisation will stage event previews but will not change jobs, tasks or capacity."
-        : "Enable read-only Gmail access? Synchronisation will import messages into Communication Intake.";
+        : source.connectorKey === "whatsapp_business"
+          ? "Enable WhatsApp Business? Signed inbound messages will be imported automatically; every outgoing message will still require a separate confirmation."
+          : source.configuredScopes.some((scope) => scope.startsWith("write:") || scope.startsWith("send:"))
+            ? "Enable Gmail read/write access? Inbox synchronisation and draft creation will be available; every outgoing email will still require a separate confirmation."
+            : "Enable read-only Gmail access? Synchronisation will import messages into Communication Intake.";
       if (!window.confirm(impact)) {
         setBusySourceId(null);
         return;
@@ -132,7 +145,7 @@ export function Connectors() {
     try {
       await api.connectors.enableSource(source.id, true);
       await loadSources();
-      setNotice(`${source.definition.serviceName} enabled. No external write access was granted.`);
+      setNotice(`${source.definition.serviceName} enabled with the listed scopes. Outgoing messages still require explicit confirmation.`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not enable the data source.");
     } finally {
@@ -179,8 +192,9 @@ export function Connectors() {
         setBusySourceId(null);
         return;
       }
-      const confirmed = window.confirm(
-        `Disconnect ${source.definition.serviceName} and revoke the Google OAuth grant? Google warns that revocation can remove every scope granted to this Google Cloud project for the account. The encrypted local credential and sync cursor will be deleted; staged and CRM records remain.`
+      const confirmed = window.confirm(source.connectorKey === "whatsapp_business"
+        ? "Disconnect WhatsApp Business from Secretary? Incoming webhooks and outgoing sends will stop. Deployment secrets remain stored on the server."
+        : `Disconnect ${source.definition.serviceName} and revoke the Google OAuth grant? Google warns that revocation can remove every scope granted to this Google Cloud project for the account. The encrypted local credential and sync cursor will be deleted; staged and CRM records remain.`
       );
       if (!confirmed) {
         setBusySourceId(null);
@@ -271,7 +285,7 @@ export function Connectors() {
         ) : null}
       </div>
       <p className="hint">
-        Gmail, Contacts and Calendar are read-only. Drive uses per-file access: only images explicitly selected in Google Picker are staged.
+        Gmail can read mail, create drafts and send only after confirmation. Contacts and Calendar are read-only. WhatsApp imports signed inbound webhooks and confirms every send. Drive uses per-file access.
         Never paste an OAuth token, client secret or password here.
       </p>
 
@@ -320,9 +334,10 @@ export function Connectors() {
                 <td>{source.definition.adapterAvailable ? "Available" : "Contract only"}</td>
                 <td>
                   {canManage ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {!source.authorizationConfigured ? (
+                    {!source.authorizationConfigured && source.connectorKey !== "whatsapp_business" ? (
                       <button onClick={() => authorize(source)} disabled={busySourceId === source.id}>Authorize {source.connectorKey === "gmail" ? "Gmail" : source.connectorKey === "google_contacts" ? "Contacts" : source.connectorKey === "google_calendar" ? "Calendar" : "Drive"}</button>
                     ) : null}
+                    {!source.authorizationConfigured && source.connectorKey === "whatsapp_business" ? <span className="hint">Server credentials required</span> : null}
                     {source.authorizationConfigured && !source.isEnabled ? (
                       <button onClick={() => enable(source)} disabled={busySourceId === source.id}>Enable</button>
                     ) : null}
@@ -337,6 +352,8 @@ export function Connectors() {
                     {source.connectorKey === "google_calendar" ? <button className="secondary" onClick={() => showExternalEvents(source)}>Review events</button> : null}
                     {source.connectorKey === "google_drive_photos" && source.isEnabled ? <button onClick={() => openDrivePicker(source)} disabled={busySourceId === source.id}>Select Drive images</button> : null}
                     {source.connectorKey === "google_drive_photos" ? <button className="secondary" onClick={() => loadDriveImages(source)}>Review images</button> : null}
+                    {source.connectorKey === "gmail" && source.isEnabled && source.configuredScopes.some(scope => scope === "write:drafts" || scope === "send:messages") ? <button onClick={() => setComposeSourceId(source.id)}>Write email</button> : null}
+                    {source.connectorKey === "whatsapp_business" && source.isEnabled && source.configuredScopes.includes("send:messages") ? <button onClick={() => setComposeSourceId(source.id)}>Write WhatsApp</button> : null}
                     {source.authorizationConfigured ? (
                       <button className="secondary" onClick={() => disconnect(source)} disabled={busySourceId === source.id}>Disconnect</button>
                     ) : null}
@@ -350,6 +367,14 @@ export function Connectors() {
           </tbody>
         </table>
       )}
+
+      {composeSourceId && sources?.find(source => source.id === composeSourceId) ? (
+        <MessageComposer
+          source={sources.find(source => source.id === composeSourceId)!}
+          onClose={() => setComposeSourceId(null)}
+          onNotice={setNotice}
+        />
+      ) : null}
 
       {contactSourceId ? (
         <section className="card" style={{ marginTop: 20 }}>
@@ -412,6 +437,108 @@ export function Connectors() {
   );
 }
 
+function MessageComposer({
+  source,
+  onClose,
+  onNotice,
+}: {
+  source: ConnectorSource;
+  onClose: () => void;
+  onNotice: (message: string | null) => void;
+}) {
+  const isGmail = source.connectorKey === "gmail";
+  const [to, setTo] = useState("");
+  const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function addresses(value: string) {
+    return value.split(/[,;\s]+/).map(item => item.trim()).filter(Boolean);
+  }
+
+  function gmailInput() {
+    return { to: addresses(to), cc: addresses(cc), bcc: addresses(bcc), subject, body };
+  }
+
+  async function createDraft() {
+    setBusy(true); setError(null); onNotice(null);
+    try {
+      const result = await api.connectors.createGmailDraft(source.id, gmailInput());
+      onNotice(`Gmail draft created (${result.draftId}). It has not been sent.`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not create the Gmail draft.");
+    } finally { setBusy(false); }
+  }
+
+  async function sendEmail() {
+    setBusy(true); setError(null); onNotice(null);
+    const input = gmailInput();
+    try {
+      await api.connectors.sendGmailMessage(source.id, input, false);
+      setError("The server did not require confirmation; the message was not sent again.");
+      return;
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.code !== "CONFIRMATION_REQUIRED") {
+        setError(err instanceof ApiError ? err.message : "Could not prepare the email.");
+        return;
+      }
+    } finally { setBusy(false); }
+    if (!window.confirm(`Send this email now?\n\nTo: ${input.to.join(", ")}\nCc: ${input.cc.join(", ") || "—"}\nBcc: ${input.bcc.join(", ") || "—"}\nSubject: ${input.subject}\n\n${input.body}`)) return;
+    setBusy(true);
+    try {
+      const result = await api.connectors.sendGmailMessage(source.id, input, true);
+      onNotice(`Email sent successfully (${result.messageId}).`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not send the email.");
+    } finally { setBusy(false); }
+  }
+
+  async function sendWhatsApp() {
+    setBusy(true); setError(null); onNotice(null);
+    try {
+      await api.connectors.sendWhatsAppMessage(source.id, { to, body }, false);
+      setError("The server did not require confirmation; the message was not sent again.");
+      return;
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.code !== "CONFIRMATION_REQUIRED") {
+        setError(err instanceof ApiError ? err.message : "Could not prepare the WhatsApp message.");
+        return;
+      }
+    } finally { setBusy(false); }
+    if (!window.confirm(`Send this WhatsApp message now?\n\nTo: ${to}\n\n${body}`)) return;
+    setBusy(true);
+    try {
+      const result = await api.connectors.sendWhatsAppMessage(source.id, { to, body }, true);
+      onNotice(`WhatsApp message accepted by Meta (${result.messageId}).`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not send the WhatsApp message.");
+    } finally { setBusy(false); }
+  }
+
+  return <section className="card" style={{ marginTop: 20 }}>
+    <div className="page-header"><h2>{isGmail ? "Write email" : "Write WhatsApp"}</h2><button className="secondary" onClick={onClose}>Close</button></div>
+    <p className="hint">Source: {source.displayName}. Nothing is sent until you review the final message and confirm it.</p>
+    <div className="inline-form">
+      <label>{isGmail ? "To (comma-separated emails)" : "Recipient (international number)"}<input value={to} onChange={event => setTo(event.target.value)} placeholder={isGmail ? "customer@example.com" : "+447700900123"} /></label>
+      {isGmail ? <>
+        <label>Cc<input value={cc} onChange={event => setCc(event.target.value)} /></label>
+        <label>Bcc<input value={bcc} onChange={event => setBcc(event.target.value)} /></label>
+        <label>Subject<input value={subject} onChange={event => setSubject(event.target.value)} /></label>
+      </> : null}
+      <label>Message<textarea rows={8} value={body} onChange={event => setBody(event.target.value)} /></label>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {isGmail && source.configuredScopes.includes("write:drafts") ? <button type="button" disabled={busy} onClick={createDraft}>Create draft only</button> : null}
+        {isGmail && source.configuredScopes.includes("send:messages") ? <button type="button" disabled={busy} onClick={sendEmail}>Review and send email</button> : null}
+        {!isGmail ? <button type="button" disabled={busy} onClick={sendWhatsApp}>Review and send WhatsApp</button> : null}
+      </div>
+      {error ? <div className="error-banner">{error}</div> : null}
+    </div>
+  </section>;
+}
+
 function RegisterSourceForm({
   definitions,
   onCreated,
@@ -421,16 +548,14 @@ function RegisterSourceForm({
 }) {
   const [connectorKey, setConnectorKey] = useState<ConnectorKey>(definitions[0].key);
   const [displayName, setDisplayName] = useState("");
-  const [configuredScopes, setConfiguredScopes] = useState<string[]>(
-    definitions[0].key === "gmail" ? ["read:messages"] : definitions[0].key === "google_contacts" ? ["read:contacts"] : definitions[0].key === "google_calendar" ? ["read:calendar"] : ["select:image_files"]
-  );
+  const [configuredScopes, setConfiguredScopes] = useState<string[]>(defaultScopes(definitions[0].key));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const definition = definitions.find((item) => item.key === connectorKey) ?? definitions[0];
 
   function changeConnector(value: ConnectorKey) {
     setConnectorKey(value);
-    setConfiguredScopes(value === "gmail" ? ["read:messages"] : value === "google_contacts" ? ["read:contacts"] : value === "google_calendar" ? ["read:calendar"] : ["select:image_files"]);
+    setConfiguredScopes(defaultScopes(value));
   }
 
   function toggleScope(scope: string) {
@@ -463,7 +588,7 @@ function RegisterSourceForm({
         {definitions.map((item) => <option key={item.key} value={item.key}>{item.serviceName}</option>)}
       </select>
       <input placeholder="Source display name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required />
-      <p className="hint">Google credentials are added through OAuth after this disabled source is registered.</p>
+      <p className="hint">Google credentials are added through OAuth. WhatsApp credentials stay in protected server configuration and are never entered here.</p>
       <fieldset>
         <legend>Logical scopes</legend>
         {definition.logicalScopes.map((scope) => (

@@ -1,10 +1,13 @@
 export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+export const GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
+export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 const GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GOOGLE_REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
 const GMAIL_MESSAGES_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
 const GMAIL_HISTORY_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/history";
 const GMAIL_PROFILE_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/profile";
+const GMAIL_DRAFTS_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/drafts";
 const MAX_IMPORTED_MESSAGE_CHARS = 100_000;
 
 export interface StoredGmailCredential {
@@ -21,6 +24,24 @@ interface GmailTokenResponse {
   expires_in?: number;
   scope?: string;
   token_type?: string;
+}
+
+export interface GmailComposeInput {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  body: string;
+}
+
+export interface GmailDraftResult {
+  id: string;
+  message?: { id?: string; threadId?: string };
+}
+
+export interface GmailSendResult {
+  id: string;
+  threadId?: string;
 }
 
 export interface GmailMessageList {
@@ -111,7 +132,23 @@ function scopesFrom(value?: string) {
   return [...new Set((value ?? "").split(/\s+/).filter(Boolean))];
 }
 
-function credentialFromTokenResponse(response: GmailTokenResponse, existingRefreshToken?: string): StoredGmailCredential {
+export function gmailProviderScopes(logicalScopes: string[]) {
+  const requested = new Set<string>();
+  if (logicalScopes.includes("read:messages")) requested.add(GMAIL_READONLY_SCOPE);
+  if (logicalScopes.includes("write:drafts")) requested.add(GMAIL_COMPOSE_SCOPE);
+  if (logicalScopes.includes("send:messages") && !requested.has(GMAIL_COMPOSE_SCOPE)) requested.add(GMAIL_SEND_SCOPE);
+  return [...requested];
+}
+
+function sameScopes(actual: string[], expected: string[]) {
+  return actual.length === expected.length && actual.every((scope) => expected.includes(scope));
+}
+
+function credentialFromTokenResponse(
+  response: GmailTokenResponse,
+  expectedScopes: string[],
+  existingRefreshToken?: string
+): StoredGmailCredential {
   const scopes = scopesFrom(response.scope);
   if (
     !response.access_token
@@ -121,8 +158,8 @@ function credentialFromTokenResponse(response: GmailTokenResponse, existingRefre
   ) {
     throw new GmailAdapterError("OAUTH_PROVIDER_REJECTED");
   }
-  if (scopes.length !== 1 || scopes[0] !== GMAIL_READONLY_SCOPE) {
-    throw new GmailAdapterError("SCOPE_DENIED", "Google did not grant exactly the required Gmail read-only scope.");
+  if (!sameScopes(scopes, expectedScopes)) {
+    throw new GmailAdapterError("SCOPE_DENIED", "Google did not grant exactly the requested Gmail scopes.");
   }
   const refreshToken = response.refresh_token ?? existingRefreshToken;
   if (!refreshToken) throw new GmailAdapterError("CONNECTOR_AUTHORIZATION_REQUIRED", "Google did not return an offline refresh token.");
@@ -158,14 +195,16 @@ async function tokenRequest(params: URLSearchParams) {
   }
 }
 
-export function buildGmailAuthorizationUrl(state: string) {
+export function buildGmailAuthorizationUrl(state: string, logicalScopes: string[] = ["read:messages"]) {
   const config = oauthConfig();
+  const providerScopes = gmailProviderScopes(logicalScopes);
+  if (providerScopes.length === 0) throw new GmailAdapterError("SCOPE_DENIED", "At least one Gmail scope is required.");
   const url = new URL(GOOGLE_AUTHORIZATION_ENDPOINT);
   url.search = new URLSearchParams({
     client_id: config.clientId,
     redirect_uri: config.redirectUri,
     response_type: "code",
-    scope: GMAIL_READONLY_SCOPE,
+    scope: providerScopes.join(" "),
     access_type: "offline",
     prompt: "consent",
     state,
@@ -173,7 +212,11 @@ export function buildGmailAuthorizationUrl(state: string) {
   return url.toString();
 }
 
-export async function exchangeGmailAuthorizationCode(code: string, existingRefreshToken?: string) {
+export async function exchangeGmailAuthorizationCode(
+  code: string,
+  expectedLogicalScopes: string[] = ["read:messages"],
+  existingRefreshToken?: string
+) {
   const config = oauthConfig();
   const response = await tokenRequest(new URLSearchParams({
     client_id: config.clientId,
@@ -182,7 +225,7 @@ export async function exchangeGmailAuthorizationCode(code: string, existingRefre
     grant_type: "authorization_code",
     redirect_uri: config.redirectUri,
   }));
-  return credentialFromTokenResponse(response, existingRefreshToken);
+  return credentialFromTokenResponse(response, gmailProviderScopes(expectedLogicalScopes), existingRefreshToken);
 }
 
 export async function refreshGmailCredential(credential: StoredGmailCredential) {
@@ -194,7 +237,7 @@ export async function refreshGmailCredential(credential: StoredGmailCredential) 
     grant_type: "refresh_token",
   }));
   if (!response.scope) response.scope = credential.scopes.join(" ");
-  return credentialFromTokenResponse(response, credential.refreshToken);
+  return credentialFromTokenResponse(response, credential.scopes, credential.refreshToken);
 }
 
 async function gmailJson<T>(
@@ -221,6 +264,62 @@ async function gmailJson<T>(
   } catch {
     throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
   }
+}
+
+async function gmailPostJson<T>(url: URL, accessToken: string, body: unknown): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new GmailAdapterError("PROVIDER_UNAVAILABLE");
+  }
+  if (!response.ok) {
+    if (response.status === 401) throw new GmailAdapterError("CONNECTOR_AUTHORIZATION_REQUIRED");
+    if (response.status === 403) throw new GmailAdapterError("SCOPE_DENIED");
+    if (response.status === 429) throw new GmailAdapterError("RATE_LIMITED");
+    if (response.status >= 500) throw new GmailAdapterError("PROVIDER_UNAVAILABLE");
+    throw new GmailAdapterError("OAUTH_PROVIDER_REJECTED");
+  }
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+  }
+}
+
+function mimeHeader(value: string) {
+  const safe = value.replace(/[\r\n]+/g, " ").trim();
+  return /^[\x20-\x7E]*$/.test(safe) ? safe : `=?UTF-8?B?${Buffer.from(safe, "utf8").toString("base64")}?=`;
+}
+
+export function buildGmailRawMessage(input: GmailComposeInput) {
+  const headers = [
+    `To: ${input.to.join(", ")}`,
+    ...(input.cc?.length ? [`Cc: ${input.cc.join(", ")}`] : []),
+    ...(input.bcc?.length ? [`Bcc: ${input.bcc.join(", ")}`] : []),
+    `Subject: ${mimeHeader(input.subject)}`,
+    "MIME-Version: 1.0",
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: 8bit",
+  ];
+  const mime = `${headers.join("\r\n")}\r\n\r\n${input.body.replace(/\r?\n/g, "\r\n")}`;
+  return Buffer.from(mime, "utf8").toString("base64url");
+}
+
+export async function createGmailDraft(accessToken: string, input: GmailComposeInput) {
+  return gmailPostJson<GmailDraftResult>(new URL(GMAIL_DRAFTS_ENDPOINT), accessToken, {
+    message: { raw: buildGmailRawMessage(input) },
+  });
+}
+
+export async function sendGmailMessage(accessToken: string, input: GmailComposeInput) {
+  return gmailPostJson<GmailSendResult>(new URL(`${GMAIL_MESSAGES_ENDPOINT}/send`), accessToken, {
+    raw: buildGmailRawMessage(input),
+  });
 }
 
 export async function listGmailMessages(

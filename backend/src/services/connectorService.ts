@@ -14,6 +14,7 @@ import {
   type ConnectorDefinition,
 } from "../connectors/registry.js";
 import type { AuthedUser } from "../middleware/auth.js";
+import { whatsAppConfigurationAvailable } from "../connectors/whatsappBusinessAdapter.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
 const credentialReferenceSchema = z
@@ -71,7 +72,7 @@ export function publicConnectorSource<T extends {
   return {
     ...safe,
     credentialReferenceConfigured: Boolean(credentialReference),
-    authorizationConfigured: Boolean(credential),
+    authorizationConfigured: Boolean(credential) || (source.connectorKey === "whatsapp_business" && whatsAppConfigurationAvailable()),
     incrementalSyncConfigured: Boolean(syncCursor),
     definition: getConnectorDefinition(source.connectorKey),
   };
@@ -322,13 +323,28 @@ export async function enableConnectorSource(
       `${definition.serviceName} is contract-only in this build; no external account was accessed.`
     );
   }
-  if (!existing.credential) {
+  const usesDeploymentCredential = existing.connectorKey === "whatsapp_business";
+  if (usesDeploymentCredential && !whatsAppConfigurationAvailable()) {
+    await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id }, "CONNECTOR_CONFIGURATION_MISSING", publicConnectorSource(existing));
+    return fail(503, "CONNECTOR_CONFIGURATION_MISSING", "Configure the WhatsApp Business deployment secrets before enabling this source.");
+  }
+  if (!existing.credential && !usesDeploymentCredential) {
     await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id }, "CONNECTOR_AUTHORIZATION_REQUIRED", publicConnectorSource(existing));
     return fail(409, "CONNECTOR_AUTHORIZATION_REQUIRED", "Authorize the provider account before enabling this source.");
   }
   if (existing.configuredScopes.length === 0) {
     await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id }, "CONNECTOR_SCOPE_REQUIRED", publicConnectorSource(existing));
     return fail(409, "CONNECTOR_SCOPE_REQUIRED");
+  }
+  if (usesDeploymentCredential) {
+    const competingSource = await prisma.connectorSource.findFirst({
+      where: { connectorKey: "whatsapp_business", isEnabled: true, isActive: true, id: { not: existing.id } },
+      select: { id: true },
+    });
+    if (competingSource) {
+      await auditError(user, ENABLE_CONNECTOR_SOURCE_ACTION, { id }, "WHATSAPP_SOURCE_ALREADY_ENABLED", publicConnectorSource(existing));
+      return fail(409, "WHATSAPP_SOURCE_ALREADY_ENABLED", "This deployment supports one active WhatsApp Business phone number.");
+    }
   }
   const preview = { source: publicConnectorSource(existing), willEnableExternalAccess: true };
   if (!parsed.data.confirmed) {

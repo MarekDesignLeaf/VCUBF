@@ -1,10 +1,10 @@
-export const CONNECTOR_KEYS = ["gmail", "google_contacts", "google_calendar", "google_drive_photos"] as const;
+export const CONNECTOR_KEYS = ["gmail", "google_contacts", "google_calendar", "google_drive_photos", "whatsapp_business"] as const;
 export type ConnectorKey = (typeof CONNECTOR_KEYS)[number];
 
 export interface ConnectorDefinition {
   key: ConnectorKey;
   serviceName: string;
-  serviceType: "email" | "contacts" | "calendar" | "photo_storage";
+  serviceType: "email" | "contacts" | "calendar" | "photo_storage" | "messaging";
   canRead: string[];
   canWrite: string[];
   logicalScopes: string[];
@@ -27,11 +27,11 @@ export const CONNECTOR_DEFINITIONS: Record<ConnectorKey, ConnectorDefinition> = 
     serviceName: "Gmail Connector",
     serviceType: "email",
     canRead: ["messages", "threads", "attachment metadata"],
-    canWrite: [],
-    logicalScopes: ["read:messages"],
+    canWrite: ["draft messages", "send messages after explicit confirmation"],
+    logicalScopes: ["read:messages", "write:drafts", "send:messages"],
     requiredPermissions: ["connectors.read", "connectors.manage"],
     returnedDataTypes: ["communication intake", "thread reference"],
-    supportedActions: ["authorize read-only access", "synchronise messages into communication intake"],
+    supportedActions: ["authorize selected Gmail access", "synchronise messages into communication intake", "create a draft", "send a reviewed and confirmed message"],
     possibleErrors: ["AUTHORIZATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "MESSAGE_NOT_FOUND"],
     supportsAudit: true,
     supportsRollback: false,
@@ -81,6 +81,22 @@ export const CONNECTOR_DEFINITIONS: Record<ConnectorKey, ConnectorDefinition> = 
     returnedDataTypes: ["photo file reference", "folder reference", "file metadata"],
     supportedActions: ["authorize per-file access", "select image files with Google Picker", "stage image metadata", "register confirmed portfolio reference"],
     possibleErrors: ["AUTHORIZATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "FILE_NOT_FOUND", "NOT_AN_IMAGE"],
+    supportsAudit: true,
+    supportsRollback: false,
+    actionMode: "proposal_and_confirmed_action",
+    adapterAvailable: true,
+  },
+  whatsapp_business: {
+    key: "whatsapp_business",
+    serviceName: "WhatsApp Business Cloud API",
+    serviceType: "messaging",
+    canRead: ["inbound message text", "sender number", "sender profile name", "delivery status webhooks"],
+    canWrite: ["send text messages after explicit confirmation"],
+    logicalScopes: ["read:messages", "send:messages"],
+    requiredPermissions: ["connectors.read", "connectors.manage", "crm.read"],
+    returnedDataTypes: ["communication intake", "message delivery reference"],
+    supportedActions: ["verify signed Meta webhooks", "import inbound messages", "send a reviewed and confirmed text message"],
+    possibleErrors: ["CONFIGURATION_MISSING", "AUTHORIZATION_REQUIRED", "WEBHOOK_SIGNATURE_INVALID", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
     supportsAudit: true,
     supportsRollback: false,
     actionMode: "proposal_and_confirmed_action",

@@ -342,6 +342,26 @@ export const SYNC_GMAIL_MESSAGES_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "HISTORY_CURSOR_EXPIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
 };
 
+export const CREATE_GMAIL_DRAFT_ACTION: ActionContract = {
+  actionName: "create_gmail_draft",
+  purpose: "Create a reviewable Gmail draft from explicit recipient, subject and body fields without sending it.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["connector_sources", "connector_credentials", "gmail.drafts"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
+};
+
+export const SEND_GMAIL_MESSAGE_ACTION: ActionContract = {
+  actionName: "send_gmail_message",
+  purpose: "Send a Gmail message to explicit recipients only after the user reviews the final destination, subject and body and confirms the external action.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["connector_sources", "connector_credentials", "gmail.messages"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "CONFIRMATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
+};
+
 export const DISCONNECT_GMAIL_SOURCE_ACTION: ActionContract = {
   actionName: "disconnect_gmail_source",
   purpose: "After explicit confirmation, revoke the stored Google OAuth grant, remove the encrypted local credential and reset Gmail synchronisation state.",
@@ -350,6 +370,36 @@ export const DISCONNECT_GMAIL_SOURCE_ACTION: ActionContract = {
   confirmationRequired: true,
   dataSources: ["connector_sources", "connector_credentials", "google_oauth"],
   possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONFIRMATION_REQUIRED", "OAUTH_PROVIDER_REJECTED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
+
+export const RECEIVE_WHATSAPP_MESSAGE_ACTION: ActionContract = {
+  actionName: "receive_whatsapp_message",
+  purpose: "Verify a Meta webhook signature and idempotently store inbound WhatsApp Business messages in Communication Intake.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["meta.whatsapp_webhook", "connector_sources", "crm.communication_intakes"],
+  possibleErrors: ["CONNECTOR_CONFIGURATION_MISSING", "WEBHOOK_SIGNATURE_INVALID", "PROVIDER_RESPONSE_INVALID", "CONNECTOR_SOURCE_NOT_FOUND"],
+};
+
+export const SEND_WHATSAPP_MESSAGE_ACTION: ActionContract = {
+  actionName: "send_whatsapp_message",
+  purpose: "Send a WhatsApp Business text to an explicit recipient only after the user reviews the final number and message and confirms the external action.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["connector_sources", "meta.whatsapp_messages"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_CONFIGURATION_MISSING", "CONFIRMATION_REQUIRED", "CONNECTOR_AUTHORIZATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
+};
+
+export const DISCONNECT_WHATSAPP_SOURCE_ACTION: ActionContract = {
+  actionName: "disconnect_whatsapp_source",
+  purpose: "Disable the local WhatsApp Business source after confirmation without exposing or deleting deployment secrets.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["connector_sources", "server_configuration"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONFIRMATION_REQUIRED"],
 };
 
 export const START_GOOGLE_CONTACTS_OAUTH_ACTION: ActionContract = {

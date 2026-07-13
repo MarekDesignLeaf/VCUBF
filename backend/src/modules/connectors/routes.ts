@@ -3,12 +3,15 @@ import { z } from "zod";
 import {
   DISABLE_CONNECTOR_SOURCE_ACTION,
   DISCONNECT_GMAIL_SOURCE_ACTION,
+  CREATE_GMAIL_DRAFT_ACTION,
   ENABLE_CONNECTOR_SOURCE_ACTION,
   REGISTER_CONNECTOR_SOURCE_ACTION,
   START_GMAIL_OAUTH_ACTION,
+  SEND_GMAIL_MESSAGE_ACTION,
   SYNC_GMAIL_MESSAGES_ACTION,
   IMPORT_GOOGLE_CONTACT_ACTION,
   REGISTER_GOOGLE_DRIVE_PHOTO_ACTION,
+  SEND_WHATSAPP_MESSAGE_ACTION,
   UPDATE_CONNECTOR_SOURCE_ACTION,
 } from "../../lib/actionContracts.js";
 import { requireAuth } from "../../middleware/auth.js";
@@ -18,8 +21,24 @@ import * as gmailConnectorService from "../../services/gmailConnectorService.js"
 import * as googleContactsConnectorService from "../../services/googleContactsConnectorService.js";
 import * as googleCalendarConnectorService from "../../services/googleCalendarConnectorService.js";
 import * as googleDriveConnectorService from "../../services/googleDriveConnectorService.js";
+import * as whatsappBusinessConnectorService from "../../services/whatsappBusinessConnectorService.js";
 
 export const connectorsRouter = Router();
+
+// Meta calls these routes without the Secretary JWT. GET proves ownership of
+// the callback URL; POST is accepted only when its raw body has a valid
+// X-Hub-Signature-256 generated with the configured Meta app secret.
+connectorsRouter.get("/whatsapp/webhook", (req, res) => {
+  const result = whatsappBusinessConnectorService.verifyWebhookChallenge(req.query);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message });
+  res.status(200).type("text/plain").send(result.data);
+});
+
+connectorsRouter.post("/whatsapp/webhook", async (req, res) => {
+  const result = await whatsappBusinessConnectorService.receiveWebhook(req.rawBody, req.get("x-hub-signature-256"), req.body);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message });
+  res.status(result.httpStatus).json(result.data);
+});
 
 // Google redirects here without the application's JWT. The one-time,
 // short-lived state binds the callback to its tenant, source and initiating
@@ -95,6 +114,9 @@ connectorsRouter.post(
   requirePermission(START_GMAIL_OAUTH_ACTION.requiredPermission),
   async (req, res) => {
     const source = await connectorService.getConnectorSource(req.user!, req.params.id);
+    if (source?.connectorKey === "whatsapp_business") {
+      return res.status(409).json({ error: "OAUTH_NOT_SUPPORTED", message: "WhatsApp Business uses deployment credentials, not browser OAuth." });
+    }
     const result = source?.connectorKey === "google_contacts"
       ? await googleContactsConnectorService.startGoogleContactsOAuth(req.user!, req.params.id)
       : source?.connectorKey === "google_calendar"
@@ -112,11 +134,44 @@ connectorsRouter.post(
   requirePermission(SYNC_GMAIL_MESSAGES_ACTION.requiredPermission),
   async (req, res) => {
     const source = await connectorService.getConnectorSource(req.user!, req.params.id);
+    if (source?.connectorKey === "whatsapp_business") {
+      return res.status(409).json({ error: "SYNC_NOT_SUPPORTED", message: "WhatsApp messages arrive automatically through the signed webhook." });
+    }
     const result = source?.connectorKey === "google_contacts"
       ? await googleContactsConnectorService.syncGoogleContacts(req.user!, req.params.id)
       : source?.connectorKey === "google_calendar"
         ? await googleCalendarConnectorService.syncGoogleCalendar(req.user!, req.params.id)
       : await gmailConnectorService.syncGmailMessages(req.user!, req.params.id, req.body);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
+connectorsRouter.post(
+  "/sources/:id/gmail/drafts",
+  requirePermission(CREATE_GMAIL_DRAFT_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await gmailConnectorService.createGmailDraftMessage(req.user!, req.params.id, req.body);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
+connectorsRouter.post(
+  "/sources/:id/gmail/messages/send",
+  requirePermission(SEND_GMAIL_MESSAGE_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await gmailConnectorService.sendGmailMessageNow(req.user!, req.params.id, req.body);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
+connectorsRouter.post(
+  "/sources/:id/whatsapp/messages/send",
+  requirePermission(SEND_WHATSAPP_MESSAGE_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await whatsappBusinessConnectorService.sendWhatsAppMessage(req.user!, req.params.id, req.body);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
   }
@@ -133,6 +188,8 @@ connectorsRouter.post(
         ? await googleCalendarConnectorService.disconnectGoogleCalendarSource(req.user!, req.params.id, req.body)
       : source?.connectorKey === "google_drive_photos"
         ? await googleDriveConnectorService.disconnectGoogleDriveSource(req.user!, req.params.id, req.body)
+      : source?.connectorKey === "whatsapp_business"
+        ? await whatsappBusinessConnectorService.disconnectWhatsAppSource(req.user!, req.params.id, req.body)
       : await gmailConnectorService.disconnectGmailSource(req.user!, req.params.id, req.body);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);

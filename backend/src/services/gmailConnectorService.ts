@@ -10,7 +10,10 @@ import {
 } from "../connectors/connectorCrypto.js";
 import {
   buildGmailAuthorizationUrl,
+  createGmailDraft,
   exchangeGmailAuthorizationCode,
+  GMAIL_COMPOSE_SCOPE,
+  GMAIL_SEND_SCOPE,
   getGmailMessage,
   getGmailProfile,
   GmailAdapterError,
@@ -19,12 +22,15 @@ import {
   parseGmailMessage,
   refreshGmailCredential,
   revokeGmailCredential,
+  sendGmailMessage,
   type StoredGmailCredential,
 } from "../connectors/gmailAdapter.js";
 import {
   COMPLETE_GMAIL_OAUTH_ACTION,
+  CREATE_GMAIL_DRAFT_ACTION,
   DISCONNECT_GMAIL_SOURCE_ACTION,
   START_GMAIL_OAUTH_ACTION,
+  SEND_GMAIL_MESSAGE_ACTION,
   SYNC_GMAIL_MESSAGES_ACTION,
   type ActionContract,
 } from "../lib/actionContracts.js";
@@ -56,6 +62,17 @@ export const syncGmailSchema = z
   });
 
 export const disconnectGmailSchema = z.object({ confirmed: z.boolean().optional() }).strict();
+
+const gmailAddressSchema = z.string().trim().email().max(320).refine((value) => !/[\r\n]/.test(value), "Invalid email address");
+const gmailComposeFields = {
+  to: z.array(gmailAddressSchema).min(1).max(20),
+  cc: z.array(gmailAddressSchema).max(20).default([]),
+  bcc: z.array(gmailAddressSchema).max(20).default([]),
+  subject: z.string().min(1).max(998).refine((value) => !/[\r\n]/.test(value), "Subject must be one line"),
+  body: z.string().min(1).max(100_000),
+};
+export const createGmailDraftSchema = z.object(gmailComposeFields).strict();
+export const sendGmailMessageSchema = z.object({ ...gmailComposeFields, confirmed: z.boolean().optional() }).strict();
 
 function stateHash(state: string) {
   return createHash("sha256").update(state).digest("hex");
@@ -125,15 +142,15 @@ export async function startGmailOAuth(user: AuthedUser, sourceId: string): Promi
     await auditFailure(START_GMAIL_OAUTH_ACTION, user, sourceId, "CONNECTOR_SOURCE_NOT_FOUND");
     return fail(404, "CONNECTOR_SOURCE_NOT_FOUND");
   }
-  if (!source.configuredScopes.includes("read:messages")) {
+  if (source.configuredScopes.length === 0) {
     await auditFailure(START_GMAIL_OAUTH_ACTION, user, sourceId, "CONNECTOR_SCOPE_REQUIRED");
-    return fail(409, "CONNECTOR_SCOPE_REQUIRED", "Configure the read:messages logical scope first.");
+    return fail(409, "CONNECTOR_SCOPE_REQUIRED", "Configure at least one Gmail logical scope first.");
   }
 
   try {
     assertConnectorEncryptionConfigured();
     const state = randomBytes(32).toString("base64url");
-    const authorizationUrl = buildGmailAuthorizationUrl(state);
+    const authorizationUrl = buildGmailAuthorizationUrl(state, source.configuredScopes);
     const expiresAt = new Date(Date.now() + OAUTH_STATE_LIFETIME_MS);
     await prisma.$transaction([
       prisma.connectorOAuthState.deleteMany({ where: { sourceId } }),
@@ -219,7 +236,11 @@ export async function completeGmailOAuth(rawInput: unknown): Promise<ServiceResu
         credentialContext(oauthState.companyId, oauthState.sourceId)
       ).refreshToken;
     }
-    const credential = await exchangeGmailAuthorizationCode(input.code!, existingRefreshToken);
+    const credential = await exchangeGmailAuthorizationCode(
+      input.code!,
+      oauthState.source.configuredScopes,
+      existingRefreshToken
+    );
     const encrypted = encryptConnectorPayload(credential, credentialContext(oauthState.companyId, oauthState.sourceId));
     await prisma.$transaction([
       prisma.connectorCredential.upsert({
@@ -543,6 +564,132 @@ export async function syncGmailMessages(
       data: { lastSyncAt: new Date(), lastSyncStatus: "error", lastErrorCode: errorCode },
     });
     await auditFailure(SYNC_GMAIL_MESSAGES_ACTION, user, sourceId, errorCode);
+    return result;
+  }
+}
+
+function composeAuditSummary(input: z.infer<typeof createGmailDraftSchema>) {
+  return {
+    toCount: input.to.length,
+    ccCount: input.cc.length,
+    bccCount: input.bcc.length,
+    subjectLength: input.subject.length,
+    bodyLength: input.body.length,
+  };
+}
+
+type ServiceFailure = Extract<ServiceResult<never>, { ok: false }>;
+type GmailWriteLookup = { ok: true; source: GmailSource } | { ok: false; failure: ServiceFailure };
+
+async function gmailWriteSource(
+  user: AuthedUser,
+  sourceId: string,
+  logicalScope: "write:drafts" | "send:messages"
+): Promise<GmailWriteLookup> {
+  const source = await prisma.connectorSource.findFirst({
+    where: { id: sourceId, companyId: user.companyId, connectorKey: "gmail", isActive: true },
+    include: { credential: true },
+  });
+  if (!source) return { ok: false, failure: fail(404, "CONNECTOR_SOURCE_NOT_FOUND") as ServiceFailure };
+  if (!source.isEnabled) return { ok: false, failure: fail(409, "CONNECTOR_NOT_ENABLED") as ServiceFailure };
+  if (!source.configuredScopes.includes(logicalScope)) {
+    return { ok: false, failure: fail(409, "CONNECTOR_SCOPE_REQUIRED", `Configure and authorize ${logicalScope} first.`) as ServiceFailure };
+  }
+  if (!source.credential) return { ok: false, failure: fail(409, "CONNECTOR_AUTHORIZATION_REQUIRED") as ServiceFailure };
+  return { ok: true, source };
+}
+
+export async function createGmailDraftMessage(
+  user: AuthedUser,
+  sourceId: string,
+  rawInput: unknown
+): Promise<ServiceResult<unknown>> {
+  const parsed = createGmailDraftSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    await auditFailure(CREATE_GMAIL_DRAFT_ACTION, user, sourceId, "VALIDATION_FAILED");
+    return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  }
+  const lookup = await gmailWriteSource(user, sourceId, "write:drafts");
+  if (!lookup.ok) {
+    await auditFailure(CREATE_GMAIL_DRAFT_ACTION, user, sourceId, lookup.failure.error);
+    return lookup.failure;
+  }
+  try {
+    const credential = await usableCredential({ credential: lookup.source.credential! });
+    if (!credential.scopes.includes(GMAIL_COMPOSE_SCOPE)) throw new GmailAdapterError("SCOPE_DENIED");
+    const draft = await createGmailDraft(credential.accessToken, parsed.data);
+    if (!draft.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    const result = { sourceId, draftId: draft.id, messageId: draft.message?.id ?? null, threadId: draft.message?.threadId ?? null };
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: CREATE_GMAIL_DRAFT_ACTION.actionName,
+      inputPayload: { sourceId, ...composeAuditSummary(parsed.data) },
+      dataAfter: result,
+      riskLevel: CREATE_GMAIL_DRAFT_ACTION.riskLevel,
+      result: "success",
+    });
+    return ok(201, result);
+  } catch (error) {
+    const result = providerErrorResult(error);
+    await auditFailure(CREATE_GMAIL_DRAFT_ACTION, user, sourceId, result.ok ? "CONNECTOR_INTERNAL_ERROR" : result.error);
+    return result;
+  }
+}
+
+export async function sendGmailMessageNow(
+  user: AuthedUser,
+  sourceId: string,
+  rawInput: unknown
+): Promise<ServiceResult<unknown>> {
+  const parsed = sendGmailMessageSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    await auditFailure(SEND_GMAIL_MESSAGE_ACTION, user, sourceId, "VALIDATION_FAILED");
+    return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  }
+  const lookup = await gmailWriteSource(user, sourceId, "send:messages");
+  if (!lookup.ok) {
+    await auditFailure(SEND_GMAIL_MESSAGE_ACTION, user, sourceId, lookup.failure.error);
+    return lookup.failure;
+  }
+  const { confirmed: _confirmed, ...message } = parsed.data;
+  const preview = { sourceId, provider: "gmail", ...message };
+  if (!parsed.data.confirmed) {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: SEND_GMAIL_MESSAGE_ACTION.actionName,
+      inputPayload: { sourceId, confirmed: false, ...composeAuditSummary(message) },
+      riskLevel: SEND_GMAIL_MESSAGE_ACTION.riskLevel,
+      confirmationRequired: true,
+      result: "rejected",
+      errorMessage: "CONFIRMATION_REQUIRED",
+    });
+    return fail(409, "CONFIRMATION_REQUIRED", "Review the final recipients, subject and body, then confirm sending.", { preview });
+  }
+  try {
+    const credential = await usableCredential({ credential: lookup.source.credential! });
+    if (!credential.scopes.some((scope) => scope === GMAIL_COMPOSE_SCOPE || scope === GMAIL_SEND_SCOPE)) {
+      throw new GmailAdapterError("SCOPE_DENIED");
+    }
+    const sent = await sendGmailMessage(credential.accessToken, message);
+    if (!sent.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    const result = { sourceId, messageId: sent.id, threadId: sent.threadId ?? null, sentAt: new Date() };
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: SEND_GMAIL_MESSAGE_ACTION.actionName,
+      inputPayload: { sourceId, confirmed: true, ...composeAuditSummary(message) },
+      dataAfter: result,
+      riskLevel: SEND_GMAIL_MESSAGE_ACTION.riskLevel,
+      confirmationRequired: true,
+      confirmed: true,
+      result: "success",
+    });
+    return ok(200, result);
+  } catch (error) {
+    const result = providerErrorResult(error);
+    await auditFailure(SEND_GMAIL_MESSAGE_ACTION, user, sourceId, result.ok ? "CONNECTOR_INTERNAL_ERROR" : result.error);
     return result;
   }
 }

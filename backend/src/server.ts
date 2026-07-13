@@ -43,7 +43,12 @@ export function createServer() {
     .map((origin) => origin.trim())
     .filter(Boolean);
   app.use(cors({ origin: allowedOrigins }));
-  app.use(express.json());
+  app.use(express.json({
+    verify: (req, _res, buffer) => {
+      const request = req as express.Request;
+      if (request.originalUrl.startsWith("/connectors/whatsapp/webhook")) request.rawBody = Buffer.from(buffer);
+    },
+  }));
 
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
 

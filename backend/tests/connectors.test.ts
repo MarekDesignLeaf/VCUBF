@@ -44,13 +44,12 @@ describe("Connector Engine registry and source lifecycle", () => {
   it("declares every master-document connector contract field and reports adapters honestly", async () => {
     const res = await request(app).get("/connectors/definitions").set("Authorization", `Bearer ${adminToken}`);
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.map((item: any) => item.key), ["gmail", "google_contacts", "google_calendar", "google_drive_photos"]);
+    assert.deepEqual(res.body.map((item: any) => item.key), ["gmail", "google_contacts", "google_calendar", "google_drive_photos", "whatsapp_business"]);
     for (const definition of res.body) {
       assert.ok(definition.serviceName);
       assert.ok(definition.serviceType);
       assert.ok(Array.isArray(definition.canRead) && definition.canRead.length > 0);
       assert.ok(Array.isArray(definition.canWrite));
-      assert.deepEqual(definition.canWrite, []);
       assert.ok(Array.isArray(definition.requiredPermissions) && definition.requiredPermissions.includes("connectors.manage"));
       assert.ok(Array.isArray(definition.returnedDataTypes) && definition.returnedDataTypes.length > 0);
       assert.ok(Array.isArray(definition.supportedActions) && definition.supportedActions.length > 0);
@@ -60,6 +59,8 @@ describe("Connector Engine registry and source lifecycle", () => {
       assert.equal(definition.actionMode, "proposal_and_confirmed_action");
       assert.equal(definition.adapterAvailable, true);
     }
+    assert.ok(res.body.find((item: any) => item.key === "gmail").canWrite.includes("draft messages"));
+    assert.ok(res.body.find((item: any) => item.key === "whatsapp_business").canWrite.length > 0);
   });
 
   it("registers a disabled tenant source without exposing its secret-store reference", async () => {
