@@ -94,6 +94,8 @@ $script:HearingMonitorText = $null
 $script:HearingMonitorLevel = $null
 $script:LastLocalHypothesis = ''
 $script:RealtimePreviewPath = Join-Path $script:AppDir 'emma-live.json'
+$script:PreferenceSyncTicks = 0
+$script:RefreshRecognizerAfterLogin = $false
 $script:VoiceLanguageNames = @{
   'en-GB' = 'English (United Kingdom)'; 'en-US' = 'English (United States)'; 'cs-CZ' = 'Czech'; 'pl-PL' = 'Polish'
   'fr-FR' = 'French'; 'de-DE' = 'German'; 'es-ES' = 'Spanish'; 'it-IT' = 'Italian'
@@ -124,6 +126,32 @@ function Load-Config {
 function Save-Config($Config) {
   $Config.ServerUrl = $Config.ServerUrl.TrimEnd('/')
   $Config | ConvertTo-Json | Set-Content -LiteralPath $script:ConfigPath -Encoding UTF8
+}
+
+# The desktop launcher writes the paired account, wake word and language to
+# config.json after the user has approved the browser sign-in.  A companion
+# that was already open must notice that change before it starts listening;
+# otherwise Windows can keep recognising in the previous language.
+function Sync-LocalVoiceConfig {
+  try {
+    $saved = Load-Config
+    $wakeChanged = [string]$saved.WakeWord -ne [string]$script:Config.WakeWord
+    $languageChanged = [string]$saved.Language -ne [string]$script:Config.Language
+    $serverChanged = [string]$saved.ServerUrl -ne [string]$script:Config.ServerUrl
+    $emailChanged = [string]$saved.Email -ne [string]$script:Config.Email
+    if (!$wakeChanged -and !$languageChanged -and !$serverChanged -and !$emailChanged) { return $false }
+
+    $script:Config = $saved
+    if (($wakeChanged -or $languageChanged) -and $script:Recognizer) {
+      Initialize-Recognizer
+    }
+    if ($languageChanged) { Select-SynthesisVoice }
+    Write-EmmaLog "Local voice configuration refreshed. Wake word: $($script:Config.WakeWord); language: $($script:Config.Language)."
+    return $true
+  } catch {
+    Write-EmmaLog "Local voice configuration refresh failed: $($_.Exception.Message)"
+    return $false
+  }
 }
 
 function Get-VoiceLanguageName([string]$Language) {
@@ -381,7 +409,17 @@ function Show-Login {
   $timer.Add_Tick({
     try {
       $result=Invoke-Vcubf POST '/auth/device/token' @{pairing_id=$pairing.pairing_id;secret=$pairing.secret} -Anonymous
-      if($result.token){Save-Token $result.token;$script:Config.WakeWord=$result.user.voiceWakeWord;$script:Config.Email=$result.user.email;Save-Config $script:Config;$status.Text='Connected successfully.';$timer.Stop();$form.DialogResult='OK';$form.Close()}
+      if($result.token){
+        $wakeChanged = $result.user.voiceWakeWord -and [string]$script:Config.WakeWord -ne [string]$result.user.voiceWakeWord
+        $languageChanged = $result.user.voiceLanguage -and [string]$script:Config.Language -ne [string]$result.user.voiceLanguage
+        Save-Token $result.token
+        if($result.user.voiceWakeWord){$script:Config.WakeWord=$result.user.voiceWakeWord}
+        if($result.user.voiceLanguage -and $script:SupportedVoiceLanguages -contains [string]$result.user.voiceLanguage){$script:Config.Language=$result.user.voiceLanguage}
+        $script:Config.Email=$result.user.email
+        Save-Config $script:Config
+        $script:RefreshRecognizerAfterLogin = [bool]($wakeChanged -or $languageChanged)
+        $status.Text='Connected successfully.';$timer.Stop();$form.DialogResult='OK';$form.Close()
+      }
     } catch { if($_.Exception.Message -match 'PAIRING_EXPIRED|PAIRING_ALREADY_USED'){$status.Text='The pairing expired. Close and try again.';$timer.Stop()} }
   })
   Start-Process $pairing.verification_url
@@ -390,7 +428,19 @@ function Show-Login {
 }
 
 function Ensure-Login {
-  try { Invoke-Vcubf GET '/auth/me' | Out-Null; return $true } catch { return Show-Login }
+  try { Invoke-Vcubf GET '/auth/me' | Out-Null; return $true }
+  catch {
+    $connected = Show-Login
+    if ($connected) {
+      Sync-VoicePreferences | Out-Null
+      if ($script:RefreshRecognizerAfterLogin) {
+        $script:RefreshRecognizerAfterLogin = $false
+        Initialize-Recognizer
+      }
+      Sync-LocalVoiceConfig | Out-Null
+    }
+    return $connected
+  }
 }
 
 function Set-AutoStart([bool]$Enabled) {
@@ -460,18 +510,51 @@ function Show-Review([string]$RecognizedText) {
   }
 }
 
+function Resolve-RealtimePython {
+  # Prefer a real Python runtime over the Windows Store shim.  The shim can
+  # start successfully but cannot import the microphone/WebSocket packages,
+  # which previously left a wake-word session with no useful error.
+  foreach($candidate in @('python.exe','py.exe')) {
+    foreach($command in @(Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue)) {
+      $path = [string]$command.Source
+      if(!$path -or $path -match '\\WindowsApps\\') { continue }
+      $prefix = @()
+      if([IO.Path]::GetFileName($path) -match '^py\.exe$') { $prefix = @('-3') }
+      try {
+        $version = @(& $path @prefix --version 2>&1) -join ' '
+        $dependencyCheck = @(& $path @prefix -c 'import pyaudio, websockets' 2>&1) -join ' '
+        if($LASTEXITCODE -eq 0 -and $version -match 'Python\s+3\.' -and !$dependencyCheck) {
+          return [pscustomobject]@{ Path=$path; Prefix=$prefix; Version=$version.Trim() }
+        }
+        Write-EmmaLog "Python candidate rejected: $path. $dependencyCheck"
+      } catch {}
+    }
+  }
+  return $null
+}
+
 function Invoke-RealtimeProcess([string]$RealtimeScript,[string]$Command) {
+  $python = Resolve-RealtimePython
+  if(!$python) {
+    Write-EmmaLog 'Realtime cannot start: no usable Python 3 runtime was found.'
+    return 127
+  }
   Remove-Item -LiteralPath $script:RealtimePreviewPath -Force -ErrorAction SilentlyContinue
   Update-HearingMonitor $script:Config.WakeWord 'Realtime active — speak now'
   $startInfo=New-Object Diagnostics.ProcessStartInfo
-  $startInfo.FileName='python.exe'
-  $startInfo.Arguments='"'+$RealtimeScript+'"'+$(if($Command){' --stdin'}else{''})
+  $startInfo.FileName=$python.Path
+  $arguments=@($python.Prefix)
+  $arguments += '"' + $RealtimeScript + '"'
+  if($Command){$arguments += '--stdin'}
+  $startInfo.Arguments=($arguments -join ' ')
   $startInfo.UseShellExecute=$false
   $startInfo.CreateNoWindow=$true
   $startInfo.RedirectStandardInput=[bool]$Command
+  $startInfo.RedirectStandardError=$true
   $process=New-Object Diagnostics.Process
   $process.StartInfo=$startInfo
   if(!$process.Start()){throw 'REALTIME_START_FAILED'}
+  Write-EmmaLog "Realtime started with $($python.Version): $($python.Path)"
   if($Command){$process.StandardInput.WriteLine($Command);$process.StandardInput.Close()}
   while(!$process.WaitForExit(100)){
     [Windows.Forms.Application]::DoEvents()
@@ -479,6 +562,9 @@ function Invoke-RealtimeProcess([string]$RealtimeScript,[string]$Command) {
   }
   Sync-RealtimePreview
   $exitCode=$process.ExitCode
+  $stderr=$process.StandardError.ReadToEnd().Trim()
+  if($stderr){Write-EmmaLog "Realtime stderr: $($stderr.Substring(0,[math]::Min(1500,$stderr.Length)))"}
+  Write-EmmaLog "Realtime exited with code $exitCode."
   Remove-Item -LiteralPath $script:RealtimePreviewPath -Force -ErrorAction SilentlyContinue
   return $exitCode
 }
@@ -487,6 +573,7 @@ function Execute-VoiceCommand([string]$Command) {
   if($Command -and (Handle-LocalConversation $Command)){return}
   try {
     if (!(Ensure-Login)) { return }
+    $realtimeFailure=$false
     $realtimeScript=Join-Path (Split-Path -Parent $PSCommandPath) 'emma_realtime.py'
     if([bool]$script:Config.Realtime -and (Test-Path -LiteralPath $realtimeScript)){
       End-TranscriptConversation 'interrupted'
@@ -495,8 +582,20 @@ function Execute-VoiceCommand([string]$Command) {
       if($realtimeExitCode -eq 10){$script:RemotePaused=$true;Update-VoiceState 'paused' $false 'wake_word' '' '' 'pause'|Out-Null;return}
       if($realtimeExitCode -eq 0){$script:ArmedUntil=[datetime]::MinValue;return}
       Write-EmmaLog 'Realtime session failed; falling back to text assistant.'
+      $realtimeFailure=$true
     }
-    if([string]::IsNullOrWhiteSpace($Command)){throw 'REALTIME_START_FAILED'}
+    if([string]::IsNullOrWhiteSpace($Command)){
+      # Realtime is the preferred Siri-style conversation.  If it cannot be
+      # opened, retain a safe hands-free path: arm the local recognizer for a
+      # short second phrase and transcribe only that activated request.
+      $script:ArmedUntil=[datetime]::UtcNow.AddSeconds(10)
+      Update-HearingMonitor '' 'Live conversation unavailable — say your request now'
+      Update-VoiceState 'listening' $true 'wake_word'|Out-Null
+      $prompt=if($realtimeFailure){'Live conversation is unavailable. Please say your request now.'}else{'I am ready. Please say your request.'}
+      if($script:Notify){$script:Notify.ShowBalloonTip(4500,'VCUBF Emma',$prompt,'Warning')}
+      Speak $prompt
+      return
+    }
     $path=if([bool]$script:Config.Assistant){'/command/assistant'}else{'/command/text'}
     Start-TranscriptConversation 'reviewed_text'
     Add-TranscriptMessage 'user' $Command.Trim()
@@ -618,6 +717,11 @@ function Initialize-Recognizer {
 
 function Start-Listening {
   if ($script:Listening -or $script:Busy -or $script:RemotePaused) { return }
+  if (!(Load-Token)) {
+    $script:Listening=$false
+    if($script:Notify){$script:Notify.Text='VCUBF Emma — sign in required'}
+    return
+  }
   try {
     if($script:DictationGrammar){$script:DictationGrammar.Enabled=(($script:HearingMonitor -and !$script:HearingMonitor.IsDisposed) -or [datetime]::UtcNow -lt $script:ArmedUntil)}
     $script:Recognizer.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple)
@@ -647,8 +751,9 @@ if ($Diagnostic) {
   $recognizers=[System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers() | ForEach-Object { "$($_.Culture.Name): $($_.Description)" }
   $wakeTests = (Find-WakeCommand "$($script:Config.WakeWord) list clients") -eq 'list clients' -and (Find-WakeCommand "x$($script:Config.WakeWord) list clients") -eq $null
   $realtimeScript=Join-Path (Split-Path -Parent $PSCommandPath) 'emma_realtime.py'
-  [pscustomobject]@{ Status=$(if($wakeTests -and (Test-Path -LiteralPath $realtimeScript)){'ok'}else{'failed'}); WakeWord=$script:Config.WakeWord; Server=$script:Config.ServerUrl; HandsFree=[bool]$script:Config.HandsFree; Assistant=[bool]$script:Config.Assistant; Realtime=[bool]$script:Config.Realtime; RealtimeRuntime=(Test-Path -LiteralPath $realtimeScript); ConversationSeconds=[int]$script:Config.ConversationSeconds; Recognizers=$recognizers; WakeParser=$wakeTests; TokenProtected=(Test-Path $script:TokenPath) } | ConvertTo-Json -Depth 4
-  if(!$wakeTests){exit 1}
+  $realtimePython=Resolve-RealtimePython
+  [pscustomobject]@{ Status=$(if($wakeTests -and (Test-Path -LiteralPath $realtimeScript) -and $realtimePython){'ok'}else{'failed'}); WakeWord=$script:Config.WakeWord; Server=$script:Config.ServerUrl; HandsFree=[bool]$script:Config.HandsFree; Assistant=[bool]$script:Config.Assistant; Realtime=[bool]$script:Config.Realtime; RealtimeRuntime=(Test-Path -LiteralPath $realtimeScript); RealtimePython=$(if($realtimePython){$realtimePython.Path}else{$null}); RealtimePythonVersion=$(if($realtimePython){$realtimePython.Version}else{$null}); ConversationSeconds=[int]$script:Config.ConversationSeconds; Recognizers=$recognizers; WakeParser=$wakeTests; TokenProtected=(Test-Path $script:TokenPath) } | ConvertTo-Json -Depth 4
+  if(!$wakeTests -or !$realtimePython){exit 1}
   exit 0
 }
 
@@ -668,7 +773,26 @@ try {
   $monitor.Add_Click({Show-HearingMonitor});$start.Add_Click({$script:RemotePaused=$false;Start-Listening}); $stop.Add_Click({Stop-Listening}); $settings.Add_Click({Show-Settings}); $open.Add_Click({Start-Process 'https://frontend-production-ee13.up.railway.app'}); $signin.Add_Click({Remove-Item -LiteralPath $script:TokenPath -Force -ErrorAction SilentlyContinue; Show-Login|Out-Null}); $exit.Add_Click({$script:Context.ExitThread()})
   $script:Notify.ContextMenuStrip=$menu; $script:Notify.Add_DoubleClick({Start-Process 'https://frontend-production-ee13.up.railway.app'})
   $script:StateTimer=New-Object Windows.Forms.Timer -Property @{Interval=3000}
-  $script:StateTimer.Add_Tick({$state=Update-VoiceState $(if($script:RemotePaused){'paused'}elseif($script:Listening){'listening'}else{'thinking'}) (!$script:RemotePaused -and $script:Listening) 'wake_word';Apply-RemoteControl $state;if($script:TranscriptConversationId -and !$script:Busy -and $script:ArmedUntil -ne [datetime]::MinValue -and [datetime]::UtcNow -ge $script:ArmedUntil){End-TranscriptConversation 'completed'}})
+  $script:StateTimer.Add_Tick({
+    # A first-run desktop launch remains open while the browser completes the
+    # device pairing.  Do not advertise a microphone as active until a real
+    # token exists; once it does, refresh the paired language/wake word and
+    # begin listening without requiring another click.
+    if(!(Load-Token)){
+      if($script:Listening){try{$script:Recognizer.RecognizeAsyncCancel()}catch{};$script:Listening=$false}
+      if($script:Notify){$script:Notify.Text='VCUBF Emma — sign in required'}
+      return
+    }
+    Sync-LocalVoiceConfig | Out-Null
+    $script:PreferenceSyncTicks++
+    if($script:PreferenceSyncTicks -ge 10){$script:PreferenceSyncTicks=0;Sync-VoicePreferences | Out-Null}
+    $wasListening=$script:Listening
+    Start-Listening
+    if(!$wasListening -and $script:Listening -and $Announce){Speak 'Emma is active and listening.'}
+    $state=Update-VoiceState $(if($script:RemotePaused){'paused'}elseif($script:Listening){'listening'}else{'thinking'}) (!$script:RemotePaused -and $script:Listening) 'wake_word'
+    Apply-RemoteControl $state
+    if($script:TranscriptConversationId -and !$script:Busy -and $script:ArmedUntil -ne [datetime]::MinValue -and [datetime]::UtcNow -ge $script:ArmedUntil){End-TranscriptConversation 'completed'}
+  })
   $script:StateTimer.Start()
   $script:RecognitionTimer=New-Object Windows.Forms.Timer -Property @{Interval=100}
   $script:RecognitionTimer.Add_Tick({Drain-SpeechEvents})
@@ -680,8 +804,9 @@ try {
   Start-Listening
   Write-EmmaLog 'Startup: microphone initialization finished.'
   if($ShowMonitor -or [bool]$script:Config.ShowMonitor){Show-HearingMonitor;Write-EmmaLog 'Startup: live hearing monitor shown.'}
-  $script:Notify.ShowBalloonTip(3000,'VCUBF Emma',"Listening locally for $($script:Config.WakeWord).",'Info')
-  if($Announce){Speak 'Emma is active and listening.'}
+  if($script:Listening){$script:Notify.ShowBalloonTip(3000,'VCUBF Emma',"Listening locally for $($script:Config.WakeWord).",'Info')}
+  else{$script:Notify.ShowBalloonTip(4500,'VCUBF Emma','Sign in in the browser to activate hands-free listening.','Info')}
+  if($Announce -and $script:Listening){Speak 'Emma is active and listening.'}
   $script:Context=New-Object Windows.Forms.ApplicationContext
   [Windows.Forms.Application]::Run($script:Context)
 } catch { Write-EmmaLog "Fatal: $($_.Exception)"; [Windows.Forms.MessageBox]::Show($_.Exception.Message,'VCUBF Emma','OK','Error')|Out-Null }

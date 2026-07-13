@@ -21,4 +21,9 @@ $desktopShortcut.WorkingDirectory=$target
 $desktopShortcut.IconLocation="$env:SystemRoot\System32\imageres.dll,15"
 $desktopShortcut.Save()
 Write-Host "VCUBF Emma installed in $target"
-if($StartNow){Start-Process -FilePath $shortcut.TargetPath -ArgumentList $shortcut.Arguments -WindowStyle Hidden}
+if($StartNow){
+  # Use the same secure launcher as the desktop icon.  On first use it waits
+  # for browser approval before Emma opens the microphone; on later starts it
+  # reuses the DPAPI-protected device pairing.
+  Start-Process -FilePath $shortcut.TargetPath -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $target 'Open-VCUBF.ps1')`"" -WindowStyle Hidden
+}
