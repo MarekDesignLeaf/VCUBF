@@ -22,6 +22,8 @@ $script:ConversationHistory = @()
 $script:RemotePaused = $false
 $script:StateTimer = $null
 $script:TranscriptConversationId = $null
+$script:LaunchStartedAt = try { (Get-Process -Id $PID).StartTime.ToUniversalTime() } catch { [datetime]::UtcNow }
+$script:InitialListeningLogged = $false
 
 New-Item -ItemType Directory -Path $script:AppDir -Force | Out-Null
 
@@ -345,7 +347,17 @@ function Initialize-Recognizer {
 
 function Start-Listening {
   if ($script:Listening -or $script:Busy -or $script:RemotePaused) { return }
-  try { $script:Recognizer.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple); $script:Listening=$true; if($script:Notify){$script:Notify.Text="VCUBF Emma — listening for $($script:Config.WakeWord)"};Update-VoiceState 'listening' $true 'wake_word'|Out-Null }
+  try {
+    $script:Recognizer.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple)
+    $script:Listening=$true
+    if(!$script:InitialListeningLogged){
+      $elapsed=[int](([datetime]::UtcNow-$script:LaunchStartedAt).TotalMilliseconds)
+      Write-EmmaLog "Local microphone listening started after $elapsed ms."
+      $script:InitialListeningLogged=$true
+    }
+    if($script:Notify){$script:Notify.Text="VCUBF Emma — listening for $($script:Config.WakeWord)"}
+    Update-VoiceState 'listening' $true 'wake_word'|Out-Null
+  }
   catch { Write-EmmaLog "Microphone start failed: $($_.Exception.Message)"; Update-VoiceState 'error' $false 'wake_word'|Out-Null; if($script:Notify){$script:Notify.ShowBalloonTip(4000,'VCUBF Emma','Microphone listening could not start.','Error')} }
 }
 
