@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   api,
   ApiError,
@@ -17,12 +17,28 @@ const PERIOD_OPTIONS = [
 ] as const;
 
 export function Enquiries() {
+  const [searchParams] = useSearchParams();
+  const query = searchParams.toString();
   const [items, setItems] = useState<EnquiryListItem[] | null>(null);
-  const [resolution, setResolution] = useState<EnquiryResolution>("unresolved");
-  const [channel, setChannel] = useState("");
+  const [resolution, setResolution] = useState<EnquiryResolution>(() => {
+    const requested = searchParams.get("resolution");
+    return requested === "all" || requested === "resolved" ? requested : "unresolved";
+  });
+  const [channel, setChannel] = useState(() => {
+    const requested = searchParams.get("channel") ?? "";
+    return COMMUNICATION_CHANNELS.some((item) => item === requested) ? requested : "";
+  });
   const [periodDays, setPeriodDays] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(query);
+    const nextResolution = params.get("resolution");
+    setResolution(nextResolution === "all" || nextResolution === "resolved" ? nextResolution : "unresolved");
+    const nextChannel = params.get("channel") ?? "";
+    setChannel(COMMUNICATION_CHANNELS.some((item) => item === nextChannel) ? nextChannel : "");
+  }, [query]);
 
   const load = useCallback(async () => {
     const days = periodDays ? Number(periodDays) : null;

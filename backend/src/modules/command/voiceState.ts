@@ -28,7 +28,7 @@ const messageSchema = z.object({
 const endConversationSchema = z.object({ status: z.enum(["completed", "interrupted", "error"]).default("completed") });
 
 function publicState(state: any) {
-  if (!state) return { status: "offline", mode: "wake_word", listening: false, lastTranscript: null, lastResponse: null, lastHeardAt: null, pendingControl: null, heartbeatAt: null };
+  if (!state) return { status: "offline", mode: "wake_word", listening: false, lastTranscript: null, lastResponse: null, lastUiAction: null, lastHeardAt: null, pendingControl: null, heartbeatAt: null };
   const stale = Date.now() - new Date(state.heartbeatAt).getTime() > 15_000;
   return {
     status: stale ? "offline" : state.status,
@@ -36,6 +36,7 @@ function publicState(state: any) {
     listening: stale ? false : state.listening,
     lastTranscript: state.lastTranscript,
     lastResponse: state.lastResponse,
+    lastUiAction: state.lastUiAction,
     lastHeardAt: state.lastHeardAt,
     pendingControl: state.pendingControl,
     heartbeatAt: state.heartbeatAt,
@@ -208,7 +209,7 @@ voiceStateRouter.delete("/voice-state/history", async (req, res) => {
     prisma.voiceConversation.deleteMany({ where: { userId: req.user!.id, companyId: req.user!.companyId } }),
     prisma.voiceDeviceState.updateMany({
       where: { userId: req.user!.id, companyId: req.user!.companyId },
-      data: { lastTranscript: null, lastResponse: null, lastHeardAt: null, pendingControl: "end_conversation" },
+      data: { lastTranscript: null, lastResponse: null, lastUiAction: Prisma.DbNull, lastHeardAt: null, pendingControl: "end_conversation" },
     }),
   ]);
   await recordAudit({

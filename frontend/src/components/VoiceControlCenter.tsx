@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { api, type VoiceConversation, type VoiceDeviceState } from "../api/client";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { api, type VoiceConversation, type VoiceDeviceState, type VoiceUiAction } from "../api/client";
 
 const OFFLINE: VoiceDeviceState = {
   status: "offline",
@@ -7,6 +8,7 @@ const OFFLINE: VoiceDeviceState = {
   listening: false,
   lastTranscript: null,
   lastResponse: null,
+  lastUiAction: null,
   lastHeardAt: null,
   pendingControl: null,
   heartbeatAt: null,
@@ -23,10 +25,13 @@ const STATUS_LABELS: Record<VoiceDeviceState["status"], string> = {
 };
 
 export function VoiceControlCenter() {
+  const navigate = useNavigate();
   const [state, setState] = useState<VoiceDeviceState>(OFFLINE);
   const [conversations, setConversations] = useState<VoiceConversation[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastAction, setLastAction] = useState<VoiceUiAction | null>(null);
+  const handledActionId = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -34,7 +39,22 @@ export function VoiceControlCenter() {
     const poll = async () => {
       try {
         const [next, history] = await Promise.all([api.command.voiceState(), api.command.voiceConversations(20)]);
-        if (active) { setState(next); setConversations(history); setError(null); }
+        if (active) {
+          setState(next); setConversations(history); setError(null);
+          const action = next.lastUiAction;
+          if (action && action.id !== handledActionId.current) {
+            handledActionId.current = action.id;
+            const storageKey = "vcubf.emma.last-ui-action";
+            let alreadyHandled = false;
+            try { alreadyHandled = window.localStorage.getItem(storageKey) === action.id; }
+            catch { /* The ref still prevents repeats when storage is unavailable. */ }
+            if (!alreadyHandled && action.kind === "navigate" && action.path.startsWith("/") && !action.path.startsWith("//")) {
+              try { window.localStorage.setItem(storageKey, action.id); } catch { /* Navigation still works. */ }
+              setLastAction(action);
+              navigate(action.path);
+            }
+          }
+        }
       } catch {
         if (active) setError("Could not read the Windows Emma status.");
       } finally {
@@ -43,7 +63,7 @@ export function VoiceControlCenter() {
     };
     poll();
     return () => { active = false; if (timer) window.clearTimeout(timer); };
-  }, []);
+  }, [navigate]);
 
   async function control(control: "pause" | "resume" | "end_conversation") {
     setBusy(true); setError(null);
@@ -81,6 +101,11 @@ export function VoiceControlCenter() {
           ? "Microphone active. Say “Emma” clearly; saying Emma alone starts a Realtime conversation."
           : state.status === "paused" ? "Microphone reactions are paused." : "Emma is not receiving microphone input."}
       </div>
+      {lastAction && (
+        <div className="voice-ui-action" role="status">
+          Emma opened <strong>{lastAction.label}</strong> in Secretary.
+        </div>
+      )}
       <div className="voice-observation-grid" aria-live="polite">
         <div><span className="voice-observation-label">Emma heard after activation</span><div>{state.lastTranscript || "Waiting for Emma to be activated."}</div></div>
         <div><span className="voice-observation-label">Emma answered</span><div>{state.lastResponse || "No response yet."}</div></div>

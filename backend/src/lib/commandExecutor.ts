@@ -16,6 +16,7 @@ import * as portfolioService from "../services/portfolioService.js";
 import * as memoryModelService from "../services/memoryModelService.js";
 import * as taskService from "../services/taskService.js";
 import * as contactService from "../services/contactService.js";
+import { buildCommandUiAction, VOICE_PAGE_ROUTES, type CommandUiAction } from "./voiceNavigation.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -32,6 +33,7 @@ export interface CommandResponse {
   data?: unknown;
   error?: string;
   message?: string;
+  uiAction?: CommandUiAction;
 }
 
 export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCommand): Promise<CommandResponse> {
@@ -612,6 +614,18 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
       break;
     }
 
+    case "navigate": {
+      const page = VOICE_PAGE_ROUTES[command.entities.page];
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: true,
+        httpStatus: 200,
+        message: `Opening ${page.label}.`,
+      };
+      break;
+    }
+
     default: {
       response = {
         intent: "unrecognized",
@@ -625,5 +639,6 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
   }
 
 
+  if (response.ok) response.uiAction = buildCommandUiAction(response.intent, response.data, response.interpreted);
   return response;
 }

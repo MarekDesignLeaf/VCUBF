@@ -260,34 +260,37 @@ function Sync-RealtimePreview {
 
 function Spoken-Result($Response) {
   if (!$Response.ok) { if ($Response.message) { return $Response.message }; return "I could not complete that. $($Response.error)" }
-  if ($Response.message) { return $Response.message }
+  $message=''
+  if ($Response.message) { $message=[string]$Response.message }
   $count = if ($null -ne $Response.data -and $null -ne $Response.data.Count) { [int]$Response.data.Count } else { -1 }
   $noun = { param($singular,$plural) if($count -eq 1){"$count $singular"}else{"$count $plural"} }
-  switch ([string]$Response.intent) {
-    'list_clients' { return "You have $(& $noun 'client' 'clients')." }
-    'list_contacts' { return "You have $(& $noun 'contact' 'contacts')." }
-    'list_channel_messages' { return "I found $(& $noun 'message' 'messages')." }
-    'list_jobs' { return "You have $(& $noun 'job' 'jobs')." }
-    'list_leads' { return "You have $(& $noun 'lead' 'leads')." }
-    'list_tasks' { return "You have $(& $noun 'task' 'tasks')." }
-    'list_quotes' { return "I found $(& $noun 'quote' 'quotes')." }
-    'list_job_openings' { return "I found $(& $noun 'job opening' 'job openings')." }
-    'list_learning_rules' { return "You have $(& $noun 'learning rule' 'learning rules')." }
-    'list_communications' { return "I found $(& $noun 'communication record' 'communication records')." }
-    'list_portfolio_photos' { return "I found $(& $noun 'photo' 'photos')." }
-    'list_follow_ups' { return "You have $(& $noun 'follow up' 'follow ups') due." }
-    'list_unresolved_enquiries' { return "You have $(& $noun 'unresolved enquiry' 'unresolved enquiries')." }
-    'list_notifications' { return "You have $(& $noun 'notification' 'notifications')." }
-    'create_client' { return "The client was created." }
-    'create_lead' { return "The lead was created." }
-    'create_job' { return "The job was created." }
-    'create_task' { return "The task was created." }
-    'create_service' { return "The service was created." }
-    'assign_job' { return "The job was assigned." }
-    'change_job_status' { return "The job status was updated." }
-    'convert_lead' { return "The lead was converted." }
-    default { return "$(([string]$Response.intent).Replace('_',' ')) completed successfully." }
-  }
+  if(!$message){$message=switch ([string]$Response.intent) {
+    'list_clients' { "You have $(& $noun 'client' 'clients')." }
+    'list_contacts' { "You have $(& $noun 'contact' 'contacts')." }
+    'list_channel_messages' { "I found $(& $noun 'message' 'messages')." }
+    'list_jobs' { "You have $(& $noun 'job' 'jobs')." }
+    'list_leads' { "You have $(& $noun 'lead' 'leads')." }
+    'list_tasks' { "You have $(& $noun 'task' 'tasks')." }
+    'list_quotes' { "I found $(& $noun 'quote' 'quotes')." }
+    'list_job_openings' { "I found $(& $noun 'job opening' 'job openings')." }
+    'list_learning_rules' { "You have $(& $noun 'learning rule' 'learning rules')." }
+    'list_communications' { "I found $(& $noun 'communication record' 'communication records')." }
+    'list_portfolio_photos' { "I found $(& $noun 'photo' 'photos')." }
+    'list_follow_ups' { "You have $(& $noun 'follow up' 'follow ups') due." }
+    'list_unresolved_enquiries' { "You have $(& $noun 'unresolved enquiry' 'unresolved enquiries')." }
+    'list_notifications' { "You have $(& $noun 'notification' 'notifications')." }
+    'create_client' { "The client was created." }
+    'create_lead' { "The lead was created." }
+    'create_job' { "The job was created." }
+    'create_task' { "The task was created." }
+    'create_service' { "The service was created." }
+    'assign_job' { "The job was assigned." }
+    'change_job_status' { "The job status was updated." }
+    'convert_lead' { "The lead was converted." }
+    default { "$(([string]$Response.intent).Replace('_',' ')) completed successfully." }
+  }}
+  if($Response.uiAction -and $Response.uiAction.label -and $Response.intent -ne 'navigate'){$message="$message Opening $($Response.uiAction.label) in Secretary."}
+  return $message
 }
 
 function Handle-LocalConversation([string]$Command) {
@@ -380,7 +383,7 @@ function Show-Review([string]$RecognizedText) {
     Start-TranscriptConversation 'reviewed_text'
     Add-TranscriptMessage 'user' $command
     $response = Invoke-Vcubf POST '/command/text' @{ text=$command; input_method='voice_transcript' }
-    $message = if ($response.ok) { if ($response.message) { $response.message } else { "$($response.intent) completed" } } else { if ($response.message) { $response.message } else { $response.error } }
+    $message = Spoken-Result $response
     Add-TranscriptMessage 'assistant' $message
     $script:Notify.ShowBalloonTip(4000,'VCUBF Emma',$message, $(if($response.ok){'Info'}else{'Warning'}))
     Speak $message

@@ -1359,9 +1359,19 @@ export interface VoiceDeviceState {
   listening: boolean;
   lastTranscript: string | null;
   lastResponse: string | null;
+  lastUiAction: VoiceUiAction | null;
   lastHeardAt: string | null;
   pendingControl: "pause" | "resume" | "end_conversation" | null;
   heartbeatAt: string | null;
+}
+
+export interface VoiceUiAction {
+  id: string;
+  kind: "navigate";
+  path: string;
+  label: string;
+  intent: string;
+  createdAt: string;
 }
 
 export interface VoiceConversationMessage {
@@ -1847,6 +1857,7 @@ export const api = {
         data?: unknown;
         error?: string;
         message?: string;
+        uiAction?: VoiceUiAction;
       }>("/command/text", {
         method: "POST",
         body: JSON.stringify({ text, input_method: inputMethod }),

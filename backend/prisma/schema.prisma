@@ -182,6 +182,7 @@ model VoiceDeviceState {
   listening      Boolean   @default(false)
   lastTranscript String?   @map("last_transcript")
   lastResponse   String?   @map("last_response")
+  lastUiAction   Json?     @map("last_ui_action")
   lastHeardAt    DateTime? @map("last_heard_at")
   pendingControl String?   @map("pending_control")
   heartbeatAt    DateTime  @default(now()) @map("heartbeat_at")

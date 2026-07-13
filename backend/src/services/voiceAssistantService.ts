@@ -44,6 +44,7 @@ show emails
 show whatsapp messages
 show data quality issues
 show action patterns
+open PAGE (dashboard, account, notifications, data quality, business metrics, leads, clients, contacts, documents, jobs, tasks, enquiries, communication intake, communications, photos, photo selection, business context, industries, connectors, website audit, website content, employees, calendar, services, quotes, invoices, recruitment, playbooks, learning, memory model)
 list clients
 list jobs
 list leads`.trim();

@@ -8,6 +8,7 @@ import { parseTextCommand } from "../../lib/commandParser.js";
 import { dispatchParsedCommand } from "../../lib/commandExecutor.js";
 import { resolveLearningAliases } from "../../services/learningService.js";
 import { createRealtimeClientSession, interpretVoiceRequest } from "../../services/voiceAssistantService.js";
+import { publishVoiceUiAction } from "../../services/voiceUiActionService.js";
 
 export const commandRouter = Router();
 
@@ -88,19 +89,22 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
   }
 
   const response = await dispatchParsedCommand(user, command);
+  const uiAction = response.uiAction
+    ? await publishVoiceUiAction(user, response.intent, response.uiAction)
+    : undefined;
   await recordAudit({
     companyId: user.companyId,
     userId: user.id,
     actionName: EXECUTE_TEXT_COMMAND_ACTION.actionName,
     interpretedIntent: response.intent,
     inputPayload: { text, inputMethod: input_method, resolvedText: alias.resolvedText, canonicalCommand: assistant?.canonical_command, appliedAliases: alias.appliedRules },
-    dataAfter: { interpreted: response.interpreted },
+    dataAfter: { interpreted: response.interpreted, uiAction },
     riskLevel: EXECUTE_TEXT_COMMAND_ACTION.riskLevel,
     confirmationRequired: EXECUTE_TEXT_COMMAND_ACTION.confirmationRequired,
     result: response.ok ? "success" : "error",
     errorMessage: response.ok ? undefined : response.error,
   });
-  return res.status(response.httpStatus).json({ ...response, kind: "action", assistantMessage: assistant?.message, appliedAliases: alias.appliedRules });
+  return res.status(response.httpStatus).json({ ...response, uiAction, kind: "action", assistantMessage: assistant?.message, appliedAliases: alias.appliedRules });
 });
 
 // POST /command/text — Voice and Text Command Layer entry point.
@@ -122,6 +126,9 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
   const command = parseTextCommand(alias.resolvedText);
 
   const response = await dispatchParsedCommand(user, command);
+  const uiAction = response.uiAction
+    ? await publishVoiceUiAction(user, response.intent, response.uiAction)
+    : undefined;
 
   await recordAudit({
     companyId: user.companyId,
@@ -134,12 +141,12 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
       resolvedText: alias.resolvedText,
       appliedAliases: alias.appliedRules,
     },
-    dataAfter: { interpreted: response.interpreted },
+    dataAfter: { interpreted: response.interpreted, uiAction },
     riskLevel: EXECUTE_TEXT_COMMAND_ACTION.riskLevel,
     confirmationRequired: EXECUTE_TEXT_COMMAND_ACTION.confirmationRequired,
     result: response.ok ? "success" : "error",
     errorMessage: response.ok ? undefined : response.error,
   });
 
-  res.status(response.httpStatus).json({ ...response, appliedAliases: alias.appliedRules });
+  res.status(response.httpStatus).json({ ...response, uiAction, appliedAliases: alias.appliedRules });
 });

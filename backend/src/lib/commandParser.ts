@@ -10,6 +10,8 @@
 // structured ParsedCommand — the same shape an LLM-based parser would need to
 // produce.
 //
+import { resolveVoicePage, type VoicePage } from "./voiceNavigation.js";
+
 // If nothing matches, the result is `unrecognized` — the system must not
 // guess (VCUF error handling rule).
 
@@ -51,6 +53,7 @@ export type ParsedCommand =
   | { intent: "list_channel_messages"; entities: { channel: "email" | "whatsapp" } }
   | { intent: "list_jobs"; entities: Record<string, never> }
   | { intent: "list_leads"; entities: Record<string, never> }
+  | { intent: "navigate"; entities: { page: VoicePage } }
   | { intent: "unrecognized"; entities: Record<string, never> };
 
 function extractLabelled(text: string, label: string): { value?: string; rest: string } {
@@ -278,14 +281,20 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   m = text.match(/^(?:list|show)\s+communications?(?:\s+for\s+(.+))?$/i);
   if (m) return { intent: "list_communications", entities: { client_name: m[1]?.trim() } };
 
-  if (/^(?:list|show)\s+clients?$/i.test(text)) return { intent: "list_clients", entities: {} };
-  if (/^(?:list|show)\s+contacts?$/i.test(text)) return { intent: "list_contacts", entities: {} };
-  if (/^(?:list|show|read)\s+(?:my\s+)?(?:email|mail)(?:\s+messages?)?s?$/i.test(text))
+  if (/^(?:list|show(?:\s+me)?|open)\s+clients?$/i.test(text)) return { intent: "list_clients", entities: {} };
+  if (/^(?:list|show(?:\s+me)?|open)\s+contacts?$/i.test(text)) return { intent: "list_contacts", entities: {} };
+  if (/^(?:list|show(?:\s+me)?|read|open)\s+(?:my\s+)?(?:email|mail)(?:\s+messages?)?s?$/i.test(text))
     return { intent: "list_channel_messages", entities: { channel: "email" } };
-  if (/^(?:list|show|read)\s+(?:my\s+)?whatsapp(?:\s+messages?)?$/i.test(text))
+  if (/^(?:list|show(?:\s+me)?|read|open)\s+(?:my\s+)?whatsapp(?:\s+messages?)?$/i.test(text))
     return { intent: "list_channel_messages", entities: { channel: "whatsapp" } };
-  if (/^(?:list|show)\s+jobs?$/i.test(text)) return { intent: "list_jobs", entities: {} };
-  if (/^(?:list|show)\s+leads?$/i.test(text)) return { intent: "list_leads", entities: {} };
+  if (/^(?:list|show(?:\s+me)?|open)\s+jobs?$/i.test(text)) return { intent: "list_jobs", entities: {} };
+  if (/^(?:list|show(?:\s+me)?|open)\s+leads?$/i.test(text)) return { intent: "list_leads", entities: {} };
+
+  m = text.match(/^(?:open|go\s+to|navigate\s+to|take\s+me\s+to|show\s+me)\s+(.+)$/i);
+  if (m) {
+    const page = resolveVoicePage(m[1]);
+    if (page) return { intent: "navigate", entities: { page } };
+  }
 
   return { intent: "unrecognized", entities: {} };
 }

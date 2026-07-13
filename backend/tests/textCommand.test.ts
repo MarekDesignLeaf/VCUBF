@@ -45,6 +45,8 @@ describe("command/text", () => {
     assert.equal(res.body.intent, "create_client");
     assert.equal(res.body.ok, true);
     assert.equal(res.body.data.displayName, "Command Client");
+    assert.equal(res.body.uiAction.kind, "navigate");
+    assert.equal(res.body.uiAction.path, `/clients/${res.body.data.id}`);
 
     const audit = await prisma.auditLog.findFirst({
       where: { actionName: "execute_text_command", result: "success" },
@@ -62,6 +64,13 @@ describe("command/text", () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.intent, "list_clients");
     assert.equal(res.body.ok, true);
+    assert.equal(res.body.uiAction.path, "/clients");
+
+    const state = await request(app)
+      .get("/command/voice-state")
+      .set("Authorization", `Bearer ${adminToken}`);
+    assert.equal(state.body.lastUiAction.id, res.body.uiAction.id);
+    assert.equal(state.body.lastUiAction.label, "Clients");
 
     const audit = await prisma.auditLog.findFirst({
       where: { actionName: "execute_text_command", result: "success" },
@@ -80,6 +89,17 @@ describe("command/text", () => {
     assert.equal(res.body.kind, "action");
     assert.equal(res.body.intent, "list_clients");
     assert.equal(res.body.ok, true);
+  });
+
+  it("navigates the signed-in application without changing business data", async () => {
+    const res = await request(app)
+      .post("/command/assistant")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "open invoices", input_method: "voice_transcript", language: "en-GB", history: [] });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.intent, "navigate");
+    assert.equal(res.body.message, "Opening Invoices.");
+    assert.equal(res.body.uiAction.path, "/invoices");
   });
 
   it("creates a job via text command by resolving the client name", async () => {

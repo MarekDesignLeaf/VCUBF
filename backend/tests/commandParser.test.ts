@@ -67,6 +67,13 @@ describe("commandParser", () => {
     assert.equal(parseTextCommand("list leads").intent, "list_leads");
   });
 
+  it("parses direct navigation across the Secretary hierarchy", () => {
+    assert.deepEqual(parseTextCommand("open dashboard"), { intent: "navigate", entities: { page: "dashboard" } });
+    assert.deepEqual(parseTextCommand("go to invoices"), { intent: "navigate", entities: { page: "invoices" } });
+    assert.deepEqual(parseTextCommand("take me to communication intake"), { intent: "navigate", entities: { page: "communication_intake" } });
+    assert.deepEqual(parseTextCommand("show me business metrics"), { intent: "navigate", entities: { page: "metrics" } });
+  });
+
   it("parses 'assign job X to Y'", () => {
     const result = parseTextCommand("assign job Hedge trimming to Test Worker");
     assert.equal(result.intent, "assign_job");
