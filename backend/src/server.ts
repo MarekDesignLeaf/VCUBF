@@ -39,10 +39,17 @@ export function createServer() {
   // exactly that hop keeps req.ip tied to the real client for login throttling
   // without accepting an arbitrary client-supplied forwarding chain.
   app.set("trust proxy", 1);
-  const allowedOrigins = (process.env.FRONTEND_URL ?? "http://localhost:5173")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  const allowedOrigins = [...new Set([
+    ...(process.env.FRONTEND_URL ?? "http://localhost:5173")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+    // Capacitor serves the bundled Android application from this fixed secure
+    // origin. It is not a wildcard and therefore does not broaden access to
+    // arbitrary websites.
+    "https://localhost",
+    "capacitor://localhost",
+  ])];
   app.use(cors({ origin: allowedOrigins }));
   app.use(express.json({
     verify: (req, _res, buffer) => {

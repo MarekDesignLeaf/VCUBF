@@ -149,6 +149,12 @@ npm run dev                 # http://localhost:5173
   interruption, speaks responses and stores its API token encrypted for the current Windows
   user with DPAPI. `Install.ps1` installs auto-start; no password or audio is persisted.
 
+- **Android app and PWA**: `frontend` is installable as a PWA and also contains
+  a Capacitor Android project (`frontend/android`). The Android build uses
+  Android speech recognition and text-to-speech for Emma, shares the production
+  Secretary API and stores text-only mobile conversation history locally. See
+  [`docs/ANDROID.md`](docs/ANDROID.md) for build, device-test and release steps.
+
 - **Job Allocation and Capacity Management Module**: `backend/src/services/
   capacityService.ts` computes an employee's **real** current-week workload from actual
   job data (`estimated_duration_hours` + `planned_start_at` on active jobs assigned to

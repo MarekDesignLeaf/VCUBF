@@ -1425,6 +1425,17 @@ export interface VoiceConversation {
   messages: VoiceConversationMessage[];
 }
 
+export interface MobileAssistantResponse {
+  ok: boolean;
+  kind: "action" | "reply" | "clarification" | "plan" | "error";
+  intent?: string;
+  data?: unknown;
+  error?: string;
+  message?: string;
+  assistantMessage?: string;
+  uiAction?: VoiceUiAction;
+}
+
 export interface SecretaryNavigationChild {
   label: string;
   path?: string;
@@ -1947,6 +1958,11 @@ export const api = {
       }>("/command/text", {
         method: "POST",
         body: JSON.stringify({ text, input_method: inputMethod }),
+      }),
+    assistant: (text: string, language: AppLanguage, history: Array<{ role: "user" | "assistant"; content: string }>) =>
+      request<MobileAssistantResponse>("/command/assistant", {
+        method: "POST",
+        body: JSON.stringify({ text, input_method: "voice_transcript", language, history }),
       }),
     voiceState: () => request<VoiceDeviceState>("/command/voice-state"),
     voiceConversations: (limit = 10) => request<VoiceConversation[]>(`/command/voice-conversations?limit=${limit}`),

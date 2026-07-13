@@ -3,6 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 import { CommandBar } from "./CommandBar";
 import { VoiceControlCenter } from "./VoiceControlCenter";
+import { MobileVoiceControl, isAndroidNative } from "./MobileVoiceControl";
 import { appLanguage, languageLabel, menuText, type MenuKey } from "../i18n";
 
 export function Layout() {
@@ -61,7 +62,10 @@ export function Layout() {
         </div>
       </aside>
       <main className="content">
-        {user?.permissions?.includes("voice.execute") && <><VoiceControlCenter /><CommandBar /></>}
+        {user?.permissions?.includes("voice.execute") && <>
+          {isAndroidNative() ? <MobileVoiceControl /> : <VoiceControlCenter />}
+          <CommandBar />
+        </>}
         <Outlet />
       </main>
     </div>
