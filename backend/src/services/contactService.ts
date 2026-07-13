@@ -8,7 +8,7 @@ import {
   UPDATE_CONTACT_ACTION,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
-import { normalizeEmail, normalizePhone } from "../lib/contactNormalization.js";
+import { normalizeEmail, normalizePhone, phoneNumberSchema } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -18,7 +18,7 @@ const contactFields = z.object({
   job_title: z.string().trim().max(200).optional(),
   department: z.string().trim().max(200).optional(),
   email: z.string().trim().email().max(320).optional(),
-  phone: z.string().trim().min(6).max(50).optional(),
+  phone: phoneNumberSchema.optional(),
   preferred_channel: z.enum(CONTACT_CHANNELS).optional(),
   preferred_language: z.enum(CONTACT_LANGUAGES).optional(),
   source: z.enum(CONTACT_SOURCES).default("user_input"),
@@ -39,7 +39,7 @@ export const updateContactSchema = contactFields
   .partial()
   .extend({
     email: z.string().trim().email().max(320).nullable().optional(),
-    phone: z.string().trim().min(6).max(50).nullable().optional(),
+    phone: phoneNumberSchema.nullable().optional(),
     job_title: z.string().trim().max(200).nullable().optional(),
     department: z.string().trim().max(200).nullable().optional(),
     preferred_channel: z.enum(CONTACT_CHANNELS).nullable().optional(),

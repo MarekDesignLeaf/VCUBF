@@ -2,12 +2,13 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
 import { CONVERT_LEAD_ACTION, CREATE_LEAD_ACTION } from "../lib/actionContracts.js";
+import { phoneNumberSchema } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
 export const createLeadSchema = z.object({
   name: z.string().min(1, "name is required"),
-  phone: z.string().optional(),
+  phone: phoneNumberSchema.optional(),
   email: z.string().email().optional().or(z.literal("")),
   service_requested: z.string().optional(),
   location: z.string().optional(),

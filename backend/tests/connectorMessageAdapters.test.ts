@@ -105,6 +105,7 @@ describe("WhatsApp Business adapter", () => {
       } }] }],
     });
     assert.equal(result.messages[0].senderName, "Customer");
+    assert.equal(result.messages[0].from, "+447700900123");
     assert.equal(result.messages[0].messageText, "Please send a quote");
     assert.equal(result.statuses[0].status, "delivered");
   });

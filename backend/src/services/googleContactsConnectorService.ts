@@ -27,7 +27,7 @@ import {
   type ActionContract,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
-import { normalizeEmail, normalizePhone } from "../lib/contactNormalization.js";
+import { isValidPhoneNumberFormat, normalizeEmail, normalizePhone } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -296,7 +296,15 @@ export async function listExternalContacts(user: AuthedUser, sourceId: string, r
     prisma.externalContact.findMany({ where, orderBy: [{ displayName: "asc" }, { createdAt: "asc" }], skip: parsed.data.offset, take: parsed.data.limit }),
     prisma.externalContact.count({ where }),
   ]);
-  return ok(200, { items: items.map((item) => ({ ...item, importable: !item.isDeleted && Boolean(item.email || item.phone) })), total, offset: parsed.data.offset, limit: parsed.data.limit });
+  return ok(200, {
+    items: items.map((item) => {
+      const phoneValid = !item.phone || isValidPhoneNumberFormat(item.phone);
+      return { ...item, phoneValid, importable: !item.isDeleted && Boolean(item.email || item.phone) && phoneValid };
+    }),
+    total,
+    offset: parsed.data.offset,
+    limit: parsed.data.limit,
+  });
 }
 
 export async function importGoogleContact(user: AuthedUser, sourceId: string, externalContactId: string, rawInput: unknown): Promise<ServiceResult<unknown>> {
@@ -309,6 +317,9 @@ export async function importGoogleContact(user: AuthedUser, sourceId: string, ex
   if (!external) return fail(404, "EXTERNAL_CONTACT_NOT_FOUND");
   if (external.importedContactId) return fail(409, "CONTACT_ALREADY_IMPORTED", undefined, { contactId: external.importedContactId });
   if (external.isDeleted || (!external.email && !external.phone)) return fail(409, "EXTERNAL_CONTACT_NOT_IMPORTABLE");
+  if (external.phone && !isValidPhoneNumberFormat(external.phone)) {
+    return fail(409, "EXTERNAL_CONTACT_PHONE_INVALID", "The staged contact has an invalid phone number. Correct it in Google Contacts and synchronise again.");
+  }
   const preview = {
     externalContactId: external.id, sourceId, displayName: external.displayName ?? external.email ?? external.phone,
     email: external.email, phone: external.phone, organisation: external.organisation, jobTitle: external.jobTitle,
@@ -331,6 +342,7 @@ export async function importGoogleContact(user: AuthedUser, sourceId: string, ex
       });
       const email = normalizeEmail(current.email);
       const phone = normalizePhone(current.phone);
+      if (current.phone && !phone) throw new Error("EXTERNAL_CONTACT_PHONE_INVALID");
       const duplicate = candidates.find((item) =>
         (email && normalizeEmail(item.email) === email) || (phone && normalizePhone(item.phone) === phone)
       );
@@ -341,7 +353,7 @@ export async function importGoogleContact(user: AuthedUser, sourceId: string, ex
         jobTitle: current.jobTitle,
         department: current.department,
         email: current.email,
-        phone: current.phone,
+        phone,
         source: "google_contacts",
         sourceReference: `google-contacts:${sourceId}:${current.externalResourceName}`,
         notes: current.organisation ? `Organisation: ${current.organisation}` : undefined,
@@ -360,6 +372,9 @@ export async function importGoogleContact(user: AuthedUser, sourceId: string, ex
     const duplicate = (error as { duplicate?: unknown }).duplicate;
     if (duplicate) return fail(409, "DUPLICATE_CONTACT_POSSIBLE", "An active CRM contact already uses this email or phone.", { possibleDuplicate: duplicate });
     if (error instanceof Error && error.message === "CONTACT_ALREADY_IMPORTED") return fail(409, "CONTACT_ALREADY_IMPORTED");
+    if (error instanceof Error && error.message === "EXTERNAL_CONTACT_PHONE_INVALID") {
+      return fail(409, "EXTERNAL_CONTACT_PHONE_INVALID", "The staged contact has an invalid phone number. Correct it in Google Contacts and synchronise again.");
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") return fail(409, "CONTACT_IMPORT_CONFLICT");
     return fail(500, "CONNECTOR_INTERNAL_ERROR");
   }

@@ -14,12 +14,12 @@ import {
   SEND_WHATSAPP_MESSAGE_ACTION,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import { normalizePhone, phoneNumberSchema } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
-const whatsappRecipient = z.string().trim().regex(/^\+?[1-9]\d{7,14}$/, "Use an international WhatsApp number, for example +447700900123");
 export const sendWhatsAppMessageSchema = z.object({
-  to: whatsappRecipient,
+  to: phoneNumberSchema,
   body: z.string().trim().min(1).max(4096),
   confirmed: z.boolean().optional(),
 }).strict();
@@ -77,6 +77,8 @@ export async function receiveWebhook(
     const importedIntakeIds: string[] = [];
     let duplicateCount = 0;
     for (const message of messages) {
+      const senderPhone = normalizePhone(message.from);
+      if (!senderPhone) continue;
       const existing = await prisma.communicationIntake.findUnique({
         where: {
           companyId_connectorSourceId_externalMessageId: {
@@ -106,7 +108,7 @@ export async function receiveWebhook(
           externalMessageId: message.id,
           channel: "whatsapp",
           senderName: message.senderName,
-          senderPhone: message.from,
+          senderPhone,
           messageText: message.messageText,
           receivedAt: message.receivedAt,
           sourceReference: `whatsapp:${phoneNumberId}:${message.id}`,

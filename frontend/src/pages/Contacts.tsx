@@ -88,7 +88,7 @@ function ContactForm({ onCreated }: { onCreated: () => void }) {
     <input placeholder="Job title" value={jobTitle} onChange={(event) => setJobTitle(event.target.value)} />
     <input placeholder="Department" value={department} onChange={(event) => setDepartment(event.target.value)} />
     <input type="email" placeholder="Email" value={email} onChange={(event) => setEmail(event.target.value)} />
-    <input placeholder="Phone" value={phone} onChange={(event) => setPhone(event.target.value)} />
+    <input type="tel" inputMode="tel" autoComplete="tel" maxLength={40} title="Use a UK number such as 07700 900123 or an international number beginning with +" placeholder="Phone, e.g. 07700 900123" value={phone} onChange={(event) => setPhone(event.target.value)} />
     <select value={channel} onChange={(event) => setChannel(event.target.value as ContactChannel | "")}><option value="">No channel preference</option>{CONTACT_CHANNELS.map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select>
     <select value={language} onChange={(event) => setLanguage(event.target.value as ContactLanguage | "")}><option value="">No language preference</option>{CONTACT_LANGUAGES.map((value) => <option key={value} value={value}>{value}</option>)}</select>
     <button type="submit" disabled={submitting || (!email && !phone)}>{submitting ? "Saving…" : "Save contact"}</button>

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
+import { phoneNumberSchema } from "../lib/contactNormalization.js";
 import {
   CREATE_JOB_OPENING_ACTION,
   UPDATE_JOB_OPENING_ACTION,
@@ -54,14 +55,14 @@ export const updateJobOpeningSchema = z.object({
 export const createCandidateSchema = z.object({
   name: z.string().min(1, "name is required"),
   email: z.string().email().optional(),
-  phone: z.string().optional(),
+  phone: phoneNumberSchema.optional(),
   notes: z.string().optional(),
 });
 
 export const updateCandidateSchema = z.object({
   name: z.string().min(1).optional(),
   email: z.string().email().optional(),
-  phone: z.string().optional(),
+  phone: phoneNumberSchema.optional(),
   stage: z.enum(CANDIDATE_STAGES).optional(),
   notes: z.string().optional(),
 });

@@ -13,7 +13,7 @@ import {
   COMMUNICATION_DIRECTIONS,
 } from "../lib/actionContracts.js";
 import type { ActionContract } from "../lib/actionContracts.js";
-import { normalizeEmail, normalizeName, normalizePhone } from "../lib/contactNormalization.js";
+import { normalizeEmail, normalizeName, normalizePhone, phoneNumberSchema } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -52,7 +52,7 @@ export const createCommunicationIntakeSchema = z.object({
   channel: z.enum(COMMUNICATION_CHANNELS),
   sender_name: z.string().max(200).optional(),
   sender_email: z.string().email().optional().or(z.literal("")),
-  sender_phone: z.string().max(100).optional(),
+  sender_phone: phoneNumberSchema.optional(),
   message_text: z.string().min(1, "message_text is required"),
   received_at: z.string().datetime(),
   source_reference: z.string().max(2000).optional(),
@@ -162,14 +162,15 @@ async function buildExtraction(companyId: string, intake: {
 
   const name = cleanOptional(intake.senderName) ?? cleanOptional(intake.messageText.match(LABELLED_NAME)?.[1]);
   const email = cleanOptional(intake.senderEmail) ?? cleanOptional(intake.messageText.match(EMAIL_IN_TEXT)?.[0]);
-  const phone = cleanOptional(intake.senderPhone) ?? cleanOptional(intake.messageText.match(PHONE_IN_TEXT)?.[0]);
+  const rawPhone = cleanOptional(intake.senderPhone) ?? cleanOptional(intake.messageText.match(PHONE_IN_TEXT)?.[0]);
+  const phone = normalizePhone(rawPhone);
   const address = cleanOptional(intake.messageText.match(LABELLED_ADDRESS)?.[1]);
   const postcode = cleanOptional(address?.match(UK_POSTCODE)?.[1] ?? intake.messageText.match(UK_POSTCODE)?.[1]);
   const messageLower = intake.messageText.toLowerCase();
   const serviceMatches = services.filter((service) => messageLower.includes(service.name.trim().toLowerCase()));
 
   const normalEmail = normalizeEmail(email);
-  const normalPhone = normalizePhone(phone);
+  const normalPhone = phone;
   const normalSenderName = normalizeName(name);
   const existingClientMatches = clients.flatMap((client) => {
     const reasons: MatchReason[] = [];

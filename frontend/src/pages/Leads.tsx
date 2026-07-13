@@ -101,7 +101,7 @@ function NewLeadForm({ onCreated }: { onCreated: () => void }) {
     <form className="inline-form" onSubmit={handleSubmit}>
       <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
       <input placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-      <input placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+      <input type="tel" inputMode="tel" autoComplete="tel" maxLength={40} title="Use a UK number such as 07700 900123 or an international number beginning with +" placeholder="Phone, e.g. 07700 900123" value={phone} onChange={(e) => setPhone(e.target.value)} />
       <input placeholder="Service requested" value={service} onChange={(e) => setService(e.target.value)} />
       <button type="submit" disabled={submitting}>
         {submitting ? "Saving…" : "Save"}

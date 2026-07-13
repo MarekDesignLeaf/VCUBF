@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
 import { CREATE_CLIENT_ACTION } from "../lib/actionContracts.js";
+import { phoneNumberSchema } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -11,7 +12,7 @@ export const createClientSchema = z.object({
   last_name: z.string().optional(),
   company_name: z.string().optional(),
   email_primary: z.string().email().optional().or(z.literal("")),
-  phone_primary: z.string().optional(),
+  phone_primary: phoneNumberSchema.optional(),
   client_type: z.string().optional(),
   billing_address_line1: z.string().optional(),
   billing_city: z.string().optional(),

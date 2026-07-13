@@ -304,7 +304,7 @@ function IntakeForm({ onCreated }: { onCreated: () => Promise<void> }) {
       </select>
       <input aria-label="Sender name" placeholder="Sender name (if known)" value={senderName} onChange={(event) => setSenderName(event.target.value)} />
       <input aria-label="Sender email" type="email" placeholder="Sender email" value={senderEmail} onChange={(event) => setSenderEmail(event.target.value)} />
-      <input aria-label="Sender phone" placeholder="Sender phone" value={senderPhone} onChange={(event) => setSenderPhone(event.target.value)} />
+      <input aria-label="Sender phone" type="tel" inputMode="tel" autoComplete="tel" maxLength={40} title="Use a UK number such as 07700 900123 or an international number beginning with +" placeholder="Sender phone, e.g. 07700 900123" value={senderPhone} onChange={(event) => setSenderPhone(event.target.value)} />
       <input aria-label="Received at" type="datetime-local" value={receivedAt} onChange={(event) => setReceivedAt(event.target.value)} required />
       <input aria-label="Original message reference" placeholder="Original message URL/reference" value={sourceReference} onChange={(event) => setSourceReference(event.target.value)} />
       <textarea

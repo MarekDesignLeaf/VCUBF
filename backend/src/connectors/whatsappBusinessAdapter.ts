@@ -158,7 +158,7 @@ export function parseWhatsAppWebhook(payload: unknown) {
         const type = stringValue(message?.type) ?? "unknown";
         const text = message ? messageText(message, type) : null;
         if (!id || !from || !text) continue;
-        messages.push({ id, from, senderName: names.get(from) ?? null, messageText: text, receivedAt: timestamp(message?.timestamp), messageType: type, phoneNumberId });
+        messages.push({ id, from: from.startsWith("+") ? from : `+${from}`, senderName: names.get(from) ?? null, messageText: text, receivedAt: timestamp(message?.timestamp), messageType: type, phoneNumberId });
       }
       for (const statusValue of Array.isArray(value.statuses) ? value.statuses : []) {
         const status = record(statusValue);

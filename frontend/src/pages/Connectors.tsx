@@ -390,7 +390,7 @@ export function Connectors() {
                 <td><strong>{contact.displayName ?? "Unnamed contact"}</strong><div className="hint">{contact.jobTitle ?? ""}</div></td>
                 <td>{contact.email ?? "—"}<div className="hint">{contact.phone ?? ""}</div></td>
                 <td>{contact.organisation ?? "—"}<div className="hint">{contact.department ?? ""}</div></td>
-                <td>{contact.importedContactId ? "Imported" : contact.importable ? "Ready for review" : "Missing email/phone"}</td>
+                <td>{contact.importedContactId ? "Imported" : !contact.phoneValid ? "Invalid phone format" : contact.importable ? "Ready for review" : "Missing email/phone"}</td>
                 <td>{canImportContacts && contact.importable && !contact.importedContactId ? <button onClick={() => importExternalContact(contact)}>Import to CRM</button> : "—"}</td>
               </tr>)}</tbody>
             </table>
@@ -522,7 +522,7 @@ function MessageComposer({
     <div className="page-header"><h2>{isGmail ? "Write email" : "Write WhatsApp"}</h2><button className="secondary" onClick={onClose}>Close</button></div>
     <p className="hint">Source: {source.displayName}. Nothing is sent until you review the final message and confirm it.</p>
     <div className="inline-form">
-      <label>{isGmail ? "To (comma-separated emails)" : "Recipient (international number)"}<input value={to} onChange={event => setTo(event.target.value)} placeholder={isGmail ? "customer@example.com" : "+447700900123"} /></label>
+      <label>{isGmail ? "To (comma-separated emails)" : "Recipient (UK or international number)"}<input type={isGmail ? "text" : "tel"} inputMode={isGmail ? undefined : "tel"} autoComplete={isGmail ? "off" : "tel"} maxLength={isGmail ? undefined : 40} title={isGmail ? undefined : "Use a UK number such as 07700 900123 or an international number beginning with +"} value={to} onChange={event => setTo(event.target.value)} placeholder={isGmail ? "customer@example.com" : "+44 7700 900123"} /></label>
       {isGmail ? <>
         <label>Cc<input value={cc} onChange={event => setCc(event.target.value)} /></label>
         <label>Bcc<input value={bcc} onChange={event => setBcc(event.target.value)} /></label>

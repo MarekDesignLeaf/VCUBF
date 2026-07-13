@@ -327,6 +327,7 @@ export interface ExternalContact {
   department?: string | null;
   isDeleted: boolean;
   importedContactId?: string | null;
+  phoneValid: boolean;
   importable: boolean;
   syncedAt: string;
 }
