@@ -174,15 +174,14 @@ h2 { font-size: 1.1rem; margin-top: 24px; }
 .status-dokonceno { background: #d9f2e3; color: var(--accent-dark); }
 .status-zruseno { background: #f1f1f1; color: var(--muted); }
 
-.command-input { flex: 1; min-width: 320px; }
+.command-input { flex: 1; min-width: min(320px, 100%); }
+.text-command-fallback { background: var(--card); border: 1px solid var(--border); border-radius: 8px; margin: -4px 0 16px; padding: 10px 14px; }
+.text-command-fallback > summary { cursor: pointer; font-weight: 600; }
+.text-command-fallback[open] > summary { margin-bottom: 12px; }
+.text-command-fallback .command-bar > .hint:first-child { margin-top: 0; }
 
 .voice-button { background: #eef0f3; color: var(--text); }
 .voice-button:hover { background: #dde1e7; }
-.voice-button-listening { background: var(--error-text); color: white; }
-.voice-button-listening:hover { background: #8f1f19; }
-.voice-privacy-note { margin-top: -10px; }
-.voice-status { margin: -10px 0 12px; padding: 7px 10px; border-radius: 6px; background: #eef0f3; }
-.voice-status-live { background: var(--error-bg); color: var(--error-text); font-weight: 600; }
 .voice-settings { margin-top: 24px; }
 .voice-control-center { background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
 .voice-control-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

@@ -8,7 +8,7 @@ export function Dashboard() {
       <p>
         Signed in as <strong>{user?.displayName}</strong> ({user?.role}).
       </p>
-      <p className="hint">The voice and text command centre remains available above every page. Dictated commands always pause for transcript review before execution.</p>
+      <p className="hint">Windows Emma remains available above every page for hands-free voice assistance. An optional typed command field is collapsed below her controls.</p>
     </div>
   );
 }
