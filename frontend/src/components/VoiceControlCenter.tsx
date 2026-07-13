@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type VoiceConversation, type VoiceDeviceState, type VoiceUiAction } from "../api/client";
+import { useAuth } from "../context/useAuth";
+import { languageLabel } from "../i18n";
 
 const OFFLINE: VoiceDeviceState = {
   status: "offline",
@@ -26,6 +28,7 @@ const STATUS_LABELS: Record<VoiceDeviceState["status"], string> = {
 
 export function VoiceControlCenter() {
   const navigate = useNavigate();
+  const { updateUser } = useAuth();
   const [state, setState] = useState<VoiceDeviceState>(OFFLINE);
   const [conversations, setConversations] = useState<VoiceConversation[]>([]);
   const [busy, setBusy] = useState(false);
@@ -52,6 +55,10 @@ export function VoiceControlCenter() {
               try { window.localStorage.setItem(storageKey, action.id); } catch { /* Navigation still works. */ }
               setLastAction(action);
               navigate(action.path);
+            } else if (!alreadyHandled && action.kind === "set_language") {
+              try { window.localStorage.setItem(storageKey, action.id); } catch { /* The in-memory ref still prevents repeats. */ }
+              updateUser({ voiceLanguage: action.language });
+              setLastAction(action);
             }
           }
         }
@@ -63,7 +70,7 @@ export function VoiceControlCenter() {
     };
     poll();
     return () => { active = false; if (timer) window.clearTimeout(timer); };
-  }, [navigate]);
+  }, [navigate, updateUser]);
 
   async function control(control: "pause" | "resume" | "end_conversation") {
     setBusy(true); setError(null);
@@ -103,7 +110,9 @@ export function VoiceControlCenter() {
       </div>
       {lastAction && (
         <div className="voice-ui-action" role="status">
-          Emma opened <strong>{lastAction.label}</strong> in Secretary.
+          {lastAction.kind === "navigate"
+            ? <>Emma opened <strong>{lastAction.label}</strong> in Secretary.</>
+            : <>Emma changed the Secretary menu language to <strong>{languageLabel(lastAction.language, true)}</strong>.</>}
         </div>
       )}
       <div className="voice-observation-grid" aria-live="polite">

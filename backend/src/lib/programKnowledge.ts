@@ -81,7 +81,7 @@ PRIMARY UI CONTROLS AND SAFE WORKFLOWS
 - Website Audit: New audit and View findings; it records supplied observations only.
 - Website Content: New proposal, View proposal and Review decision; approval does not publish.
 - Data Quality: inspect duplicate pairs, choose Merge, review the preview and explicitly confirm; missing-contact rows link back to the client.
-- Account: Change password; Voice control lets the user change wake word, language and continuous-listening preference with Save voice preferences.
+- Account: Change password; Voice control lets the user change wake word, Emma and Secretary menu language, and continuous-listening preference with Save voice preferences.
 
 UI ACCURACY RULE: primary controls above are exact current labels. Never add a likely/common control or capability from general software knowledge. If a detail is not stated here, say it is not described and direct the user to the named page for inspection.
 `.trim();

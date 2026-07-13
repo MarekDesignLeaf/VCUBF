@@ -1,0 +1,94 @@
+export const VOICE_LANGUAGES = ["en-GB", "en-US", "cs-CZ", "pl-PL", "fr-FR", "de-DE", "es-ES", "it-IT"] as const;
+
+export type VoiceLanguage = (typeof VOICE_LANGUAGES)[number];
+
+export const VOICE_LANGUAGE_LABELS: Record<VoiceLanguage, string> = {
+  "en-GB": "English (United Kingdom)",
+  "en-US": "English (United States)",
+  "cs-CZ": "Czech",
+  "pl-PL": "Polish",
+  "fr-FR": "French",
+  "de-DE": "German",
+  "es-ES": "Spanish",
+  "it-IT": "Italian",
+};
+
+const LANGUAGE_ALIASES: Record<string, VoiceLanguage> = {
+  "en-gb": "en-GB",
+  en: "en-GB",
+  english: "en-GB",
+  "english uk": "en-GB",
+  "british english": "en-GB",
+  "en-us": "en-US",
+  "american english": "en-US",
+  "us english": "en-US",
+  "cs-cz": "cs-CZ",
+  cs: "cs-CZ",
+  czech: "cs-CZ",
+  cestina: "cs-CZ",
+  cestinu: "cs-CZ",
+  cesky: "cs-CZ",
+  "pl-pl": "pl-PL",
+  pl: "pl-PL",
+  polish: "pl-PL",
+  polski: "pl-PL",
+  polsky: "pl-PL",
+  polstinu: "pl-PL",
+  "fr-fr": "fr-FR",
+  fr: "fr-FR",
+  french: "fr-FR",
+  francais: "fr-FR",
+  francouzsky: "fr-FR",
+  francouzstinu: "fr-FR",
+  "de-de": "de-DE",
+  de: "de-DE",
+  german: "de-DE",
+  deutsch: "de-DE",
+  nemecky: "de-DE",
+  nemcinu: "de-DE",
+  "es-es": "es-ES",
+  es: "es-ES",
+  spanish: "es-ES",
+  espanol: "es-ES",
+  spanelsky: "es-ES",
+  spanelstinu: "es-ES",
+  "it-it": "it-IT",
+  it: "it-IT",
+  italian: "it-IT",
+  italiano: "it-IT",
+  italsky: "it-IT",
+  italstinu: "it-IT",
+};
+
+function normaliseLanguage(raw: string) {
+  return raw
+    .trim()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase("en")
+    .replace(/[_\s]+/g, " ")
+    .replace(/\s*-\s*/g, "-")
+    .replace(/[.!?]+$/g, "");
+}
+
+export function isVoiceLanguage(value: string): value is VoiceLanguage {
+  return (VOICE_LANGUAGES as readonly string[]).includes(value);
+}
+
+export function resolveVoiceLanguage(raw: string): VoiceLanguage | undefined {
+  return LANGUAGE_ALIASES[normaliseLanguage(raw)];
+}
+
+export function languageSwitchMessage(language: VoiceLanguage) {
+  const messages: Record<VoiceLanguage, string> = {
+    "en-GB": "Language changed to English. Emma and the Secretary menu now use English.",
+    "en-US": "Language changed to English. Emma and the Secretary menu now use English.",
+    "cs-CZ": "Jazyk jsem změnila na češtinu. Emma i menu Secretary nyní používají češtinu.",
+    "pl-PL": "Zmieniono język na polski. Emma i menu Secretary używają teraz języka polskiego.",
+    "fr-FR": "La langue a été changée en français. Emma et le menu Secretary utilisent maintenant le français.",
+    "de-DE": "Die Sprache wurde auf Deutsch geändert. Emma und das Secretary-Menü verwenden jetzt Deutsch.",
+    "es-ES": "El idioma se ha cambiado a español. Emma y el menú de Secretary ahora usan español.",
+    "it-IT": "La lingua è stata cambiata in italiano. Emma e il menu Secretary ora usano l'italiano.",
+  };
+  return messages[language];
+}

@@ -19,6 +19,7 @@ import * as taskService from "../services/taskService.js";
 import * as contactService from "../services/contactService.js";
 import * as connectorSetupService from "../services/connectorSetupService.js";
 import * as voiceGmailService from "../services/voiceGmailService.js";
+import * as voicePreferenceService from "../services/voicePreferenceService.js";
 import { buildCommandUiAction, VOICE_PAGE_ROUTES, type CommandUiAction } from "./voiceNavigation.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
@@ -740,6 +741,20 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
     case "list_leads": {
       const data = await leadService.listLeads(user, {});
       response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "set_voice_language": {
+      const result = await voicePreferenceService.setVoiceLanguage(user, command.entities.language);
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? result.data.message : result.message,
+      };
       break;
     }
 

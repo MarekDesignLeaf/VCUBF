@@ -99,6 +99,13 @@ describe("commandParser", () => {
     assert.equal(isGmailCancellationPhrase("Do not send"), true);
   });
 
+  it("parses language changes in English and Czech", () => {
+    assert.deepEqual(parseTextCommand("set language cs-CZ"), { intent: "set_voice_language", entities: { language: "cs-CZ" } });
+    assert.deepEqual(parseTextCommand("switch language to Polish"), { intent: "set_voice_language", entities: { language: "pl-PL" } });
+    assert.deepEqual(parseTextCommand("změň jazyk na francouzštinu"), { intent: "set_voice_language", entities: { language: "fr-FR" } });
+    assert.deepEqual(parseTextCommand("mluv německy"), { intent: "set_voice_language", entities: { language: "de-DE" } });
+  });
+
   it("parses direct navigation across the Secretary hierarchy", () => {
     assert.deepEqual(parseTextCommand("open dashboard"), { intent: "navigate", entities: { page: "dashboard" } });
     assert.deepEqual(parseTextCommand("go to invoices"), { intent: "navigate", entities: { page: "invoices" } });

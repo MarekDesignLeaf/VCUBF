@@ -29,6 +29,17 @@ CHUNK = 2_400  # 100 ms PCM16 frames
 MAX_SESSION_SECONDS = 180
 IDLE_AFTER_RESPONSE_SECONDS = 25
 
+LANGUAGE_NAMES = {
+    "en-GB": "English (United Kingdom)",
+    "en-US": "English (United States)",
+    "cs-CZ": "Czech",
+    "pl-PL": "Polish",
+    "fr-FR": "French",
+    "de-DE": "German",
+    "es-ES": "Spanish",
+    "it-IT": "Italian",
+}
+
 APP_DIR = Path(os.environ["LOCALAPPDATA"]) / "VCUBF" / "Emma"
 CONFIG_PATH = APP_DIR / "config.json"
 TOKEN_PATH = APP_DIR / "token.bin"
@@ -142,8 +153,9 @@ class RealtimeEmma:
         self.input_stream = None
         self.output_stream = None
         self.ws = None
-        configured_language = str(load_config().get("Language", "en-GB"))
-        self.transcription_language = configured_language.split("-", 1)[0].lower() or "en"
+        self.configured_language = str(load_config().get("Language", "en-GB"))
+        self.spoken_language = LANGUAGE_NAMES.get(self.configured_language, self.configured_language)
+        self.transcription_language = self.configured_language.split("-", 1)[0].lower() or "en"
 
     async def send(self, payload: dict) -> None:
         async with self.send_lock:
@@ -240,9 +252,11 @@ class RealtimeEmma:
         # it in the middle of a string.
         context_json = json.dumps(self.assistant_context, ensure_ascii=False, separators=(",", ":"))
         instructions = f"""You are Emma, a concise, warm voice assistant for VCUBF Secretary.
-Always speak and respond in English. Never switch to French, Polish, or another language
-based on accent, names, locale guesses, or transcription uncertainty. Change spoken language
-only when the user explicitly asks you to speak that language. Keep normal answers short enough for speech.
+Always speak and respond in {self.spoken_language}. Never switch language based on accent, names,
+locale guesses, or transcription uncertainty. Change spoken language only when the user explicitly
+asks you to do so through the backend. If the backend confirms set_voice_language and returns
+result.data.voiceLanguage, immediately continue this response in that selected language. Keep normal
+answers short enough for speech.
 For every request involving company records, clients, jobs, leads, tasks, schedules,
 communications, quotes, invoices, employees, services, notifications, or any business
 operation, call execute_business_request with the user's exact request. Also call it
@@ -283,7 +297,7 @@ EMMA_CONTEXT={context_json}"""
                             "transcription": {
                                 "model": "gpt-4o-transcribe",
                                 "language": self.transcription_language,
-                                "prompt": "Transcribe in English. VCUBF Secretary voice command. The assistant wake word is Emma. Common requests include show me contacts, list clients, list jobs, create a task, and navigate the application. Preserve contact names, company names, and application terms exactly.",
+                                "prompt": f"Transcribe in {self.spoken_language}. VCUBF Secretary voice command. The assistant wake word is Emma. Common requests include show me contacts, list clients, list jobs, create a task, change language, and navigate the application. Preserve contact names, company names, and application terms exactly.",
                             },
                             "turn_detection": {
                                 "type": "semantic_vad",

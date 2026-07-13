@@ -99,17 +99,15 @@ const PAGE_ALIASES: Record<string, VoicePage> = {
   patterns: "memory_model",
 };
 
-export interface CommandUiAction {
-  kind: "navigate";
-  path: string;
-  label: string;
-}
+export type CommandUiAction =
+  | { kind: "navigate"; path: string; label: string }
+  | { kind: "set_language"; language: VoiceLanguage; label: string };
 
-export interface VoiceUiAction extends CommandUiAction {
+export type VoiceUiAction = CommandUiAction & {
   id: string;
   intent: string;
   createdAt: string;
-}
+};
 
 export function resolveVoicePage(rawPage: string): VoicePage | undefined {
   const normalized = rawPage
@@ -177,6 +175,15 @@ export function buildCommandUiAction(intent: string, data: unknown, interpreted:
     case "sync_connectors": return { kind: "navigate", path: "/connectors", label: "Connectors" };
     case "list_jobs": return { kind: "navigate", path: "/jobs", label: "Jobs" };
     case "list_leads": return { kind: "navigate", path: "/leads", label: "Leads" };
+    case "set_voice_language": {
+      const language = typeof payload.voiceLanguage === "string" && isVoiceLanguage(payload.voiceLanguage)
+        ? payload.voiceLanguage
+        : typeof entities.language === "string" && isVoiceLanguage(entities.language)
+          ? entities.language
+          : undefined;
+      return language ? { kind: "set_language", language, label: VOICE_LANGUAGE_LABELS[language] } : undefined;
+    }
     default: return undefined;
   }
 }
+import { isVoiceLanguage, VOICE_LANGUAGE_LABELS, type VoiceLanguage } from "./voiceLanguages.js";

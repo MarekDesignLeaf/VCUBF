@@ -112,6 +112,25 @@ describe("command/text", () => {
     assert.equal(res.body.uiAction.path, "/invoices");
   });
 
+  it("changes Emma and Secretary menu language through a voice command", async () => {
+    const res = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "změň jazyk na češtinu", input_method: "voice_transcript" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.intent, "set_voice_language");
+    assert.equal(res.body.data.voiceLanguage, "cs-CZ");
+    assert.equal(res.body.uiAction.kind, "set_language");
+    assert.equal(res.body.uiAction.language, "cs-CZ");
+
+    const me = await request(app).get("/auth/me").set("Authorization", `Bearer ${adminToken}`);
+    assert.equal(me.body.voiceLanguage, "cs-CZ");
+
+    const state = await request(app).get("/command/voice-state").set("Authorization", `Bearer ${adminToken}`);
+    assert.equal(state.body.lastUiAction.kind, "set_language");
+    assert.equal(state.body.lastUiAction.language, "cs-CZ");
+  });
+
   it("creates a job via text command by resolving the client name", async () => {
     const res = await request(app)
       .post("/command/text")

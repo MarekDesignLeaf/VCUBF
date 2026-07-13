@@ -47,6 +47,7 @@ do{
       if(Test-Path -LiteralPath $configPath){$config=Get-Content -LiteralPath $configPath -Raw|ConvertFrom-Json}else{$config=[pscustomobject]@{ServerUrl=$server}}
       if($config.PSObject.Properties.Name -contains 'Email'){$config.Email=$result.user.email}else{$config|Add-Member -NotePropertyName Email -NotePropertyValue $result.user.email}
       if($config.PSObject.Properties.Name -contains 'WakeWord'){$config.WakeWord=$result.user.voiceWakeWord}else{$config|Add-Member -NotePropertyName WakeWord -NotePropertyValue $result.user.voiceWakeWord}
+      if($config.PSObject.Properties.Name -contains 'Language'){$config.Language=$result.user.voiceLanguage}else{$config|Add-Member -NotePropertyName Language -NotePropertyValue $result.user.voiceLanguage}
       $config|ConvertTo-Json|Set-Content -LiteralPath $configPath -Encoding UTF8
       break
     }

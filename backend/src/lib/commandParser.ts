@@ -12,6 +12,7 @@
 //
 import { resolveVoicePage, type VoicePage } from "./voiceNavigation.js";
 import type { ConnectorKey } from "../connectors/registry.js";
+import { resolveVoiceLanguage, type VoiceLanguage } from "./voiceLanguages.js";
 
 // If nothing matches, the result is `unrecognized` — the system must not
 // guess (VCUF error handling rule).
@@ -60,6 +61,7 @@ export type ParsedCommand =
     }
   | { intent: "confirm_gmail_message"; entities: Record<string, never> }
   | { intent: "cancel_gmail_message"; entities: Record<string, never> }
+  | { intent: "set_voice_language"; entities: { language: VoiceLanguage } }
   | { intent: "connector_status"; entities: { connector_key: ConnectorKey | "all" } }
   | { intent: "setup_connectors"; entities: { connector_key: ConnectorKey | "all" } }
   | { intent: "sync_connectors"; entities: { connector_key: ConnectorKey | "all" } }
@@ -149,6 +151,21 @@ function parseGmailMessageCommand(text: string): Extract<ParsedCommand, { intent
   return { intent: "prepare_gmail_message", entities: { to, cc, bcc, subject, body } };
 }
 
+function parseVoiceLanguageCommand(text: string): Extract<ParsedCommand, { intent: "set_voice_language" }> | undefined {
+  const patterns = [
+    /^(?:set|change|switch)\s+(?:the\s+)?(?:(?:emma(?:'s)?|voice|menu|secretary)\s+)?language\s+(?:to\s+)?(.+)$/iu,
+    /^(?:speak|talk|respond)\s+(?:in\s+)?(.+)$/iu,
+    /^(?:zm[eě]ň|zmen|přepni|prepn[ií]|nastav)\s+(?:(?:jazyk\s+)?(?:emmy|menu|sekretary|sekretáře)|jazyk)\s*(?:na\s+)?(.+)$/iu,
+    /^(?:mluv|mluvte|odpov[ií]dej)\s+(?:pros[ií]m\s+)?(?:v\s+)?(.+)$/iu,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const language = match ? resolveVoiceLanguage(match[1]) : undefined;
+    if (language) return { intent: "set_voice_language", entities: { language } };
+  }
+  return undefined;
+}
+
 export function isGmailConfirmationPhrase(rawText: string) {
   const text = rawText.trim().toLocaleLowerCase().replace(/[.!?]+$/g, "");
   return /^(?:yes|yeah|yep|confirm|go ahead|do it|send it|ano|potvrzuji|potvrďuji|potvrdit)$/iu.test(text);
@@ -162,6 +179,8 @@ export function isGmailCancellationPhrase(rawText: string) {
 export function parseTextCommand(rawText: string): ParsedCommand {
   const text = rawText.trim();
 
+  const languageCommand = parseVoiceLanguageCommand(text);
+  if (languageCommand) return languageCommand;
   const gmailMessage = parseGmailMessageCommand(text);
   if (gmailMessage) return gmailMessage;
   if (/^(?:confirm|send)\s+(?:the\s+)?(?:email|message)(?:\s+now)?$/i.test(text))

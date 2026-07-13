@@ -5,7 +5,8 @@ import { z } from "zod";
 import { prisma } from "../../db.js";
 import { requireAuth, signToken } from "../../middleware/auth.js";
 import { recordAudit } from "../../lib/audit.js";
-import { CHANGE_OWN_PASSWORD_ACTION, UPDATE_VOICE_PREFERENCES_ACTION } from "../../lib/actionContracts.js";
+import { CHANGE_OWN_PASSWORD_ACTION } from "../../lib/actionContracts.js";
+import { updateVoicePreferences, voicePreferencesSchema } from "../../services/voicePreferenceService.js";
 
 export const authRouter = Router();
 
@@ -17,12 +18,6 @@ const loginSchema = z.object({
 const changePasswordSchema = z.object({
   current_password: z.string().min(1),
   new_password: z.string().min(12).regex(/[a-z]/, "new password must contain a lowercase letter").regex(/[A-Z]/, "new password must contain an uppercase letter").regex(/[0-9]/, "new password must contain a number"),
-});
-
-const voicePreferencesSchema = z.object({
-  wake_word: z.string().trim().min(2).max(30).regex(/^[\p{L}\p{N}][\p{L}\p{N} '\-]*$/u, "wake word contains unsupported characters"),
-  continuous_listening: z.boolean(),
-  language: z.enum(["en-GB", "en-US"]),
 });
 
 const loginRateLimiter = rateLimit({
@@ -92,12 +87,9 @@ authRouter.get("/me", requireAuth, (req, res) => {
 authRouter.put("/voice-preferences", requireAuth, async (req, res) => {
   const parsed = voicePreferencesSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
-  const before = await prisma.user.findFirst({ where: { id: req.user!.id, companyId: req.user!.companyId }, select: { voiceWakeWord: true, voiceContinuous: true, voiceLanguage: true } });
-  if (!before) return res.status(404).json({ error: "USER_NOT_FOUND" });
-  const user = await prisma.user.update({ where: { id: req.user!.id }, data: { voiceWakeWord: parsed.data.wake_word, voiceContinuous: parsed.data.continuous_listening, voiceLanguage: parsed.data.language } });
-  const data = { voiceWakeWord: user.voiceWakeWord, voiceContinuous: user.voiceContinuous, voiceLanguage: user.voiceLanguage };
-  await recordAudit({ companyId: req.user!.companyId, userId: req.user!.id, actionName: UPDATE_VOICE_PREFERENCES_ACTION.actionName, inputPayload: parsed.data, dataBefore: before, dataAfter: data, riskLevel: UPDATE_VOICE_PREFERENCES_ACTION.riskLevel, confirmationRequired: false, result: "success" });
-  res.json(data);
+  const result = await updateVoicePreferences(req.user!, parsed.data);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message });
+  res.status(result.httpStatus).json(result.data);
 });
 
 authRouter.post("/change-password", requireAuth, async (req, res) => {

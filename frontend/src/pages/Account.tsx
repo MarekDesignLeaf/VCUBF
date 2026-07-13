@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../context/useAuth";
+import { APP_LANGUAGES, appLanguage, languageLabel, type AppLanguage } from "../i18n";
 
 export function Account() {
   const { user, logout, updateUser } = useAuth();
@@ -15,7 +16,7 @@ export function Account() {
   const [submitting, setSubmitting] = useState(false);
   const [wakeWord, setWakeWord] = useState(user?.voiceWakeWord ?? "Emma");
   const [continuous, setContinuous] = useState(user?.voiceContinuous ?? false);
-  const [voiceLanguage, setVoiceLanguage] = useState<"en-GB" | "en-US">(user?.voiceLanguage ?? "en-GB");
+  const [voiceLanguage, setVoiceLanguage] = useState<AppLanguage>(appLanguage(user?.voiceLanguage));
   const [voiceMessage, setVoiceMessage] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [savingVoice, setSavingVoice] = useState(false);
@@ -36,6 +37,10 @@ export function Account() {
         setPairingError(caught instanceof ApiError ? caught.message : "Could not connect the Windows companion.");
       });
   }, [pairingCode]);
+
+  useEffect(() => {
+    setVoiceLanguage(appLanguage(user?.voiceLanguage));
+  }, [user?.voiceLanguage]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -60,7 +65,7 @@ export function Account() {
     try {
       const preferences = await api.updateVoicePreferences(wakeWord, continuous, voiceLanguage);
       updateUser(preferences); setWakeWord(preferences.voiceWakeWord);
-      setVoiceMessage("Voice preferences saved. The new wake word is active immediately.");
+      setVoiceMessage("Voice and menu language saved. Secretary menu updates immediately; Emma applies it after her current answer.");
     } catch (caught) {
       setVoiceError(caught instanceof ApiError ? caught.message : "Could not save voice preferences.");
     } finally { setSavingVoice(false); }
@@ -98,7 +103,8 @@ export function Account() {
       <h2>Voice control</h2>
       <p className="hint">The Windows companion listens locally for the wake word whenever it is running. Say Emma alone to start Realtime listening, then speak naturally. The <strong>What Emma hears</strong> monitor opens automatically and can be reopened from the tray with <strong>Show live hearing</strong>; its pre-wake recognition is not uploaded or saved.</p>
       <label>Wake word<input value={wakeWord} minLength={2} maxLength={30} onChange={(event) => setWakeWord(event.target.value)} required /></label>
-      <label>Recognition language<select value={voiceLanguage} onChange={(event) => setVoiceLanguage(event.target.value as "en-GB" | "en-US")}><option value="en-GB">English (United Kingdom)</option><option value="en-US">English (United States)</option></select></label>
+      <label>Emma and Secretary menu language<select value={voiceLanguage} onChange={(event) => setVoiceLanguage(event.target.value as AppLanguage)}>{APP_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{languageLabel(language.code, true)}</option>)}</select></label>
+      <p className="hint">Changing this setting changes both Emma’s spoken language and the main Secretary menu. If Windows has no local recognizer for that language, Emma keeps a local wake-word fallback while Realtime conversation uses the selected language.</p>
       <label className="checkbox-label"><input type="checkbox" checked={continuous} onChange={(event) => setContinuous(event.target.checked)} /> Enable wake-word listening controls</label>
       {voiceError && <div className="error-banner">{voiceError}</div>}
       {voiceMessage && <div className="success-banner">{voiceMessage}</div>}

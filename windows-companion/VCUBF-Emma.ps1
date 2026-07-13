@@ -94,6 +94,11 @@ $script:HearingMonitorText = $null
 $script:HearingMonitorLevel = $null
 $script:LastLocalHypothesis = ''
 $script:RealtimePreviewPath = Join-Path $script:AppDir 'emma-live.json'
+$script:VoiceLanguageNames = @{
+  'en-GB' = 'English (United Kingdom)'; 'en-US' = 'English (United States)'; 'cs-CZ' = 'Czech'; 'pl-PL' = 'Polish'
+  'fr-FR' = 'French'; 'de-DE' = 'German'; 'es-ES' = 'Spanish'; 'it-IT' = 'Italian'
+}
+$script:SupportedVoiceLanguages = @('en-GB','en-US','cs-CZ','pl-PL','fr-FR','de-DE','es-ES','it-IT')
 
 New-Item -ItemType Directory -Path $script:AppDir -Force | Out-Null
 
@@ -119,6 +124,40 @@ function Load-Config {
 function Save-Config($Config) {
   $Config.ServerUrl = $Config.ServerUrl.TrimEnd('/')
   $Config | ConvertTo-Json | Set-Content -LiteralPath $script:ConfigPath -Encoding UTF8
+}
+
+function Get-VoiceLanguageName([string]$Language) {
+  if ($script:VoiceLanguageNames.ContainsKey($Language)) { return [string]$script:VoiceLanguageNames[$Language] }
+  return $Language
+}
+
+function Select-SynthesisVoice {
+  try {
+    $target = [string]$script:Config.Language
+    $base = $target.Split('-')[0]
+    $voice = $script:Synth.GetInstalledVoices() | Where-Object { $_.Enabled -and $_.VoiceInfo.Culture.Name -eq $target } | Select-Object -First 1
+    if (!$voice) { $voice = $script:Synth.GetInstalledVoices() | Where-Object { $_.Enabled -and $_.VoiceInfo.Culture.Name -like "$base-*" } | Select-Object -First 1 }
+    if ($voice) { $script:Synth.SelectVoice($voice.VoiceInfo.Name) }
+  } catch { Write-EmmaLog "Speech voice selection failed: $($_.Exception.Message)" }
+}
+
+function Sync-VoicePreferences {
+  try {
+    $profile = Invoke-Vcubf GET '/auth/me'
+    $nextLanguage = [string]$profile.voiceLanguage
+    $nextWakeWord = [string]$profile.voiceWakeWord
+    $changed = $false
+    if ($nextLanguage -and $script:SupportedVoiceLanguages -contains $nextLanguage -and $script:Config.Language -ne $nextLanguage) { $script:Config.Language = $nextLanguage; $changed = $true }
+    if ($nextWakeWord -and $script:Config.WakeWord -ne $nextWakeWord) { $script:Config.WakeWord = $nextWakeWord; $changed = $true }
+    if (!$changed) { return $false }
+    Save-Config $script:Config
+    Initialize-Recognizer
+    Select-SynthesisVoice
+    $label = Get-VoiceLanguageName $script:Config.Language
+    Write-EmmaLog "Voice preferences synchronised. Language: $label."
+    if ($script:Notify) { $script:Notify.ShowBalloonTip(3000,'VCUBF Emma',"Language changed to $label.",'Info') }
+    return $true
+  } catch { Write-EmmaLog "Voice preference sync failed: $($_.Exception.Message)"; return $false }
 }
 
 function Save-Token([string]$Token) {
@@ -376,7 +415,7 @@ function Show-Settings {
   $assistant = New-Object Windows.Forms.CheckBox -Property @{ Left=150; Top=170; Width=270; Text='Natural conversation with OpenAI'; Checked=[bool]$script:Config.Assistant }
   $realtime = New-Object Windows.Forms.CheckBox -Property @{ Left=150; Top=200; Width=270; Text='Realtime audio and interruption'; Checked=[bool]$script:Config.Realtime }
   $language = New-Object Windows.Forms.ComboBox -Property @{ Left=150; Top=235; Width=120; DropDownStyle='DropDownList' }
-  @('en-GB','en-US') | ForEach-Object {[void]$language.Items.Add($_)}; $language.SelectedItem=$script:Config.Language
+  $script:SupportedVoiceLanguages | ForEach-Object {[void]$language.Items.Add($_)}; $language.SelectedItem=$script:Config.Language
   $rate = New-Object Windows.Forms.NumericUpDown -Property @{ Left=150; Top=270; Width=100; Minimum=-5; Maximum=5; Value=[decimal]$script:Config.VoiceRate }
   $volume = New-Object Windows.Forms.NumericUpDown -Property @{ Left=150; Top=305; Width=100; Minimum=0; Maximum=100; Increment=5; Value=[decimal]$script:Config.VoiceVolume }
   $showMonitor = New-Object Windows.Forms.CheckBox -Property @{ Left=150; Top=335; Width=260; Text='Show live hearing on startup'; Checked=[bool]$script:Config.ShowMonitor }
@@ -388,7 +427,7 @@ function Show-Settings {
   if ($wake.Text.Trim().Length -lt 2) { [Windows.Forms.MessageBox]::Show('Wake word must contain at least two characters.') | Out-Null; return }
   $script:Config.WakeWord=$wake.Text.Trim(); $script:Config.Confidence=[double]$confidence.Value; $script:Config.AutoStart=$auto.Checked; $script:Config.ShowMonitor=$showMonitor.Checked; $script:Config.HandsFree=$hands.Checked; $script:Config.Assistant=$assistant.Checked; $script:Config.Realtime=$realtime.Checked; $script:Config.Language=[string]$language.SelectedItem; $script:Config.VoiceRate=[int]$rate.Value; $script:Config.VoiceVolume=[int]$volume.Value; $script:Config.ServerUrl=$server.Text.TrimEnd('/'); Save-Config $script:Config; Set-AutoStart $script:Config.AutoStart
   try { Invoke-Vcubf PUT '/auth/voice-preferences' @{ wake_word=$script:Config.WakeWord; continuous_listening=$true; language=$script:Config.Language } | Out-Null } catch { Write-EmmaLog "Could not sync voice preferences: $($_.Exception.Message)" }
-  Initialize-Recognizer
+  Initialize-Recognizer; Select-SynthesisVoice
   $script:Notify.ShowBalloonTip(2500,'VCUBF Emma',"Wake word changed to $($script:Config.WakeWord).",'Info')
 }
 
@@ -406,6 +445,7 @@ function Show-Review([string]$RecognizedText) {
     Start-TranscriptConversation 'reviewed_text'
     Add-TranscriptMessage 'user' $command
     $response = Invoke-Vcubf POST '/command/text' @{ text=$command; input_method='voice_transcript' }
+    Sync-VoicePreferences | Out-Null
     $message = Spoken-Result $response
     Add-TranscriptMessage 'assistant' $message
     $script:Notify.ShowBalloonTip(4000,'VCUBF Emma',$message, $(if($response.ok){'Info'}else{'Warning'}))
@@ -451,6 +491,7 @@ function Execute-VoiceCommand([string]$Command) {
     if([bool]$script:Config.Realtime -and (Test-Path -LiteralPath $realtimeScript)){
       End-TranscriptConversation 'interrupted'
       $realtimeExitCode=Invoke-RealtimeProcess $realtimeScript $Command
+      Sync-VoicePreferences | Out-Null
       if($realtimeExitCode -eq 10){$script:RemotePaused=$true;Update-VoiceState 'paused' $false 'wake_word' '' '' 'pause'|Out-Null;return}
       if($realtimeExitCode -eq 0){$script:ArmedUntil=[datetime]::MinValue;return}
       Write-EmmaLog 'Realtime session failed; falling back to text assistant.'
@@ -462,6 +503,7 @@ function Execute-VoiceCommand([string]$Command) {
     $body=@{text=$Command.Trim();input_method='voice_transcript'}
     if([bool]$script:Config.Assistant){$body.language=$script:Config.Language;$body.history=@($script:ConversationHistory | Select-Object -Last 6)}
     $response=Invoke-Vcubf POST $path $body
+    Sync-VoicePreferences | Out-Null
     $message=if($response.kind -in @('reply','clarification','plan','error')){[string]$response.message}else{Spoken-Result $response}
     $script:ConversationHistory += [pscustomobject]@{role='user';content=$Command.Trim()}
     $script:ConversationHistory += [pscustomobject]@{role='assistant';content=$message}
@@ -551,8 +593,16 @@ function Initialize-Recognizer {
   $wasListening=$script:Listening
   if($script:SpeechBridge){$script:SpeechBridge.Detach()}
   if ($script:Recognizer) { try { $script:Recognizer.RecognizeAsyncCancel(); $script:Recognizer.Dispose() } catch {} }
-  $info=[System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers() | Where-Object { $_.Culture.Name -eq $script:Config.Language } | Select-Object -First 1
-  if (!$info) { throw "No Windows speech recognizer is installed for $($script:Config.Language)." }
+  $recognizers=[System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers()
+  $info=$recognizers | Where-Object { $_.Culture.Name -eq $script:Config.Language } | Select-Object -First 1
+  if (!$info) {
+    $fallback=$recognizers | Where-Object { $_.Culture.Name -like 'en-*' } | Select-Object -First 1
+    if (!$fallback) { $fallback=$recognizers | Select-Object -First 1 }
+    if (!$fallback) { throw 'No Windows speech recognizer is installed.' }
+    $info=$fallback
+    Write-EmmaLog "No local recognizer for $($script:Config.Language); using $($info.Culture.Name) for the wake word while Realtime uses the selected language."
+    if($script:Notify){$script:Notify.ShowBalloonTip(4500,'VCUBF Emma',"Install the $($script:Config.Language) Windows speech pack for local recognition. Emma will use $($info.Culture.Name) for the wake word until then.",'Info')}
+  }
   $script:Recognizer=New-Object System.Speech.Recognition.SpeechRecognitionEngine($info)
   $script:DictationGrammar=New-Object System.Speech.Recognition.DictationGrammar;$script:DictationGrammar.Name='VCUBF Dictation';$script:DictationGrammar.Enabled=$false;$script:Recognizer.LoadGrammar($script:DictationGrammar)
   $wakeOnlyBuilder=[System.Speech.Recognition.GrammarBuilder]::new();$wakeOnlyBuilder.Culture=$info.Culture;$wakeOnlyBuilder.Append([string]$script:Config.WakeWord)
@@ -562,6 +612,7 @@ function Initialize-Recognizer {
   $script:Recognizer.SetInputToDefaultAudioDevice()
   $script:SpeechBridge=New-Object VcubfSpeechBridge
   $script:SpeechBridge.Attach($script:Recognizer)
+  Select-SynthesisVoice
   if ($wasListening) { Start-Listening }
 }
 

@@ -1,3 +1,5 @@
+import type { AppLanguage } from "../i18n";
+
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
 export class ApiError extends Error {
@@ -57,7 +59,7 @@ export interface LoginResponse {
     mustChangePassword: boolean;
     voiceWakeWord: string;
     voiceContinuous: boolean;
-    voiceLanguage: "en-GB" | "en-US";
+    voiceLanguage: AppLanguage;
   };
 }
 export interface Invoice { id:string; invoiceNumber:string; title:string; invoiceStatus:string; dueDate?:string|null; isOverdue:boolean; client:{id:string;displayName:string}; totals:{total:number;paid:number;balance:number}; }
@@ -1390,14 +1392,21 @@ export interface VoiceDeviceState {
   heartbeatAt: string | null;
 }
 
-export interface VoiceUiAction {
+export type VoiceUiAction = ({
   id: string;
   kind: "navigate";
   path: string;
   label: string;
   intent: string;
   createdAt: string;
-}
+} | {
+  id: string;
+  kind: "set_language";
+  language: AppLanguage;
+  label: string;
+  intent: string;
+  createdAt: string;
+});
 
 export interface VoiceConversationMessage {
   id: string;
@@ -1431,7 +1440,7 @@ export const api = {
   me: () => request<LoginResponse["user"]>("/auth/me"),
   changePassword: (currentPassword: string, newPassword: string) =>
     request<void>("/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
-  updateVoicePreferences: (wakeWord: string, continuousListening: boolean, language: "en-GB" | "en-US") =>
+  updateVoicePreferences: (wakeWord: string, continuousListening: boolean, language: AppLanguage) =>
     request<Pick<LoginResponse["user"], "voiceWakeWord" | "voiceContinuous" | "voiceLanguage">>("/auth/voice-preferences", { method: "PUT", body: JSON.stringify({ wake_word: wakeWord, continuous_listening: continuousListening, language }) }),
   approveDevicePairing: (code: string) => request<{status:string;expires_at:string}>("/auth/device/approve", { method: "POST", body: JSON.stringify({ code }) }),
   clients: {

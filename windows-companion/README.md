@@ -36,9 +36,9 @@ Program-navigation and usage questions are routed through the backend just like 
 
 Hands-free mode can be disabled in tray **Settings** to restore the editable review dialog. Backend permissions, deterministic ambiguity checks and confirmation requirements remain authoritative in either mode.
 
-Settings also control natural assistant mode, Realtime audio, recognizer language, fallback spoken-response speed and volume. The default wake word remains editable at any time. If Realtime cannot connect, the companion automatically falls back to the text assistant and Windows speech synthesis.
+Settings also control natural assistant mode, Realtime audio, Emma and Secretary menu language, fallback spoken-response speed and volume. You can also say, for example, **“Emma, switch language to Czech”**; the selected language is saved for both Emma and the web menu. English (UK/US), Czech, Polish, French, German, Spanish and Italian are supported. If Windows has no local speech pack for the selected language, the companion retains an available local wake-word recognizer while Realtime uses the chosen conversation language. The default wake word remains editable at any time. If Realtime cannot connect, the companion automatically falls back to the text assistant and Windows speech synthesis.
 
-The wake-word recognizer is local and continues while browsers are minimized or closed, but Windows must be running and the user must be signed in. Microphone privacy settings must allow desktop applications. Realtime audio requires internet access. The deterministic command parser supports English canonical forms; the natural assistant can translate ordinary supported phrasing into them.
+The wake-word recognizer is local and continues while browsers are minimized or closed, but Windows must be running and the user must be signed in. Microphone privacy settings must allow desktop applications. Realtime audio requires internet access. The deterministic parser supports English business-command canonical forms and explicit language changes in English or Czech; the natural assistant can translate ordinary supported phrasing into them.
 
 ## Diagnostics
 

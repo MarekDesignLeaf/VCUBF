@@ -25,7 +25,7 @@ export const CHANGE_OWN_PASSWORD_ACTION: ActionContract = {
 
 export const UPDATE_VOICE_PREFERENCES_ACTION: ActionContract = {
   actionName: "update_voice_preferences",
-  purpose: "Store the authenticated user's wake word, browser recognition language and availability of continuous listening controls.",
+  purpose: "Store the authenticated user's wake word, Emma speech language, Secretary menu language and availability of continuous listening controls.",
   requiredPermission: "authenticated",
   riskLevel: 1,
   confirmationRequired: false,

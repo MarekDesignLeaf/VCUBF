@@ -77,12 +77,13 @@ describe("auth", () => {
     const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
     assert.equal(login.body.user.voiceWakeWord, "Emma");
     assert.equal(login.body.user.voiceContinuous, false);
-    const updated = await request(app).put("/auth/voice-preferences").set("Authorization", `Bearer ${login.body.token}`).send({ wake_word: "Ema Assistant", continuous_listening: true, language: "en-US" });
+    const updated = await request(app).put("/auth/voice-preferences").set("Authorization", `Bearer ${login.body.token}`).send({ wake_word: "Ema Assistant", continuous_listening: true, language: "cs-CZ" });
     assert.equal(updated.status, 200);
-    assert.deepEqual(updated.body, { voiceWakeWord: "Ema Assistant", voiceContinuous: true, voiceLanguage: "en-US" });
+    assert.deepEqual(updated.body, { voiceWakeWord: "Ema Assistant", voiceContinuous: true, voiceLanguage: "cs-CZ" });
     const me = await request(app).get("/auth/me").set("Authorization", `Bearer ${login.body.token}`);
     assert.equal(me.body.voiceWakeWord, "Ema Assistant");
-    const invalid = await request(app).put("/auth/voice-preferences").set("Authorization", `Bearer ${login.body.token}`).send({ wake_word: "!", continuous_listening: true, language: "cs-CZ" });
+    assert.equal(me.body.voiceLanguage, "cs-CZ");
+    const invalid = await request(app).put("/auth/voice-preferences").set("Authorization", `Bearer ${login.body.token}`).send({ wake_word: "Ema Assistant", continuous_listening: true, language: "zz-ZZ" });
     assert.equal(invalid.status, 400);
     const audit = await prisma.auditLog.findFirst({ where: { actionName: "update_voice_preferences", userId: me.body.id }, orderBy: { createdAt: "desc" } });
     assert.equal((audit?.dataAfter as any)?.voiceWakeWord, "Ema Assistant");
