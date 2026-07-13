@@ -12,7 +12,8 @@ const setupDefaults: Record<ConnectorKey, { displayName: string; scopes: string[
   gmail: { displayName: "Gmail", scopes: ["read:messages", "write:drafts", "send:messages"] },
   google_contacts: { displayName: "Google Contacts", scopes: ["read:contacts"] },
   google_calendar: { displayName: "Google Calendar", scopes: ["read:calendar"] },
-  google_drive_photos: { displayName: "Google Drive Photos", scopes: ["select:image_files"] },
+  google_drive: { displayName: "Google Drive", scopes: ["select:image_files"] },
+  google_photos: { displayName: "Google Photos", scopes: ["select:user_selected_photos"] },
   whatsapp_business: { displayName: "WhatsApp Business", scopes: ["read:messages", "send:messages"] },
 };
 
@@ -85,7 +86,7 @@ export async function syncConnectors(user: AuthedUser, target: ConnectorSetupTar
       results.push({ connectorKey, ok: false, status: "not_enabled" });
       continue;
     }
-    if (connectorKey === "google_drive_photos") {
+    if (connectorKey === "google_drive" || connectorKey === "google_photos") {
       results.push({ connectorKey, ok: true, status: "ready_for_user_selection", sourceId: source.id });
       continue;
     }

@@ -79,7 +79,8 @@ function resolveConnectorTarget(raw: string): ConnectorKey | "all" | undefined {
     gmail: "gmail", email: "gmail", mail: "gmail",
     "google contacts": "google_contacts", contacts: "google_contacts",
     "google calendar": "google_calendar", calendar: "google_calendar",
-    "google drive": "google_drive_photos", "google drive photos": "google_drive_photos", drive: "google_drive_photos", photos: "google_drive_photos",
+    "google drive": "google_drive", "google drive photos": "google_drive", drive: "google_drive",
+    "google photos": "google_photos", "google photo": "google_photos", photos: "google_photos",
     whatsapp: "whatsapp_business", "whatsapp business": "whatsapp_business",
   };
   return aliases[normalized];

@@ -97,7 +97,8 @@ export function connectorConfigurationAvailable(connectorKey: string) {
     gmail: [process.env.GMAIL_OAUTH_CLIENT_ID, process.env.GMAIL_OAUTH_CLIENT_SECRET, process.env.GMAIL_OAUTH_REDIRECT_URI],
     google_contacts: [process.env.GOOGLE_CONTACTS_OAUTH_CLIENT_ID, process.env.GOOGLE_CONTACTS_OAUTH_CLIENT_SECRET, process.env.GOOGLE_CONTACTS_OAUTH_REDIRECT_URI],
     google_calendar: [process.env.GOOGLE_CALENDAR_OAUTH_CLIENT_ID, process.env.GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET, process.env.GOOGLE_CALENDAR_OAUTH_REDIRECT_URI],
-    google_drive_photos: [process.env.GOOGLE_DRIVE_OAUTH_CLIENT_ID, process.env.GOOGLE_DRIVE_OAUTH_CLIENT_SECRET, process.env.GOOGLE_DRIVE_OAUTH_REDIRECT_URI],
+    google_drive: [process.env.GOOGLE_DRIVE_OAUTH_CLIENT_ID, process.env.GOOGLE_DRIVE_OAUTH_CLIENT_SECRET, process.env.GOOGLE_DRIVE_OAUTH_REDIRECT_URI],
+    google_photos: [process.env.GOOGLE_PHOTOS_OAUTH_CLIENT_ID, process.env.GOOGLE_PHOTOS_OAUTH_CLIENT_SECRET, process.env.GOOGLE_PHOTOS_OAUTH_REDIRECT_URI],
   };
   const required = requiredByConnector[connectorKey];
   return Boolean(required?.[0]?.trim() && required?.[1]?.trim() && validProviderRedirect(required?.[2]));

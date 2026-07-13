@@ -2,7 +2,7 @@
 
 ## Current status
 
-The connector registry covers Gmail, Google Contacts, Google Calendar, Google Drive photo storage and WhatsApp Business Cloud API. All five have real least-privilege adapters.
+The connector registry covers Gmail, Google Contacts, Google Calendar, Google Drive image selection, Google Photos selection and WhatsApp Business Cloud API. All six have real least-privilege adapters.
 
 The Gmail adapter can:
 
@@ -22,7 +22,9 @@ The Google Contacts adapter uses only `contacts.readonly`. It stages People API 
 
 Google Calendar uses only `calendar.readonly`. Calendar and event metadata is staged separately from Secretary jobs and tasks. CalendarList and every calendar keep independent sync tokens; HTTP 410 clears only that calendar's stale event staging before a full reload. Provider cancellations never change internal scheduling or capacity records.
 
-Google Drive/Photos deliberately uses non-sensitive `drive.file` rather than broad restricted Drive scopes. Google Picker grants access only to images the user explicitly selects. The backend verifies each selected ID with `files.get`, accepts only `image/*`, stores metadata but no bytes, and requires confirmation before creating a Portfolio Photo reference. Registration leaves marketing use false and all review/permission states unreviewed or unknown.
+Google Drive deliberately uses non-sensitive `drive.file` rather than broad restricted Drive scopes. Google Picker grants access only to image files the user explicitly selects. The backend verifies each selected ID with `files.get`, accepts only `image/*`, stores metadata but no bytes, and requires confirmation before creating a Portfolio Photo reference. Registration leaves marketing use false and all review/permission states unreviewed or unknown.
+
+Google Photos is a separate connector. It uses the Google Photos Picker scope `photospicker.mediaitems.readonly`, creates a short-lived server-side Picker session and opens the returned Google-controlled picker in a new tab (never an iframe). The user selects exact Photos items; the backend polls the session, retrieves only the selected item metadata, ignores the temporary `baseUrl` byte-download URL and deletes the completed session when possible. It never scans, searches or imports a whole Google Photos library. Only selected `PHOTO`/`image/*` items can become internal Portfolio Photo references after a separate confirmation.
 
 WhatsApp Business uses a direct, deployment-level Cloud API connection for one business phone number. Meta webhook ownership is verified with a private verify token and every POST body must pass `X-Hub-Signature-256` verification with the Meta app secret. Inbound text and supported message captions are imported idempotently into `CommunicationIntake`; media bytes are not downloaded. Outgoing text is previewed first and is sent only after explicit confirmation. Meta delivery status webhooks are accepted but currently remain audit/result metadata rather than a separate message-status table.
 
@@ -39,6 +41,8 @@ WhatsApp Business uses a direct, deployment-level Cloud API connection for one b
 | `POST` | `/connectors/sources/:id/oauth/start` | `connectors.manage` | Creates an expiring one-time state and returns Google's authorization URL. |
 | `GET` | `/connectors/gmail/oauth/callback` | one-time OAuth state | Exchanges the provider code, verifies `gmail.readonly`, encrypts tokens and redirects to the frontend. |
 | `GET` | `/connectors/google-contacts/oauth/callback` | one-time OAuth state | Exchanges the provider code, verifies `contacts.readonly`, encrypts tokens and redirects to the frontend. |
+| `GET` | `/connectors/google-drive/oauth/callback` | one-time OAuth state | Exchanges the provider code, verifies `drive.file`, encrypts tokens and redirects to the frontend. |
+| `GET` | `/connectors/google-photos/oauth/callback` | one-time OAuth state | Exchanges the provider code, verifies the Google Photos Picker scope, encrypts tokens and redirects to the frontend. |
 | `POST` | `/connectors/sources/:id/enable` | `connectors.manage` | Confirmation-gated enable after verified authorization. |
 | `POST` | `/connectors/sources/:id/sync` | `connectors.manage` | Reads up to 50 Gmail messages and imports unseen messages. |
 | `POST` | `/connectors/sources/:id/gmail/drafts` | `connectors.manage` | Creates a Gmail draft without sending it. |
@@ -47,6 +51,15 @@ WhatsApp Business uses a direct, deployment-level Cloud API connection for one b
 | `POST` | `/connectors/whatsapp/webhook` | Meta signature | Imports signed inbound WhatsApp messages idempotently. |
 | `POST` | `/connectors/sources/:id/whatsapp/messages/send` | `connectors.manage` | Previews, then sends a WhatsApp text after explicit confirmation. |
 | `POST` | `/connectors/sources/:id/disconnect` | `connectors.manage` | Confirmation-gated Google token revocation and local credential/cursor deletion. |
+| `GET` | `/connectors/sources/:id/drive-picker-token` | `connectors.manage` | Returns a short-lived Drive Picker configuration without a refresh token. |
+| `POST` | `/connectors/sources/:id/drive-images/stage` | `connectors.manage` | Verifies and stages metadata for explicitly selected Drive image IDs. |
+| `GET` | `/connectors/sources/:id/drive-images` | `connectors.read` | Lists staged Drive image metadata. |
+| `POST` | `/connectors/sources/:id/drive-images/:imageId/register` | `connectors.manage` + `crm.manage` | Confirmation-gated Portfolio Photo reference from one Drive image. |
+| `POST` | `/connectors/sources/:id/google-photos/picker-sessions` | `connectors.manage` | Creates a short-lived Google Photos Picker session. |
+| `GET` | `/connectors/sources/:id/google-photos/picker-sessions/:sessionId` | `connectors.manage` | Reads picker completion state with no media bytes or token exposure. |
+| `POST` | `/connectors/sources/:id/google-photos/picker-sessions/:sessionId/import` | `connectors.manage` | Stages metadata from completed user-selected Google Photos items and cleans up the session. |
+| `GET` | `/connectors/sources/:id/google-photos/items` | `connectors.read` | Lists staged Google Photos metadata. |
+| `POST` | `/connectors/sources/:id/google-photos/items/:photoId/register` | `connectors.manage` + `crm.manage` | Confirmation-gated Portfolio Photo reference from one Google Photos item. |
 | `GET` | `/connectors/sources/:id/external-contacts` | `connectors.read` | Lists company-scoped staged Google contacts without creating CRM data. |
 | `POST` | `/connectors/sources/:id/external-contacts/:contactId/import` | `connectors.manage` + `crm.manage` | Confirmation-gated import of one reviewed contact into CRM. |
 | `POST` | `/connectors/sources/:id/disable` | `connectors.manage` | Immediately prevents further synchronisation. |
@@ -71,6 +84,9 @@ Configure these values outside source control:
 - `GOOGLE_DRIVE_OAUTH_REDIRECT_URI`
 - `GOOGLE_DRIVE_PICKER_APP_ID` — Google Cloud project number
 - `GOOGLE_DRIVE_PICKER_API_KEY` — browser-restricted Picker API key
+- `GOOGLE_PHOTOS_OAUTH_CLIENT_ID`
+- `GOOGLE_PHOTOS_OAUTH_CLIENT_SECRET`
+- `GOOGLE_PHOTOS_OAUTH_REDIRECT_URI`
 - `CONNECTOR_ENCRYPTION_KEY` — exactly 32 random bytes encoded as base64
 - `FRONTEND_URL`
 - `WHATSAPP_GRAPH_API_VERSION`
@@ -105,12 +121,12 @@ The database unique key `(companyId, connectorSourceId, externalMessageId)` prev
 
 ## Source lifecycle
 
-Say **Emma, set up all connectors** (or name one connector) to use the guided path. It prepares missing disabled sources, skips and reports unavailable deployment configuration, opens each Google OAuth flow in sequence, resumes after callback, obtains the mandatory Enable confirmation, and performs the first supported Gmail/Contacts/Calendar sync. It never approves provider consent, confirms external access, selects Drive files or creates missing provider credentials on the user's behalf.
+Say **Emma, set up all connectors** (or name one connector) to use the guided path. It prepares missing disabled sources, skips and reports unavailable deployment configuration, opens each Google OAuth flow in sequence, resumes after callback, obtains the mandatory Enable confirmation, and performs the first supported Gmail/Contacts/Calendar sync. It never approves provider consent, confirms external access, selects Drive files or Google Photos items, or creates missing provider credentials on the user's behalf.
 
 The same lifecycle can be completed manually:
 
-1. Register Gmail (choose read, draft and/or send scopes), Google Contacts (`read:contacts`) or WhatsApp Business (`read:messages`, `send:messages`).
-2. Choose **Authorize Gmail/Contacts** and complete Google's consent screen.
+1. Register Gmail (choose read, draft and/or send scopes), Google Contacts (`read:contacts`), Google Drive (`select:image_files`), Google Photos (`select:user_selected_photos`) or WhatsApp Business (`read:messages`, `send:messages`).
+2. Choose **Authorize Gmail/Contacts/Drive/Google Photos** and complete Google's consent screen.
 3. Review and explicitly enable the source.
 4. Use **Initial sync**, then **Sync changes**. Gmail imports Communication Intake; Contacts creates reviewable staging records only.
 5. For Contacts, choose **Review contacts** and explicitly confirm any CRM import.

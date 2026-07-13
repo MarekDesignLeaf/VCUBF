@@ -243,7 +243,7 @@ export interface ManagedEmployee {
   isActive: boolean;
 }
 
-export type ConnectorKey = "gmail" | "google_contacts" | "google_calendar" | "google_drive_photos" | "whatsapp_business";
+export type ConnectorKey = "gmail" | "google_contacts" | "google_calendar" | "google_drive" | "google_photos" | "whatsapp_business";
 
 export interface ConnectorDefinition {
   key: ConnectorKey;
@@ -311,7 +311,7 @@ export interface ConnectorSyncResult {
 
 export interface ConnectorDisconnectResult {
   sourceId: string;
-  provider: "gmail" | "google_contacts" | "google_calendar" | "google_drive_photos" | "whatsapp_business";
+  provider: "gmail" | "google_contacts" | "google_calendar" | "google_drive" | "google_photos" | "whatsapp_business";
   disconnectedAt: string;
   providerGrantRevoked: boolean;
 }
@@ -350,6 +350,18 @@ export interface DrivePickerToken { accessToken: string; expiresAt: string; appI
 export interface ExternalDriveImage {
   id: string; externalFileId: string; name: string; mimeType: string; webViewLink?: string | null;
   thumbnailLink?: string | null; sizeBytes?: string | null; width?: number | null; height?: number | null;
+  portfolioPhotoId?: string | null; stagedAt: string;
+}
+export interface GooglePhotosPickerSession {
+  sessionId: string;
+  pickerUri?: string;
+  mediaItemsSet?: boolean;
+  expiresAt: string | null;
+  pollIntervalMs: number;
+}
+export interface ExternalGooglePhoto {
+  id: string; externalMediaItemId: string; name: string; mimeType: string; mediaType: string;
+  width?: number | null; height?: number | null; createdTime?: string | null;
   portfolioPhotoId?: string | null; stagedAt: string;
 }
 
@@ -1525,6 +1537,15 @@ export const api = {
     driveImages: (id: string) => request<ExternalDriveImage[]>(`/connectors/sources/${id}/drive-images`),
     registerDrivePhoto: (sourceId: string, imageId: string, confirmed: boolean) =>
       request<PortfolioPhoto>(`/connectors/sources/${sourceId}/drive-images/${imageId}/register`, { method: "POST", body: JSON.stringify({ confirmed }) }),
+    createGooglePhotosPickerSession: (sourceId: string) =>
+      request<GooglePhotosPickerSession>(`/connectors/sources/${sourceId}/google-photos/picker-sessions`, { method: "POST", body: "{}" }),
+    googlePhotosPickerSession: (sourceId: string, sessionId: string) =>
+      request<GooglePhotosPickerSession>(`/connectors/sources/${sourceId}/google-photos/picker-sessions/${encodeURIComponent(sessionId)}`),
+    stageGooglePhotosSelection: (sourceId: string, sessionId: string) =>
+      request<{ items: ExternalGooglePhoto[]; skippedNonImageCount: number; sessionCleaned: boolean }>(`/connectors/sources/${sourceId}/google-photos/picker-sessions/${encodeURIComponent(sessionId)}/import`, { method: "POST", body: "{}" }),
+    googlePhotosItems: (sourceId: string) => request<ExternalGooglePhoto[]>(`/connectors/sources/${sourceId}/google-photos/items`),
+    registerGooglePhotosPhoto: (sourceId: string, photoId: string, confirmed: boolean) =>
+      request<PortfolioPhoto>(`/connectors/sources/${sourceId}/google-photos/items/${photoId}/register`, { method: "POST", body: JSON.stringify({ confirmed }) }),
     createGmailDraft: (sourceId: string, data: GmailMessageInput) =>
       request<GmailDraftResult>(`/connectors/sources/${sourceId}/gmail/drafts`, { method: "POST", body: JSON.stringify(data) }),
     sendGmailMessage: (sourceId: string, data: GmailMessageInput, confirmed: boolean) =>

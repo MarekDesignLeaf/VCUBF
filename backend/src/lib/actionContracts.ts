@@ -492,6 +492,30 @@ export const DISCONNECT_GOOGLE_DRIVE_SOURCE_ACTION: ActionContract = {
   actionName: "disconnect_google_drive_source", purpose: "After confirmation revoke Drive authorization while retaining staged and registered metadata.", requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: true,
   dataSources: ["connector_sources", "connector_credentials", "google_oauth"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONFIRMATION_REQUIRED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
 };
+export const START_GOOGLE_PHOTOS_OAUTH_ACTION: ActionContract = {
+  actionName: "start_google_photos_oauth", purpose: "Start Google Photos Picker OAuth for photos the user will explicitly choose.", requiredPermission: "connectors.manage", riskLevel: 1, confirmationRequired: false,
+  dataSources: ["connector_sources", "server_configuration"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_CONFIGURATION_MISSING"],
+};
+export const COMPLETE_GOOGLE_PHOTOS_OAUTH_ACTION: ActionContract = {
+  actionName: "complete_google_photos_oauth", purpose: "Verify Google Photos Picker scope and store only encrypted Google tokens.", requiredPermission: "connectors.manage", riskLevel: 2, confirmationRequired: false,
+  dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials"], possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED"],
+};
+export const CREATE_GOOGLE_PHOTOS_PICKER_SESSION_ACTION: ActionContract = {
+  actionName: "create_google_photos_picker_session", purpose: "Create a short-lived Google Photos Picker session without exposing Google tokens or browsing the user's library.", requiredPermission: "connectors.manage", riskLevel: 1, confirmationRequired: false,
+  dataSources: ["connector_sources", "connector_credentials", "google_photos_picker"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "GOOGLE_PHOTOS_ACCOUNT_REQUIRED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
+export const STAGE_GOOGLE_PHOTOS_ITEMS_ACTION: ActionContract = {
+  actionName: "stage_google_photos_items", purpose: "Read metadata only for photos explicitly selected in Google Photos Picker; never download image bytes or retain temporary Google base URLs.", requiredPermission: "connectors.manage", riskLevel: 1, confirmationRequired: false,
+  dataSources: ["google_photos_picker", "external_google_photos"], possibleErrors: ["MISSING_PERMISSION", "PICKER_SELECTION_PENDING", "NOT_AN_IMAGE", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
+export const REGISTER_GOOGLE_PHOTOS_PHOTO_ACTION: ActionContract = {
+  actionName: "register_google_photos_portfolio_photo", purpose: "Create an internal Portfolio Photo reference from one reviewed Google Photos selection after explicit confirmation.", requiredPermission: "crm.manage", riskLevel: 3, confirmationRequired: true,
+  dataSources: ["external_google_photos", "portfolio_photos"], possibleErrors: ["MISSING_PERMISSION", "GOOGLE_PHOTOS_ITEM_NOT_FOUND", "PHOTO_ALREADY_REGISTERED", "CONFIRMATION_REQUIRED"],
+};
+export const DISCONNECT_GOOGLE_PHOTOS_SOURCE_ACTION: ActionContract = {
+  actionName: "disconnect_google_photos_source", purpose: "After confirmation revoke Google Photos authorization while retaining staged and registered metadata.", requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: true,
+  dataSources: ["connector_sources", "connector_credentials", "google_oauth"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONFIRMATION_REQUIRED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
 
 // Service Catalogue Module — see VCUF master documentation section 24C.
 // Entries here are entered by the user, never invented ("no fake facts"
@@ -1423,6 +1447,7 @@ export const PORTFOLIO_PHOTO_SOURCES = [
   "client_provided",
   "before_after",
   "google_drive",
+  "google_photos",
   "other",
 ] as const;
 export type PortfolioPhotoSource = (typeof PORTFOLIO_PHOTO_SOURCES)[number];

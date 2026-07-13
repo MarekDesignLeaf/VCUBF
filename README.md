@@ -661,16 +661,18 @@ npm run dev                 # http://localhost:5173
 - **User guide and CI**: `docs/USER_GUIDE.md` documents daily use and limitations. GitHub
   Actions builds and tests the backend against disposable PostgreSQL and builds/lints the frontend.
 - **Connector Engine Phase 3 Google read-only adapters**: the registry declares Gmail,
-  Google Contacts, Google Calendar and Google Drive photo-storage contracts. Gmail has
+  Google Contacts, Google Calendar, Google Drive and Google Photos contracts. Gmail has
   tenant-scoped OAuth with hashed one-time state, exact `gmail.readonly` scope enforcement,
   AES-256-GCM token storage, refresh-token handling, full-to-incremental Gmail history sync,
   expired-cursor fallback, idempotent Communication Intake provenance and confirmation-gated
   provider revocation/disconnect. Google Contacts adds exact `contacts.readonly` OAuth,
   full-to-incremental People API sync, review staging, confirmation-gated CRM import and
   deletion isolation. Google Calendar adds exact `calendar.readonly` OAuth, per-calendar
-  incremental event staging and HTTP 410 recovery without changing jobs or tasks. Google Drive/Photos uses
+  incremental event staging and HTTP 410 recovery without changing jobs or tasks. Google Drive uses
   non-sensitive per-file `drive.file` access through Google Picker, stages metadata only for explicitly selected
-  images and requires confirmation before creating an internal Portfolio Photo reference. See
+  images and requires confirmation before creating an internal Portfolio Photo reference. Google Photos uses a
+  separate user-controlled Photos Picker session and stages only metadata for the exact photos selected there;
+  it never scans the whole Google Photos library or stores image bytes. See
   `docs/CONNECTOR_ENGINE.md`.
 
 Backend verified: 358/358 tests passing across 42 suites (auth, CORS, CRM clients, CRM jobs, CRM leads,
@@ -825,7 +827,8 @@ Build order should follow the roadmap in the master documentation (Phase 1 → P
   `GOOGLE_CONTACTS_OAUTH_CLIENT_SECRET`, `GOOGLE_CONTACTS_OAUTH_REDIRECT_URI`, `GOOGLE_CALENDAR_OAUTH_CLIENT_ID`,
   `GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET`, `GOOGLE_CALENDAR_OAUTH_REDIRECT_URI`, `GOOGLE_DRIVE_OAUTH_CLIENT_ID`,
   `GOOGLE_DRIVE_OAUTH_CLIENT_SECRET`, `GOOGLE_DRIVE_OAUTH_REDIRECT_URI`, `GOOGLE_DRIVE_PICKER_APP_ID`,
-  `GOOGLE_DRIVE_PICKER_API_KEY` and a 32-byte base64
+  `GOOGLE_DRIVE_PICKER_API_KEY`, `GOOGLE_PHOTOS_OAUTH_CLIENT_ID`, `GOOGLE_PHOTOS_OAUTH_CLIENT_SECRET`,
+  `GOOGLE_PHOTOS_OAUTH_REDIRECT_URI` and a 32-byte base64
   `CONNECTOR_ENCRYPTION_KEY` as environment variables; run
   `npm run build && npx prisma migrate deploy && npm start`.
 - **Frontend**: any static host (Railway static site, Vercel, Netlify). Set

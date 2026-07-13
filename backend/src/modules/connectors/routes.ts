@@ -11,6 +11,7 @@ import {
   SYNC_GMAIL_MESSAGES_ACTION,
   IMPORT_GOOGLE_CONTACT_ACTION,
   REGISTER_GOOGLE_DRIVE_PHOTO_ACTION,
+  REGISTER_GOOGLE_PHOTOS_PHOTO_ACTION,
   SEND_WHATSAPP_MESSAGE_ACTION,
   UPDATE_CONNECTOR_SOURCE_ACTION,
 } from "../../lib/actionContracts.js";
@@ -21,6 +22,7 @@ import * as gmailConnectorService from "../../services/gmailConnectorService.js"
 import * as googleContactsConnectorService from "../../services/googleContactsConnectorService.js";
 import * as googleCalendarConnectorService from "../../services/googleCalendarConnectorService.js";
 import * as googleDriveConnectorService from "../../services/googleDriveConnectorService.js";
+import * as googlePhotosConnectorService from "../../services/googlePhotosConnectorService.js";
 import * as whatsappBusinessConnectorService from "../../services/whatsappBusinessConnectorService.js";
 import * as connectorSetupService from "../../services/connectorSetupService.js";
 
@@ -65,12 +67,17 @@ connectorsRouter.get("/google-drive/oauth/callback", async (req, res) => {
   if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   res.redirect(303, result.data.redirectUrl);
 });
+connectorsRouter.get("/google-photos/oauth/callback", async (req, res) => {
+  const result = await googlePhotosConnectorService.completeGooglePhotosOAuth(req.query);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.redirect(303, result.data.redirectUrl);
+});
 
 connectorsRouter.use(requireAuth);
 
 const listQuerySchema = z.object({ active_only: z.enum(["true", "false"]).optional() });
 const setupSchema = z.object({
-  connector_key: z.enum(["gmail", "google_contacts", "google_calendar", "google_drive_photos", "whatsapp_business", "all"]),
+  connector_key: z.enum(["gmail", "google_contacts", "google_calendar", "google_drive", "google_photos", "whatsapp_business", "all"]),
 });
 
 connectorsRouter.post("/setup/prepare", requirePermission("connectors.manage"), async (req, res) => {
@@ -133,8 +140,10 @@ connectorsRouter.post(
       ? await googleContactsConnectorService.startGoogleContactsOAuth(req.user!, req.params.id)
       : source?.connectorKey === "google_calendar"
         ? await googleCalendarConnectorService.startGoogleCalendarOAuth(req.user!, req.params.id)
-      : source?.connectorKey === "google_drive_photos"
+      : source?.connectorKey === "google_drive"
         ? await googleDriveConnectorService.startGoogleDriveOAuth(req.user!, req.params.id)
+      : source?.connectorKey === "google_photos"
+        ? await googlePhotosConnectorService.startGooglePhotosOAuth(req.user!, req.params.id)
       : await gmailConnectorService.startGmailOAuth(req.user!, req.params.id);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
@@ -148,6 +157,9 @@ connectorsRouter.post(
     const source = await connectorService.getConnectorSource(req.user!, req.params.id);
     if (source?.connectorKey === "whatsapp_business") {
       return res.status(409).json({ error: "SYNC_NOT_SUPPORTED", message: "WhatsApp messages arrive automatically through the signed webhook." });
+    }
+    if (source?.connectorKey === "google_drive" || source?.connectorKey === "google_photos") {
+      return res.status(409).json({ error: "SYNC_NOT_SUPPORTED", message: "Select images directly through the applicable Google picker." });
     }
     const result = source?.connectorKey === "google_contacts"
       ? await googleContactsConnectorService.syncGoogleContacts(req.user!, req.params.id)
@@ -198,8 +210,10 @@ connectorsRouter.post(
       ? await googleContactsConnectorService.disconnectGoogleContactsSource(req.user!, req.params.id, req.body)
       : source?.connectorKey === "google_calendar"
         ? await googleCalendarConnectorService.disconnectGoogleCalendarSource(req.user!, req.params.id, req.body)
-      : source?.connectorKey === "google_drive_photos"
+      : source?.connectorKey === "google_drive"
         ? await googleDriveConnectorService.disconnectGoogleDriveSource(req.user!, req.params.id, req.body)
+      : source?.connectorKey === "google_photos"
+        ? await googlePhotosConnectorService.disconnectGooglePhotosSource(req.user!, req.params.id, req.body)
       : source?.connectorKey === "whatsapp_business"
         ? await whatsappBusinessConnectorService.disconnectWhatsAppSource(req.user!, req.params.id, req.body)
       : await gmailConnectorService.disconnectGmailSource(req.user!, req.params.id, req.body);
@@ -230,6 +244,33 @@ connectorsRouter.get("/sources/:id/drive-images", requirePermission("connectors.
 });
 connectorsRouter.post("/sources/:id/drive-images/:imageId/register", requirePermission("connectors.manage"), requirePermission(REGISTER_GOOGLE_DRIVE_PHOTO_ACTION.requiredPermission), async (req, res) => {
   const result = await googleDriveConnectorService.registerDrivePortfolioPhoto(req.user!, req.params.id, req.params.imageId, req.body);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.status(result.httpStatus).json(result.data);
+});
+connectorsRouter.post("/sources/:id/google-photos/picker-sessions", requirePermission("connectors.manage"), async (req, res) => {
+  const result = await googlePhotosConnectorService.createGooglePhotosSelectionSession(req.user!, req.params.id);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.setHeader("Cache-Control", "no-store");
+  res.status(result.httpStatus).json(result.data);
+});
+connectorsRouter.get("/sources/:id/google-photos/picker-sessions/:sessionId", requirePermission("connectors.manage"), async (req, res) => {
+  const result = await googlePhotosConnectorService.getGooglePhotosSelectionSession(req.user!, req.params.id, req.params.sessionId);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.setHeader("Cache-Control", "no-store");
+  res.status(result.httpStatus).json(result.data);
+});
+connectorsRouter.post("/sources/:id/google-photos/picker-sessions/:sessionId/import", requirePermission("connectors.manage"), async (req, res) => {
+  const result = await googlePhotosConnectorService.stageGooglePhotosSelection(req.user!, req.params.id, req.params.sessionId);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.status(result.httpStatus).json(result.data);
+});
+connectorsRouter.get("/sources/:id/google-photos/items", requirePermission("connectors.read"), async (req, res) => {
+  const result = await googlePhotosConnectorService.listGooglePhotosItems(req.user!, req.params.id);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.status(result.httpStatus).json(result.data);
+});
+connectorsRouter.post("/sources/:id/google-photos/items/:photoId/register", requirePermission("connectors.manage"), requirePermission(REGISTER_GOOGLE_PHOTOS_PHOTO_ACTION.requiredPermission), async (req, res) => {
+  const result = await googlePhotosConnectorService.registerGooglePhotosPortfolioPhoto(req.user!, req.params.id, req.params.photoId, req.body);
   if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   res.status(result.httpStatus).json(result.data);
 });

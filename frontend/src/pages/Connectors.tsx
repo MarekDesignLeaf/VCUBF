@@ -8,6 +8,7 @@ import {
   type ExternalContact,
   type ExternalCalendarEvent,
   type ExternalDriveImage,
+  type ExternalGooglePhoto,
 } from "../api/client";
 import { useAuth } from "../context/useAuth";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -41,12 +42,13 @@ function defaultScopes(key: ConnectorKey) {
   if (key === "gmail") return ["read:messages", "write:drafts", "send:messages"];
   if (key === "google_contacts") return ["read:contacts"];
   if (key === "google_calendar") return ["read:calendar"];
-  if (key === "google_drive_photos") return ["select:image_files"];
+  if (key === "google_drive") return ["select:image_files"];
+  if (key === "google_photos") return ["select:user_selected_photos"];
   return ["read:messages", "send:messages"];
 }
 
 const SETUP_SESSION_KEY = "vcubf-guided-connector-setup";
-const connectorOrder: ConnectorKey[] = ["gmail", "google_contacts", "google_calendar", "google_drive_photos", "whatsapp_business"];
+const connectorOrder: ConnectorKey[] = ["gmail", "google_contacts", "google_calendar", "google_drive", "google_photos", "whatsapp_business"];
 type SetupTarget = ConnectorKey | "all";
 interface SetupSession { target: SetupTarget; pending: ConnectorKey[]; blockers: string[]; paused?: boolean; }
 
@@ -77,8 +79,10 @@ function enableImpact(source: ConnectorSource) {
       ? "Enable read-only Google Calendar access? Synchronisation will stage event previews but will not change jobs, tasks or capacity."
       : source.connectorKey === "whatsapp_business"
         ? "Enable WhatsApp Business? Signed inbound messages will be imported automatically; every outgoing message will still require a separate confirmation."
-        : source.connectorKey === "google_drive_photos"
+        : source.connectorKey === "google_drive"
           ? "Enable per-file Google Drive access? Secretary will only use image files you explicitly select."
+          : source.connectorKey === "google_photos"
+            ? "Enable Google Photos Picker? You will choose the exact photos in Google Photos; Secretary stores metadata only after you finish selection."
           : source.configuredScopes.some((scope) => scope.startsWith("write:") || scope.startsWith("send:"))
             ? "Enable Gmail read/write access? Inbox synchronisation and draft creation will be available; every outgoing email will still require a separate confirmation."
             : "Enable read-only Gmail access? Synchronisation will import messages into Communication Intake.";
@@ -102,8 +106,10 @@ export function Connectors() {
         ? "Google Contacts authorization completed. Review the read-only access and enable the source before synchronising."
         : new URLSearchParams(window.location.search).get("google_calendar") === "connected"
           ? "Google Calendar authorization completed. Review the read-only access and enable the source before synchronising."
-          : new URLSearchParams(window.location.search).get("google_drive_photos") === "connected"
+          : new URLSearchParams(window.location.search).get("google_drive") === "connected"
             ? "Google Drive authorization completed. Enable the source, then explicitly select image files."
+            : new URLSearchParams(window.location.search).get("google_photos") === "connected"
+              ? "Google Photos authorization completed. Enable the source, then select exact photos in Google Photos."
             : null
   );
   const [busySourceId, setBusySourceId] = useState<string | null>(null);
@@ -113,12 +119,22 @@ export function Connectors() {
   const [externalEvents, setExternalEvents] = useState<ExternalCalendarEvent[] | null>(null);
   const [driveSourceId, setDriveSourceId] = useState<string | null>(null);
   const [driveImages, setDriveImages] = useState<ExternalDriveImage[] | null>(null);
+  const [googlePhotosSourceId, setGooglePhotosSourceId] = useState<string | null>(null);
+  const [googlePhotosItems, setGooglePhotosItems] = useState<ExternalGooglePhoto[] | null>(null);
+  const googlePhotosPollTimer = useRef<number | null>(null);
   const [composeSourceId, setComposeSourceId] = useState<string | null>(null);
   const guidedSetupRunning = useRef(false);
 
   function loadSources() {
     return api.connectors.sources(activeOnly).then(setSources);
   }
+
+  function stopGooglePhotosPolling() {
+    if (googlePhotosPollTimer.current !== null) window.clearTimeout(googlePhotosPollTimer.current);
+    googlePhotosPollTimer.current = null;
+  }
+
+  useEffect(() => () => stopGooglePhotosPolling(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -404,6 +420,57 @@ export function Connectors() {
     try { await api.connectors.registerDrivePhoto(driveSourceId, image.id, true); const source = sources?.find(item => item.id === driveSourceId); if (source) await loadDriveImages(source); setNotice("Drive image registered as an internal portfolio reference; marketing use remains disabled."); }
     catch (err) { setError(err instanceof ApiError ? err.message : "Could not register the portfolio photo."); }
   }
+  async function loadGooglePhotosItems(source: ConnectorSource) {
+    setGooglePhotosSourceId(source.id); setError(null);
+    try { setGooglePhotosItems(await api.connectors.googlePhotosItems(source.id)); }
+    catch (err) { setError(err instanceof ApiError ? err.message : "Could not load selected Google Photos items."); }
+  }
+  async function pollGooglePhotosSelection(source: ConnectorSource, sessionId: string) {
+    try {
+      const session = await api.connectors.googlePhotosPickerSession(source.id, sessionId);
+      if (!session.mediaItemsSet) {
+        googlePhotosPollTimer.current = window.setTimeout(() => { void pollGooglePhotosSelection(source, sessionId); }, session.pollIntervalMs);
+        return;
+      }
+      stopGooglePhotosPolling();
+      setBusySourceId(source.id);
+      const result = await api.connectors.stageGooglePhotosSelection(source.id, sessionId);
+      await loadGooglePhotosItems(source);
+      setNotice(`Google Photos selection imported: ${result.items.length} photo${result.items.length === 1 ? "" : "s"} staged as metadata only${result.skippedNonImageCount ? `; ${result.skippedNonImageCount} non-photo item${result.skippedNonImageCount === 1 ? " was" : "s were"} skipped` : ""}.`);
+    } catch (err) {
+      stopGooglePhotosPolling();
+      setError(err instanceof ApiError ? err.message : "Could not import the Google Photos selection.");
+    } finally {
+      setBusySourceId(null);
+    }
+  }
+  async function openGooglePhotosPicker(source: ConnectorSource) {
+    setBusySourceId(source.id); setError(null); setNotice(null); stopGooglePhotosPolling();
+    // Open synchronously from the button click so normal popup protection does
+    // not block the user-controlled Google Photos Picker after the API call.
+    const popup = window.open("", "vcubf-google-photos-picker");
+    try {
+      if (!popup) throw new Error("Google Photos Picker popup was blocked");
+      const session = await api.connectors.createGooglePhotosPickerSession(source.id);
+      const pickerUrl = new URL(session.pickerUri!);
+      pickerUrl.pathname = `${pickerUrl.pathname.replace(/\/$/, "")}/autoclose`;
+      popup.location.assign(pickerUrl.toString());
+      setNotice("Google Photos Picker is open. Choose the exact photos there; Secretary will import their metadata automatically after you finish.");
+      googlePhotosPollTimer.current = window.setTimeout(() => { void pollGooglePhotosSelection(source, session.sessionId); }, session.pollIntervalMs);
+    } catch (err) {
+      popup?.close();
+      setError(err instanceof ApiError ? err.message : "Could not open Google Photos Picker. Allow the popup and try again.");
+    } finally {
+      setBusySourceId(null);
+    }
+  }
+  async function registerGooglePhotosPhoto(item: ExternalGooglePhoto) {
+    if (!googlePhotosSourceId) return;
+    try { await api.connectors.registerGooglePhotosPhoto(googlePhotosSourceId, item.id, false); }
+    catch (err) { if (!(err instanceof ApiError) || err.code !== "CONFIRMATION_REQUIRED") { setError(err instanceof ApiError ? err.message : "Could not prepare photo registration."); return; } if (!window.confirm(`Register “${item.name}” as an internal Portfolio Photo reference? No image bytes will be copied and marketing use remains disabled.`)) return; }
+    try { await api.connectors.registerGooglePhotosPhoto(googlePhotosSourceId, item.id, true); const source = sources?.find(candidate => candidate.id === googlePhotosSourceId); if (source) await loadGooglePhotosItems(source); setNotice("Google Photos item registered as an internal portfolio reference; marketing use remains disabled."); }
+    catch (err) { setError(err instanceof ApiError ? err.message : "Could not register the portfolio photo."); }
+  }
 
   return (
     <div>
@@ -416,7 +483,7 @@ export function Connectors() {
         ) : null}
       </div>
       <p className="hint">
-        Gmail can read mail, create drafts and send only after confirmation. Contacts and Calendar are read-only. WhatsApp imports signed inbound webhooks and confirms every send. Drive uses per-file access.
+        Gmail can read mail, create drafts and send only after confirmation. Contacts and Calendar are read-only. Google Drive uses per-file access; Google Photos opens its own picker for exact user-selected photos. WhatsApp imports signed inbound webhooks and confirms every send.
         Never paste an OAuth token, client secret or password here.
       </p>
 
@@ -468,7 +535,7 @@ export function Connectors() {
                 <td>
                   {canManage ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {!source.authorizationConfigured && source.connectorKey !== "whatsapp_business" ? (
-                      <button onClick={() => authorize(source)} disabled={busySourceId === source.id}>Authorize {source.connectorKey === "gmail" ? "Gmail" : source.connectorKey === "google_contacts" ? "Contacts" : source.connectorKey === "google_calendar" ? "Calendar" : "Drive"}</button>
+                      <button onClick={() => authorize(source)} disabled={busySourceId === source.id}>Authorize {source.connectorKey === "gmail" ? "Gmail" : source.connectorKey === "google_contacts" ? "Contacts" : source.connectorKey === "google_calendar" ? "Calendar" : source.connectorKey === "google_photos" ? "Google Photos" : "Google Drive"}</button>
                     ) : null}
                     {!source.authorizationConfigured && source.connectorKey === "whatsapp_business" ? <span className="hint">Server credentials required</span> : null}
                     {source.authorizationConfigured && !source.isEnabled ? (
@@ -483,8 +550,10 @@ export function Connectors() {
                       <button className="secondary" onClick={() => showExternalContacts(source)}>Review contacts</button>
                     ) : null}
                     {source.connectorKey === "google_calendar" ? <button className="secondary" onClick={() => showExternalEvents(source)}>Review events</button> : null}
-                    {source.connectorKey === "google_drive_photos" && source.isEnabled ? <button onClick={() => openDrivePicker(source)} disabled={busySourceId === source.id}>Select Drive images</button> : null}
-                    {source.connectorKey === "google_drive_photos" ? <button className="secondary" onClick={() => loadDriveImages(source)}>Review images</button> : null}
+                    {source.connectorKey === "google_drive" && source.isEnabled ? <button onClick={() => openDrivePicker(source)} disabled={busySourceId === source.id}>Select Drive images</button> : null}
+                    {source.connectorKey === "google_drive" ? <button className="secondary" onClick={() => loadDriveImages(source)}>Review Drive images</button> : null}
+                    {source.connectorKey === "google_photos" && source.isEnabled ? <button onClick={() => openGooglePhotosPicker(source)} disabled={busySourceId === source.id}>Select Google Photos</button> : null}
+                    {source.connectorKey === "google_photos" ? <button className="secondary" onClick={() => loadGooglePhotosItems(source)}>Review Google Photos</button> : null}
                     {source.connectorKey === "gmail" && source.isEnabled && source.configuredScopes.some(scope => scope === "write:drafts" || scope === "send:messages") ? <button onClick={() => setComposeSourceId(source.id)}>Write email</button> : null}
                     {source.connectorKey === "whatsapp_business" && source.isEnabled && source.configuredScopes.includes("send:messages") ? <button onClick={() => setComposeSourceId(source.id)}>Write WhatsApp</button> : null}
                     {source.authorizationConfigured ? (
@@ -545,6 +614,13 @@ export function Connectors() {
         <p className="hint">Metadata references only. No image bytes are stored and marketing use remains disabled until a separate human review.</p>
         {!driveImages ? <p>Loading…</p> : driveImages.length === 0 ? <p className="hint">No images selected.</p> : <table className="data-table"><thead><tr><th>Image</th><th>Type</th><th>Dimensions</th><th>Status</th><th></th></tr></thead><tbody>{driveImages.map(image => <tr key={image.id}>
           <td><strong>{image.name}</strong>{image.webViewLink ? <div><a href={image.webViewLink} target="_blank" rel="noreferrer">Open in Drive</a></div> : null}</td><td>{image.mimeType}</td><td>{image.width && image.height ? `${image.width} × ${image.height}` : "Unknown"}</td><td>{image.portfolioPhotoId ? "Registered" : "Staged"}</td><td>{canImportContacts && !image.portfolioPhotoId ? <button onClick={() => registerDrivePhoto(image)}>Register portfolio reference</button> : "—"}</td>
+        </tr>)}</tbody></table>}
+      </section> : null}
+      {googlePhotosSourceId ? <section className="card" style={{ marginTop: 20 }}>
+        <div className="page-header"><h2>Selected Google Photos</h2><button className="secondary" onClick={() => { setGooglePhotosSourceId(null); setGooglePhotosItems(null); }}>Close</button></div>
+        <p className="hint">These are references to photos you explicitly chose in Google Photos. No image bytes or temporary Google download URLs are stored; marketing use remains disabled until a separate human review.</p>
+        {!googlePhotosItems ? <p>Loading…</p> : googlePhotosItems.length === 0 ? <p className="hint">No Google Photos items selected yet.</p> : <table className="data-table"><thead><tr><th>Photo</th><th>Type</th><th>Dimensions</th><th>Created</th><th>Status</th><th></th></tr></thead><tbody>{googlePhotosItems.map(item => <tr key={item.id}>
+          <td><strong>{item.name}</strong><div className="hint">Google Photos reference only</div></td><td>{item.mimeType}</td><td>{item.width && item.height ? `${item.width} × ${item.height}` : "Unknown"}</td><td>{item.createdTime ? new Date(item.createdTime).toLocaleString() : "Unknown"}</td><td>{item.portfolioPhotoId ? "Registered" : "Staged"}</td><td>{canImportContacts && !item.portfolioPhotoId ? <button onClick={() => registerGooglePhotosPhoto(item)}>Register portfolio reference</button> : "—"}</td>
         </tr>)}</tbody></table>}
       </section> : null}
 

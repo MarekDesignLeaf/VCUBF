@@ -1,4 +1,4 @@
-export const CONNECTOR_KEYS = ["gmail", "google_contacts", "google_calendar", "google_drive_photos", "whatsapp_business"] as const;
+export const CONNECTOR_KEYS = ["gmail", "google_contacts", "google_calendar", "google_drive", "google_photos", "whatsapp_business"] as const;
 export type ConnectorKey = (typeof CONNECTOR_KEYS)[number];
 
 export interface ConnectorDefinition {
@@ -70,9 +70,9 @@ export const CONNECTOR_DEFINITIONS: Record<ConnectorKey, ConnectorDefinition> = 
     actionMode: "proposal_and_confirmed_action",
     adapterAvailable: true,
   },
-  google_drive_photos: {
-    key: "google_drive_photos",
-    serviceName: "Google Drive Photo Storage Connector",
+  google_drive: {
+    key: "google_drive",
+    serviceName: "Google Drive Image Picker",
     serviceType: "photo_storage",
     canRead: ["file metadata", "folder metadata", "image file references"],
     canWrite: [],
@@ -81,6 +81,22 @@ export const CONNECTOR_DEFINITIONS: Record<ConnectorKey, ConnectorDefinition> = 
     returnedDataTypes: ["photo file reference", "folder reference", "file metadata"],
     supportedActions: ["authorize per-file access", "select image files with Google Picker", "stage image metadata", "register confirmed portfolio reference"],
     possibleErrors: ["AUTHORIZATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "FILE_NOT_FOUND", "NOT_AN_IMAGE"],
+    supportsAudit: true,
+    supportsRollback: false,
+    actionMode: "proposal_and_confirmed_action",
+    adapterAvailable: true,
+  },
+  google_photos: {
+    key: "google_photos",
+    serviceName: "Google Photos Picker",
+    serviceType: "photo_storage",
+    canRead: ["metadata for photos explicitly selected by the user"],
+    canWrite: [],
+    logicalScopes: ["select:user_selected_photos"],
+    requiredPermissions: ["connectors.read", "connectors.manage", "crm.read", "crm.manage"],
+    returnedDataTypes: ["selected Google Photos reference", "photo metadata"],
+    supportedActions: ["authorize Google Photos Picker", "open a user-controlled Google Photos selection session", "stage selected photo metadata", "register confirmed portfolio reference"],
+    possibleErrors: ["AUTHORIZATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "PICKER_SELECTION_PENDING", "NOT_AN_IMAGE"],
     supportsAudit: true,
     supportsRollback: false,
     actionMode: "proposal_and_confirmed_action",

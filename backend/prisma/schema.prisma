@@ -28,6 +28,7 @@ model Company {
   externalCalendars            ExternalCalendar[]
   externalCalendarEvents       ExternalCalendarEvent[]
   externalDriveImages          ExternalDriveImage[]
+  externalGooglePhotos         ExternalGooglePhoto[]
   jobs                         Job[]
   leads                        Lead[]
   auditLogs                    AuditLog[]
@@ -90,6 +91,7 @@ model ConnectorSource {
   externalCalendars      ExternalCalendar[]
   externalCalendarEvents ExternalCalendarEvent[]
   externalDriveImages    ExternalDriveImage[]
+  externalGooglePhotos   ExternalGooglePhoto[]
 
   @@unique([companyId, connectorKey, displayName])
   @@index([companyId, serviceType])
@@ -537,6 +539,36 @@ model ExternalDriveImage {
   @@unique([companyId, connectorSourceId, externalFileId])
   @@index([companyId, isRemoved])
   @@map("external_drive_images")
+}
+
+// Google Photos Picker never grants background access to a whole photo
+// library. This table retains only metadata for items a user explicitly
+// selected, never the temporary Google baseUrl or image/video bytes.
+model ExternalGooglePhoto {
+  id                  String    @id @default(uuid())
+  companyId           String    @map("company_id")
+  connectorSourceId   String    @map("connector_source_id")
+  pickerSessionId     String    @map("picker_session_id")
+  externalMediaItemId String    @map("external_media_item_id")
+  name                String
+  mimeType            String    @map("mime_type")
+  mediaType           String    @map("media_type")
+  width               Int?
+  height              Int?
+  createdTime         DateTime? @map("created_time")
+  portfolioPhotoId    String?   @map("portfolio_photo_id")
+  isRemoved           Boolean   @default(false) @map("is_removed")
+  stagedAt            DateTime  @default(now()) @map("staged_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  company         Company         @relation(fields: [companyId], references: [id])
+  connectorSource ConnectorSource @relation(fields: [connectorSourceId], references: [id], onDelete: Cascade)
+  portfolioPhoto  PortfolioPhoto? @relation(fields: [portfolioPhotoId], references: [id])
+
+  @@unique([companyId, connectorSourceId, externalMediaItemId])
+  @@index([companyId, isRemoved])
+  @@map("external_google_photos")
 }
 
 // Document Registry — metadata and references only. The MVP deliberately
@@ -1046,6 +1078,7 @@ model PortfolioPhoto {
   job                 Job?                    @relation(fields: [jobId], references: [id])
   serviceSelections   PhotoServiceSelection[]
   externalDriveImages ExternalDriveImage[]
+  externalGooglePhotos ExternalGooglePhoto[]
 
   @@index([companyId])
   @@index([clientId])

@@ -44,7 +44,7 @@ describe("Connector Engine registry and source lifecycle", () => {
   it("declares every master-document connector contract field and reports adapters honestly", async () => {
     const res = await request(app).get("/connectors/definitions").set("Authorization", `Bearer ${adminToken}`);
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.map((item: any) => item.key), ["gmail", "google_contacts", "google_calendar", "google_drive_photos", "whatsapp_business"]);
+    assert.deepEqual(res.body.map((item: any) => item.key), ["gmail", "google_contacts", "google_calendar", "google_drive", "google_photos", "whatsapp_business"]);
     for (const definition of res.body) {
       assert.ok(definition.serviceName);
       assert.ok(definition.serviceType);
@@ -206,9 +206,9 @@ describe("Connector Engine registry and source lifecycle", () => {
       .send({ connector_key: "all" });
     assert.equal(prepared.status, 201);
     assert.deepEqual(prepared.body.items.map((item: any) => item.connectorKey), [
-      "gmail", "google_contacts", "google_calendar", "google_drive_photos", "whatsapp_business",
+      "gmail", "google_contacts", "google_calendar", "google_drive", "google_photos", "whatsapp_business",
     ]);
-    assert.equal(prepared.body.items.length, 5);
+    assert.equal(prepared.body.items.length, 6);
     assert.ok(prepared.body.items.every((item: any) => item.source && item.source.isEnabled === false));
     assert.ok(prepared.body.items.every((item: any) => typeof item.source.configurationAvailable === "boolean"));
     assert.ok(prepared.body.items.every((item: any) => !JSON.stringify(item).includes("CLIENT_SECRET")));

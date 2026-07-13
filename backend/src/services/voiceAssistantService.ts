@@ -53,7 +53,7 @@ show emails
 show whatsapp messages
 check connectors
 set up all connectors
-set up CONNECTOR (Gmail, Google Contacts, Google Calendar, Google Drive Photos, WhatsApp Business)
+set up CONNECTOR (Gmail, Google Contacts, Google Calendar, Google Drive, Google Photos, WhatsApp Business)
 sync all connectors
 sync CONNECTOR
 show data quality issues
