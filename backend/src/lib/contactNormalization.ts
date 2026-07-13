@@ -26,7 +26,7 @@ export function normalizePhone(phone: string | null | undefined): string | null 
   const parsed = parsePhoneNumberFromString(input, "GB");
   if (!parsed) return null;
   const isReservedUkExample =
-    parsed.country === "GB" && parsed.isPossible() && UK_OFCOM_DRAMA_MOBILE.test(parsed.nationalNumber);
+    parsed.countryCallingCode === "44" && parsed.isPossible() && UK_OFCOM_DRAMA_MOBILE.test(parsed.nationalNumber);
   return parsed.isValid() || isReservedUkExample ? parsed.number : null;
 }
 

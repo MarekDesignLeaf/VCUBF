@@ -9,6 +9,7 @@ import {
 describe("phone number validation", () => {
   it("accepts UK national numbers and stores them in E.164 format", () => {
     assert.equal(normalizePhone("07700 900123"), "+447700900123");
+    assert.equal(normalizePhone("+44 7700 900123"), "+447700900123");
     assert.equal(phoneNumberSchema.parse("(07700) 900-123"), "+447700900123");
   });
 
