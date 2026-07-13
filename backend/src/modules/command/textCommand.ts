@@ -9,6 +9,7 @@ import { dispatchParsedCommand } from "../../lib/commandExecutor.js";
 import { resolveLearningAliases } from "../../services/learningService.js";
 import { createRealtimeClientSession, interpretVoiceRequest, transcribeVoiceAudio } from "../../services/voiceAssistantService.js";
 import { publishVoiceUiAction } from "../../services/voiceUiActionService.js";
+import { getAssistantContext } from "../../services/assistantMemoryService.js";
 
 export const commandRouter = Router();
 
@@ -94,7 +95,8 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
 
   if (command.intent === "unrecognized") {
     try {
-      assistant = await interpretVoiceRequest({ text: alias.resolvedText, userName: user.displayName, language, history });
+      const memoryContext = await getAssistantContext(user);
+      assistant = await interpretVoiceRequest({ text: alias.resolvedText, userName: user.displayName, language, history, memoryContext });
     } catch (error) {
       console.error("Voice assistant interpretation failed", error instanceof Error ? error.message : error);
       return res.status(503).json({

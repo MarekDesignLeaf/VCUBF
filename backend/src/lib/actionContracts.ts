@@ -766,6 +766,42 @@ export const UPDATE_LEARNING_RULE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "LEARNING_RULE_NOT_FOUND", "VALIDATION_FAILED"],
 };
 
+// Emma's durable memory is distinct from both learned command aliases and
+// automatically detected action patterns. It stores only an explicit user
+// statement, remains visible, and is reversible by archiving.
+export const ASSISTANT_MEMORY_SCOPES = ["personal", "company"] as const;
+export const ASSISTANT_MEMORY_STATUSES = ["active", "archived"] as const;
+
+export const CREATE_ASSISTANT_MEMORY_ACTION: ActionContract = {
+  actionName: "create_assistant_memory",
+  purpose: "Store an explicit user-stated note for future Emma conversations without inferring or inventing any missing detail.",
+  requiredPermission: "voice.execute",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["user_input"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
+export const RECALL_ASSISTANT_MEMORY_ACTION: ActionContract = {
+  actionName: "recall_assistant_memory",
+  purpose: "Read active explicit memories available to the signed-in user, optionally filtered by the user's query.",
+  requiredPermission: "voice.execute",
+  riskLevel: 0,
+  confirmationRequired: false,
+  dataSources: ["assistant_memories"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
+export const ARCHIVE_ASSISTANT_MEMORY_ACTION: ActionContract = {
+  actionName: "archive_assistant_memory",
+  purpose: "Stop using one visible persistent Emma memory while retaining its audit trail.",
+  requiredPermission: "voice.execute",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["assistant_memories"],
+  possibleErrors: ["MISSING_PERMISSION", "ASSISTANT_MEMORY_NOT_FOUND"],
+};
+
 // Business Context Layer — structured company knowledge that later modules
 // (Website Management, Business Growth, Communication Intelligence and
 // Process Planning) can read instead of asking an LLM to invent company

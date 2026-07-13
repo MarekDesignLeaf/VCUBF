@@ -185,6 +185,48 @@ describe("commandParser", () => {
     assert.equal(parseTextCommand("show learning rule").intent, "list_learning_rules");
   });
 
+  it("parses explicit personal and company memory commands in English and Czech", () => {
+    assert.deepEqual(parseTextCommand("remember that invoice numbers use YYYY-001"), {
+      intent: "create_assistant_memory",
+      entities: { content: "invoice numbers use YYYY-001", scope: "personal" },
+    });
+    assert.deepEqual(parseTextCommand("remember for the company that invoice numbers use YYYYMMDD-001"), {
+      intent: "create_assistant_memory",
+      entities: { content: "invoice numbers use YYYYMMDD-001", scope: "company" },
+    });
+    assert.deepEqual(parseTextCommand("zapamatuj si, že čísla faktur začínají rokem"), {
+      intent: "create_assistant_memory",
+      entities: { content: "čísla faktur začínají rokem", scope: "personal" },
+    });
+    assert.deepEqual(parseTextCommand("zapamatuj si ze invoice cisla konci 001"), {
+      intent: "create_assistant_memory",
+      entities: { content: "invoice cisla konci 001", scope: "personal" },
+    });
+    assert.deepEqual(parseTextCommand("zapamatuj si pro firmu, že faktury končí trojčíslím 001"), {
+      intent: "create_assistant_memory",
+      entities: { content: "faktury končí trojčíslím 001", scope: "company" },
+    });
+  });
+
+  it("parses memory recall commands", () => {
+    assert.deepEqual(parseTextCommand("what do you remember about invoice numbers?"), {
+      intent: "recall_assistant_memory",
+      entities: { query: "invoice numbers" },
+    });
+    assert.deepEqual(parseTextCommand("co si pamatuješ o fakturách?"), {
+      intent: "recall_assistant_memory",
+      entities: { query: "fakturách" },
+    });
+    assert.deepEqual(parseTextCommand("co máš v paměti"), {
+      intent: "recall_assistant_memory",
+      entities: { query: undefined },
+    });
+    assert.deepEqual(parseTextCommand("co si pamatujes o invoices?"), {
+      intent: "recall_assistant_memory",
+      entities: { query: "invoices" },
+    });
+  });
+
   it("returns unrecognized for gibberish instead of guessing", () => {
     const result = parseTextCommand("please make the weather nicer today");
     assert.equal(result.intent, "unrecognized");

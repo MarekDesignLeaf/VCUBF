@@ -1017,6 +1017,18 @@ export interface RepeatedActionPattern {
   exampleTimestamps: string[];
 }
 
+export interface AssistantMemory {
+  id: string;
+  scope: "personal" | "company";
+  content: string;
+  status: "active" | "archived";
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+  duplicate?: boolean;
+}
+
 // Portfolio and Photo Intelligence Module — the manual-entry foundation of a
 // future automated photo-selection/website-publishing workflow. There is no
 // image upload/storage connector yet: `filename` is just the literal
@@ -1776,6 +1788,15 @@ export const api = {
   },
   memoryModel: {
     patterns: () => request<RepeatedActionPattern[]>("/memory-model/patterns"),
+    memories: (status: "active" | "archived" | "all" = "all") =>
+      request<AssistantMemory[]>(`/memory-model/memories?status=${status}`),
+    createMemory: (content: string, scope: "personal" | "company") =>
+      request<AssistantMemory>("/memory-model/memories", {
+        method: "POST",
+        body: JSON.stringify({ content, scope }),
+      }),
+    archiveMemory: (id: string) =>
+      request<AssistantMemory>(`/memory-model/memories/${id}/archive`, { method: "POST" }),
   },
   portfolio: {
     list: (params?: { clientId?: string; jobId?: string; tag?: string; usableForMarketing?: boolean; source?: string }) => {

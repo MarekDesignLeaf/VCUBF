@@ -7,6 +7,7 @@ export function Layout() {
   const { user, logout } = useAuth();
   const canRecruit = user?.permissions?.includes("recruitment.manage") ?? false;
   const canReadAudit = user?.permissions?.includes("audit.read") ?? false;
+  const canUseEmmaMemory = user?.permissions?.includes("voice.execute") ?? false;
   const canReadConnectors = user?.permissions?.includes("connectors.read") ?? false;
   return (
     <div className="app-shell">
@@ -42,7 +43,7 @@ export function Layout() {
           {canRecruit && <NavLink to="/recruitment">Recruitment</NavLink>}
           <NavLink to="/playbooks">Playbooks</NavLink>
           <NavLink to="/learning">Learning</NavLink>
-          {canReadAudit && <NavLink to="/memory-model">Memory Model</NavLink>}
+          {(canUseEmmaMemory || canReadAudit) && <NavLink to="/memory-model">Emma Memory</NavLink>}
         </nav>
         <div className="sidebar-footer">
           <div className="user-name">{user?.displayName}</div>

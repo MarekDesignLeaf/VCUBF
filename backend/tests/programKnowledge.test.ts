@@ -16,7 +16,7 @@ describe("Emma program knowledge", () => {
   });
 
   it("grounds guidance in exact controls and safe external-effect boundaries", () => {
-    for (const label of ["New client", "Preserve message", "Create draft", "Record payment", "Confirm run", "Save voice preferences"]) {
+    for (const label of ["New client", "Preserve message", "Create draft", "Record payment", "Confirm run", "Save voice preferences", "For the company", "Remember"]) {
       assert.ok(PROGRAM_KNOWLEDGE.includes(label), `program knowledge is missing control ${label}`);
     }
     assert.match(PROGRAM_KNOWLEDGE, /does not send/i);

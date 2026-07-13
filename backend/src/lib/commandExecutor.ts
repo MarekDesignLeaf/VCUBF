@@ -14,6 +14,7 @@ import * as notificationService from "../services/notificationService.js";
 import * as dataQualityService from "../services/dataQualityService.js";
 import * as portfolioService from "../services/portfolioService.js";
 import * as memoryModelService from "../services/memoryModelService.js";
+import * as assistantMemoryService from "../services/assistantMemoryService.js";
 import * as taskService from "../services/taskService.js";
 import * as contactService from "../services/contactService.js";
 import * as connectorSetupService from "../services/connectorSetupService.js";
@@ -382,6 +383,42 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
     case "list_learning_rules": {
       const data = await learningService.listLearningRules(user, {});
       response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "create_assistant_memory": {
+      const result = await assistantMemoryService.createAssistantMemory(user, command.entities);
+      const scopeLabel = command.entities.scope === "company" ? "for the company" : "for you";
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok
+          ? result.data.duplicate
+            ? `I already remember this ${scopeLabel}: ${result.data.content}`
+            : `I will remember this ${scopeLabel}: ${result.data.content}`
+          : result.message,
+      };
+      break;
+    }
+
+    case "recall_assistant_memory": {
+      const data = await assistantMemoryService.recallAssistantMemories(user, command.entities.query);
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: true,
+        httpStatus: 200,
+        data,
+        message: data.length
+          ? `I remember: ${data.map((memory) => memory.content).join("; ")}`
+          : command.entities.query
+            ? `I do not have an active memory about ${command.entities.query}.`
+            : "I do not have any active persistent memories yet.",
+      };
       break;
     }
 

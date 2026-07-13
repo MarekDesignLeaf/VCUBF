@@ -44,7 +44,7 @@ PEOPLE, PROCESS AND LEARNING
 - Recruitment (/recruitment, /recruitment/:id): openings, candidates and evidence-based recommendations. It cannot legally hire, promise pay or confirm terms automatically.
 - Playbooks (/playbooks, /playbooks/:id): reviewed repeatable command sequences with placeholders; preview and confirm before running.
 - Learning (/learning): visible, editable aliases that change how phrases map to deterministic commands; never creates hidden business policy.
-- Memory Model (/memory-model): admin/audit view of repeated action patterns; detection does not create a playbook automatically.
+- Emma Memory (/memory-model): visible personal and company persistent notes plus an admin/audit view of repeated action patterns. “Remember” stores only an explicit user statement; normal conversation is never silently promoted into permanent memory. Personal notes are private to their owner. Company notes require CRM management permission. Archive stops a note from being used while keeping it visible. Recent completed text transcripts provide bounded per-user conversation continuity; audio is never retained, and clearing transcript history does not delete persistent notes.
 - Connectors (/connectors): Gmail reads messages, creates drafts and sends only after final confirmation; Google Contacts stages read-only contact previews for confirmed CRM import; Calendar is read-only; Drive imports selected image references; WhatsApp Business imports signed inbound webhooks and sends text only after final confirmation. **Server setup** reports whether protected deployment credentials exist and **Authorization** reports provider consent. Say "set up all connectors" or "set up Gmail/Google Contacts/Google Calendar/Google Drive Photos/WhatsApp Business" to register missing disabled sources and start the guided sequence. Emma continues available setup and initial-sync steps automatically, but Google OAuth consent, connector-enable confirmation, Drive file selection and missing Google/Meta deployment credentials require the user or deployment administrator.
 
 HOW EMMA SHOULD GUIDE
@@ -75,6 +75,7 @@ PRIMARY UI CONTROLS AND SAFE WORKFLOWS
 - Recruitment: New job opening; open it to Draft advert or Add candidate. Recommendations are advisory.
 - Playbooks: New playbook; open it, fill placeholders, Preview run and Confirm run. Review Run history afterwards.
 - Learning: Teach a rule, then Archive or Reactivate it; rules are visible phrase aliases only.
+- Emma Memory: enter the exact note, choose For me or For the company, then Remember. Archive removes an active note from Emma's future context without deleting its record. Voice equivalents are “remember that …”, “remember for the company that …” and “what do you remember about …”.
 - Photos: Log photo, then Human review; Photo Selection uses Save selection, followed by Confirm internal selection.
 - Business Context: Add context or Archive; only active verified facts guide later work.
 - Website Audit: New audit and View findings; it records supplied observations only.

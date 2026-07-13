@@ -5,6 +5,7 @@ import { prisma } from "../../db.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { recordAudit } from "../../lib/audit.js";
+import { getAssistantContext } from "../../services/assistantMemoryService.js";
 
 export const voiceStateRouter = Router();
 voiceStateRouter.use(requireAuth, requirePermission("voice.execute"));
@@ -71,6 +72,11 @@ voiceStateRouter.get("/voice-conversations", async (req, res) => {
   });
   res.set("Cache-Control", "no-store");
   res.json(conversations.map(publicConversation));
+});
+
+voiceStateRouter.get("/assistant-context", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(await getAssistantContext(req.user!));
 });
 
 voiceStateRouter.post("/voice-conversations", async (req, res) => {

@@ -34,6 +34,8 @@ export type ParsedCommand =
   | { intent: "list_job_openings"; entities: Record<string, never> }
   | { intent: "create_learning_rule"; entities: { term: string; meaning: string } }
   | { intent: "list_learning_rules"; entities: Record<string, never> }
+  | { intent: "create_assistant_memory"; entities: { content: string; scope: "personal" | "company" } }
+  | { intent: "recall_assistant_memory"; entities: { query?: string } }
   | {
       intent: "log_communication";
       entities: { client_name: string; channel: string; direction: string; summary: string };
@@ -216,6 +218,19 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (m) return { intent: "create_learning_rule", entities: { term: m[1].trim(), meaning: m[2].trim() } };
 
   if (/^(?:list|show)\s+learning\s+rules?$/i.test(text)) return { intent: "list_learning_rules", entities: {} };
+
+  // Explicit durable Emma memory. This is deliberately separate from the
+  // alias syntax above: arbitrary conversation is never promoted to memory,
+  // only a direct "remember that" instruction is. Company scope must also be
+  // stated explicitly; the service enforces crm.manage for that wider scope.
+  m = text.match(/^(?:remember\s+for\s+(?:the\s+)?company\s+that|zapamatuj\s+si\s+pro\s+(?:firmu|společnost|spolecnost)\s*,?\s*(?:že|ze))\s+(.+)$/iu);
+  if (m) return { intent: "create_assistant_memory", entities: { content: m[1].trim(), scope: "company" } };
+
+  m = text.match(/^(?:remember(?:\s+for\s+me)?\s+that|zapamatuj\s+si(?:\s+pro\s+(?:mě|me))?\s*,?\s*(?:že|ze))\s+(.+)$/iu);
+  if (m) return { intent: "create_assistant_memory", entities: { content: m[1].trim(), scope: "personal" } };
+
+  m = text.match(/^(?:what\s+do\s+you\s+remember|co\s+si\s+(?:pamatuješ|pamatujes)|co\s+(?:máš|mas)\s+v\s+(?:paměti|pameti))(?:\s+(?:about|o)\s+(.+?))?\??$/iu);
+  if (m) return { intent: "recall_assistant_memory", entities: { query: m[1]?.trim() } };
 
   // "log call with Jane Smith: discussed timeline, promised quote by Friday"
   // "log email from Jane Smith: sent quote"

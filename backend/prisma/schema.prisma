@@ -53,6 +53,7 @@ model Company {
   voiceDeviceStates            VoiceDeviceState[]
   voiceConversations           VoiceConversation[]
   voiceConversationMessages    VoiceConversationMessage[]
+  assistantMemories            AssistantMemory[]
 
   @@map("companies")
 }
@@ -163,6 +164,7 @@ model User {
   assignedJobs  Job[]      @relation("AssignedJobs")
   voiceDeviceState VoiceDeviceState?
   voiceConversations VoiceConversation[]
+  assistantMemories AssistantMemory[] @relation("AssistantMemoryOwner")
   assignedTasks Task[]     @relation("AssignedTasks")
   devicePairings DevicePairing[]
 
@@ -231,6 +233,32 @@ model VoiceConversationMessage {
   @@unique([conversationId, sourceEventId])
   @@index([companyId, occurredAt])
   @@map("voice_conversation_messages")
+}
+
+// Explicit, durable Emma memory. Conversation transcripts remain a separate,
+// short-term continuity source: no transcript is promoted into this table
+// unless the user explicitly says "remember that ...". Personal memories are
+// visible only to their owner; company memories are shared and require company
+// management permission to create or archive.
+model AssistantMemory {
+  id                String    @id @default(uuid())
+  companyId         String    @map("company_id")
+  ownerUserId       String?   @map("owner_user_id")
+  scope             String    @default("personal")
+  content           String
+  normalizedContent String    @map("normalized_content")
+  status            String    @default("active")
+  createdBy         String    @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  archivedAt        DateTime? @map("archived_at")
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  ownerUser User?   @relation("AssistantMemoryOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, scope, status])
+  @@index([companyId, ownerUserId, status])
+  @@map("assistant_memories")
 }
 
 model DevicePairing {

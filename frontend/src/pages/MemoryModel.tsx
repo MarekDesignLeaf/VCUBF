@@ -1,88 +1,169 @@
-import { useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type RepeatedActionPattern } from "../api/client";
+import { api, type AssistantMemory, type RepeatedActionPattern } from "../api/client";
 
-// Memory Model — Pattern Detection (read-only foundation only).
-//
-// This is a different, lower-trust layer than the Learning Engine (the
-// Learning page only ever creates a rule from an explicit user
-// correction/statement). Here, a "pattern" is just a repeated sequence of
-// manual actions found in the real Audit Log — a much weaker signal — so
-// nothing on this page is ever auto-applied. See
-// backend/src/services/memoryModelService.ts for the exact detection rule
-// (last 30 days, same user, 2+ consecutive distinct actions, recurring at
-// least 3 times). Nothing here creates a Playbook automatically; the
-// convenience link below only prefills the real Playbook creation form on
-// the Playbooks page so a human still reviews and explicitly saves it.
 export function MemoryModel() {
+  const [memories, setMemories] = useState<AssistantMemory[] | null>(null);
   const [patterns, setPatterns] = useState<RepeatedActionPattern[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [content, setContent] = useState("");
+  const [scope, setScope] = useState<"personal" | "company">("personal");
+  const [saving, setSaving] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [patternError, setPatternError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.memoryModel
-      .patterns()
-      .then(setPatterns)
-      .catch(() => setError("Could not load detected action patterns."));
+  const loadMemories = useCallback(async () => {
+    try {
+      setMemories(await api.memoryModel.memories("all"));
+      setMemoryError(null);
+    } catch {
+      setMemoryError("Could not load Emma's persistent memory.");
+    }
   }, []);
 
-  if (error) return <div className="error-banner">{error}</div>;
+  useEffect(() => {
+    void loadMemories();
+    api.memoryModel.patterns().then(setPatterns).catch(() => {
+      setPatternError("Repeated action patterns require audit.read permission.");
+    });
+  }, [loadMemories]);
+
+  async function saveMemory(event: FormEvent) {
+    event.preventDefault();
+    const value = content.trim();
+    if (!value) return;
+    setSaving(true);
+    setMemoryError(null);
+    setNotice(null);
+    try {
+      const saved = await api.memoryModel.createMemory(value, scope);
+      setContent("");
+      setNotice(saved.duplicate ? "Emma already had this active memory." : "Memory saved. Emma will receive it in future conversations.");
+      await loadMemories();
+    } catch {
+      setMemoryError(scope === "company"
+        ? "Could not save company memory. Company scope requires CRM management permission."
+        : "Could not save the memory.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function archiveMemory(memory: AssistantMemory) {
+    if (!window.confirm(`Archive this memory?\n\n${memory.content}`)) return;
+    setMemoryError(null);
+    setNotice(null);
+    try {
+      await api.memoryModel.archiveMemory(memory.id);
+      setNotice("Memory archived. Emma will no longer use it as active context.");
+      await loadMemories();
+    } catch {
+      setMemoryError("Could not archive the memory.");
+    }
+  }
 
   return (
     <div>
       <div className="page-header">
-        <h1>Memory Model — Repeated Action Patterns</h1>
+        <h1>Emma Memory</h1>
       </div>
-      <p className="hint">
-        Candidate patterns — review only, nothing created automatically. This scans the last 30
-        days of your own audit log for sequences of two or more different actions that the same
-        person performed together, back to back, at least 3 separate times. It is a much weaker
-        signal than the Learning Engine (which only ever learns from an explicit correction you
-        make), so nothing here is ever turned into a rule or a Playbook by itself. If a pattern
-        below looks like a real repeated workflow, use "Build a playbook from this" to prefill a
-        real Playbook on the Playbook Engine page — you still review and save it yourself.
-      </p>
 
-      {!patterns ? (
-        <p>Loading…</p>
-      ) : patterns.length === 0 ? (
-        <p className="hint">No repeated action pattern has recurred at least 3 times in the last 30 days.</p>
-      ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Action sequence</th>
-              <th>Occurrences</th>
-              <th>Example timestamps</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {patterns.map((p) => {
-              const sequenceLabel = p.actionSequence.join(" → ");
-              const prefillName = `Playbook: ${p.actionSequence.join(" then ")}`;
-              const prefillSteps = p.actionSequence.join("\n");
-              const query = new URLSearchParams({
-                prefill_name: prefillName,
-                prefill_steps: prefillSteps,
-              }).toString();
-              return (
-                <tr key={p.actionSequence.join(">")}>
+      <section className="card" style={{ marginBottom: 24 }}>
+        <h2>Persistent memory</h2>
+        <p className="hint">
+          Emma stores a permanent note only after an explicit “remember that…” command or this form.
+          Personal notes are visible only to you. Company notes are shared with your company and require
+          CRM management permission. Archived notes stay visible here but are not sent to Emma.
+        </p>
+        <form onSubmit={saveMemory}>
+          <label>
+            What Emma should remember
+            <textarea
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              maxLength={2000}
+              rows={3}
+              placeholder="For example: Invoice numbers use the format YYYY-001."
+              required
+            />
+          </label>
+          <label>
+            Scope
+            <select value={scope} onChange={(event) => setScope(event.target.value as "personal" | "company")}>
+              <option value="personal">For me</option>
+              <option value="company">For the company</option>
+            </select>
+          </label>
+          <button type="submit" disabled={saving || !content.trim()}>{saving ? "Saving…" : "Remember"}</button>
+        </form>
+        {notice && <p>{notice}</p>}
+        {memoryError && <div className="error-banner">{memoryError}</div>}
+
+        {memories === null ? (
+          <p>Loading…</p>
+        ) : memories.length === 0 ? (
+          <p className="hint">No persistent memory has been saved yet.</p>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr><th>Memory</th><th>Scope</th><th>Status</th><th>Updated</th><th></th></tr>
+            </thead>
+            <tbody>
+              {memories.map((memory) => (
+                <tr key={memory.id}>
+                  <td>{memory.content}</td>
+                  <td>{memory.scope === "company" ? "Company" : "Personal"}</td>
+                  <td>{memory.status}</td>
+                  <td>{new Date(memory.updatedAt).toLocaleString()}</td>
                   <td>
-                    <code>{sequenceLabel}</code>
-                  </td>
-                  <td>{p.occurrenceCount}</td>
-                  <td className="hint">
-                    {p.exampleTimestamps.map((t) => new Date(t).toLocaleString()).join(", ")}
-                  </td>
-                  <td>
-                    <Link to={`/playbooks?${query}`}>Build a playbook from this</Link>
+                    {memory.status === "active" && (
+                      <button type="button" onClick={() => void archiveMemory(memory)}>Archive</button>
+                    )}
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section>
+        <h2>Repeated action patterns</h2>
+        <p className="hint">
+          Candidate patterns are review-only. The system scans the last 30 days for two different
+          consecutive actions repeated by the same person at least three times. It never turns a
+          detected pattern into a rule or playbook automatically.
+        </p>
+        {patternError ? (
+          <p className="hint">{patternError}</p>
+        ) : patterns === null ? (
+          <p>Loading…</p>
+        ) : patterns.length === 0 ? (
+          <p className="hint">No repeated action pattern has recurred at least 3 times in the last 30 days.</p>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr><th>Action sequence</th><th>Occurrences</th><th>Example timestamps</th><th></th></tr>
+            </thead>
+            <tbody>
+              {patterns.map((pattern) => {
+                const query = new URLSearchParams({
+                  prefill_name: `Playbook: ${pattern.actionSequence.join(" then ")}`,
+                  prefill_steps: pattern.actionSequence.join("\n"),
+                }).toString();
+                return (
+                  <tr key={pattern.actionSequence.join(">")}>
+                    <td><code>{pattern.actionSequence.join(" → ")}</code></td>
+                    <td>{pattern.occurrenceCount}</td>
+                    <td className="hint">{pattern.exampleTimestamps.map((t) => new Date(t).toLocaleString()).join(", ")}</td>
+                    <td><Link to={`/playbooks?${query}`}>Build a playbook from this</Link></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </section>
     </div>
   );
 }
