@@ -32,6 +32,7 @@ export type ParsedCommand =
   | { intent: "create_service"; entities: { name: string; category?: string } }
   | { intent: "create_task"; entities: { title: string; employee_name?: string; due_at?: string } }
   | { intent: "list_tasks"; entities: Record<string, never> }
+  | { intent: "change_task_status"; entities: { title: string; task_status: "open" | "in_progress" | "completed" | "cancelled" } }
   | { intent: "list_quotes"; entities: { client_name?: string } }
   | { intent: "list_job_openings"; entities: Record<string, never> }
   | { intent: "create_learning_rule"; entities: { term: string; meaning: string } }
@@ -317,6 +318,12 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   }
 
   if (/^(?:list|show)\s+tasks?$/i.test(text)) return { intent: "list_tasks", entities: {} };
+  const taskStatusMatch = text.match(/^(?:start|complete|cancel)\s+(?:task\s+)?(.+)$/i);
+  if (taskStatusMatch) {
+    const verb = text.match(/^(start|complete|cancel)/i)?.[1].toLowerCase();
+    const task_status = verb === "start" ? "in_progress" : verb === "complete" ? "completed" : "cancelled";
+    return { intent: "change_task_status", entities: { title: taskStatusMatch[1].trim(), task_status } };
+  }
 
   m = text.match(/^(?:create|add|new)\s+service\s+(.+)$/i);
   if (m) {

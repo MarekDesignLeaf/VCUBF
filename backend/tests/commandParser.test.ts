@@ -169,6 +169,17 @@ describe("commandParser", () => {
     assert.equal(parseTextCommand("list tasks").intent, "list_tasks");
   });
 
+  it("parses task workflow status commands", () => {
+    assert.deepEqual(parseTextCommand("start task Prepare quote"), {
+      intent: "change_task_status",
+      entities: { title: "Prepare quote", task_status: "in_progress" },
+    });
+    assert.deepEqual(parseTextCommand("complete task Prepare quote"), {
+      intent: "change_task_status",
+      entities: { title: "Prepare quote", task_status: "completed" },
+    });
+  });
+
   it("parses 'create service X, category Y'", () => {
     const result = parseTextCommand("create service Fence repair, category Fencing");
     assert.equal(result.intent, "create_service");

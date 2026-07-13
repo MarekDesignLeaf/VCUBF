@@ -310,6 +310,22 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
       break;
     }
 
+    case "change_task_status": {
+      const tasks = await taskService.listTasks(user);
+      const matches = tasks.filter((task) => task.title.toLocaleLowerCase() === command.entities.title.toLocaleLowerCase());
+      if (matches.length === 0) {
+        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 404, error: "TASK_NOT_FOUND", message: `No task matching "${command.entities.title}".` };
+        break;
+      }
+      if (matches.length > 1) {
+        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 409, error: "AMBIGUOUS_REFERENCE", message: `Multiple tasks match "${command.entities.title}" — be more specific.` };
+        break;
+      }
+      const result = await taskService.updateTask(user, matches[0].id, { task_status: command.entities.task_status });
+      response = { intent: command.intent, interpreted: command.entities, ok: result.ok, httpStatus: result.httpStatus, data: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error, message: result.ok ? undefined : result.message };
+      break;
+    }
+
     case "create_service": {
       const result = await serviceCatalogueService.createService(user, {
         name: command.entities.name,
