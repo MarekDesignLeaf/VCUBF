@@ -16,6 +16,7 @@ import {
 import type { AuthedUser } from "../middleware/auth.js";
 import { whatsAppConfigurationAvailable } from "../connectors/whatsappBusinessAdapter.js";
 import { assertConnectorEncryptionConfigured } from "../connectors/connectorCrypto.js";
+import { requestConnectorBackgroundSync } from "./connectorBackgroundSyncService.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
 const credentialReferenceSchema = z
@@ -395,5 +396,6 @@ export async function enableConnectorSource(
     confirmed: true,
     result: "success",
   });
+  requestConnectorBackgroundSync();
   return ok(200, safeUpdated);
 }

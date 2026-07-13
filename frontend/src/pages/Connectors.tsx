@@ -47,6 +47,12 @@ function defaultScopes(key: ConnectorKey) {
   return ["read:messages", "send:messages"];
 }
 
+function supportsAutomaticServerSync(source: ConnectorSource) {
+  if (source.connectorKey === "gmail") return source.configuredScopes.includes("read:messages");
+  if (source.connectorKey === "google_contacts") return source.configuredScopes.includes("read:contacts");
+  return source.connectorKey === "google_calendar" && source.configuredScopes.includes("read:calendar");
+}
+
 const SETUP_SESSION_KEY = "vcubf-guided-connector-setup";
 const connectorOrder: ConnectorKey[] = ["gmail", "google_contacts", "google_calendar", "google_drive", "google_photos", "whatsapp_business"];
 type SetupTarget = ConnectorKey | "all";
@@ -84,8 +90,8 @@ function enableImpact(source: ConnectorSource) {
           : source.connectorKey === "google_photos"
             ? "Enable Google Photos Picker? You will choose the exact photos in Google Photos; Secretary stores metadata only after you finish selection."
           : source.configuredScopes.some((scope) => scope.startsWith("write:") || scope.startsWith("send:"))
-            ? "Enable Gmail read/write access? Inbox synchronisation and draft creation will be available; every outgoing email will still require a separate confirmation."
-            : "Enable read-only Gmail access? Synchronisation will import messages into Communication Intake.";
+            ? "Enable Gmail read/write access? Inbox synchronisation begins automatically after the source is enabled, and draft creation will be available; every outgoing email still requires a separate confirmation."
+            : "Enable read-only Gmail access? Inbox synchronisation begins automatically after the source is enabled and imports messages into Communication Intake.";
 }
 
 export function Connectors() {
@@ -296,7 +302,10 @@ export function Connectors() {
     try {
       await api.connectors.enableSource(source.id, true);
       await loadSources();
-      setNotice(`${source.definition.serviceName} enabled with the listed scopes. Outgoing messages still require explicit confirmation.`);
+      const automaticSync = supportsAutomaticServerSync(source)
+        ? " Server synchronisation will start automatically; Sync now is only an optional immediate refresh."
+        : "";
+      setNotice(`${source.definition.serviceName} enabled with the listed scopes. Outgoing messages still require explicit confirmation.${automaticSync}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not enable the data source.");
     } finally {
@@ -312,7 +321,7 @@ export function Connectors() {
       const result = await api.connectors.syncSource(source.id, source.connectorKey === "gmail" ? { max_results: 25 } : {});
       await loadSources();
       const mode = result.mode === "incremental" ? "incremental" : "full";
-      const more = result.hasMore ? " More provider pages remain; run sync again." : "";
+      const more = result.hasMore ? " More provider pages remain; the server will continue automatically." : "";
       if (source.connectorKey === "google_contacts") {
         const fallback = result.fallbackFromExpiredSyncToken ? " Sync token expired, so a safe full sync was used." : "";
         setNotice(`Google Contacts ${mode} sync: ${result.upsertedCount ?? 0} staged, ${result.deletedCount ?? 0} provider deletions.${fallback}${more}`);
@@ -487,7 +496,7 @@ export function Connectors() {
         ) : null}
       </div>
       <p className="hint">
-        Gmail can read mail, create drafts and send only after confirmation. Contacts and Calendar are read-only. Google Drive uses per-file access; Google Photos opens its own picker for exact user-selected photos. WhatsApp imports signed inbound webhooks, synchronises valid sender contacts without overwriting CRM data, and confirms every send.
+        Enabled Gmail (with read access), Contacts and Calendar sources synchronise automatically in the background. Sync now is an optional immediate refresh. Gmail can read mail, create drafts and send only after confirmation. Contacts and Calendar are read-only. Google Drive uses per-file access; Google Photos opens its own picker for exact user-selected photos. WhatsApp imports signed inbound webhooks, synchronises valid sender contacts without overwriting CRM data, and confirms every send.
         Never paste an OAuth token, client secret or password here.
       </p>
 
@@ -534,7 +543,12 @@ export function Connectors() {
                 <td>{source.configuredScopes.length ? source.configuredScopes.join(", ") : "None configured"}</td>
                 <td>{source.configurationAvailable ? "Ready" : "Missing protected credentials"}</td>
                 <td>{source.authorizationConfigured ? "Configured" : "Not configured"}</td>
-                <td>{source.connectionStatus.replaceAll("_", " ")}</td>
+                <td>
+                  {source.connectionStatus.replaceAll("_", " ")}
+                  {source.isEnabled && supportsAutomaticServerSync(source) ? <div className="hint">Automatic server sync enabled</div> : null}
+                  {source.lastSyncAt ? <div className="hint">Last sync: {new Date(source.lastSyncAt).toLocaleString()} ({source.lastSyncStatus ?? "unknown"})</div> : null}
+                  {source.lastErrorCode ? <div className="hint">Last sync error: {source.lastErrorCode}</div> : null}
+                </td>
                 <td>{source.definition.adapterAvailable ? "Available" : "Contract only"}</td>
                 <td>
                   {canManage ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -547,7 +561,7 @@ export function Connectors() {
                     ) : null}
                     {["gmail", "google_contacts", "google_calendar"].includes(source.connectorKey) && source.isEnabled ? (
                       <button onClick={() => sync(source)} disabled={busySourceId === source.id}>
-                        {source.incrementalSyncConfigured ? "Sync changes" : "Initial sync"}
+                        Sync now
                       </button>
                     ) : null}
                     {["google_contacts", "whatsapp_business"].includes(source.connectorKey) ? (

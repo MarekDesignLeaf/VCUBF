@@ -31,6 +31,7 @@ import { metricsRouter } from "./modules/metrics/routes.js";
 import { invoicesRouter } from "./modules/invoices/routes.js";
 import { devicePairingRouter } from "./modules/auth/devicePairing.js";
 import { voiceStateRouter } from "./modules/command/voiceState.js";
+import { startConnectorBackgroundSync } from "./services/connectorBackgroundSyncService.js";
 
 export function createServer() {
   const app = express();
@@ -98,5 +99,8 @@ export function createServer() {
 if (process.env.NODE_ENV !== "test") {
   const app = createServer();
   const port = process.env.PORT ?? 4000;
-  app.listen(port, () => console.log(`VCUF Secretary backend listening on :${port}`));
+  app.listen(port, () => {
+    console.log(`VCUF Secretary backend listening on :${port}`);
+    startConnectorBackgroundSync();
+  });
 }

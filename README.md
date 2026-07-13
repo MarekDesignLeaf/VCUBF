@@ -785,8 +785,9 @@ not guess" rule rather than trying to be clever about it). Gmail read-only inges
 imports messages manually on request into Communication Intake, preserving provider source,
 message and thread IDs; after the initial full sync it uses Gmail history changes, and supports
 confirmed provider revocation/disconnect. It performs deterministic extraction and CRM matching
-only through the existing reviewed intake workflow. Scheduled/background invocation, Gmail push
-notifications, WhatsApp/SMS ingestion, thread-wide summarisation, attachment/photo
+only through the existing reviewed intake workflow. Enabled Gmail, Google Contacts and Google Calendar
+sources now receive server-side background polling; Gmail push notifications, WhatsApp/SMS ingestion,
+thread-wide summarisation, attachment/photo
 ingestion, near-duplicate identity matching beyond the fixed normalized contact/name
 rules, unresolved-enquiry scanning across external inboxes, and any send action remain
 unimplemented. The Notification and Escalation Module's feed is pull-only (a
@@ -829,7 +830,9 @@ Build order should follow the roadmap in the master documentation (Phase 1 → P
   `GOOGLE_DRIVE_OAUTH_CLIENT_SECRET`, `GOOGLE_DRIVE_OAUTH_REDIRECT_URI`, `GOOGLE_DRIVE_PICKER_APP_ID`,
   `GOOGLE_DRIVE_PICKER_API_KEY`, `GOOGLE_PHOTOS_OAUTH_CLIENT_ID`, `GOOGLE_PHOTOS_OAUTH_CLIENT_SECRET`,
   `GOOGLE_PHOTOS_OAUTH_REDIRECT_URI` and a 32-byte base64
-  `CONNECTOR_ENCRYPTION_KEY` as environment variables; run
+  `CONNECTOR_ENCRYPTION_KEY` as environment variables. Optional non-secret controls are
+  `CONNECTOR_BACKGROUND_SYNC_ENABLED` (defaults to `true`) and
+  `CONNECTOR_BACKGROUND_SYNC_INTERVAL_MINUTES` (defaults to `5`, minimum `1`); run
   `npm run build && npx prisma migrate deploy && npm start`.
 - **Frontend**: any static host (Railway static site, Vercel, Netlify). Set
   `VITE_API_URL` to the deployed backend URL at build time.

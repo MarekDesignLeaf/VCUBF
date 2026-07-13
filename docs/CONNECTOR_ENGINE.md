@@ -22,6 +22,8 @@ The Google Contacts adapter uses only `contacts.readonly`. It stages People API 
 
 Google Calendar uses only `calendar.readonly`. Calendar and event metadata is staged separately from Secretary jobs and tasks. CalendarList and every calendar keep independent sync tokens; HTTP 410 clears only that calendar's stale event staging before a full reload. Provider cancellations never change internal scheduling or capacity records.
 
+Enabled Gmail sources with `read:messages`, Google Contacts sources with `read:contacts`, and Google Calendar sources with `read:calendar` are synchronised by the backend automatically. The server runs a first sweep at startup, requests a sweep immediately after a supported source is enabled and then polls due sources every five minutes by default; `CONNECTOR_BACKGROUND_SYNC_INTERVAL_MINUTES` can set a longer or shorter interval (minimum one minute), while `CONNECTOR_BACKGROUND_SYNC_ENABLED=false` pauses this non-destructive polling for maintenance. A database lease prevents two server instances from processing the same due source together. Each provider sync retains its existing audit record and error status. **Sync now** is only an optional immediate refresh. Google Drive and Google Photos remain explicit user-selection flows, and WhatsApp remains event-driven through signed webhooks.
+
 Google Drive deliberately uses non-sensitive `drive.file` rather than broad restricted Drive scopes. Google Picker grants access only to image files the user explicitly selects. The backend verifies each selected ID with `files.get`, accepts only `image/*`, stores metadata but no bytes, and requires confirmation before creating a Portfolio Photo reference. Registration leaves marketing use false and all review/permission states unreviewed or unknown.
 
 Google Photos is a separate connector. It uses the Google Photos Picker scope `photospicker.mediaitems.readonly`, creates a short-lived server-side Picker session and opens the returned Google-controlled picker in a new tab (never an iframe). The user selects exact Photos items; the backend polls the session, retrieves only the selected item metadata, ignores the temporary `baseUrl` byte-download URL and deletes the completed session when possible. It never scans, searches or imports a whole Google Photos library. Only selected `PHOTO`/`image/*` items can become internal Portfolio Photo references after a separate confirmation.
@@ -128,7 +130,7 @@ The same lifecycle can be completed manually:
 1. Register Gmail (choose read, draft and/or send scopes), Google Contacts (`read:contacts`), Google Drive (`select:image_files`), Google Photos (`select:user_selected_photos`) or WhatsApp Business (`read:messages`, `send:messages`).
 2. Choose **Authorize Gmail/Contacts/Drive/Google Photos** and complete Google's consent screen.
 3. Review and explicitly enable the source.
-4. Use **Initial sync**, then **Sync changes**. Gmail imports Communication Intake; Contacts creates reviewable staging records only.
+4. After Enable, the server starts the first supported Gmail/Contacts/Calendar sync automatically. Use **Sync now** only when an immediate refresh is useful. Gmail imports Communication Intake; Contacts creates reviewable staging records only.
 5. For Contacts, choose **Review contacts** and explicitly confirm any CRM import.
 6. Use **Disable** to stop access temporarily, or confirmed **Disconnect** to revoke and delete authorization.
 
@@ -138,7 +140,7 @@ Cross-company source IDs resolve as not found. Provider failures set `lastSyncSt
 
 ## Remaining connector work
 
-- scheduled/background invocation and Gmail push notifications;
+- Gmail push notifications (background polling is implemented);
 - encryption-key rotation workflow;
 - attachment metadata and separately authorized attachment ingestion;
 - provider sandbox verification plus production Google Picker origin/API-key restrictions;
