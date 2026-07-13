@@ -29,4 +29,39 @@ describe("native voice device state", () => {
     assert.ok(audit);
     assert.ok(await prisma.auditLog.findFirst({ where: { actionName: "clear_voice_device_history" } }));
   });
+
+  it("persists a complete ordered text transcript without audio", async () => {
+    const started = await request(app).post("/command/voice-conversations").set("Authorization", `Bearer ${token}`).send({ mode: "realtime" });
+    assert.equal(started.status, 201);
+    const conversationId = started.body.id;
+
+    // Realtime input transcription is asynchronous and may arrive after the
+    // model response, so the explicit sequence must define display order.
+    const assistant = await request(app).post(`/command/voice-conversations/${conversationId}/messages`).set("Authorization", `Bearer ${token}`).send({ role: "assistant", content: "Open Invoices and choose Create draft.", sequence: 2, source_event_id: "response-1" });
+    assert.equal(assistant.status, 201);
+    const user = await request(app).post(`/command/voice-conversations/${conversationId}/messages`).set("Authorization", `Bearer ${token}`).send({ role: "user", content: "Where do I create an invoice?", sequence: 1, source_event_id: "input-1" });
+    assert.equal(user.status, 201);
+    const duplicate = await request(app).post(`/command/voice-conversations/${conversationId}/messages`).set("Authorization", `Bearer ${token}`).send({ role: "user", content: "Where do I create an invoice?", sequence: 1, source_event_id: "input-1" });
+    assert.equal(duplicate.status, 200);
+    await request(app).post(`/command/voice-conversations/${conversationId}/end`).set("Authorization", `Bearer ${token}`).send({ status: "completed" }).expect(204);
+
+    const history = await request(app).get("/command/voice-conversations").set("Authorization", `Bearer ${token}`);
+    assert.equal(history.status, 200);
+    assert.equal(history.body[0].status, "completed");
+    assert.deepEqual(history.body[0].messages.map((message: any) => [message.role, message.content]), [
+      ["user", "Where do I create an invoice?"],
+      ["assistant", "Open Invoices and choose Create draft."],
+    ]);
+    assert.equal("audio" in history.body[0], false);
+    assert.equal(await prisma.voiceConversationMessage.count({ where: { conversationId } }), 2);
+
+    await prisma.user.update({ where: { email: "worker@test.local" }, data: { permissions: ["voice.execute"] } });
+    const workerLogin = await request(app).post("/auth/login").send({ email: "worker@test.local", password: "Password123!" });
+    const workerHistory = await request(app).get("/command/voice-conversations").set("Authorization", `Bearer ${workerLogin.body.token}`);
+    assert.deepEqual(workerHistory.body, []);
+    await request(app).post(`/command/voice-conversations/${conversationId}/messages`).set("Authorization", `Bearer ${workerLogin.body.token}`).send({ role: "user", content: "not mine" }).expect(404);
+
+    await request(app).delete("/command/voice-state/history").set("Authorization", `Bearer ${token}`).expect(200);
+    assert.equal(await prisma.voiceConversation.count({ where: { id: conversationId } }), 0);
+  });
 });

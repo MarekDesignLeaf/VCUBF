@@ -51,6 +51,8 @@ model Company {
   tasks                        Task[]
   devicePairings               DevicePairing[]
   voiceDeviceStates            VoiceDeviceState[]
+  voiceConversations           VoiceConversation[]
+  voiceConversationMessages    VoiceConversationMessage[]
 
   @@map("companies")
 }
@@ -160,6 +162,7 @@ model User {
   auditLogs     AuditLog[]
   assignedJobs  Job[]      @relation("AssignedJobs")
   voiceDeviceState VoiceDeviceState?
+  voiceConversations VoiceConversation[]
   assignedTasks Task[]     @relation("AssignedTasks")
   devicePairings DevicePairing[]
 
@@ -189,6 +192,44 @@ model VoiceDeviceState {
 
   @@index([companyId, heartbeatAt])
   @@map("voice_device_states")
+}
+
+// Persisted text-only transcript of one activated Emma exchange. Audio bytes
+// are streamed during Realtime sessions but are never written to these tables.
+model VoiceConversation {
+  id        String    @id @default(uuid())
+  companyId String    @map("company_id")
+  userId    String    @map("user_id")
+  mode      String
+  status    String    @default("active")
+  startedAt DateTime  @default(now()) @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+
+  company  Company                    @relation(fields: [companyId], references: [id])
+  user     User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages VoiceConversationMessage[]
+
+  @@index([companyId, userId, startedAt])
+  @@map("voice_conversations")
+}
+
+model VoiceConversationMessage {
+  id             String   @id @default(uuid())
+  companyId      String   @map("company_id")
+  conversationId String   @map("conversation_id")
+  role           String
+  content        String
+  sequence       Int
+  sourceEventId  String?  @map("source_event_id")
+  occurredAt     DateTime @default(now()) @map("occurred_at")
+
+  company      Company           @relation(fields: [companyId], references: [id])
+  conversation VoiceConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, sequence])
+  @@unique([conversationId, sourceEventId])
+  @@index([companyId, occurredAt])
+  @@map("voice_conversation_messages")
 }
 
 model DevicePairing {

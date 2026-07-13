@@ -1352,6 +1352,23 @@ export interface VoiceDeviceState {
   heartbeatAt: string | null;
 }
 
+export interface VoiceConversationMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  sequence: number;
+  occurredAt: string;
+}
+
+export interface VoiceConversation {
+  id: string;
+  mode: "realtime" | "reviewed_text" | "local";
+  status: "active" | "completed" | "interrupted" | "error";
+  startedAt: string;
+  endedAt: string | null;
+  messages: VoiceConversationMessage[];
+}
+
 export const api = {
   invoices: { list:()=>request<Invoice[]>("/invoices"), create:(data:Record<string,unknown>)=>request<Invoice>("/invoices",{method:"POST",body:JSON.stringify(data)}), status:(id:string,invoice_status:string)=>request<Invoice>(`/invoices/${id}/status`,{method:"PUT",body:JSON.stringify({invoice_status})}), payment:(id:string,data:Record<string,unknown>,confirmed=false)=>request<Invoice>(`/invoices/${id}/payments`,{method:"POST",body:JSON.stringify({...data,confirmed})}), downloadPdf:(id:string)=>download(`/invoices/${id}/pdf`) },
   metrics: {
@@ -1817,6 +1834,7 @@ export const api = {
         body: JSON.stringify({ text, input_method: inputMethod }),
       }),
     voiceState: () => request<VoiceDeviceState>("/command/voice-state"),
+    voiceConversations: (limit = 10) => request<VoiceConversation[]>(`/command/voice-conversations?limit=${limit}`),
     controlVoice: (control: "pause" | "resume" | "end_conversation") =>
       request<VoiceDeviceState>("/command/voice-state/control", {
         method: "POST",

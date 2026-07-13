@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type VoiceDeviceState } from "../api/client";
+import { api, type VoiceConversation, type VoiceDeviceState } from "../api/client";
 
 const OFFLINE: VoiceDeviceState = {
   status: "offline",
@@ -24,6 +24,7 @@ const STATUS_LABELS: Record<VoiceDeviceState["status"], string> = {
 
 export function VoiceControlCenter() {
   const [state, setState] = useState<VoiceDeviceState>(OFFLINE);
+  const [conversations, setConversations] = useState<VoiceConversation[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,8 +33,8 @@ export function VoiceControlCenter() {
     let timer: number | undefined;
     const poll = async () => {
       try {
-        const next = await api.command.voiceState();
-        if (active) { setState(next); setError(null); }
+        const [next, history] = await Promise.all([api.command.voiceState(), api.command.voiceConversations(20)]);
+        if (active) { setState(next); setConversations(history); setError(null); }
       } catch {
         if (active) setError("Could not read the Windows Emma status.");
       } finally {
@@ -52,9 +53,10 @@ export function VoiceControlCenter() {
   }
 
   async function clearHistory() {
+    if (!window.confirm("Delete all saved Emma conversation transcripts and end the active conversation? Audio is not stored.")) return;
     setBusy(true); setError(null);
-    try { setState(await api.command.clearVoiceHistory()); }
-    catch { setError("Emma's displayed text could not be cleared."); }
+    try { setState(await api.command.clearVoiceHistory()); setConversations([]); }
+    catch { setError("Emma's transcript history could not be deleted."); }
     finally { setBusy(false); }
   }
 
@@ -70,14 +72,32 @@ export function VoiceControlCenter() {
         <div className="voice-control-actions">
           <button type="button" className="voice-button" disabled={busy || state.status === "offline"} onClick={() => control(isPaused ? "resume" : "pause")}>{isPaused ? "Resume listening" : "Pause listening"}</button>
           <button type="button" className="voice-button" disabled={busy || state.status === "offline"} onClick={() => control("end_conversation")}>End conversation</button>
-          <button type="button" className="voice-button" disabled={busy || (!state.lastTranscript && !state.lastResponse)} onClick={clearHistory}>Clear displayed text</button>
+          <button type="button" className="voice-button" disabled={busy || (!state.lastTranscript && !state.lastResponse && conversations.length === 0)} onClick={clearHistory}>Delete transcript history</button>
         </div>
       </div>
       <div className="voice-observation-grid" aria-live="polite">
         <div><span className="voice-observation-label">Emma heard</span><div>{state.lastTranscript || "Nothing captured yet."}</div></div>
         <div><span className="voice-observation-label">Emma answered</span><div>{state.lastResponse || "No response yet."}</div></div>
       </div>
-      <p className="hint voice-control-privacy">Only final text accepted after activation is shown and stored here. Background speech is not retained, and VCUBF does not store microphone audio. Pause listening disables wake-word reactions; Clear displayed text removes the retained transcript and answer.</p>
+      <details className="voice-transcript-history">
+        <summary>Recent saved conversation transcripts ({conversations.length})</summary>
+        {conversations.length === 0 ? <p className="hint">No saved conversations yet.</p> : conversations.map((conversation) => (
+          <section className="voice-transcript-conversation" key={conversation.id}>
+            <div className="voice-transcript-heading">
+              <strong>{new Date(conversation.startedAt).toLocaleString()}</strong>
+              <span className="hint">{conversation.mode.replace("_", " ")} · {conversation.status}</span>
+            </div>
+            {conversation.messages.map((message) => (
+              <div className={`voice-transcript-message role-${message.role}`} key={message.id}>
+                <span>{message.role === "user" ? "You" : "Emma"}</span>
+                <div>{message.content}</div>
+                <time dateTime={message.occurredAt}>{new Date(message.occurredAt).toLocaleTimeString()}</time>
+              </div>
+            ))}
+          </section>
+        ))}
+      </details>
+      <p className="hint voice-control-privacy">Complete final text turns are saved after Emma is activated. Background speech is not retained, and VCUBF does not store microphone audio. Pause listening disables wake-word reactions; Delete transcript history ends the active conversation and removes all saved text conversations.</p>
       {state.pendingControl && <div className="voice-control-pending">Waiting for Emma to apply: {state.pendingControl.replace("_", " ")}…</div>}
       {error && <div className="error-banner" role="alert">{error}</div>}
     </section>

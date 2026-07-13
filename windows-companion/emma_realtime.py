@@ -110,11 +110,18 @@ class RealtimeEmma:
         self.last_activity = time.monotonic()
         self.response_complete_at: float | None = None
         self.current_response_text = ""
+        self.response_texts: dict[str, str] = {}
         self.current_status = "listening"
         self.current_listening = True
         self.reported_speaking = False
         self.exit_code = 0
         self.state_lock = asyncio.Lock()
+        self.transcript_lock = asyncio.Lock()
+        self.conversation_id: str | None = None
+        self.current_user_sequence = 0
+        self.next_user_sequence = 1
+        self.item_sequences: dict[str, int] = {}
+        self.response_sequences: dict[str, int] = {}
         self.audio = pyaudio.PyAudio()
         self.input_stream = None
         self.output_stream = None
@@ -157,6 +164,43 @@ class RealtimeEmma:
         except Exception as exc:
             log(f"voice heartbeat error: {type(exc).__name__}")
             return {}
+
+    async def start_transcript(self) -> None:
+        try:
+            result = await asyncio.to_thread(backend_json, "POST", "/command/voice-conversations", {"mode": "realtime"})
+            self.conversation_id = str(result["id"])
+        except Exception as exc:
+            log(f"transcript start error: {type(exc).__name__}")
+
+    async def append_transcript(self, role: str, content: str, sequence: int, source_event_id: str = "") -> None:
+        if not self.conversation_id or not content.strip():
+            return
+        body = {"role": role, "content": content.strip()[:8000], "sequence": sequence}
+        if source_event_id:
+            body["source_event_id"] = source_event_id[:200]
+        try:
+            async with self.transcript_lock:
+                await asyncio.to_thread(
+                    backend_json,
+                    "POST",
+                    f"/command/voice-conversations/{self.conversation_id}/messages",
+                    body,
+                )
+        except Exception as exc:
+            log(f"transcript message error: {type(exc).__name__}")
+
+    async def end_transcript(self, status: str) -> None:
+        if not self.conversation_id:
+            return
+        try:
+            await asyncio.to_thread(
+                backend_json,
+                "POST",
+                f"/command/voice-conversations/{self.conversation_id}/end",
+                {"status": status},
+            )
+        except Exception as exc:
+            log(f"transcript end error: {type(exc).__name__}")
 
     async def configure(self) -> None:
         instructions = """You are Emma, a concise, warm voice assistant for VCUBF Secretary.
@@ -213,7 +257,10 @@ If interrupted, stop speaking immediately and listen to the new request."""
             }
         )
         if self.initial_command:
+            self.current_user_sequence = 1
+            self.next_user_sequence = 3
             await self.update_state("thinking", False, transcript=self.initial_command)
+            await self.append_transcript("user", self.initial_command, 1, "initial-command")
             await self.send(
                 {
                     "type": "conversation.item.create",
@@ -289,7 +336,11 @@ If interrupted, stop speaking immediately and listen to the new request."""
             event = json.loads(raw)
             event_type = event.get("type", "")
             self.last_activity = time.monotonic()
-            if event_type in ("response.output_audio.delta", "response.audio.delta"):
+            if event_type == "response.created":
+                response_id = str((event.get("response") or {}).get("id") or "")
+                if response_id and self.current_user_sequence:
+                    self.response_sequences[response_id] = self.current_user_sequence + 1
+            elif event_type in ("response.output_audio.delta", "response.audio.delta"):
                 if not self.reported_speaking:
                     self.reported_speaking = True
                     await self.update_state("speaking", True)
@@ -297,7 +348,11 @@ If interrupted, stop speaking immediately and listen to the new request."""
                 if chunk:
                     await self.output_queue.put(chunk)
             elif event_type in ("response.output_audio_transcript.delta", "response.audio_transcript.delta"):
-                self.current_response_text += str(event.get("delta") or "")
+                response_id = str(event.get("response_id") or "")
+                delta = str(event.get("delta") or "")
+                self.current_response_text += delta
+                if response_id:
+                    self.response_texts[response_id] = self.response_texts.get(response_id, "") + delta
                 if not self.reported_speaking:
                     self.reported_speaking = True
                     await self.update_state("speaking", True)
@@ -305,7 +360,15 @@ If interrupted, stop speaking immediately and listen to the new request."""
                 transcript = str(event.get("transcript") or "").strip()
                 if transcript:
                     self.current_response_text = transcript
+                    response_id = str(event.get("response_id") or "")
+                    if response_id:
+                        self.response_texts[response_id] = transcript
             elif event_type == "input_audio_buffer.speech_started":
+                self.current_user_sequence = self.next_user_sequence
+                self.next_user_sequence += 2
+                item_id = str(event.get("item_id") or "")
+                if item_id:
+                    self.item_sequences[item_id] = self.current_user_sequence
                 self.clear_playback()
                 self.response_complete_at = None
                 self.current_response_text = ""
@@ -319,19 +382,30 @@ If interrupted, stop speaking immediately and listen to the new request."""
                     pass
             elif event_type == "response.function_call_arguments.done":
                 asyncio.create_task(self.run_tool(event))
+            elif event_type == "conversation.item.created":
+                item = event.get("item") or {}
+                item_id = str(item.get("id") or "")
+                if item_id and item.get("role") == "user" and self.current_user_sequence:
+                    self.item_sequences.setdefault(item_id, self.current_user_sequence)
             elif event_type == "conversation.item.input_audio_transcription.completed":
                 heard = str(event.get("transcript") or "").strip()
                 if heard:
                     await self.update_state("thinking", False, transcript=heard)
+                    item_id = str(event.get("item_id") or "")
+                    sequence = self.item_sequences.pop(item_id, self.current_user_sequence or 1)
+                    await self.append_transcript("user", heard, sequence, str(event.get("event_id") or item_id))
                 normalized = heard.lower().rstrip(".!?")
                 if normalized in {"stop", "goodbye", "that's all", "that is all"}:
                     self.stop.set()
             elif event_type == "response.done":
                 self.response_complete_at = time.monotonic()
-                completed_text = response_text(event) or self.current_response_text.strip()
+                response_id = str((event.get("response") or {}).get("id") or "")
+                completed_text = response_text(event) or self.response_texts.pop(response_id, "").strip() or self.current_response_text.strip()
                 output = (event.get("response") or {}).get("output") or []
                 if completed_text:
                     await self.update_state("listening", True, response=completed_text)
+                    sequence = self.response_sequences.pop(response_id, self.current_user_sequence + 1)
+                    await self.append_transcript("assistant", completed_text, sequence, response_id or str(event.get("event_id") or ""))
                 elif any(item.get("type") == "function_call" for item in output):
                     await self.update_state("thinking", False)
                 else:
@@ -369,25 +443,35 @@ If interrupted, stop speaking immediately and listen to the new request."""
                 self.stop.set()
 
     async def run(self) -> None:
-        session = await asyncio.to_thread(backend_json, "POST", "/command/realtime/session", {})
-        secret = session["client_secret"]
-        model = session["model"]
-        uri = f"wss://api.openai.com/v1/realtime?model={model}"
-        async with websockets.connect(uri, additional_headers={"Authorization": f"Bearer {secret}"}, max_size=8 * 1024 * 1024) as ws:
-            self.ws = ws
-            await self.configure()
-            tasks = [
-                asyncio.create_task(self.microphone()),
-                asyncio.create_task(self.playback()),
-                asyncio.create_task(self.receive()),
-                asyncio.create_task(self.watchdog()),
-                asyncio.create_task(self.control_watchdog()),
-            ]
-            await self.stop.wait()
-            await self.output_queue.put(None)
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+        transcript_status = "completed"
+        await self.start_transcript()
+        try:
+            session = await asyncio.to_thread(backend_json, "POST", "/command/realtime/session", {})
+            secret = session["client_secret"]
+            model = session["model"]
+            uri = f"wss://api.openai.com/v1/realtime?model={model}"
+            async with websockets.connect(uri, additional_headers={"Authorization": f"Bearer {secret}"}, max_size=8 * 1024 * 1024) as ws:
+                self.ws = ws
+                await self.configure()
+                tasks = [
+                    asyncio.create_task(self.microphone()),
+                    asyncio.create_task(self.playback()),
+                    asyncio.create_task(self.receive()),
+                    asyncio.create_task(self.watchdog()),
+                    asyncio.create_task(self.control_watchdog()),
+                ]
+                await self.stop.wait()
+                await self.output_queue.put(None)
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+            if self.exit_code == 10:
+                transcript_status = "interrupted"
+        except Exception:
+            transcript_status = "error"
+            raise
+        finally:
+            await self.end_transcript(transcript_status)
 
     def close(self) -> None:
         for stream in (self.input_stream, self.output_stream):
