@@ -29,6 +29,7 @@ describe("voice assistant interpretation", () => {
       assert.match(body.instructions, /\/communication-intake/);
       assert.match(body.instructions, /\/invoices/);
       assert.match(body.instructions, /never invent UI/i);
+      assert.match(body.instructions, /Do not infer a conventional New button/i);
       return new Response(
         JSON.stringify({
           output: [

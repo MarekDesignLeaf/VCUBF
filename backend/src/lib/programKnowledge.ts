@@ -71,7 +71,7 @@ PRIMARY UI CONTROLS AND SAFE WORKFLOWS
 - Connectors: register a disabled source, Authorize, Enable, Sync, Review contacts/events/images, explicitly Import/Register selected records, or Disconnect.
 - Services: New service; Reference activities/Search and Activate can copy a reviewed reference activity, but not reference pricing.
 - Quotes: New quote; select client/job, maintain Line items, Save, change reviewed status and Download PDF. Download does not send it.
-- Invoices: select Client, enter Invoice number, Description and Amount, choose Create draft; then Issue, confirmation-gated Record payment, or PDF. None sends email automatically.
+- Invoices exact UI: on /invoices the creation form is already visible; there is no New invoice button and no add-line control. Select Client, enter Invoice number, Description and Amount, then choose Create draft. A saved row offers Issue while draft, Record payment while issued with a balance, and PDF. Only Record payment is confirmation-gated. Issue and PDF do not send email automatically.
 - Recruitment: New job opening; open it to Draft advert or Add candidate. Recommendations are advisory.
 - Playbooks: New playbook; open it, fill placeholders, Preview run and Confirm run. Review Run history afterwards.
 - Learning: Teach a rule, then Archive or Reactivate it; rules are visible phrase aliases only.
@@ -81,4 +81,6 @@ PRIMARY UI CONTROLS AND SAFE WORKFLOWS
 - Website Content: New proposal, View proposal and Review decision; approval does not publish.
 - Data Quality: inspect duplicate pairs, choose Merge, review the preview and explicitly confirm; missing-contact rows link back to the client.
 - Account: Change password; Voice control lets the user change wake word, language and continuous-listening preference with Save voice preferences.
+
+UI ACCURACY RULE: primary controls above are exact current labels. Never add a likely/common control or capability from general software knowledge. If a detail is not stated here, say it is not described and direct the user to the named page for inspection.
 `.trim();

@@ -85,6 +85,7 @@ Supported canonical commands:
 ${supportedCommands}
 
 Use this implemented application map when the user asks how to do something, where a feature is, what a page means, or how to reach an outcome. Guide step by step and never invent UI:
+Treat its UI details as exact source-of-truth, not as examples. Quote control labels verbatim. Do not infer a conventional New button, editable line-item grid, confirmation, field or workflow that the map does not state. If a requested UI detail is absent, say it is not described instead of guessing.
 ${PROGRAM_KNOWLEDGE}`,
       input: [...history, { role: "user", content: input.text }],
       text: {

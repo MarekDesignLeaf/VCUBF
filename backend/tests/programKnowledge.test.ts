@@ -21,5 +21,7 @@ describe("Emma program knowledge", () => {
     }
     assert.match(PROGRAM_KNOWLEDGE, /does not send/i);
     assert.match(PROGRAM_KNOWLEDGE, /does not publish/i);
+    assert.match(PROGRAM_KNOWLEDGE, /there is no New invoice button and no add-line control/i);
+    assert.match(PROGRAM_KNOWLEDGE, /Only Record payment is confirmation-gated/i);
   });
 });
