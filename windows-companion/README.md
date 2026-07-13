@@ -24,7 +24,7 @@ Every signed-in VCUBF page includes a **Windows Emma** control centre. It report
 
 The local-only **What Emma hears** monitor opens by default and shows microphone level, recognition hypotheses and activated Realtime turns. Close it when it is not needed and reopen it with the tray command **Show live hearing**; pre-wake text shown there is not uploaded or saved. The wake word uses a dedicated high-priority grammar; say `Emma` alone to start Realtime audio, then speak naturally even when the installed Windows recognizer does not support the conversation language.
 
-Program-navigation and usage questions are routed through the backend just like business-data questions. The backend supplies Emma with a tested map covering every implemented frontend route, primary control labels, prerequisites and confirmation boundaries. This lets her guide the user to an outcome without granting the Realtime model direct database access or allowing it to invent unavailable UI.
+Program-navigation and usage questions are routed through the backend just like business-data questions. At the start of every Realtime session, the backend supplies Emma with a tested complete tree covering every sidebar item, every detail-screen subtree, primary control labels, prerequisites and confirmation boundaries. Say **“Emma, read the full menu”**, **“Emma, přečti celé menu”** or **“Emma, read full menu customers and work”**. The same tree is visible in the web control centre under **Complete Secretary menu Emma can read**. This lets her guide the user to an outcome without granting the Realtime model direct database access or allowing it to invent unavailable UI.
 
 ## Voice flow
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, type VoiceConversation, type VoiceDeviceState, type VoiceUiAction } from "../api/client";
+import { api, type SecretaryNavigationCatalogue, type VoiceConversation, type VoiceDeviceState, type VoiceUiAction } from "../api/client";
 import { useAuth } from "../context/useAuth";
 import { languageLabel } from "../i18n";
 
@@ -34,7 +34,17 @@ export function VoiceControlCenter() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<VoiceUiAction | null>(null);
+  const [navigation, setNavigation] = useState<SecretaryNavigationCatalogue | null>(null);
+  const [navigationError, setNavigationError] = useState(false);
   const handledActionId = useRef<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api.command.navigation()
+      .then((catalogue) => { if (active) { setNavigation(catalogue); setNavigationError(false); } })
+      .catch(() => { if (active) setNavigationError(true); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -119,6 +129,40 @@ export function VoiceControlCenter() {
         <div><span className="voice-observation-label">Emma heard after activation</span><div>{state.lastTranscript || "Waiting for Emma to be activated."}</div></div>
         <div><span className="voice-observation-label">Emma answered</span><div>{state.lastResponse || "No response yet."}</div></div>
       </div>
+      {navigation && (
+        <details className="emma-navigation-catalogue">
+          <summary>Complete Secretary menu Emma can read ({navigation.sections.length} sections)</summary>
+          <p className="hint">This is the same backend-certified map Emma uses. It includes detail-screen subtrees and named controls, not only the visible sidebar rows.</p>
+          {navigation.sections.map((section) => (
+            <section className="emma-navigation-section" key={section.id}>
+              <h3>{section.label}</h3>
+              <p className="hint">{section.description}</p>
+              <ul>
+                {section.items.map((item) => (
+                  <li key={item.id} className={item.available ? undefined : "emma-navigation-restricted"}>
+                    <strong>{item.label}</strong> <code>{item.path}</code>
+                    <div>{item.description}</div>
+                    {item.controls.length > 0 && <div className="hint">Controls: {item.controls.join(", ")}</div>}
+                    {!item.available && <div className="hint">{item.accessNote ?? "This item requires additional permission."}</div>}
+                    {item.children.length > 0 && (
+                      <ul className="emma-navigation-children">
+                        {item.children.map((child) => (
+                          <li key={`${item.id}-${child.label}`}>
+                            <strong>{child.label}</strong>{child.path && <> <code>{child.path}</code></>}
+                            <div>{child.description}</div>
+                            {child.controls.length > 0 && <div className="hint">Controls: {child.controls.join(", ")}</div>}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </details>
+      )}
+      {navigationError && <p className="hint">Emma’s complete menu map could not be loaded right now.</p>}
       <details className="voice-transcript-history">
         <summary>Recent saved conversation transcripts ({conversations.length})</summary>
         {conversations.length === 0 ? <p className="hint">No saved conversations yet.</p> : conversations.map((conversation) => (

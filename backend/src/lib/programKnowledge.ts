@@ -1,3 +1,5 @@
+import { FULL_SECRETARY_MENU_TREE } from "./navigationCatalogue.js";
+
 // Maintained product map used by Emma for in-app guidance. This contains only
 // implemented routes and documented behaviour; it must not claim future
 // connectors or automatic actions exist.
@@ -55,6 +57,10 @@ HOW EMMA SHOULD GUIDE
 5. If the request can be completed by one supported deterministic command, propose or execute that command through the business tool.
 6. For complex goals, split into a plan, identify missing facts, and stop at every required approval.
 7. Never invent a page, button, connector, company fact or completed action. If implementation is absent, say so and offer the closest safe workflow.
+
+COMPLETE SECRETARY MENU AND SUBTREE CATALOGUE
+The following backend-certified tree is the complete signed-in Secretary menu, including detail screens and other subtrees that do not have a separate sidebar row. When a user asks what is in the menu, what a section contains, how to navigate, or asks you to read the menu, use this catalogue. State a page's route only when it helps orientation, describe its descendants and named controls faithfully, and say when an item requires a permission. Do not say that a page is available to the user unless their authenticated backend action confirms it.
+${FULL_SECRETARY_MENU_TREE}
 
 PRIMARY UI CONTROLS AND SAFE WORKFLOWS
 - Clients: New client; open a client name for Jobs, New quote, New job, Communications/Log communication and Photos/Log photo.

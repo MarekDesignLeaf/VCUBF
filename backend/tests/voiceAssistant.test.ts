@@ -28,6 +28,8 @@ describe("voice assistant interpretation", () => {
       assert.equal(body.text.format.type, "json_schema");
       assert.match(body.instructions, /\/communication-intake/);
       assert.match(body.instructions, /\/invoices/);
+      assert.match(body.instructions, /COMPLETE SECRETARY MENU AND SUBTREE CATALOGUE/);
+      assert.match(body.instructions, /Client details/);
       assert.match(body.instructions, /never invent UI/i);
       assert.match(body.instructions, /Do not infer a conventional New button/i);
       return new Response(

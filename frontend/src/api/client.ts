@@ -1425,6 +1425,36 @@ export interface VoiceConversation {
   messages: VoiceConversationMessage[];
 }
 
+export interface SecretaryNavigationChild {
+  label: string;
+  path?: string;
+  description: string;
+  controls: string[];
+}
+
+export interface SecretaryNavigationItem {
+  id: string;
+  label: string;
+  path: string;
+  description: string;
+  controls: string[];
+  available: boolean;
+  accessNote?: string;
+  children: SecretaryNavigationChild[];
+}
+
+export interface SecretaryNavigationSection {
+  id: string;
+  label: string;
+  description: string;
+  items: SecretaryNavigationItem[];
+}
+
+export interface SecretaryNavigationCatalogue {
+  title: string;
+  sections: SecretaryNavigationSection[];
+}
+
 export const api = {
   invoices: { list:()=>request<Invoice[]>("/invoices"), create:(data:Record<string,unknown>)=>request<Invoice>("/invoices",{method:"POST",body:JSON.stringify(data)}), status:(id:string,invoice_status:string)=>request<Invoice>(`/invoices/${id}/status`,{method:"PUT",body:JSON.stringify({invoice_status})}), payment:(id:string,data:Record<string,unknown>,confirmed=false)=>request<Invoice>(`/invoices/${id}/payments`,{method:"POST",body:JSON.stringify({...data,confirmed})}), downloadPdf:(id:string)=>download(`/invoices/${id}/pdf`) },
   metrics: {
@@ -1920,6 +1950,7 @@ export const api = {
       }),
     voiceState: () => request<VoiceDeviceState>("/command/voice-state"),
     voiceConversations: (limit = 10) => request<VoiceConversation[]>(`/command/voice-conversations?limit=${limit}`),
+    navigation: () => request<SecretaryNavigationCatalogue>("/command/navigation"),
     controlVoice: (control: "pause" | "resume" | "end_conversation") =>
       request<VoiceDeviceState>("/command/voice-state/control", {
         method: "POST",

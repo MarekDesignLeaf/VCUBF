@@ -13,6 +13,7 @@
 import { resolveVoicePage, type VoicePage } from "./voiceNavigation.js";
 import type { ConnectorKey } from "../connectors/registry.js";
 import { resolveVoiceLanguage, type VoiceLanguage } from "./voiceLanguages.js";
+import { resolveNavigationSection, type NavigationSectionId } from "./navigationCatalogue.js";
 
 // If nothing matches, the result is `unrecognized` — the system must not
 // guess (VCUF error handling rule).
@@ -62,6 +63,7 @@ export type ParsedCommand =
   | { intent: "confirm_gmail_message"; entities: Record<string, never> }
   | { intent: "cancel_gmail_message"; entities: Record<string, never> }
   | { intent: "set_voice_language"; entities: { language: VoiceLanguage } }
+  | { intent: "describe_menu"; entities: { section?: NavigationSectionId } }
   | { intent: "connector_status"; entities: { connector_key: ConnectorKey | "all" } }
   | { intent: "setup_connectors"; entities: { connector_key: ConnectorKey | "all" } }
   | { intent: "sync_connectors"; entities: { connector_key: ConnectorKey | "all" } }
@@ -166,6 +168,24 @@ function parseVoiceLanguageCommand(text: string): Extract<ParsedCommand, { inten
   return undefined;
 }
 
+function parseMenuDescriptionCommand(text: string): Extract<ParsedCommand, { intent: "describe_menu" }> | undefined {
+  const normalized = text.trim().replace(/[.!?]+$/g, "");
+  if (
+    /^(?:read|show|list|describe)(?:\s+me)?\s+(?:the\s+)?(?:whole|full|complete|all)?\s*(?:menu|navigation)(?:\s+(?:tree|contents|items))?$/iu.test(normalized)
+    || /^(?:what(?:'s|\s+is)\s+(?:in\s+)?(?:the\s+)?(?:menu|navigation)|what\s+can\s+i\s+do(?:\s+in\s+(?:the\s+)?(?:app|secretary))?)$/iu.test(normalized)
+    || /^(?:přečti|precti|ukaž|ukaz|vypiš|vypis)\s+(?:mi\s+)?(?:(?:cel[ée]|všechny)\s+)?(?:(?:položky|polozky)\s+)?(?:menu|navigaci|navigace)(?:\s+programu)?$/iu.test(normalized)
+    || /^co\s+je\s+v\s+(?:cel[ée]m\s+)?(?:menu|navigaci)$/iu.test(normalized)
+  ) {
+    return { intent: "describe_menu", entities: {} };
+  }
+
+  const sectionMatch = normalized.match(/^(?:read|show|list|describe)(?:\s+me)?\s+(?:the\s+)?(?:whole|full|complete)?\s*(?:menu|navigation)(?:\s+section)?\s+(.+)$/iu)
+    ?? normalized.match(/^(?:přečti|precti|ukaž|ukaz|vypiš|vypis)\s+(?:mi\s+)?(?:menu|navigaci|navigace)(?:\s+sekci)?\s+(.+)$/iu)
+    ?? normalized.match(/^co\s+je\s+v\s+(?:menu|navigaci)\s+(.+)$/iu);
+  const section = sectionMatch ? resolveNavigationSection(sectionMatch[1]) : undefined;
+  return section ? { intent: "describe_menu", entities: { section } } : undefined;
+}
+
 export function isGmailConfirmationPhrase(rawText: string) {
   const text = rawText.trim().toLocaleLowerCase().replace(/[.!?]+$/g, "");
   return /^(?:yes|yeah|yep|confirm|go ahead|do it|send it|ano|potvrzuji|potvrďuji|potvrdit)$/iu.test(text);
@@ -181,6 +201,8 @@ export function parseTextCommand(rawText: string): ParsedCommand {
 
   const languageCommand = parseVoiceLanguageCommand(text);
   if (languageCommand) return languageCommand;
+  const menuDescription = parseMenuDescriptionCommand(text);
+  if (menuDescription) return menuDescription;
   const gmailMessage = parseGmailMessageCommand(text);
   if (gmailMessage) return gmailMessage;
   if (/^(?:confirm|send)\s+(?:the\s+)?(?:email|message)(?:\s+now)?$/i.test(text))

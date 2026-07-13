@@ -106,6 +106,14 @@ describe("commandParser", () => {
     assert.deepEqual(parseTextCommand("mluv německy"), { intent: "set_voice_language", entities: { language: "de-DE" } });
   });
 
+  it("parses complete menu and named menu-subtree requests in English and Czech", () => {
+    assert.deepEqual(parseTextCommand("read the full menu"), { intent: "describe_menu", entities: {} });
+    assert.deepEqual(parseTextCommand("what is in the menu"), { intent: "describe_menu", entities: {} });
+    assert.deepEqual(parseTextCommand("read full menu customers and work"), { intent: "describe_menu", entities: { section: "customers_and_work" } });
+    assert.deepEqual(parseTextCommand("přečti menu klienti"), { intent: "describe_menu", entities: { section: "customers_and_work" } });
+    assert.deepEqual(parseTextCommand("co je v menu obchod"), { intent: "describe_menu", entities: { section: "sales_and_finance" } });
+  });
+
   it("parses direct navigation across the Secretary hierarchy", () => {
     assert.deepEqual(parseTextCommand("open dashboard"), { intent: "navigate", entities: { page: "dashboard" } });
     assert.deepEqual(parseTextCommand("go to invoices"), { intent: "navigate", entities: { page: "invoices" } });

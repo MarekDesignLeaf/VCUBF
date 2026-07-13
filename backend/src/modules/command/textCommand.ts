@@ -11,10 +11,19 @@ import { createRealtimeClientSession, interpretVoiceRequest, transcribeVoiceAudi
 import { publishVoiceUiAction } from "../../services/voiceUiActionService.js";
 import { getAssistantContext } from "../../services/assistantMemoryService.js";
 import { hasPendingVoiceGmailMessage } from "../../services/voiceGmailService.js";
+import { getNavigationCatalogue } from "../../lib/navigationCatalogue.js";
 
 export const commandRouter = Router();
 
 commandRouter.use(requireAuth);
+
+// Exposes the same authoritative tree used in Emma's prompt. It is read-only
+// and includes page descendants that are not represented by a sidebar link.
+commandRouter.get("/navigation", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission), (req, res) => {
+  const navigation = getNavigationCatalogue(req.user!.permissions);
+  res.set("Cache-Control", "no-store");
+  return res.json({ title: navigation.title, sections: navigation.sections });
+});
 
 const commandSchema = z.object({
   text: z.string().min(1, "text is required"),

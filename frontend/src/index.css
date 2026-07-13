@@ -203,6 +203,15 @@ h2 { font-size: 1.1rem; margin-top: 24px; }
 .voice-control-pending { margin-top: 8px; color: var(--warning-text); font-size: .85rem; }
 .voice-transcript-history { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
 .voice-transcript-history > summary { cursor: pointer; font-weight: 600; }
+.emma-navigation-catalogue { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.emma-navigation-catalogue > summary { cursor: pointer; font-weight: 600; }
+.emma-navigation-section { margin-top: 14px; padding: 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); }
+.emma-navigation-section h3 { margin: 0 0 4px; font-size: .95rem; }
+.emma-navigation-section > ul { margin: 8px 0 0; padding-left: 20px; }
+.emma-navigation-section li { margin: 8px 0; }
+.emma-navigation-section code { color: var(--muted); font-size: .78rem; }
+.emma-navigation-children { margin: 7px 0 0; padding-left: 20px; }
+.emma-navigation-restricted { opacity: .72; }
 .voice-transcript-conversation { margin-top: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); }
 .voice-transcript-heading { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .voice-transcript-message { display: grid; grid-template-columns: 52px 1fr auto; gap: 8px; align-items: start; padding: 7px 0; border-top: 1px solid var(--border); }

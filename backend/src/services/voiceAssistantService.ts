@@ -6,7 +6,10 @@ import type { AssistantContext } from "./assistantMemoryService.js";
 const assistantResultSchema = z.object({
   kind: z.enum(["command", "reply", "clarification", "plan"]),
   canonical_command: z.string().nullable(),
-  message: z.string().min(1).max(800),
+  // A deliberate request to read the complete menu can be longer than an
+  // ordinary spoken answer. The caller still asks Emma to keep normal turns
+  // concise, but must not truncate an authoritative subtree catalogue.
+  message: z.string().min(1).max(12_000),
 });
 
 export type VoiceAssistantResult = z.infer<typeof assistantResultSchema>;
@@ -49,10 +52,11 @@ list marketing photos
 list follow ups
 list unresolved enquiries [from the last N days]
 list notifications
-  list contacts
-  show emails
-  show whatsapp messages
-  set language LANGUAGE_CODE (${VOICE_LANGUAGES.join(", ")})
+list contacts
+show emails
+show whatsapp messages
+set language LANGUAGE_CODE (${VOICE_LANGUAGES.join(", ")})
+read full menu [section NAME]
   send email to EMAIL; [cc EMAIL;] [bcc EMAIL;] subject SUBJECT; body BODY
   confirm email
   cancel email
@@ -132,6 +136,7 @@ Never claim an action happened unless kind is command and the backend later conf
 Never invent company data. Never turn legal, financial, deletion, publishing, hiring, payment, invoice sending, or other risky requests into a command. For those, explain that a reviewed confirmation flow is required. The only email exception is the supported Gmail command: it merely prepares a short-lived review, and the message is never sent until a separate confirmation succeeds.
 If the request maps unambiguously to exactly one supported command, return kind command and rewrite it into one exact canonical form below. Preserve names and values exactly. Do not add missing facts.
 If a required value is missing or ambiguous, return clarification and ask one short question.
+When the user asks what is in Secretary, asks to read/list/show the whole menu or navigation, or asks what a menu section contains, return kind command with the exact canonical form read full menu. For a named section, use read full menu SECTION_NAME. The backend returns the certified complete tree, including detail-page subtrees and exact controls. Do not summarise it as only a few likely pages or invent a menu item.
 For a language request, use only one supported language code in the canonical form set language LANGUAGE_CODE. This command changes both Emma's spoken language and the Secretary navigation menu. If the requested language is unsupported, ask the user to choose from the supported codes instead of guessing.
 For a send-email request, require at least one valid recipient email address, subject and body. Use semicolons between fields in the canonical command. Never fabricate an address, subject or body. A later yes or confirm is meaningful only after a prepared email review; use the exact canonical command confirm email. A no or cancel after a prepared review must become cancel email.
 If it is a complex objective, return plan with a short numbered spoken plan and identify facts or approvals needed. Do not execute it.

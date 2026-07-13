@@ -21,6 +21,7 @@ import * as connectorSetupService from "../services/connectorSetupService.js";
 import * as voiceGmailService from "../services/voiceGmailService.js";
 import * as voicePreferenceService from "../services/voicePreferenceService.js";
 import { buildCommandUiAction, VOICE_PAGE_ROUTES, type CommandUiAction } from "./voiceNavigation.js";
+import { getNavigationCatalogue } from "./navigationCatalogue.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -754,6 +755,18 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
         data: result.ok ? result.data : undefined,
         error: result.ok ? undefined : result.error,
         message: result.ok ? result.data.message : result.message,
+      };
+      break;
+    }
+
+    case "describe_menu": {
+      const navigation = getNavigationCatalogue(user.permissions, command.entities.section);
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: true,
+        httpStatus: 200,
+        message: navigation.readout,
       };
       break;
     }
