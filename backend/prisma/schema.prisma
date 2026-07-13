@@ -54,6 +54,7 @@ model Company {
   voiceDeviceStates            VoiceDeviceState[]
   voiceConversations           VoiceConversation[]
   voiceConversationMessages    VoiceConversationMessage[]
+  voicePendingActions          VoicePendingAction[]
   assistantMemories            AssistantMemory[]
 
   @@map("companies")
@@ -92,6 +93,7 @@ model ConnectorSource {
   externalCalendarEvents ExternalCalendarEvent[]
   externalDriveImages    ExternalDriveImage[]
   externalGooglePhotos   ExternalGooglePhoto[]
+  voicePendingActions    VoicePendingAction[]
 
   @@unique([companyId, connectorKey, displayName])
   @@index([companyId, serviceType])
@@ -166,6 +168,7 @@ model User {
   assignedJobs  Job[]      @relation("AssignedJobs")
   voiceDeviceState VoiceDeviceState?
   voiceConversations VoiceConversation[]
+  voicePendingActions VoicePendingAction[]
   assistantMemories AssistantMemory[] @relation("AssistantMemoryOwner")
   assignedTasks Task[]     @relation("AssignedTasks")
   devicePairings DevicePairing[]
@@ -235,6 +238,30 @@ model VoiceConversationMessage {
   @@unique([conversationId, sourceEventId])
   @@index([companyId, occurredAt])
   @@map("voice_conversation_messages")
+}
+
+// A short-lived, user-scoped confirmation state for risky Emma actions. The
+// Gmail payload is retained only while the action is pending, then removed as
+// soon as it is sent, cancelled, expires or fails.
+model VoicePendingAction {
+  id         String    @id @default(uuid())
+  companyId  String    @map("company_id")
+  userId     String    @map("user_id")
+  actionType String    @map("action_type")
+  status     String    @default("pending")
+  sourceId   String?   @map("source_id")
+  payload    Json?
+  expiresAt  DateTime  @map("expires_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  resolvedAt DateTime? @map("resolved_at")
+
+  company Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source  ConnectorSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, userId, actionType, status, expiresAt])
+  @@map("voice_pending_actions")
 }
 
 // Explicit, durable Emma memory. Conversation transcripts remain a separate,

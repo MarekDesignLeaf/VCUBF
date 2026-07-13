@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseTextCommand } from "../src/lib/commandParser.js";
+import { isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../src/lib/commandParser.js";
 
 describe("commandParser", () => {
   it("parses 'create client' with email and phone", () => {
@@ -73,6 +73,30 @@ describe("commandParser", () => {
     assert.deepEqual(parseTextCommand("configure Google Contacts"), { intent: "setup_connectors", entities: { connector_key: "google_contacts" } });
     assert.deepEqual(parseTextCommand("start WhatsApp Business connector"), { intent: "setup_connectors", entities: { connector_key: "whatsapp_business" } });
     assert.deepEqual(parseTextCommand("sync Gmail"), { intent: "sync_connectors", entities: { connector_key: "gmail" } });
+  });
+
+  it("parses a reviewed Gmail send command and explicit email confirmation controls", () => {
+    assert.deepEqual(
+      parseTextCommand("send email to jane@example.com and sam@example.com; cc accounts@example.com; bcc archive@example.com; subject Quote review; body Hello, please review the attached quote."),
+      {
+        intent: "prepare_gmail_message",
+        entities: {
+          to: ["jane@example.com", "sam@example.com"],
+          cc: ["accounts@example.com"],
+          bcc: ["archive@example.com"],
+          subject: "Quote review",
+          body: "Hello, please review the attached quote.",
+        },
+      }
+    );
+    assert.deepEqual(parseTextCommand("send email to jane@example.com, subject Quick update, body I will call tomorrow."), {
+      intent: "prepare_gmail_message",
+      entities: { to: ["jane@example.com"], cc: [], bcc: [], subject: "Quick update", body: "I will call tomorrow." },
+    });
+    assert.equal(parseTextCommand("confirm email").intent, "confirm_gmail_message");
+    assert.equal(parseTextCommand("cancel email").intent, "cancel_gmail_message");
+    assert.equal(isGmailConfirmationPhrase("Yes."), true);
+    assert.equal(isGmailCancellationPhrase("Do not send"), true);
   });
 
   it("parses direct navigation across the Secretary hierarchy", () => {

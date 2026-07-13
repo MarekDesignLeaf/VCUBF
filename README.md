@@ -760,9 +760,9 @@ A day-level scheduling grid with travel time, tool/material/vehicle requirements
 staged multi-visit scheduling is not implemented — the calendar slice works at weekly
 granularity, matching the capacity engine underneath it. Employee creation issues no
 invitation email — an admin sets the initial temporary password directly and Secretary
-forces the employee to replace it before continuing, since there is no outbound email action. Quotes have no
-"send to client" action — PDF export is manual and status is tracked internally only, since the Gmail
-adapter is read-only and cannot deliver anything. Recruitment adverts are
+forces the employee to replace it before continuing; this does not use the separate confirmed Gmail send flow. Quotes have no
+"send to client" action — PDF export is manual and status is tracked internally only, even though Gmail can send a separately composed,
+reviewed email through the connector or Emma. Recruitment adverts are
 drafted text only — there is no job-board connector to place them, no candidate-sourcing
 integration, and no trial-day scheduling tie-in to the calendar module yet; a hired
 candidate must still be turned into an employee account manually. Playbooks are limited
@@ -789,7 +789,7 @@ only through the existing reviewed intake workflow. Enabled Gmail, Google Contac
 sources now receive server-side background polling; Gmail push notifications, WhatsApp/SMS ingestion,
 thread-wide summarisation, attachment/photo
 ingestion, near-duplicate identity matching beyond the fixed normalized contact/name
-rules, unresolved-enquiry scanning across external inboxes, and any send action remain
+rules and unresolved-enquiry scanning across external inboxes remain
 unimplemented. The Notification and Escalation Module's feed is pull-only (a
 page you open, or a text command you run) — there is no push delivery yet: no email
 digest, no SMS/WhatsApp alert, and no in-app real-time badge/websocket, since no

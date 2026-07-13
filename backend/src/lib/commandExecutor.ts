@@ -18,6 +18,7 @@ import * as assistantMemoryService from "../services/assistantMemoryService.js";
 import * as taskService from "../services/taskService.js";
 import * as contactService from "../services/contactService.js";
 import * as connectorSetupService from "../services/connectorSetupService.js";
+import * as voiceGmailService from "../services/voiceGmailService.js";
 import { buildCommandUiAction, VOICE_PAGE_ROUTES, type CommandUiAction } from "./voiceNavigation.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
@@ -637,6 +638,48 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
     case "list_channel_messages": {
       const data = await communicationService.listEnquiries(user, { resolution: "all", channel: command.entities.channel });
       response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "prepare_gmail_message": {
+      const result = await voiceGmailService.prepareVoiceGmailMessage(user, command.entities);
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
+      };
+      break;
+    }
+
+    case "confirm_gmail_message": {
+      const result = await voiceGmailService.confirmVoiceGmailMessage(user);
+      response = {
+        intent: command.intent,
+        interpreted: {},
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
+      };
+      break;
+    }
+
+    case "cancel_gmail_message": {
+      const result = await voiceGmailService.cancelVoiceGmailMessage(user);
+      response = {
+        intent: command.intent,
+        interpreted: {},
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
+      };
       break;
     }
 

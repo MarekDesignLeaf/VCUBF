@@ -362,6 +362,36 @@ export const SEND_GMAIL_MESSAGE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "CONFIRMATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
 };
 
+export const PREPARE_VOICE_GMAIL_MESSAGE_ACTION: ActionContract = {
+  actionName: "prepare_voice_gmail_message",
+  purpose: "Prepare a short-lived Gmail message review for Emma, with explicit recipient, subject and body fields, before the user gives a separate spoken confirmation to send it.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: true,
+  dataSources: ["connector_sources", "connector_credentials", "voice_pending_actions"],
+  possibleErrors: ["MISSING_PERMISSION", "GMAIL_NOT_CONFIGURED", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "AMBIGUOUS_GMAIL_SOURCE", "VALIDATION_FAILED"],
+};
+
+export const CONFIRM_VOICE_GMAIL_MESSAGE_ACTION: ActionContract = {
+  actionName: "confirm_voice_gmail_message",
+  purpose: "Use one pending Emma Gmail review exactly once to send the previously reviewed message through the selected authorized Gmail source.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["voice_pending_actions", "connector_sources", "connector_credentials", "gmail.messages"],
+  possibleErrors: ["MISSING_PERMISSION", "NO_PENDING_GMAIL_MESSAGE", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
+};
+
+export const CANCEL_VOICE_GMAIL_MESSAGE_ACTION: ActionContract = {
+  actionName: "cancel_voice_gmail_message",
+  purpose: "Cancel the current short-lived Emma Gmail review and remove its message content without sending it.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["voice_pending_actions"],
+  possibleErrors: ["MISSING_PERMISSION", "NO_PENDING_GMAIL_MESSAGE"],
+};
+
 export const DISCONNECT_GMAIL_SOURCE_ACTION: ActionContract = {
   actionName: "disconnect_gmail_source",
   purpose: "After explicit confirmation, revoke the stored Google OAuth grant, remove the encrypted local credential and reset Gmail synchronisation state.",

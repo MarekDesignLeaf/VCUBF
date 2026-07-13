@@ -16,7 +16,7 @@ The Gmail adapter can:
 - send a final email only through a separate confirmation-gated action;
 - explicitly revoke and disconnect Gmail through a confirmation-gated action.
 
-It cannot delete or label Gmail data. No attachment bytes are imported. Draft and send scopes are optional; a source configured only with `read:messages` remains read-only. Recipient, subject and body are shown in the send preview, while audit records retain only counts, lengths and provider result IDs rather than message content.
+It cannot delete or label Gmail data. No attachment bytes are imported. Draft and send scopes are optional; a source configured only with `read:messages` remains read-only. Recipient, subject and body are shown in the send preview, while audit records retain only counts, lengths and provider result IDs rather than message content. Emma may create a five-minute, user-scoped pending Gmail review when exactly one enabled source has `send:messages`; a separate `yes`/`confirm` sends it once, while cancellation, expiry, failure or transcript deletion removes the temporary message payload.
 
 The Google Contacts adapter uses only `contacts.readonly`. It stages People API contact previews in `ExternalContact`; synchronisation never creates a CRM contact. A user holding both connector and CRM management permissions must review one staged record and confirm its import. Provider deletions archive only the staged record and never delete or deactivate a previously imported CRM contact. Initial sync requests `nextSyncToken`; later calls retrieve only changes. Google's `EXPIRED_SYNC_TOKEN` response triggers a safe full-sync fallback.
 

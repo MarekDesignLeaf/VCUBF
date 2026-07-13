@@ -213,6 +213,10 @@ voiceStateRouter.post("/voice-state/control", async (req, res) => {
 voiceStateRouter.delete("/voice-state/history", async (req, res) => {
   await prisma.$transaction([
     prisma.voiceConversation.deleteMany({ where: { userId: req.user!.id, companyId: req.user!.companyId } }),
+    prisma.voicePendingAction.updateMany({
+      where: { userId: req.user!.id, companyId: req.user!.companyId, actionType: "send_gmail_message", status: "pending" },
+      data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: new Date() },
+    }),
     prisma.voiceDeviceState.updateMany({
       where: { userId: req.user!.id, companyId: req.user!.companyId },
       data: { lastTranscript: null, lastResponse: null, lastUiAction: Prisma.DbNull, lastHeardAt: null, pendingControl: "end_conversation" },

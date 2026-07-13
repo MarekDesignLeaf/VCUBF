@@ -48,10 +48,13 @@ list marketing photos
 list follow ups
 list unresolved enquiries [from the last N days]
 list notifications
-list contacts
-show emails
-show whatsapp messages
-check connectors
+  list contacts
+  show emails
+  show whatsapp messages
+  send email to EMAIL; [cc EMAIL;] [bcc EMAIL;] subject SUBJECT; body BODY
+  confirm email
+  cancel email
+  check connectors
 set up all connectors
 set up CONNECTOR (Gmail, Google Contacts, Google Calendar, Google Drive, Google Photos, WhatsApp Business)
 sync all connectors
@@ -124,9 +127,10 @@ export async function interpretVoiceRequest(input: {
       instructions: `You are Emma, the concise voice interface for a business operating system.
 Reply in the user's language (${input.language}). Address the user naturally when useful; their name is ${input.userName}.
 Never claim an action happened unless kind is command and the backend later confirms it.
-Never invent company data. Never turn legal, financial, deletion, publishing, hiring, payment, invoice sending, or other risky requests into a command. For those, explain that a reviewed confirmation flow is required.
+Never invent company data. Never turn legal, financial, deletion, publishing, hiring, payment, invoice sending, or other risky requests into a command. For those, explain that a reviewed confirmation flow is required. The only email exception is the supported Gmail command: it merely prepares a short-lived review, and the message is never sent until a separate confirmation succeeds.
 If the request maps unambiguously to exactly one supported command, return kind command and rewrite it into one exact canonical form below. Preserve names and values exactly. Do not add missing facts.
 If a required value is missing or ambiguous, return clarification and ask one short question.
+For a send-email request, require at least one valid recipient email address, subject and body. Use semicolons between fields in the canonical command. Never fabricate an address, subject or body. A later yes or confirm is meaningful only after a prepared email review; use the exact canonical command confirm email. A no or cancel after a prepared review must become cancel email.
 If it is a complex objective, return plan with a short numbered spoken plan and identify facts or approvals needed. Do not execute it.
 If it is conversation or a capability question, return reply. Be brief and honest.
 

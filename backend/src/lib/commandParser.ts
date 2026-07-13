@@ -54,6 +54,12 @@ export type ParsedCommand =
   | { intent: "list_clients"; entities: Record<string, never> }
   | { intent: "list_contacts"; entities: Record<string, never> }
   | { intent: "list_channel_messages"; entities: { channel: "email" | "whatsapp" } }
+  | {
+      intent: "prepare_gmail_message";
+      entities: { to: string[]; cc: string[]; bcc: string[]; subject: string; body: string };
+    }
+  | { intent: "confirm_gmail_message"; entities: Record<string, never> }
+  | { intent: "cancel_gmail_message"; entities: Record<string, never> }
   | { intent: "connector_status"; entities: { connector_key: ConnectorKey | "all" } }
   | { intent: "setup_connectors"; entities: { connector_key: ConnectorKey | "all" } }
   | { intent: "sync_connectors"; entities: { connector_key: ConnectorKey | "all" } }
@@ -86,8 +92,82 @@ function resolveConnectorTarget(raw: string): ConnectorKey | "all" | undefined {
   return aliases[normalized];
 }
 
+function parseEmailAddresses(raw: string) {
+  return raw
+    .split(/\s*(?:,|\band\b)\s*/i)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function parseGmailMessageCommand(text: string): Extract<ParsedCommand, { intent: "prepare_gmail_message" }> | undefined {
+  const prefix = text.match(/^(?:send|write|compose)\s+(?:an?\s+)?(?:email|mail)\s+to\s*:?\s*(.+)$/i);
+  if (!prefix) return undefined;
+  const rest = prefix[1].trim();
+
+  // A natural spoken form is often transcribed with commas. It intentionally
+  // supports only To, Subject and Body; the semicolon form below also permits
+  // CC and BCC without confusing commas inside the message body.
+  const commaForm = rest.match(/^(.+?)\s*,\s*subject\s*:?\s*(.+?)\s*,\s*(?:body|message)\s*:?\s*(.+)$/i);
+  if (commaForm) {
+    const to = parseEmailAddresses(commaForm[1]);
+    const subject = commaForm[2].trim();
+    const body = commaForm[3].trim();
+    if (to.length && subject && body) return { intent: "prepare_gmail_message", entities: { to, cc: [], bcc: [], subject, body } };
+    return undefined;
+  }
+
+  const sections = rest.split(/\s*;\s*/);
+  const to = parseEmailAddresses(sections.shift() ?? "");
+  let cc: string[] = [];
+  let bcc: string[] = [];
+  let subject = "";
+  let body = "";
+  for (let index = 0; index < sections.length; index += 1) {
+    const section = sections[index];
+    let match = section.match(/^cc\s*:?\s*(.+)$/i);
+    if (match) {
+      cc = parseEmailAddresses(match[1]);
+      continue;
+    }
+    match = section.match(/^bcc\s*:?\s*(.+)$/i);
+    if (match) {
+      bcc = parseEmailAddresses(match[1]);
+      continue;
+    }
+    match = section.match(/^subject\s*:?\s*(.+)$/i);
+    if (match) {
+      subject = match[1].trim();
+      continue;
+    }
+    match = section.match(/^(?:body|message)\s*:?\s*(.*)$/i);
+    if (match) {
+      body = [match[1], ...sections.slice(index + 1)].join("; ").trim();
+      break;
+    }
+  }
+  if (!to.length || !subject || !body) return undefined;
+  return { intent: "prepare_gmail_message", entities: { to, cc, bcc, subject, body } };
+}
+
+export function isGmailConfirmationPhrase(rawText: string) {
+  const text = rawText.trim().toLocaleLowerCase().replace(/[.!?]+$/g, "");
+  return /^(?:yes|yeah|yep|confirm|go ahead|do it|send it|ano|potvrzuji|potvrďuji|potvrdit)$/iu.test(text);
+}
+
+export function isGmailCancellationPhrase(rawText: string) {
+  const text = rawText.trim().toLocaleLowerCase().replace(/[.!?]+$/g, "");
+  return /^(?:no|cancel|cancel it|don't send|do not send|stop email|ne|zruš|zrus|nezasilat|neodesilat)$/iu.test(text);
+}
+
 export function parseTextCommand(rawText: string): ParsedCommand {
   const text = rawText.trim();
+
+  const gmailMessage = parseGmailMessageCommand(text);
+  if (gmailMessage) return gmailMessage;
+  if (/^(?:confirm|send)\s+(?:the\s+)?(?:email|message)(?:\s+now)?$/i.test(text))
+    return { intent: "confirm_gmail_message", entities: {} };
+  if (/^(?:cancel|discard)\s+(?:the\s+)?(?:email|message)$/i.test(text))
+    return { intent: "cancel_gmail_message", entities: {} };
 
   let connectorMatch = text.match(/^(?:check|show|list)\s+(.+?)\s+(?:connector\s+)?status$/i);
   if (connectorMatch) {
