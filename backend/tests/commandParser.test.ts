@@ -60,6 +60,9 @@ describe("commandParser", () => {
 
   it("parses list commands", () => {
     assert.equal(parseTextCommand("list clients").intent, "list_clients");
+    assert.equal(parseTextCommand("show contacts").intent, "list_contacts");
+    assert.deepEqual(parseTextCommand("read my emails"), { intent: "list_channel_messages", entities: { channel: "email" } });
+    assert.deepEqual(parseTextCommand("show whatsapp messages"), { intent: "list_channel_messages", entities: { channel: "whatsapp" } });
     assert.equal(parseTextCommand("show jobs").intent, "list_jobs");
     assert.equal(parseTextCommand("list leads").intent, "list_leads");
   });

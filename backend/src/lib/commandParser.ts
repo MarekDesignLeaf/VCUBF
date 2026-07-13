@@ -47,6 +47,8 @@ export type ParsedCommand =
   | { intent: "list_data_quality"; entities: Record<string, never> }
   | { intent: "detect_action_patterns"; entities: Record<string, never> }
   | { intent: "list_clients"; entities: Record<string, never> }
+  | { intent: "list_contacts"; entities: Record<string, never> }
+  | { intent: "list_channel_messages"; entities: { channel: "email" | "whatsapp" } }
   | { intent: "list_jobs"; entities: Record<string, never> }
   | { intent: "list_leads"; entities: Record<string, never> }
   | { intent: "unrecognized"; entities: Record<string, never> };
@@ -277,6 +279,11 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (m) return { intent: "list_communications", entities: { client_name: m[1]?.trim() } };
 
   if (/^(?:list|show)\s+clients?$/i.test(text)) return { intent: "list_clients", entities: {} };
+  if (/^(?:list|show)\s+contacts?$/i.test(text)) return { intent: "list_contacts", entities: {} };
+  if (/^(?:list|show|read)\s+(?:my\s+)?(?:email|mail)(?:\s+messages?)?s?$/i.test(text))
+    return { intent: "list_channel_messages", entities: { channel: "email" } };
+  if (/^(?:list|show|read)\s+(?:my\s+)?whatsapp(?:\s+messages?)?$/i.test(text))
+    return { intent: "list_channel_messages", entities: { channel: "whatsapp" } };
   if (/^(?:list|show)\s+jobs?$/i.test(text)) return { intent: "list_jobs", entities: {} };
   if (/^(?:list|show)\s+leads?$/i.test(text)) return { intent: "list_leads", entities: {} };
 

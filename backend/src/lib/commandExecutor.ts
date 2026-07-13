@@ -15,6 +15,7 @@ import * as dataQualityService from "../services/dataQualityService.js";
 import * as portfolioService from "../services/portfolioService.js";
 import * as memoryModelService from "../services/memoryModelService.js";
 import * as taskService from "../services/taskService.js";
+import * as contactService from "../services/contactService.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -584,6 +585,18 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
     case "list_clients": {
       const data = await clientService.listClients(user);
       response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "list_contacts": {
+      const data = await contactService.listContacts(user, { activeOnly: true });
+      response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "list_channel_messages": {
+      const data = await communicationService.listEnquiries(user, { resolution: "all", channel: command.entities.channel });
+      response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
       break;
     }
 

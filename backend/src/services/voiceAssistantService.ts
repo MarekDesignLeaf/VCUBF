@@ -39,6 +39,9 @@ list marketing photos
 list follow ups
 list unresolved enquiries [from the last N days]
 list notifications
+list contacts
+show emails
+show whatsapp messages
 show data quality issues
 show action patterns
 list clients

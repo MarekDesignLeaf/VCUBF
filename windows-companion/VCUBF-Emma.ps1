@@ -265,6 +265,8 @@ function Spoken-Result($Response) {
   $noun = { param($singular,$plural) if($count -eq 1){"$count $singular"}else{"$count $plural"} }
   switch ([string]$Response.intent) {
     'list_clients' { return "You have $(& $noun 'client' 'clients')." }
+    'list_contacts' { return "You have $(& $noun 'contact' 'contacts')." }
+    'list_channel_messages' { return "I found $(& $noun 'message' 'messages')." }
     'list_jobs' { return "You have $(& $noun 'job' 'jobs')." }
     'list_leads' { return "You have $(& $noun 'lead' 'leads')." }
     'list_tasks' { return "You have $(& $noun 'task' 'tasks')." }
