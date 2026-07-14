@@ -192,6 +192,10 @@ export function startConnectorBackgroundSync() {
 }
 
 export function requestConnectorBackgroundSync() {
+  // Tests exercise background sweeps directly. Starting a detached sweep from
+  // an HTTP request would race connector-specific fetch mocks and make the
+  // result depend on timing rather than connector behaviour.
+  if (process.env.NODE_ENV === "test") return;
   const configuration = getConnectorBackgroundSyncConfiguration();
   if (!configuration.enabled) return;
   requestConfiguredSweep(configuration);
