@@ -15,14 +15,17 @@ import base64
 import ctypes
 from ctypes import wintypes
 from collections import deque
+from difflib import SequenceMatcher
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import time
 import urllib.error
 import urllib.request
 
+from aec_audio_processing import AudioProcessor
 import pyaudio
 import websockets
 
@@ -30,13 +33,17 @@ RATE = 24_000
 CHUNK = 2_400  # 100 ms PCM16 frames
 MAX_SESSION_SECONDS = 180
 IDLE_AFTER_RESPONSE_SECONDS = 25
-# PyAudio exposes raw microphone and speaker streams, not Windows' acoustic
-# echo cancellation. Keep a speaker reference so only Emma's acoustic echo is
-# removed; the microphone itself remains live for human barge-in.
+# Feed the exact speaker reference and microphone stream through WebRTC AEC in
+# 10 ms frames. The microphone remains open while Emma speaks, but only a
+# locally confirmed near-end voice is allowed to interrupt her.
 OUTPUT_ECHO_GUARD_SECONDS = 0.75
-ECHO_REFERENCE_SECONDS = 1.5
-ECHO_CORRELATION_THRESHOLD = 0.30
-ECHO_RESIDUAL_RATIO = 0.38
+AEC_FRAME_SAMPLES = RATE // 100
+AEC_FRAME_BYTES = AEC_FRAME_SAMPLES * 2
+AEC_DEFAULT_DELAY_MS = 80
+AEC_WARMUP_SECONDS = 0.20
+BARGE_IN_MIN_RMS = 550.0
+BARGE_IN_MIN_PEAK = 1600
+BARGE_IN_CONFIRM_FRAMES = 3
 
 LANGUAGE_NAMES = {
     "en-GB": "English (United Kingdom)",
@@ -159,8 +166,15 @@ class RealtimeEmma:
         self.current_listening = True
         self.reported_speaking = False
         self.speaker_echo_until = 0.0
-        self.output_reference: deque[int] = deque(maxlen=int(RATE * ECHO_REFERENCE_SECONDS))
+        self.output_started_at = 0.0
         self.suppressed_input_items: set[str] = set()
+        self.playback_input_items: set[str] = set()
+        self.human_barge_in_items: set[str] = set()
+        self.barge_in_prefix: deque[bytes] = deque(maxlen=2)
+        self.barge_in_voice_frames = 0
+        self.barge_in_active = False
+        self.response_active = False
+        self.last_assistant_text = ""
         self.speaking_generation = 0
         self.exit_code = 0
         self.state_lock = asyncio.Lock()
@@ -175,6 +189,17 @@ class RealtimeEmma:
         self.audio = pyaudio.PyAudio()
         self.input_stream = None
         self.output_stream = None
+        self.echo_processor = AudioProcessor(
+            enable_aec=True,
+            enable_ns=True,
+            ns_level=2,
+            enable_agc=False,
+            enable_vad=False,
+        )
+        self.echo_processor.set_stream_format(RATE, 1, RATE, 1)
+        self.echo_processor.set_reverse_stream_format(RATE, 1)
+        self.echo_processor.set_stream_delay(AEC_DEFAULT_DELAY_MS)
+        self.reverse_remainder = b""
         self.ws = None
         self.configured_language = str(load_config().get("Language", "en-GB"))
         self.spoken_language = LANGUAGE_NAMES.get(self.configured_language, self.configured_language)
@@ -342,8 +367,12 @@ SECRETARY_NAVIGATION={navigation_json}"""
                             "turn_detection": {
                                 "type": "semantic_vad",
                                 "eagerness": "medium",
-                                "create_response": True,
-                                "interrupt_response": True,
+                                # The client validates AEC-cleaned near-end
+                                # speech before it creates or interrupts a
+                                # response. This prevents speaker echo from
+                                # becoming a new automatic conversation turn.
+                                "create_response": False,
+                                "interrupt_response": False,
                             },
                         },
                         "output": {
@@ -396,9 +425,11 @@ SECRETARY_NAVIGATION={navigation_json}"""
         while not self.stop.is_set():
             try:
                 chunk = await asyncio.to_thread(self.input_stream.read, CHUNK, False)
-                filtered = self.filter_microphone_chunk(chunk)
+                filtered, human_barge_in = self.filter_microphone_chunk(chunk)
                 if filtered is None:
                     continue
+                if human_barge_in:
+                    await self.interrupt_for_human()
                 await self.send({"type": "input_audio_buffer.append", "audio": base64.b64encode(filtered).decode("ascii")})
             except Exception as exc:
                 if not self.stop.is_set():
@@ -409,82 +440,97 @@ SECRETARY_NAVIGATION={navigation_json}"""
         self.output_stream = self.audio.open(
             format=pyaudio.paInt16, channels=1, rate=RATE, output=True, frames_per_buffer=CHUNK
         )
+        try:
+            output_delay_ms = int(round(self.output_stream.get_output_latency() * 1000)) + 30
+            output_delay_ms = max(20, min(300, output_delay_ms))
+            self.echo_processor.set_stream_delay(output_delay_ms)
+            log(f"WebRTC acoustic echo cancellation active; delay={output_delay_ms}ms")
+        except Exception as exc:
+            log(f"AEC delay detection failed; using {AEC_DEFAULT_DELAY_MS}ms: {type(exc).__name__}")
         while not self.stop.is_set():
             chunk = await self.output_queue.get()
             if chunk is None:
                 return
-            # Register the exact PCM before it reaches the speaker so the
-            # concurrent microphone path can remove that signal immediately.
-            self.remember_output_chunk(chunk)
+            # Feed the exact far-end PCM to WebRTC before it reaches the
+            # speaker. The matching microphone frame can then have the room
+            # echo removed while preserving a different near-end voice.
+            self.process_output_reference(chunk)
             self.speaker_echo_until = max(self.speaker_echo_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS)
             await asyncio.to_thread(self.output_stream.write, chunk)
             self.speaker_echo_until = max(self.speaker_echo_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS)
 
-    def remember_output_chunk(self, chunk: bytes) -> None:
+    def process_output_reference(self, chunk: bytes) -> None:
+        pending = self.reverse_remainder + chunk
+        complete = len(pending) - (len(pending) % AEC_FRAME_BYTES)
+        for offset in range(0, complete, AEC_FRAME_BYTES):
+            self.echo_processor.process_reverse_stream(pending[offset:offset + AEC_FRAME_BYTES])
+        self.reverse_remainder = pending[complete:]
+
+    @staticmethod
+    def frame_levels(frame: bytes) -> tuple[float, int]:
         samples = array("h")
-        samples.frombytes(chunk)
-        self.output_reference.extend(samples)
+        samples.frombytes(frame)
+        if not samples:
+            return 0.0, 0
+        energy = sum(int(sample) * int(sample) for sample in samples)
+        peak = max(abs(int(sample)) for sample in samples)
+        return (energy / len(samples)) ** 0.5, peak
 
-    def filter_microphone_chunk(self, chunk: bytes) -> bytes | None:
-        """Cancel matched speaker PCM while preserving different human speech."""
-        if time.monotonic() >= self.speaker_echo_until:
-            return chunk
-        microphone = array("h")
-        microphone.frombytes(chunk)
-        sample_count = len(microphone)
-        history = list(self.output_reference)
-        if sample_count == 0 or len(history) < sample_count:
-            return chunk
+    def speaker_active(self) -> bool:
+        return self.reported_speaking or time.monotonic() < self.speaker_echo_until
 
-        # Search recent speaker audio at a coarse resolution. Room and device
-        # latency vary, so matching only the most recent frame is unreliable.
-        stride = 12
-        candidate_step = 60  # 2.5 ms at 24 kHz; enough for typical room delay.
-        search_start = max(0, len(history) - RATE)
-        mic_points = list(range(0, sample_count, stride))
-        microphone_energy = sum(int(microphone[index]) ** 2 for index in mic_points)
-        if microphone_energy <= 0:
-            return None
-        best_score = 0.0
-        best_start: int | None = None
-        for start in range(search_start, len(history) - sample_count + 1, candidate_step):
-            reference_energy = 0
-            cross = 0
-            for index in mic_points:
-                reference = history[start + index]
-                sample = microphone[index]
-                reference_energy += reference * reference
-                cross += sample * reference
-            if reference_energy <= 0:
-                continue
-            score = abs(cross) / (microphone_energy * reference_energy) ** 0.5
-            if score > best_score:
-                best_score = score
-                best_start = start
-        if best_start is None or best_score < ECHO_CORRELATION_THRESHOLD:
-            return chunk
+    def filter_microphone_chunk(self, chunk: bytes) -> tuple[bytes | None, bool]:
+        """Apply WebRTC AEC and admit only confirmed near-end speech mid-reply."""
+        complete = len(chunk) - (len(chunk) % AEC_FRAME_BYTES)
+        processed_frames: list[bytes] = []
+        consecutive_voice_frames = self.barge_in_voice_frames
+        longest_voice_run = consecutive_voice_frames
+        for offset in range(0, complete, AEC_FRAME_BYTES):
+            processed = self.echo_processor.process_stream(chunk[offset:offset + AEC_FRAME_BYTES])
+            processed_frames.append(processed)
+            rms, peak = self.frame_levels(processed)
+            if rms >= BARGE_IN_MIN_RMS and peak >= BARGE_IN_MIN_PEAK:
+                consecutive_voice_frames += 1
+                longest_voice_run = max(longest_voice_run, consecutive_voice_frames)
+            else:
+                consecutive_voice_frames = 0
+        if complete < len(chunk):
+            # PyAudio currently supplies exact 100 ms blocks. Preserve any
+            # future partial tail instead of silently losing user audio.
+            processed_frames.append(chunk[complete:])
+        processed_chunk = b"".join(processed_frames)
 
-        reference = history[best_start:best_start + sample_count]
-        reference_energy = sum(sample * sample for sample in reference)
-        if reference_energy <= 0:
-            return chunk
-        gain = sum(int(microphone[index]) * reference[index] for index in range(sample_count)) / reference_energy
-        gain = max(-3.0, min(3.0, gain))
-        residual = array("h")
-        residual_energy = 0
-        full_microphone_energy = 0
-        for index, sample in enumerate(microphone):
-            value = int(round(sample - gain * reference[index]))
-            value = max(-32768, min(32767, value))
-            residual.append(value)
-            residual_energy += value * value
-            full_microphone_energy += int(sample) * int(sample)
-        if full_microphone_energy <= 0:
-            return None
-        residual_ratio = (residual_energy / full_microphone_energy) ** 0.5
-        # Echo-only frames disappear. A person speaking over Emma leaves a
-        # distinct residual, which continues to Realtime and triggers barge-in.
-        return None if residual_ratio < ECHO_RESIDUAL_RATIO else residual.tobytes()
+        if not self.speaker_active():
+            self.barge_in_prefix.clear()
+            self.barge_in_voice_frames = 0
+            self.barge_in_active = False
+            return processed_chunk, False
+        if self.barge_in_active:
+            return processed_chunk, False
+
+        self.barge_in_prefix.append(processed_chunk)
+        if time.monotonic() - self.output_started_at < AEC_WARMUP_SECONDS:
+            self.barge_in_voice_frames = 0
+            return None, False
+        self.barge_in_voice_frames = consecutive_voice_frames
+        if longest_voice_run < BARGE_IN_CONFIRM_FRAMES:
+            return None, False
+
+        admitted = b"".join(self.barge_in_prefix)
+        self.barge_in_prefix.clear()
+        self.barge_in_active = True
+        log("human barge-in confirmed after acoustic echo cancellation")
+        return admitted, True
+
+    async def interrupt_for_human(self) -> None:
+        """Stop only a tracked active reply after local AEC confirms a person."""
+        self.clear_playback()
+        self.response_complete_at = None
+        self.reported_speaking = False
+        self.speaking_generation += 1
+        if self.response_active:
+            await self.send({"type": "response.cancel"})
+        await self.update_state("hearing", True)
 
     def clear_playback(self) -> None:
         while True:
@@ -499,6 +545,10 @@ SECRETARY_NAVIGATION={navigation_json}"""
         if self.reported_speaking:
             return
         self.reported_speaking = True
+        self.output_started_at = time.monotonic()
+        self.barge_in_active = False
+        self.barge_in_voice_frames = 0
+        self.barge_in_prefix.clear()
         self.speaking_generation += 1
         await self.update_state("speaking", False)
 
@@ -512,6 +562,30 @@ SECRETARY_NAVIGATION={navigation_json}"""
             return
         self.response_complete_at = time.monotonic()
         await self.update_state("listening", True, response=response)
+
+    @staticmethod
+    def normalized_transcript(text: str) -> str:
+        return " ".join(re.findall(r"\w+", text.casefold(), flags=re.UNICODE))
+
+    def looks_like_self_echo(self, heard: str) -> bool:
+        heard_normalized = self.normalized_transcript(heard)
+        assistant_normalized = self.normalized_transcript(self.last_assistant_text or self.current_response_text)
+        if len(heard_normalized) < 8 or len(assistant_normalized) < 8:
+            return False
+        if heard_normalized in assistant_normalized or assistant_normalized in heard_normalized:
+            return True
+        return SequenceMatcher(None, heard_normalized, assistant_normalized).ratio() >= 0.62
+
+    async def create_response_for_user(self) -> None:
+        """Create one reply only after a user transcript passed local validation."""
+        for _ in range(40):
+            if self.stop.is_set():
+                return
+            if not self.response_active:
+                await self.send({"type": "response.create"})
+                return
+            await asyncio.sleep(0.025)
+        log("validated user turn could not start because a response stayed active")
 
     async def run_tool(self, event: dict) -> None:
         call_id = event.get("call_id")
@@ -552,7 +626,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 "item": {"type": "function_call_output", "call_id": call_id, "output": output},
             }
         )
-        await self.send({"type": "response.create"})
+        await self.create_response_for_user()
 
     async def receive(self) -> None:
         async for raw in self.ws:
@@ -560,6 +634,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
             event_type = event.get("type", "")
             self.last_activity = time.monotonic()
             if event_type == "response.created":
+                self.response_active = True
                 response_id = str((event.get("response") or {}).get("id") or "")
                 if response_id and self.current_user_sequence:
                     self.response_sequences[response_id] = self.current_user_sequence + 1
@@ -588,15 +663,20 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 self.next_user_sequence += 2
                 if item_id:
                     self.item_sequences[item_id] = self.current_user_sequence
-                self.clear_playback()
+                if self.speaker_active() and not self.barge_in_active:
+                    if item_id:
+                        self.suppressed_input_items.add(item_id)
+                        self.playback_input_items.add(item_id)
+                    log("suppressed unconfirmed speech start during Emma playback")
+                    continue
+                if item_id and self.barge_in_active:
+                    self.human_barge_in_items.add(item_id)
                 self.response_complete_at = None
-                self.current_response_text = ""
-                self.reported_speaking = False
-                self.speaking_generation += 1
                 await self.update_state("hearing", True)
-                # Realtime already interrupts the active answer because
-                # interrupt_response is true. Sending response.cancel here as
-                # well produces cancellation errors when no response is active.
+            elif event_type == "input_audio_buffer.speech_stopped":
+                # Keep the AEC-confirmed flag until the matching transcript is
+                # validated. It is reset when the next assistant output begins.
+                pass
             elif event_type == "response.function_call_arguments.done":
                 asyncio.create_task(self.run_tool(event))
             elif event_type == "conversation.item.created":
@@ -608,9 +688,22 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 item_id = str(event.get("item_id") or "")
                 if item_id and item_id in self.suppressed_input_items:
                     self.suppressed_input_items.discard(item_id)
+                    self.playback_input_items.discard(item_id)
+                    self.item_sequences.pop(item_id, None)
                     log("ignored microphone transcript captured during Emma playback")
+                    await self.send({"type": "conversation.item.delete", "item_id": item_id})
                     continue
                 heard = str(event.get("transcript") or "").strip()
+                began_during_playback = item_id in self.playback_input_items
+                confirmed_human = item_id in self.human_barge_in_items
+                self.playback_input_items.discard(item_id)
+                self.human_barge_in_items.discard(item_id)
+                if heard and began_during_playback and not confirmed_human and self.looks_like_self_echo(heard):
+                    self.item_sequences.pop(item_id, None)
+                    log("ignored transcript matching Emma's own reply")
+                    if item_id:
+                        await self.send({"type": "conversation.item.delete", "item_id": item_id})
+                    continue
                 if heard:
                     await self.update_state("thinking", False, transcript=heard)
                     sequence = self.item_sequences.pop(item_id, self.current_user_sequence or 1)
@@ -618,14 +711,20 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 normalized = heard.lower().rstrip(".!?")
                 if normalized in {"stop", "goodbye", "that's all", "that is all"}:
                     self.stop.set()
+                elif heard:
+                    asyncio.create_task(self.create_response_for_user())
             elif event_type == "response.done":
+                self.response_active = False
                 response_id = str((event.get("response") or {}).get("id") or "")
                 completed_text = response_text(event) or self.response_texts.pop(response_id, "").strip() or self.current_response_text.strip()
                 output = (event.get("response") or {}).get("output") or []
                 if completed_text:
+                    self.last_assistant_text = completed_text
                     sequence = self.response_sequences.pop(response_id, self.current_user_sequence + 1)
                     await self.append_transcript("assistant", completed_text, sequence, response_id or str(event.get("event_id") or ""))
-                    if self.reported_speaking:
+                    if self.barge_in_active:
+                        await self.update_state("hearing", True)
+                    elif self.reported_speaking:
                         asyncio.create_task(self.resume_after_output(completed_text, self.speaking_generation))
                     else:
                         self.response_complete_at = time.monotonic()

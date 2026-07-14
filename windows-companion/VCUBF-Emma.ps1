@@ -522,7 +522,7 @@ function Resolve-RealtimePython {
       if([IO.Path]::GetFileName($path) -match '^py\.exe$') { $prefix = @('-3') }
       try {
         $version = @(& $path @prefix --version 2>&1) -join ' '
-        $dependencyCheck = @(& $path @prefix -c 'import pyaudio, websockets' 2>&1) -join ' '
+        $dependencyCheck = @(& $path @prefix -c 'import aec_audio_processing, pyaudio, websockets' 2>&1) -join ' '
         if($LASTEXITCODE -eq 0 -and $version -match 'Python\s+3\.' -and !$dependencyCheck) {
           return [pscustomobject]@{ Path=$path; Prefix=$prefix; Version=$version.Trim() }
         }
