@@ -131,6 +131,10 @@ describe("commandParser", () => {
     assert.deepEqual(parseTextCommand("mluv německy"), { intent: "set_voice_language", entities: { language: "de-DE" } });
     assert.deepEqual(parseTextCommand("mów po polsku"), { intent: "set_voice_language", entities: { language: "pl-PL" } });
     assert.deepEqual(parseTextCommand("zmień język na angielski"), { intent: "set_voice_language", entities: { language: "en-GB" } });
+    assert.deepEqual(parseTextCommand("Přepni se do angličtiny."), { intent: "set_voice_language", entities: { language: "en-GB" } });
+    assert.deepEqual(parseTextCommand("Ne, přepni se okamžitě do angličtiny!"), { intent: "set_voice_language", entities: { language: "en-GB" } });
+    assert.deepEqual(parseTextCommand("Switch to Polish"), { intent: "set_voice_language", entities: { language: "pl-PL" } });
+    assert.deepEqual(parseTextCommand("Yes, switch to Polish."), { intent: "set_voice_language", entities: { language: "pl-PL" } });
     assert.equal(isExplicitVoiceLanguageChange("změň jazyk na češtinu", "cs-CZ"), true);
     assert.equal(isExplicitVoiceLanguageChange("show me contacts", "en-GB"), false);
     assert.equal(isExplicitVoiceLanguageChange("mluv česky", "en-GB"), false);
