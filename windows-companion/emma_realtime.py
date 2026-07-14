@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import queue
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -252,6 +253,37 @@ def write_live_preview(role: str = "", text: str = "", status: str = "Realtime a
         temporary.replace(LIVE_PATH)
     except OSError:
         pass
+
+
+def restart_wake_listener() -> None:
+    """Restore exactly one hidden PowerShell wake listener after Realtime."""
+    listener = Path(__file__).with_name("VCUBF-Emma.ps1")
+    powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    if not listener.exists() or not powershell.exists():
+        log("wake listener restart skipped: required file is missing")
+        return
+    try:
+        subprocess.Popen(
+            [
+                str(powershell),
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-File",
+                str(listener),
+            ],
+            cwd=str(listener.parent),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        log("hidden wake listener restart requested")
+    except OSError as exc:
+        log(f"wake listener restart failed: {type(exc).__name__}")
 
 
 def unprotect_dpapi(data: bytes) -> bytes:
@@ -1204,6 +1236,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stdin", action="store_true")
     parser.add_argument("--diagnostic", action="store_true")
+    parser.add_argument("--restart-listener", action="store_true")
     args = parser.parse_args()
     if args.diagnostic:
         input_devices = []
@@ -1241,6 +1274,8 @@ def main() -> int:
         return 1
     finally:
         runtime.close()
+        if args.restart_listener and runtime.exit_code != 10:
+            restart_wake_listener()
 
 
 if __name__ == "__main__":

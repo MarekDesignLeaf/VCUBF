@@ -1,7 +1,7 @@
 param([switch]$Diagnostic,[string]$CommandTest,[switch]$DesktopLaunch,[switch]$Announce,[switch]$ShowMonitor)
 
 $ErrorActionPreference = 'Stop'
-try { (Get-Process -Id $PID).PriorityClass = 'AboveNormal' } catch {}
+try { (Get-Process -Id $PID).PriorityClass = 'Normal' } catch {}
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Speech
@@ -96,6 +96,7 @@ $script:HearingMonitorLevel = $null
 $script:LastLocalHypothesis = ''
 $script:RealtimePreviewPath = Join-Path $script:AppDir 'emma-live.json'
 $script:RealtimeProcess = $null
+$script:RealtimeHandoff = $false
 $script:PreferenceSyncTicks = 0
 $script:RefreshRecognizerAfterLogin = $false
 $script:VoiceLanguageNames = @{
@@ -112,7 +113,7 @@ function Write-EmmaLog([string]$Message) {
 }
 
 function Default-Config {
-  [pscustomobject]@{ ServerUrl = 'https://backend-production-7952.up.railway.app'; Email = ''; WakeWord = 'Emma'; Language = 'en-GB'; Confidence = 0.62; AutoStart = $true; ShowMonitor = $true; HandsFree = $true; ConversationSeconds = 12; Assistant = $true; Realtime = $true; VoiceRate = 0; VoiceVolume = 90 }
+  [pscustomobject]@{ ServerUrl = 'https://backend-production-7952.up.railway.app'; Email = ''; WakeWord = 'Emma'; Language = 'en-GB'; Confidence = 0.62; AutoStart = $true; ShowMonitor = $false; HandsFree = $true; ConversationSeconds = 12; Assistant = $true; Realtime = $true; VoiceRate = 0; VoiceVolume = 90 }
 }
 
 function Load-Config {
@@ -596,38 +597,26 @@ function Invoke-RealtimeProcess([string]$RealtimeScript,[string]$Command) {
   $arguments=@($python.Prefix)
   $arguments += '"' + $RealtimeScript + '"'
   if($Command){$arguments += '--stdin'}
+  $arguments += '--restart-listener'
   $startInfo.Arguments=($arguments -join ' ')
   $startInfo.UseShellExecute=$false
   $startInfo.CreateNoWindow=$true
   $startInfo.RedirectStandardInput=[bool]$Command
-  $startInfo.RedirectStandardError=$true
+  $startInfo.RedirectStandardError=$false
   $process=New-Object Diagnostics.Process
   $process.StartInfo=$startInfo
   if(!$process.Start()){throw 'REALTIME_START_FAILED'}
   try { $process.PriorityClass = 'AboveNormal' } catch {}
   $script:RealtimeProcess=$process
+  $script:RealtimeHandoff=$true
   if($script:Notify){$script:Notify.Text='VCUBF Emma — active conversation 1 of 1'}
-  Update-HearingMonitor $script:Config.WakeWord 'Realtime conversation active — 1 of 1'
-  try {
-    Write-EmmaLog "Realtime started with $($python.Version): $($python.Path)"
-    if($Command){$process.StandardInput.WriteLine($Command);$process.StandardInput.Close()}
-    while(!$process.WaitForExit(100)){
-      [Windows.Forms.Application]::DoEvents()
-      Sync-RealtimePreview
-    }
-    Sync-RealtimePreview
-    $exitCode=$process.ExitCode
-    $stderr=$process.StandardError.ReadToEnd().Trim()
-    if($stderr){Write-EmmaLog "Realtime stderr: $($stderr.Substring(0,[math]::Min(1500,$stderr.Length)))"}
-    Write-EmmaLog "Realtime exited with code $exitCode."
-    return $exitCode
-  } finally {
-    if(!$process.HasExited){try{$process.Kill()}catch{}}
-    $script:RealtimeProcess=$null
-    Remove-Item -LiteralPath $script:RealtimePreviewPath -Force -ErrorAction SilentlyContinue
-    Update-HearingMonitor '' "No active conversation — listening for $($script:Config.WakeWord)"
-    if($script:Notify){$script:Notify.Text="VCUBF Emma — listening for $($script:Config.WakeWord)"}
-  }
+  Write-EmmaLog "Realtime handoff started with $($python.Version): $($python.Path)"
+  if($Command){$process.StandardInput.WriteLine($Command);$process.StandardInput.Close()}
+  # Realtime owns the microphone and audio timing from this point. Exit the
+  # PowerShell listener completely so it cannot compete with playback. The
+  # Python session restarts one hidden wake-word listener when it ends.
+  if($script:Context){$script:Context.ExitThread()}else{[Windows.Forms.Application]::ExitThread()}
+  return 0
 }
 
 function Execute-VoiceCommand([string]$Command) {
@@ -639,6 +628,7 @@ function Execute-VoiceCommand([string]$Command) {
     if([bool]$script:Config.Realtime -and (Test-Path -LiteralPath $realtimeScript)){
       End-TranscriptConversation 'interrupted'
       $realtimeExitCode=Invoke-RealtimeProcess $realtimeScript $Command
+      if($script:RealtimeHandoff){return}
       Sync-VoicePreferences | Out-Null
       if($realtimeExitCode -eq 10){$script:RemotePaused=$true;Update-VoiceState 'paused' $false 'wake_word' '' '' 'pause'|Out-Null;return}
       if($realtimeExitCode -eq 0){$script:ArmedUntil=[datetime]::MinValue;return}
@@ -682,12 +672,11 @@ function Start-HandsFreeRealtime {
   try{
     try{$script:Recognizer.RecognizeAsyncCancel()}catch{}
     $script:Listening=$false
-    Show-HearingMonitor
     Update-VoiceState 'hearing' $true 'wake_word' $script:Config.WakeWord|Out-Null
     # Realtime immediately starts listening. Speaking here delayed activation
     # and, historically, injected a hard-coded English response.
     Execute-VoiceCommand ''
-  } finally {$script:Busy=$false;Start-Listening}
+  } finally {$script:Busy=$false;if(!$script:RealtimeHandoff){Start-Listening}}
 }
 
 function Find-WakeCommand([string]$Text) {
@@ -734,7 +723,7 @@ function Handle-Recognition([string]$Text,[double]$Confidence,[byte[]]$AudioWav)
   Write-EmmaLog ("Accepted ({0:N2}): {1}" -f $confidence,$command)
   Update-VoiceState 'hearing' $true 'wake_word' $command|Out-Null
   $script:ArmedUntil=[datetime]::MinValue; $script:Busy=$true
-  try { $script:Recognizer.RecognizeAsyncCancel(); $script:Listening=$false; if([bool]$script:Config.HandsFree){Execute-VoiceCommand $command}else{Show-Review $command} } finally { $script:Busy=$false; Start-Listening }
+  try { $script:Recognizer.RecognizeAsyncCancel(); $script:Listening=$false; if([bool]$script:Config.HandsFree){Execute-VoiceCommand $command}else{Show-Review $command} } finally { $script:Busy=$false; if(!$script:RealtimeHandoff){Start-Listening} }
 }
 
 function Drain-SpeechEvents {
@@ -779,7 +768,7 @@ function Initialize-Recognizer {
 }
 
 function Start-Listening {
-  if ($script:Listening -or $script:Busy -or $script:RemotePaused) { return }
+  if ($script:Listening -or $script:Busy -or $script:RemotePaused -or $script:RealtimeHandoff) { return }
   if (!(Load-Token)) {
     $script:Listening=$false
     if($script:Notify){$script:Notify.Text='VCUBF Emma — sign in required'}
@@ -884,4 +873,14 @@ try {
   $script:Context=New-Object Windows.Forms.ApplicationContext
   [Windows.Forms.Application]::Run($script:Context)
 } catch { Write-EmmaLog "Fatal: $($_.Exception)"; [Windows.Forms.MessageBox]::Show($_.Exception.Message,'VCUBF Emma','OK','Error')|Out-Null }
-finally { if($script:StateTimer){$script:StateTimer.Stop();$script:StateTimer.Dispose()};if($script:RecognitionTimer){$script:RecognitionTimer.Stop();$script:RecognitionTimer.Dispose()};End-TranscriptConversation 'interrupted';Stop-Listening;Update-VoiceState 'offline' $false 'wake_word'|Out-Null;if($script:SpeechBridge){$script:SpeechBridge.Detach()};if($script:HearingMonitor -and !$script:HearingMonitor.IsDisposed){$script:HearingMonitor.Dispose()};if($script:Notify){$script:Notify.Visible=$false;$script:Notify.Dispose()}; if($script:Recognizer){$script:Recognizer.Dispose()};$script:Synth.Dispose();$mutex.ReleaseMutex();$mutex.Dispose() }
+finally {
+  if($script:StateTimer){$script:StateTimer.Stop();$script:StateTimer.Dispose()}
+  if($script:RecognitionTimer){$script:RecognitionTimer.Stop();$script:RecognitionTimer.Dispose()}
+  if(!$script:RealtimeHandoff){End-TranscriptConversation 'interrupted';Stop-Listening;Update-VoiceState 'offline' $false 'wake_word'|Out-Null}
+  elseif($script:Recognizer){try{$script:Recognizer.RecognizeAsyncCancel()}catch{};$script:Listening=$false}
+  if($script:SpeechBridge){$script:SpeechBridge.Detach()}
+  if($script:HearingMonitor -and !$script:HearingMonitor.IsDisposed){$script:HearingMonitor.Dispose()}
+  if($script:Notify){$script:Notify.Visible=$false;$script:Notify.Dispose()}
+  if($script:Recognizer){$script:Recognizer.Dispose()}
+  $script:Synth.Dispose();$mutex.ReleaseMutex();$mutex.Dispose()
+}
