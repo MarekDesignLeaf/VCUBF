@@ -75,12 +75,22 @@ export interface EmmaCapabilityPolicyItem {
   id: string;
   category: string;
   mode: "read" | "write" | "external" | "administration";
+  kind: "page" | "action" | "command";
   label: string;
   description: string;
   intents: string[];
+  route?: string;
+  page?: string;
+  actionName?: string;
+  requiredPermission?: string;
+  riskLevel?: number;
+  confirmationRequired?: boolean;
   enabled: boolean;
 }
-export interface EmmaPolicy { capabilities: EmmaCapabilityPolicyItem[]; }
+export interface EmmaPolicy {
+  summary: { pages: number; actions: number; commands: number };
+  capabilities: EmmaCapabilityPolicyItem[];
+}
 export interface Invoice { id:string; invoiceNumber:string; title:string; invoiceStatus:string; dueDate?:string|null; isOverdue:boolean; client:{id:string;displayName:string}; totals:{total:number;paid:number;balance:number}; }
 
 export interface Client {

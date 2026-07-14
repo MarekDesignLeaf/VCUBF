@@ -4,7 +4,7 @@ import { api, ApiError, type EmmaCapabilityPolicyItem } from "../api/client";
 import { useAuth } from "../context/useAuth";
 import { appLanguage } from "../i18n";
 
-const CATEGORY_ORDER = ["navigation", "customers", "work", "sales", "communication", "attention", "people", "learning", "evidence", "connectors"];
+const CATEGORY_ORDER = ["navigation", "customers", "work", "sales", "communication", "attention", "people", "learning", "evidence", "connectors", "administration"];
 
 const PL_CAPABILITIES: Record<string, [string, string]> = {
   "navigation.open": ["Otwieranie stron aplikacji", "Emma może otwierać ekrany i zakładki w Secretary."],
@@ -43,6 +43,7 @@ const PL_CATEGORIES: Record<string, string> = {
   navigation: "Aplikacja i nawigacja", customers: "Klienci", work: "Praca i kalendarz", sales: "Usługi, oferty i sprzedaż",
   communication: "Komunikacja zewnętrzna i wewnętrzna", attention: "Powiadomienia i analizy", people: "Pracownicy i rekrutacja",
   learning: "Uczenie i pamięć", evidence: "Zdjęcia i materiały", connectors: "Integracje",
+  administration: "Administracja i bezpieczeństwo",
 };
 
 export function EmmaPermissions() {
@@ -51,6 +52,8 @@ export function EmmaPermissions() {
   const polish = language === "pl-PL";
   const isAdministrator = user?.role === "administrator" || user?.role === "admin";
   const [capabilities, setCapabilities] = useState<EmmaCapabilityPolicyItem[]>([]);
+  const [summary, setSummary] = useState({ pages: 0, actions: 0, commands: 0 });
+  const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,15 +62,22 @@ export function EmmaPermissions() {
   useEffect(() => {
     if (!isAdministrator) return;
     api.company.emmaPolicy()
-      .then((policy) => setCapabilities(policy.capabilities))
+      .then((policy) => { setCapabilities(policy.capabilities); setSummary(policy.summary); })
       .catch((reason) => setError(reason instanceof ApiError ? reason.message : (polish ? "Nie udało się wczytać uprawnień Emmy." : "Could not load Emma permissions.")))
       .finally(() => setLoading(false));
   }, [isAdministrator, polish]);
 
+  const visibleCapabilities = useMemo(() => {
+    const query = filter.trim().toLocaleLowerCase();
+    if (!query) return capabilities;
+    return capabilities.filter((item) => [item.label, item.description, item.id, item.route, item.actionName]
+      .some((value) => value?.toLocaleLowerCase().includes(query)));
+  }, [capabilities, filter]);
+
   const groups = useMemo(() => CATEGORY_ORDER.map((category) => ({
     category,
-    capabilities: capabilities.filter((item) => item.category === category),
-  })).filter((group) => group.capabilities.length > 0), [capabilities]);
+    capabilities: visibleCapabilities.filter((item) => item.category === category),
+  })).filter((group) => group.capabilities.length > 0), [visibleCapabilities]);
 
   if (!isAdministrator) return <Navigate to="/" replace />;
 
@@ -86,6 +96,7 @@ export function EmmaPermissions() {
     try {
       const policy = await api.company.updateEmmaPolicy(capabilities.filter((item) => !item.enabled).map((item) => item.id));
       setCapabilities(policy.capabilities);
+      setSummary(policy.summary);
       setMessage(polish ? "Uprawnienia Emmy zostały zapisane i obowiązują od razu." : "Emma permissions were saved and apply immediately.");
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : (polish ? "Nie udało się zapisać uprawnień Emmy." : "Could not save Emma permissions."));
@@ -97,19 +108,21 @@ export function EmmaPermissions() {
   return <div className="emma-permissions-page">
     <div className="page-header"><div>
       <h1>{polish ? "Uprawnienia Emmy" : "Emma permissions"}</h1>
-      <p className="hint">{polish ? "Ustawienia firmowe widoczne tylko dla administratora. Wyłączona funkcja jest blokowana przez serwer dla wszystkich użytkowników." : "Company-wide controls visible only to administrators. A disabled capability is blocked by the server for every user."}</p>
+      <p className="hint">{polish ? "Pełne, automatycznie odzwierciedlane uprawnienia do każdej strony, operacji i polecenia Emmy. Wyłączona funkcja jest blokowana przez serwer dla wszystkich użytkowników." : "Complete automatically mirrored permissions for every page, backend action and Emma command. A disabled capability is blocked by the server for every user."}</p>
     </div></div>
 
     <section className="emma-policy-summary">
       <div><strong>{capabilities.filter((item) => item.enabled).length}</strong><span>{polish ? "włączone" : "enabled"}</span></div>
       <div><strong>{capabilities.filter((item) => !item.enabled).length}</strong><span>{polish ? "wyłączone" : "disabled"}</span></div>
       <div><strong>{capabilities.filter((item) => item.enabled && item.mode === "external").length}</strong><span>{polish ? "działania zewnętrzne" : "external actions"}</span></div>
+      <div><strong>{summary.pages} / {summary.actions} / {summary.commands}</strong><span>{polish ? "strony / operacje / polecenia" : "pages / actions / commands"}</span></div>
     </section>
 
     <div className="emma-policy-toolbar">
       <button type="button" className="secondary-button" onClick={() => setCapabilities((current) => current.map((item) => ({ ...item, enabled: true })))}>{polish ? "Włącz wszystko" : "Enable all"}</button>
       <button type="button" className="secondary-button" onClick={() => { setMode("write", false); setMode("external", false); setMode("administration", false); }}>{polish ? "Tylko odczyt" : "Read only"}</button>
       <button type="button" className="secondary-button" onClick={() => setMode("external", false)}>{polish ? "Wyłącz działania zewnętrzne" : "Disable external actions"}</button>
+      <input className="emma-policy-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={polish ? "Szukaj strony lub operacji…" : "Search pages or operations…"} />
     </div>
 
     {error && <div className="error-banner" role="alert">{error}</div>}
@@ -126,8 +139,12 @@ export function EmmaPermissions() {
               : item.mode;
             return <label className={`emma-capability ${item.enabled ? "is-enabled" : "is-disabled"}`} key={item.id}>
               <input type="checkbox" checked={item.enabled} onChange={(event) => setEnabled(item.id, event.target.checked)} />
-              <span><strong>{localized?.[0] ?? item.label}</strong><small>{localized?.[1] ?? item.description}</small></span>
-              <em className={`emma-capability-mode mode-${item.mode}`}>{mode}</em>
+              <span>
+                <strong>{localized?.[0] ?? item.label}</strong>
+                <small>{localized?.[1] ?? item.description}</small>
+                <small className="emma-capability-technical">{item.route ?? item.actionName ?? item.id}{item.requiredPermission ? ` · ${item.requiredPermission}` : ""}{item.confirmationRequired ? (polish ? " · wymaga potwierdzenia" : " · confirmation required") : ""}</small>
+              </span>
+              <em className={`emma-capability-mode mode-${item.mode}`}>{item.kind} · {mode}</em>
             </label>;
           })}
         </div>

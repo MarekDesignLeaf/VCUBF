@@ -114,7 +114,7 @@ function auditInterpreted(command: ParsedTextCommand, interpreted: unknown) {
 }
 
 async function blockedByEmmaPolicy(user: AuthedUser, command: ParsedTextCommand) {
-  const decision = await evaluateEmmaCommand(user, command.intent);
+  const decision = await evaluateEmmaCommand(user, command);
   if (decision.allowed) return undefined;
   await recordAudit({
     companyId: user.companyId,

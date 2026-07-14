@@ -46,9 +46,9 @@ describe("company Emma capability policy", () => {
     const changed = await request(app)
       .put("/company/emma-policy")
       .set("Authorization", `Bearer ${administratorToken}`)
-      .send({ disabled_capabilities: ["navigation.open"] });
+      .send({ disabled_capabilities: ["page.quotes"] });
     assert.equal(changed.status, 200);
-    assert.equal(changed.body.capabilities.find((item: { id: string }) => item.id === "navigation.open").enabled, false);
+    assert.equal(changed.body.capabilities.find((item: { id: string }) => item.id === "page.quotes").enabled, false);
 
     const blocked = await request(app)
       .post("/command/text")
@@ -56,7 +56,7 @@ describe("company Emma capability policy", () => {
       .send({ text: "open quotes", input_method: "voice_transcript" });
     assert.equal(blocked.status, 403);
     assert.equal(blocked.body.error, "EMMA_CAPABILITY_DISABLED");
-    assert.equal(blocked.body.capabilityId, "navigation.open");
+    assert.equal(blocked.body.capabilityId, "page.quotes");
 
     const policyAudit = await prisma.auditLog.findFirst({
       where: { companyId: adminUser.companyId, actionName: "update_emma_company_policy" },
@@ -85,7 +85,7 @@ describe("company Emma capability policy", () => {
     const changed = await request(app)
       .put("/company/emma-policy")
       .set("Authorization", `Bearer ${administratorToken}`)
-      .send({ disabled_capabilities: ["customers.clients.create", "customers.contacts.archive"] });
+      .send({ disabled_capabilities: ["action.create_client", "action.archive_contact"] });
     assert.equal(changed.status, 200);
 
     const authedUser = {
