@@ -24,6 +24,7 @@ import re
 import sys
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 
@@ -67,6 +68,86 @@ LANGUAGE_NAMES = {
     "es-ES": "Spanish",
     "it-IT": "Italian",
 }
+
+# Language switching is a local control as well as a Secretary command. Detect
+# it before asking the Realtime model for a reply so success never depends on
+# the model deciding to call execute_business_request.
+LANGUAGE_ALIASES = {
+    "en gb": "en-GB", "en": "en-GB", "english": "en-GB", "british english": "en-GB",
+    "anglictina": "en-GB", "anglictiny": "en-GB", "anglictinu": "en-GB", "anglicky": "en-GB",
+    "angielski": "en-GB", "angielsku": "en-GB", "anglais": "en-GB", "englisch": "en-GB",
+    "ingles": "en-GB", "inglese": "en-GB",
+    "en us": "en-US", "american english": "en-US", "us english": "en-US",
+    "cs cz": "cs-CZ", "cs": "cs-CZ", "czech": "cs-CZ", "cestina": "cs-CZ",
+    "cestiny": "cs-CZ", "cestinu": "cs-CZ", "cesky": "cs-CZ", "czeski": "cs-CZ", "czesku": "cs-CZ",
+    "tcheque": "cs-CZ", "tschechisch": "cs-CZ", "checo": "cs-CZ", "ceco": "cs-CZ",
+    "pl pl": "pl-PL", "pl": "pl-PL", "polish": "pl-PL", "polski": "pl-PL", "polsku": "pl-PL",
+    "polsky": "pl-PL", "polstina": "pl-PL", "polstiny": "pl-PL", "polstinu": "pl-PL",
+    "polonais": "pl-PL", "polnisch": "pl-PL", "polaco": "pl-PL", "polacco": "pl-PL",
+    "fr fr": "fr-FR", "fr": "fr-FR", "french": "fr-FR", "francais": "fr-FR", "francouzsky": "fr-FR",
+    "francouzstina": "fr-FR", "francouzstiny": "fr-FR", "francouzstinu": "fr-FR", "francuski": "fr-FR",
+    "franzosisch": "fr-FR", "frances": "fr-FR", "francese": "fr-FR",
+    "de de": "de-DE", "de": "de-DE", "german": "de-DE", "deutsch": "de-DE", "nemecky": "de-DE",
+    "nemcina": "de-DE", "nemciny": "de-DE", "nemcinu": "de-DE", "niemiecki": "de-DE",
+    "allemand": "de-DE", "aleman": "de-DE", "tedesco": "de-DE",
+    "es es": "es-ES", "es": "es-ES", "spanish": "es-ES", "espanol": "es-ES", "spanelsky": "es-ES",
+    "spanelstina": "es-ES", "spanelstiny": "es-ES", "spanelstinu": "es-ES", "hiszpanski": "es-ES",
+    "espagnol": "es-ES", "spanisch": "es-ES", "spagnolo": "es-ES",
+    "it it": "it-IT", "it": "it-IT", "italian": "it-IT", "italiano": "it-IT", "italsky": "it-IT",
+    "italstina": "it-IT", "italstiny": "it-IT", "italstinu": "it-IT", "wloski": "it-IT",
+    "italien": "it-IT", "italienisch": "it-IT",
+}
+
+LANGUAGE_COMMAND_PATTERNS = tuple(re.compile(pattern) for pattern in (
+    r"(?:please )?(?:set|change|switch)(?: the)?(?:(?: emma s| voice| menu| secretary))? language(?: to)? (.+)",
+    r"(?:yes )?(?:change|switch)(?: yourself| over)? to (.+)",
+    r"(?:please )?(?:speak|talk|respond)(?: in)? (.+)",
+    r"(?:(?:ano|ne) )?(?:zmen|prepni|nastav)(?: se)?(?: okamzite)?(?:(?: jazyk)?(?: emmy| menu| sekretare| secretary)?| jazyk)(?: na| do)? (.+)",
+    r"(?:(?:ano|ne) )?(?:zmen|prepni)(?: se)?(?: okamzite)? (?:do|na) (.+)",
+    r"(?:mluv|mluvte|odpovidej)(?: prosim)?(?: v| cesky| polsky)? (.+)",
+    r"(?:(?:tak|nie) )?(?:zmien|przelacz|ustaw)(?: sie)?(?: jezyk)?(?: emmy| menu)?(?: na| do)? (.+)",
+    r"(?:mow|odpowiadaj)(?: po| w)? (.+)",
+    r"(?:change|passe|bascule|mets)(?: la)? langue(?: en| vers)? (.+)",
+    r"(?:parle|reponds)(?: en)? (.+)",
+    r"(?:wechsle|andere|stelle)(?: die)? sprache(?: auf| zu)? (.+)",
+    r"(?:sprich|antworte)(?: auf)? (.+)",
+    r"(?:cambia|cambiar|pon)(?: el)? idioma(?: a| en)? (.+)",
+    r"(?:habla|responde)(?: en)? (.+)",
+    r"(?:cambia|imposta)(?: la)? lingua(?: in| su)? (.+)",
+    r"(?:parla|rispondi)(?: in)? (.+)",
+))
+
+
+def normalize_language_command(text: str) -> str:
+    decomposed = unicodedata.normalize("NFD", text.casefold())
+    ascii_text = "".join(character for character in decomposed if unicodedata.category(character) != "Mn")
+    return " ".join(re.findall(r"[a-z0-9]+", ascii_text))
+
+
+def detect_language_change(text: str) -> str | None:
+    normalized = normalize_language_command(text)
+    for pattern in LANGUAGE_COMMAND_PATTERNS:
+        match = pattern.fullmatch(normalized)
+        if match:
+            return LANGUAGE_ALIASES.get(match.group(1).strip())
+    return None
+
+
+def language_detection_self_test() -> bool:
+    examples = {
+        "Switch language to Polish.": "pl-PL",
+        "Přepni se do angličtiny.": "en-GB",
+        "Přepni jazyk do češtiny.": "cs-CZ",
+        "Změň jazyk Emmy na francouzštinu.": "fr-FR",
+        "Zmień język na niemiecki.": "de-DE",
+        "Mów po polsku.": "pl-PL",
+        "Cambia el idioma a español.": "es-ES",
+        "Cambia la lingua in italiano.": "it-IT",
+        "Passe la langue en allemand.": "de-DE",
+        "Wechsle die Sprache auf Spanisch.": "es-ES",
+    }
+    return all(detect_language_change(text) == expected for text, expected in examples.items()) \
+        and detect_language_change("Show me contacts") is None
 
 LOCALIZED_TOOL_ERRORS = {
     "en-GB": "The business request could not be completed.",
@@ -752,23 +833,72 @@ SECRETARY_NAVIGATION={navigation_json}"""
             return True
         return SequenceMatcher(None, heard_normalized, assistant_normalized).ratio() >= 0.62
 
-    def response_create_event(self) -> dict:
+    def response_create_event(self, one_turn_instruction: str = "", disable_tools: bool = False) -> dict:
         """Lock each generated turn to the complete current-language prompt."""
+        response: dict = {
+            "instructions": self.response_instructions + one_turn_instruction,
+        }
+        if disable_tools:
+            response["tool_choice"] = "none"
         return {
             "type": "response.create",
-            "response": {"instructions": self.response_instructions},
+            "response": response,
         }
 
-    async def create_response_for_user(self) -> None:
+    async def create_response_for_user(self, one_turn_instruction: str = "", disable_tools: bool = False) -> None:
         """Create one reply only after a user transcript passed local validation."""
         for _ in range(40):
             if self.stop.is_set():
                 return
             if not self.response_active:
-                await self.send(self.response_create_event())
+                await self.send(self.response_create_event(one_turn_instruction, disable_tools))
                 return
             await asyncio.sleep(0.025)
         log("validated user turn could not start because a response stayed active")
+
+    async def apply_language(self, language: str) -> None:
+        """Apply one backend-confirmed language to speech, transcription and local startup state."""
+        if language not in LANGUAGE_NAMES:
+            raise ValueError("unsupported language")
+        self.configured_language = language
+        self.spoken_language = LANGUAGE_NAMES[language]
+        self.transcription_language = language.split("-", 1)[0].lower()
+        save_config_language(language)
+        await self.configure(initialize=False)
+        log(f"realtime language changed to {language}")
+
+    async def handle_direct_language_change(self, heard: str, expected_language: str) -> None:
+        """Persist an explicit language command without relying on an AI tool decision."""
+        try:
+            result = await asyncio.to_thread(
+                backend_json,
+                "POST",
+                "/command/assistant",
+                {"text": heard, "input_method": "voice_transcript", "language": self.configured_language, "history": []},
+            )
+            selected_language = (
+                (result.get("data") or {}).get("voiceLanguage")
+                if result.get("intent") == "set_voice_language" and result.get("ok") is True
+                else None
+            )
+            if selected_language != expected_language or selected_language not in LANGUAGE_NAMES:
+                raise ValueError("backend did not confirm requested language")
+            await self.apply_language(selected_language)
+            confirmation = str(result.get("message") or "").strip()
+            if not confirmation:
+                confirmation = f"Language changed to {self.spoken_language}."
+            exact_confirmation = json.dumps(confirmation, ensure_ascii=False)
+            await self.create_response_for_user(
+                "\nIMPORTANT FOR THIS ONE RESPONSE: The backend has already completed the explicit language change. "
+                "Do not call any tool. Say exactly this confirmation and nothing else: " + exact_confirmation,
+                disable_tools=True,
+            )
+        except Exception as exc:
+            if isinstance(exc, urllib.error.HTTPError):
+                log(f"direct language change error: HTTP {exc.code}")
+            else:
+                log(f"direct language change error: {type(exc).__name__}")
+            await self.create_response_for_user()
 
     async def run_tool(self, event: dict) -> None:
         call_id = event.get("call_id")
@@ -794,15 +924,10 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 else None
             )
             if selected_language in LANGUAGE_NAMES and selected_language != self.configured_language:
-                self.configured_language = selected_language
-                self.spoken_language = LANGUAGE_NAMES[selected_language]
-                self.transcription_language = selected_language.split("-", 1)[0].lower()
-                save_config_language(selected_language)
                 # Update transcription and response instructions before the
                 # function result is handed back to Realtime. The confirmation
                 # and every subsequent turn then use one language end to end.
-                await self.configure(initialize=False)
-                log(f"realtime language changed to {selected_language}")
+                await self.apply_language(selected_language)
             output = compact_tool_result(result)
         except Exception as exc:
             log(f"tool error: {type(exc).__name__}")
@@ -912,7 +1037,11 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 if normalized in {"stop", "goodbye", "that's all", "that is all"}:
                     self.stop.set()
                 elif heard:
-                    asyncio.create_task(self.create_response_for_user())
+                    requested_language = detect_language_change(heard)
+                    if requested_language:
+                        asyncio.create_task(self.handle_direct_language_change(heard, requested_language))
+                    else:
+                        asyncio.create_task(self.create_response_for_user())
             elif event_type == "response.done":
                 self.response_active = False
                 # Current Realtime servers emit response.output_audio.done.
@@ -1037,16 +1166,18 @@ def main() -> int:
         finally:
             audio.terminate()
         buffer_ok = playback_buffer_self_test()
+        language_ok = language_detection_self_test()
         print(json.dumps({
-            "status": "ok" if buffer_ok and output_devices else "failed",
+            "status": "ok" if buffer_ok and language_ok and output_devices else "failed",
             "input_devices": len(input_devices),
             "output_devices": len(output_devices),
             "playback_frame_ms": PLAYBACK_FRAME_MS,
             "playback_prebuffer_ms": PLAYBACK_PREBUFFER_MS,
             "jitter_buffer": buffer_ok,
+            "language_command_detection": language_ok,
             "token_protected": TOKEN_PATH.exists(),
         }))
-        return 0 if buffer_ok and output_devices else 1
+        return 0 if buffer_ok and language_ok and output_devices else 1
     initial = sys.stdin.readline().strip() if args.stdin else ""
     runtime = RealtimeEmma(initial)
     try:

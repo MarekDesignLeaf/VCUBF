@@ -201,12 +201,20 @@ function parseVoiceLanguageCommand(text: string): Extract<ParsedCommand, { inten
     /^(?:set|change|switch)\s+(?:the\s+)?(?:(?:emma(?:'s)?|voice|menu|secretary)\s+)?language\s+(?:to\s+)?(.+)$/iu,
     /^(?:yes[,\s]+)?(?:change|switch)(?:\s+(?:yourself|over))?\s+to\s+(.+)$/iu,
     /^(?:speak|talk|respond)\s+(?:in\s+)?(.+)$/iu,
-    /^(?:zm[eě]ň|zmen|přepni|prepn[ií]|nastav)\s+(?:(?:jazyk\s+)?(?:emmy|menu|sekretary|sekretáře)|jazyk)\s*(?:na\s+)?(.+)$/iu,
+    /^(?:zm[eě]ň|zmen|přepni|prepn[ií]|nastav)\s+(?:(?:jazyk\s+)?(?:emmy|menu|sekretary|sekretáře)|jazyk)\s*(?:(?:na|do)\s+)?(.+)$/iu,
     /^(?:(?:ano|ne)[,\s]+)?(?:přepni|prepni|zepni)(?:\s+se)?(?:\s+okamžitě)?\s+(?:do|na)\s+(.+)$/iu,
     /^(?:mluv|mluvte|odpov[ií]dej)\s+(?:pros[ií]m\s+)?(?:v\s+)?(.+)$/iu,
-    /^(?:zmień|zmien|przełącz|przelacz|ustaw)\s+(?:język|jezyk)(?:\s+emmy|\s+menu)?\s*(?:na\s+)?(.+)$/iu,
+    /^(?:zmień|zmien|przełącz|przelacz|ustaw)\s+(?:język|jezyk)(?:\s+emmy|\s+menu)?\s*(?:(?:na|do)\s+)?(.+)$/iu,
     /^(?:tak[,\s]+)?(?:przełącz|przelacz)(?:\s+się|\s+sie)?\s+na\s+(.+)$/iu,
     /^(?:mów|mow|odpowiadaj)\s+(?:po\s+)?(.+)$/iu,
+    /^(?:change|passe|bascule|mets)\s+(?:la\s+)?langue\s*(?:(?:en|vers)\s+)?(.+)$/iu,
+    /^(?:parle|réponds|reponds)\s+(?:en\s+)?(.+)$/iu,
+    /^(?:wechsle|ändere|andere|stelle)\s+(?:die\s+)?sprache\s*(?:(?:auf|zu)\s+)?(.+)$/iu,
+    /^(?:sprich|antworte)\s+(?:auf\s+)?(.+)$/iu,
+    /^(?:cambia|cambiar|pon)\s+(?:el\s+)?idioma\s*(?:(?:a|en)\s+)?(.+)$/iu,
+    /^(?:habla|responde)\s+(?:en\s+)?(.+)$/iu,
+    /^(?:cambia|imposta)\s+(?:la\s+)?lingua\s*(?:(?:in|su)\s+)?(.+)$/iu,
+    /^(?:parla|rispondi)\s+(?:in\s+)?(.+)$/iu,
   ];
   for (const pattern of patterns) {
     const match = text.match(pattern);

@@ -171,10 +171,16 @@ describe("commandParser", () => {
     assert.deepEqual(parseTextCommand("zmień język na angielski"), { intent: "set_voice_language", entities: { language: "en-GB" } });
     assert.deepEqual(parseTextCommand("Přepni se do angličtiny."), { intent: "set_voice_language", entities: { language: "en-GB" } });
     assert.deepEqual(parseTextCommand("Přepni se do češtiny."), { intent: "set_voice_language", entities: { language: "cs-CZ" } });
+    assert.deepEqual(parseTextCommand("Přepni jazyk do češtiny."), { intent: "set_voice_language", entities: { language: "cs-CZ" } });
+    assert.deepEqual(parseTextCommand("Změň jazyk Emmy na francouzštinu."), { intent: "set_voice_language", entities: { language: "fr-FR" } });
     assert.deepEqual(parseTextCommand("Přepni se do němčiny."), { intent: "set_voice_language", entities: { language: "de-DE" } });
     assert.deepEqual(parseTextCommand("Ne, přepni se okamžitě do angličtiny!"), { intent: "set_voice_language", entities: { language: "en-GB" } });
     assert.deepEqual(parseTextCommand("Switch to Polish"), { intent: "set_voice_language", entities: { language: "pl-PL" } });
     assert.deepEqual(parseTextCommand("Yes, switch to Polish."), { intent: "set_voice_language", entities: { language: "pl-PL" } });
+    assert.deepEqual(parseTextCommand("Passe la langue en allemand."), { intent: "set_voice_language", entities: { language: "de-DE" } });
+    assert.deepEqual(parseTextCommand("Wechsle die Sprache auf Spanisch."), { intent: "set_voice_language", entities: { language: "es-ES" } });
+    assert.deepEqual(parseTextCommand("Cambia el idioma a italiano."), { intent: "set_voice_language", entities: { language: "it-IT" } });
+    assert.deepEqual(parseTextCommand("Cambia la lingua in francese."), { intent: "set_voice_language", entities: { language: "fr-FR" } });
     assert.equal(isExplicitVoiceLanguageChange("změň jazyk na češtinu", "cs-CZ"), true);
     assert.equal(isExplicitVoiceLanguageChange("show me contacts", "en-GB"), false);
     assert.equal(isExplicitVoiceLanguageChange("mluv česky", "en-GB"), false);
