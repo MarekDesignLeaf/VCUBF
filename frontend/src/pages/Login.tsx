@@ -64,14 +64,17 @@ export function Login() {
             <input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
           </label>
           <label>
-            Password
+            <span className="login-field-heading">
+              Password
+              <Link className="login-inline-reset" to="/forgot-password">Reset password</Link>
+            </span>
             <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
           </label>
           {error && <div className="error-banner" role="alert">{error}</div>}
           <button className="login-submit" type="submit" disabled={submitting}>
             {submitting ? "Signing in…" : "Enter Secretary"}
           </button>
-          <Link className="login-secondary-link" to="/forgot-password">Forgot your password?</Link>
+          <p className="login-reset-hint">Cannot sign in? <Link to="/forgot-password">Send a new reset link</Link></p>
         </form>
       </main>
     </div>

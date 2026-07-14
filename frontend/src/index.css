@@ -126,10 +126,14 @@ body {
 .login-card .login-eyebrow { color: #277451; }
 .subtitle { color: var(--muted); margin: 0; font-size: .92rem; }
 .login-card label { gap: 7px; color: #33453a; font-size: .84rem; font-weight: 700; }
+.login-field-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.login-inline-reset { color: #277451; font-size: .78rem; font-weight: 750; text-decoration: none; }
+.login-inline-reset:hover, .login-inline-reset:focus-visible { text-decoration: underline; }
 .login-card input { min-height: 45px; border-radius: 9px; background: #fbfdfb; transition: border-color .15s ease, box-shadow .15s ease; }
 .login-card input:focus { outline: none; border-color: #4da071; box-shadow: 0 0 0 3px rgb(77 160 113 / 14%); }
 .login-submit { min-height: 47px; margin-top: 3px; border-radius: 9px; font-weight: 750; }
-.login-secondary-link { justify-self: center; color: #277451; font-size: .88rem; font-weight: 700; text-align: center; }
+.login-reset-hint { margin: -2px 0 0; color: var(--muted); font-size: .82rem; text-align: center; }
+.login-reset-hint a { color: #277451; font-weight: 750; }
 
 label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
 
