@@ -56,7 +56,7 @@ export function Login() {
           <div><span>02</span><p><strong>Work in motion</strong>Move from lead to quote, job and invoice without losing the thread.</p></div>
           <div><span>03</span><p><strong>Emma at hand</strong>Use voice guidance and actions where you need them.</p></div>
         </div>
-        <p className="login-version">VCUF Secretary · secure workspace</p>
+        <p className="login-version">VCUF Secretary · build {__VCUBF_BUILD__}</p>
       </section>
 
       <main className="login-panel">

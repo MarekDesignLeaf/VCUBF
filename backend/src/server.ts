@@ -59,7 +59,10 @@ export function createServer() {
     },
   }));
 
-  app.get("/health", (_req, res) => res.json({ status: "ok" }));
+  app.get("/health", (_req, res) => res.json({
+    status: "ok",
+    build: (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "local").slice(0, 12),
+  }));
 
   app.use("/auth", authRouter);
   app.use("/auth/device", devicePairingRouter);

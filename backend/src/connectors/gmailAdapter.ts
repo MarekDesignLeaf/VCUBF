@@ -8,6 +8,7 @@ const GMAIL_MESSAGES_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/
 const GMAIL_HISTORY_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/history";
 const GMAIL_PROFILE_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/profile";
 const GMAIL_DRAFTS_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/drafts";
+export const GMAIL_INBOX_LABEL = "INBOX";
 const MAX_IMPORTED_MESSAGE_CHARS = 100_000;
 
 export interface StoredGmailCredential {
@@ -76,6 +77,7 @@ interface GmailPayloadPart {
 export interface GmailMessage {
   id: string;
   threadId?: string;
+  labelIds?: string[];
   historyId?: string;
   internalDate?: string;
   snippet?: string;
@@ -328,6 +330,7 @@ export async function listGmailMessages(
 ) {
   const url = new URL(GMAIL_MESSAGES_ENDPOINT);
   url.searchParams.set("maxResults", String(input.maxResults));
+  url.searchParams.append("labelIds", GMAIL_INBOX_LABEL);
   if (input.query) url.searchParams.set("q", input.query);
   if (input.pageToken) url.searchParams.set("pageToken", input.pageToken);
   return gmailJson<GmailMessageList>(url, accessToken);
@@ -351,6 +354,7 @@ export async function listGmailHistory(
   url.searchParams.set("startHistoryId", input.startHistoryId);
   url.searchParams.set("maxResults", String(input.maxResults));
   url.searchParams.append("historyTypes", "messageAdded");
+  url.searchParams.set("labelId", GMAIL_INBOX_LABEL);
   if (input.pageToken) url.searchParams.set("pageToken", input.pageToken);
   return gmailJson<GmailHistoryList>(url, accessToken, "history");
 }

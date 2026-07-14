@@ -168,6 +168,7 @@ describe("Gmail read-only connector", () => {
       if (url.pathname.endsWith("/messages")) {
         assert.equal(url.searchParams.get("maxResults"), "10");
         assert.equal(url.searchParams.get("q"), "newer_than:7d");
+        assert.deepEqual(url.searchParams.getAll("labelIds"), ["INBOX"]);
         return Response.json({ messages: [{ id: "message-1", threadId: "thread-1" }], resultSizeEstimate: 1 });
       }
       assert.ok(url.pathname.endsWith("/messages/message-1"));
@@ -175,6 +176,7 @@ describe("Gmail read-only connector", () => {
       return Response.json({
         id: "message-1",
         threadId: "thread-1",
+        labelIds: ["INBOX", "UNREAD"],
         internalDate: "1767225600000",
         payload: {
           mimeType: "text/plain",
@@ -211,6 +213,7 @@ describe("Gmail read-only connector", () => {
     assert.equal(intake.senderName, "Customer One");
     assert.equal(intake.messageText, "Subject: Kitchen quote\n\nHello from Gmail");
     assert.equal(intake.sourceReference, `gmail:${sourceId}:message-1`);
+    assert.deepEqual(intake.sourceMetadata, { provider: "gmail", labelIds: ["INBOX", "UNREAD"] });
     assert.equal(await prisma.communicationIntake.count({ where: { connectorSourceId: sourceId } }), 1);
 
     const audit = await prisma.auditLog.findFirstOrThrow({
@@ -249,13 +252,20 @@ describe("Gmail read-only connector", () => {
       if (url.pathname.endsWith("/history")) {
         assert.equal(url.searchParams.get("startHistoryId"), "100");
         assert.equal(url.searchParams.get("historyTypes"), "messageAdded");
+        assert.equal(url.searchParams.get("labelId"), "INBOX");
         return Response.json({
-          history: [{ id: "104", messagesAdded: [{ message: { id: "message-2", threadId: "thread-2" } }] }],
+          history: [{ id: "104", messagesAdded: [
+            { message: { id: "message-2", threadId: "thread-2" } },
+            { message: { id: "message-spam", threadId: "thread-spam" } },
+          ] }],
           historyId: "105",
         });
       }
       if (url.pathname.endsWith("/messages/message-2")) {
-        return Response.json({ id: "message-2", threadId: "thread-2", snippet: "Incremental Gmail message" });
+        return Response.json({ id: "message-2", threadId: "thread-2", labelIds: ["INBOX"], snippet: "Incremental Gmail message" });
+      }
+      if (url.pathname.endsWith("/messages/message-spam")) {
+        return Response.json({ id: "message-spam", threadId: "thread-spam", labelIds: ["SPAM"], snippet: "Spam message" });
       }
       throw new Error(`Unexpected incremental sync request: ${url}`);
     };
@@ -266,10 +276,12 @@ describe("Gmail read-only connector", () => {
     assert.equal(incremental.status, 200);
     assert.equal(incremental.body.mode, "incremental");
     assert.equal(incremental.body.importedCount, 1);
+    assert.equal(incremental.body.skippedCount, 1);
     assert.equal(incremental.body.cursorAdvanced, true);
     stored = await prisma.connectorSource.findUniqueOrThrow({ where: { id: sourceId } });
     assert.equal(stored.syncCursor, "105");
     assert.equal(await prisma.communicationIntake.count({ where: { externalMessageId: "message-2" } }), 1);
+    assert.equal(await prisma.communicationIntake.count({ where: { externalMessageId: "message-spam" } }), 0);
   });
 
   it("refreshes an expired access token without replacing the refresh token", async () => {

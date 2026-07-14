@@ -56,8 +56,8 @@ function Start-Emma {
 }
 
 function Open-Login([string]$Email) {
-  $url="$frontend/login"
-  if($Email){$url+="?email=$([uri]::EscapeDataString($Email))"}
+  $url="$frontend/login?desktop=1&launch=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+  if($Email){$url+="&email=$([uri]::EscapeDataString($Email))"}
   Start-Process $url
 }
 

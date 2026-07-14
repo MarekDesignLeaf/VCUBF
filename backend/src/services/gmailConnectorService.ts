@@ -12,6 +12,7 @@ import {
   buildGmailAuthorizationUrl,
   createGmailDraft,
   exchangeGmailAuthorizationCode,
+  GMAIL_INBOX_LABEL,
   GMAIL_COMPOSE_SCOPE,
   GMAIL_SEND_SCOPE,
   getGmailMessage,
@@ -395,6 +396,10 @@ async function importMessageReferences(
       }
       throw error;
     }
+    if (!Array.isArray(rawMessage.labelIds) || !rawMessage.labelIds.includes(GMAIL_INBOX_LABEL)) {
+      skippedCount += 1;
+      continue;
+    }
     const message = parseGmailMessage(rawMessage);
     if (message.externalMessageId !== reference.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
     try {
@@ -410,6 +415,7 @@ async function importMessageReferences(
           messageText: message.messageText,
           receivedAt: message.receivedAt,
           sourceReference: `gmail:${source.id}:${message.externalMessageId}`,
+          sourceMetadata: { provider: "gmail", labelIds: rawMessage.labelIds },
           createdBy: user.id,
         },
       });
