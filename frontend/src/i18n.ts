@@ -28,7 +28,8 @@ export const MENU_KEYS = [
   "dashboard", "account", "notifications", "dataQuality", "metrics", "leads", "clients", "contacts", "documents", "jobs",
   "tasks", "enquiries", "communicationIntake", "communications", "photos", "photoSelection", "businessContext", "industries",
   "connectors", "websiteAudit", "websiteContent", "employees", "calendar", "services", "quotes", "invoices", "recruitment",
-  "playbooks", "learning", "emmaMemory", "logout",
+  "playbooks", "learning", "emmaMemory", "logout", "overview", "customers", "workFinance", "growth", "management",
+  "workspace", "openMenu", "closeMenu",
 ] as const;
 
 export type MenuKey = (typeof MENU_KEYS)[number];
@@ -40,6 +41,8 @@ const ENGLISH: Record<MenuKey, string> = {
   businessContext: "Business Context", industries: "Industries", connectors: "Connectors", websiteAudit: "Website Audit", websiteContent: "Website Content",
   employees: "Employees", calendar: "Calendar", services: "Services", quotes: "Quotes", invoices: "Invoices", recruitment: "Recruitment",
   playbooks: "Playbooks", learning: "Learning", emmaMemory: "Emma Memory", logout: "Log out",
+  overview: "Overview", customers: "Customers & communication", workFinance: "Work & finance", growth: "Growth & presentation", management: "Management & system",
+  workspace: "Secretary workspace", openMenu: "Open menu", closeMenu: "Close menu",
 };
 
 const TRANSLATIONS: Record<AppLanguage, Partial<Record<MenuKey, string>>> = {
@@ -52,6 +55,8 @@ const TRANSLATIONS: Record<AppLanguage, Partial<Record<MenuKey, string>>> = {
     businessContext: "Kontext firmy", industries: "Obory", connectors: "Konektory", websiteAudit: "Audit webu", websiteContent: "Obsah webu",
     employees: "Zaměstnanci", calendar: "Kalendář", services: "Služby", quotes: "Nabídky", invoices: "Faktury", recruitment: "Nábor",
     playbooks: "Postupy", learning: "Učení", emmaMemory: "Paměť Emmy", logout: "Odhlásit se",
+    overview: "Přehled", customers: "Klienti a komunikace", workFinance: "Práce a finance", growth: "Růst a prezentace", management: "Řízení a systém",
+    workspace: "Pracovní prostor Secretary", openMenu: "Otevřít menu", closeMenu: "Zavřít menu",
   },
   "pl-PL": {
     dashboard: "Panel główny", account: "Konto", notifications: "Powiadomienia", dataQuality: "Jakość danych", metrics: "Wskaźniki firmy",
@@ -60,6 +65,8 @@ const TRANSLATIONS: Record<AppLanguage, Partial<Record<MenuKey, string>>> = {
     businessContext: "Kontekst firmy", industries: "Branże", connectors: "Integracje", websiteAudit: "Audyt strony", websiteContent: "Treść strony",
     employees: "Pracownicy", calendar: "Kalendarz", services: "Usługi", quotes: "Oferty", invoices: "Faktury", recruitment: "Rekrutacja",
     playbooks: "Procedury", learning: "Uczenie", emmaMemory: "Pamięć Emmy", logout: "Wyloguj się",
+    overview: "Przegląd", customers: "Klienci i komunikacja", workFinance: "Praca i finanse", growth: "Rozwój i prezentacja", management: "Zarządzanie i system",
+    workspace: "Obszar roboczy Secretary", openMenu: "Otwórz menu", closeMenu: "Zamknij menu",
   },
   "fr-FR": {
     dashboard: "Tableau de bord", account: "Compte", notifications: "Notifications", dataQuality: "Qualité des données", metrics: "Indicateurs de l’entreprise",
@@ -68,6 +75,8 @@ const TRANSLATIONS: Record<AppLanguage, Partial<Record<MenuKey, string>>> = {
     businessContext: "Contexte de l’entreprise", industries: "Secteurs", connectors: "Connecteurs", websiteAudit: "Audit du site", websiteContent: "Contenu du site",
     employees: "Employés", calendar: "Calendrier", services: "Services", quotes: "Devis", invoices: "Factures", recruitment: "Recrutement",
     playbooks: "Procédures", learning: "Apprentissage", emmaMemory: "Mémoire d’Emma", logout: "Se déconnecter",
+    overview: "Vue d’ensemble", customers: "Clients et communication", workFinance: "Travail et finances", growth: "Croissance et présentation", management: "Gestion et système",
+    workspace: "Espace de travail Secretary", openMenu: "Ouvrir le menu", closeMenu: "Fermer le menu",
   },
   "de-DE": {
     dashboard: "Übersicht", account: "Konto", notifications: "Benachrichtigungen", dataQuality: "Datenqualität", metrics: "Unternehmenskennzahlen",
@@ -76,6 +85,8 @@ const TRANSLATIONS: Record<AppLanguage, Partial<Record<MenuKey, string>>> = {
     businessContext: "Unternehmenskontext", industries: "Branchen", connectors: "Konnektoren", websiteAudit: "Website-Audit", websiteContent: "Website-Inhalte",
     employees: "Mitarbeiter", calendar: "Kalender", services: "Leistungen", quotes: "Angebote", invoices: "Rechnungen", recruitment: "Personalbeschaffung",
     playbooks: "Abläufe", learning: "Lernen", emmaMemory: "Emma-Speicher", logout: "Abmelden",
+    overview: "Übersicht", customers: "Kunden und Kommunikation", workFinance: "Arbeit und Finanzen", growth: "Wachstum und Darstellung", management: "Verwaltung und System",
+    workspace: "Secretary-Arbeitsbereich", openMenu: "Menü öffnen", closeMenu: "Menü schließen",
   },
   "es-ES": {
     dashboard: "Panel", account: "Cuenta", notifications: "Notificaciones", dataQuality: "Calidad de datos", metrics: "Métricas empresariales",
@@ -84,6 +95,8 @@ const TRANSLATIONS: Record<AppLanguage, Partial<Record<MenuKey, string>>> = {
     businessContext: "Contexto empresarial", industries: "Sectores", connectors: "Conectores", websiteAudit: "Auditoría web", websiteContent: "Contenido web",
     employees: "Empleados", calendar: "Calendario", services: "Servicios", quotes: "Presupuestos", invoices: "Facturas", recruitment: "Selección de personal",
     playbooks: "Procedimientos", learning: "Aprendizaje", emmaMemory: "Memoria de Emma", logout: "Cerrar sesión",
+    overview: "Resumen", customers: "Clientes y comunicación", workFinance: "Trabajo y finanzas", growth: "Crecimiento y presentación", management: "Gestión y sistema",
+    workspace: "Espacio de trabajo Secretary", openMenu: "Abrir menú", closeMenu: "Cerrar menú",
   },
   "it-IT": {
     dashboard: "Panoramica", account: "Account", notifications: "Notifiche", dataQuality: "Qualità dei dati", metrics: "Metriche aziendali",
@@ -92,6 +105,8 @@ const TRANSLATIONS: Record<AppLanguage, Partial<Record<MenuKey, string>>> = {
     businessContext: "Contesto aziendale", industries: "Settori", connectors: "Connettori", websiteAudit: "Audit del sito", websiteContent: "Contenuto del sito",
     employees: "Dipendenti", calendar: "Calendario", services: "Servizi", quotes: "Preventivi", invoices: "Fatture", recruitment: "Selezione del personale",
     playbooks: "Procedure", learning: "Apprendimento", emmaMemory: "Memoria di Emma", logout: "Esci",
+    overview: "Panoramica", customers: "Clienti e comunicazione", workFinance: "Lavoro e finanze", growth: "Crescita e presentazione", management: "Gestione e sistema",
+    workspace: "Area di lavoro Secretary", openMenu: "Apri menu", closeMenu: "Chiudi menu",
   },
 };
 
