@@ -220,6 +220,8 @@ describe("commandParser", () => {
 
   it("parses direct navigation across the Secretary hierarchy", () => {
     assert.deepEqual(parseTextCommand("open dashboard"), { intent: "navigate", entities: { page: "dashboard" } });
+    assert.deepEqual(parseTextCommand("Opan calendar."), { intent: "navigate", entities: { page: "calendar" } });
+    assert.deepEqual(parseTextCommand("oppen quotes"), { intent: "navigate", entities: { page: "quotes" } });
     assert.deepEqual(parseTextCommand("go to invoices"), { intent: "navigate", entities: { page: "invoices" } });
     assert.deepEqual(parseTextCommand("take me to communication intake"), { intent: "navigate", entities: { page: "communication_intake" } });
     assert.deepEqual(parseTextCommand("show me business metrics"), { intent: "navigate", entities: { page: "metrics" } });

@@ -719,7 +719,10 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (/^(?:list|show(?:\s+me)?|open)\s+jobs?$/i.test(text)) return { intent: "list_jobs", entities: {} };
   if (/^(?:list|show(?:\s+me)?|open)\s+leads?$/i.test(text)) return { intent: "list_leads", entities: {} };
 
-  m = text.match(/^(?:open|go\s+to|navigate\s+to|take\s+me\s+to|show\s+me|otevři|otevri|přejdi\s+na|prejdi\s+na|ukaž|ukaz|otwórz|otworz|przejdź\s+do|przejdz\s+do|pokaż|pokaz|ouvre|ouvrir|va\s+à|va\s+a|affiche|öffne|offne|gehe\s+zu|zeige|abre|abrir|ve\s+a|muestra|apri|vai\s+a|mostra)\s+(.+)$/iu);
+  // "Opan" and "oppen" are common English speech-to-text renderings of
+  // "open". Accept them only as command verbs; the page name must still
+  // resolve through the authoritative navigation catalogue below.
+  m = text.match(/^(?:open|opan|oppen|go\s+to|navigate\s+to|take\s+me\s+to|show\s+me|otevři|otevri|přejdi\s+na|prejdi\s+na|ukaž|ukaz|otwórz|otworz|przejdź\s+do|przejdz\s+do|pokaż|pokaz|ouvre|ouvrir|va\s+à|va\s+a|affiche|öffne|offne|gehe\s+zu|zeige|abre|abrir|ve\s+a|muestra|apri|vai\s+a|mostra)\s+(.+)$/iu);
   if (m) {
     const page = resolveVoicePage(m[1]);
     if (page) return { intent: "navigate", entities: { page } };
