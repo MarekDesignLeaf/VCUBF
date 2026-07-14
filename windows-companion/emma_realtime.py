@@ -28,6 +28,11 @@ RATE = 24_000
 CHUNK = 2_400  # 100 ms PCM16 frames
 MAX_SESSION_SECONDS = 180
 IDLE_AFTER_RESPONSE_SECONDS = 25
+# PyAudio exposes raw microphone and speaker streams, not Windows' acoustic
+# echo cancellation.  Do not feed Emma's own PCM output back into Realtime;
+# retain a short tail after playback for room echo to decay before reopening
+# the microphone.
+OUTPUT_ECHO_GUARD_SECONDS = 0.75
 
 LANGUAGE_NAMES = {
     "en-GB": "English (United Kingdom)",
@@ -140,6 +145,9 @@ class RealtimeEmma:
         self.current_status = "listening"
         self.current_listening = True
         self.reported_speaking = False
+        self.microphone_suppressed_until = 0.0
+        self.suppressed_input_items: set[str] = set()
+        self.speaking_generation = 0
         self.exit_code = 0
         self.state_lock = asyncio.Lock()
         self.transcript_lock = asyncio.Lock()
@@ -370,6 +378,11 @@ SECRETARY_NAVIGATION={navigation_json}"""
         while not self.stop.is_set():
             try:
                 chunk = await asyncio.to_thread(self.input_stream.read, CHUNK, False)
+                # The desktop microphone can hear the local speaker.  Reading
+                # continues to keep the device healthy, but these frames must
+                # never reach the model while Emma is speaking.
+                if time.monotonic() < self.microphone_suppressed_until:
+                    continue
                 await self.send({"type": "input_audio_buffer.append", "audio": base64.b64encode(chunk).decode("ascii")})
             except Exception as exc:
                 if not self.stop.is_set():
@@ -384,7 +397,16 @@ SECRETARY_NAVIGATION={navigation_json}"""
             chunk = await self.output_queue.get()
             if chunk is None:
                 return
+            # Set the guard before and after writing.  The first assignment
+            # closes the race with microphone(), while the second includes the
+            # remaining acoustic echo after the last speaker frame.
+            self.microphone_suppressed_until = max(
+                self.microphone_suppressed_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS
+            )
             await asyncio.to_thread(self.output_stream.write, chunk)
+            self.microphone_suppressed_until = max(
+                self.microphone_suppressed_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS
+            )
 
     def clear_playback(self) -> None:
         while True:
@@ -392,6 +414,35 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 self.output_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
+
+    async def begin_output(self) -> None:
+        """Enter speaker mode before the first PCM frame can reach the mic."""
+        self.microphone_suppressed_until = max(
+            self.microphone_suppressed_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS
+        )
+        if self.reported_speaking:
+            return
+        self.reported_speaking = True
+        self.speaking_generation += 1
+        # Discard any microphone tail that arrived immediately before speaker
+        # mode.  Without this, server VAD can treat Emma's first words as an
+        # interruption and create a self-conversation.
+        try:
+            await self.send({"type": "input_audio_buffer.clear"})
+        except Exception:
+            pass
+        await self.update_state("speaking", False)
+
+    async def resume_after_output(self, response: str, generation: int) -> None:
+        """Expose the completed reply only after queued audio and echo end."""
+        while not self.stop.is_set() and (
+            not self.output_queue.empty() or time.monotonic() < self.microphone_suppressed_until
+        ):
+            await asyncio.sleep(0.05)
+        if self.stop.is_set() or generation != self.speaking_generation:
+            return
+        self.response_complete_at = time.monotonic()
+        await self.update_state("listening", True, response=response)
 
     async def run_tool(self, event: dict) -> None:
         call_id = event.get("call_id")
@@ -429,9 +480,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 if response_id and self.current_user_sequence:
                     self.response_sequences[response_id] = self.current_user_sequence + 1
             elif event_type in ("response.output_audio.delta", "response.audio.delta"):
-                if not self.reported_speaking:
-                    self.reported_speaking = True
-                    await self.update_state("speaking", True)
+                await self.begin_output()
                 chunk = base64.b64decode(event.get("delta", ""))
                 if chunk:
                     await self.output_queue.put(chunk)
@@ -441,9 +490,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 self.current_response_text += delta
                 if response_id:
                     self.response_texts[response_id] = self.response_texts.get(response_id, "") + delta
-                if not self.reported_speaking:
-                    self.reported_speaking = True
-                    await self.update_state("speaking", True)
+                await self.begin_output()
             elif event_type in ("response.output_audio_transcript.done", "response.audio_transcript.done"):
                 transcript = str(event.get("transcript") or "").strip()
                 if transcript:
@@ -452,15 +499,26 @@ SECRETARY_NAVIGATION={navigation_json}"""
                     if response_id:
                         self.response_texts[response_id] = transcript
             elif event_type == "input_audio_buffer.speech_started":
+                item_id = str(event.get("item_id") or "")
+                if time.monotonic() < self.microphone_suppressed_until:
+                    # This is speaker feedback.  Never cancel Emma's reply or
+                    # create a transcript turn from it.
+                    if item_id:
+                        self.suppressed_input_items.add(item_id)
+                    try:
+                        await self.send({"type": "input_audio_buffer.clear"})
+                    except Exception:
+                        pass
+                    continue
                 self.current_user_sequence = self.next_user_sequence
                 self.next_user_sequence += 2
-                item_id = str(event.get("item_id") or "")
                 if item_id:
                     self.item_sequences[item_id] = self.current_user_sequence
                 self.clear_playback()
                 self.response_complete_at = None
                 self.current_response_text = ""
                 self.reported_speaking = False
+                self.speaking_generation += 1
                 await self.update_state("hearing", True)
                 # Current Realtime sessions interrupt automatically when
                 # interrupt_response is true. Cancel is harmless if no response is active.
@@ -476,27 +534,35 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 if item_id and item.get("role") == "user" and self.current_user_sequence:
                     self.item_sequences.setdefault(item_id, self.current_user_sequence)
             elif event_type == "conversation.item.input_audio_transcription.completed":
+                item_id = str(event.get("item_id") or "")
+                if item_id and item_id in self.suppressed_input_items:
+                    self.suppressed_input_items.discard(item_id)
+                    log("ignored microphone transcript captured during Emma playback")
+                    continue
                 heard = str(event.get("transcript") or "").strip()
                 if heard:
                     await self.update_state("thinking", False, transcript=heard)
-                    item_id = str(event.get("item_id") or "")
                     sequence = self.item_sequences.pop(item_id, self.current_user_sequence or 1)
                     await self.append_transcript("user", heard, sequence, str(event.get("event_id") or item_id))
                 normalized = heard.lower().rstrip(".!?")
                 if normalized in {"stop", "goodbye", "that's all", "that is all"}:
                     self.stop.set()
             elif event_type == "response.done":
-                self.response_complete_at = time.monotonic()
                 response_id = str((event.get("response") or {}).get("id") or "")
                 completed_text = response_text(event) or self.response_texts.pop(response_id, "").strip() or self.current_response_text.strip()
                 output = (event.get("response") or {}).get("output") or []
                 if completed_text:
-                    await self.update_state("listening", True, response=completed_text)
                     sequence = self.response_sequences.pop(response_id, self.current_user_sequence + 1)
                     await self.append_transcript("assistant", completed_text, sequence, response_id or str(event.get("event_id") or ""))
+                    if self.reported_speaking:
+                        asyncio.create_task(self.resume_after_output(completed_text, self.speaking_generation))
+                    else:
+                        self.response_complete_at = time.monotonic()
+                        await self.update_state("listening", True, response=completed_text)
                 elif any(item.get("type") == "function_call" for item in output):
                     await self.update_state("thinking", False)
                 else:
+                    self.response_complete_at = time.monotonic()
                     await self.update_state("listening", True)
                 self.current_response_text = ""
                 self.reported_speaking = False
