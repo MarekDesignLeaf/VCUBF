@@ -187,6 +187,8 @@ button {
 
 button:hover { background: var(--accent-dark); }
 button:disabled { opacity: 0.6; cursor: default; }
+.danger-button { background: #a72929; }
+.danger-button:hover { background: #7f1f1f; }
 
 .error-banner {
   background: var(--error-bg);
@@ -225,6 +227,12 @@ button:disabled { opacity: 0.6; cursor: default; }
 .detail-list { display: grid; grid-template-columns: 120px 1fr; row-gap: 8px; }
 .detail-list dt { color: var(--muted); }
 .detail-list dd { margin: 0; }
+.client-heading { gap: 16px; }
+.client-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.client-edit-form { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); align-items: end; }
+.client-edit-form label { display: grid; gap: 5px; color: var(--muted); font-size: .82rem; font-weight: 600; }
+.client-edit-form input, .client-edit-form textarea { width: 100%; box-sizing: border-box; }
+.client-edit-notes, .client-edit-submit, .client-edit-error { grid-column: 1 / -1; }
 
 /* Notification and Escalation Module — severity badges on the attention feed. */
 .badge {

@@ -90,8 +90,12 @@ function NewClientForm({ onCreated }: { onCreated: () => void }) {
     } catch (err) {
       if (err instanceof ApiError && err.code === "DUPLICATE_CLIENT_POSSIBLE") {
         setError("A client with this email or name+phone already exists — CRM Core rejected the duplicate.");
+      } else if (err instanceof ApiError && err.code === "EMAIL_BELONGS_TO_USER") {
+        setError("This email belongs to a Secretary user and cannot also be assigned to a client.");
+      } else if (err instanceof ApiError && err.code === "VALIDATION_FAILED") {
+        setError(err.message || "Check the email address and use a valid UK or international phone number.");
       } else {
-        setError("Could not create client.");
+        setError(err instanceof ApiError ? err.message : "Could not create client.");
       }
     } finally {
       setSubmitting(false);

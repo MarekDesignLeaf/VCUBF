@@ -94,6 +94,10 @@ export interface Client {
   clientType?: string | null;
   notes?: string | null;
   source?: string | null;
+  billingLine1?: string | null;
+  billingCity?: string | null;
+  billingPostcode?: string | null;
+  isActive?: boolean;
   createdAt: string;
 }
 
@@ -1536,6 +1540,13 @@ export const api = {
     get: (id: string) => request<Client>(`/crm/clients/${id}`),
     create: (data: Record<string, unknown>) =>
       request<Client>("/crm/clients", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<Client>(`/crm/clients/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    archive: (id: string, confirmed = false) =>
+      request<{ client: Client; preservedRecords: Record<string, number>; message: string }>(`/crm/clients/${id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ confirmed }),
+      }),
     search: (q: string) => request<Client[]>(`/crm/clients/search?q=${encodeURIComponent(q)}`),
   },
   contacts: {
@@ -1552,6 +1563,10 @@ export const api = {
       request<Contact>("/crm/contacts", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Record<string, unknown>) =>
       request<Contact>(`/crm/contacts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    archive: (id: string, confirmed = false) => request<{ contact: Contact; message: string }>(`/crm/contacts/${id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ confirmed }),
+    }),
   },
   documents: {
     list: (params?: { clientId?: string; jobId?: string; documentType?: string; sensitivity?: string; activeOnly?: boolean }) => {

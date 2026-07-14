@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   api,
   type Client,
@@ -14,12 +14,15 @@ import {
 
 export function ClientDetail() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [client, setClient] = useState<Client | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [showJobForm, setShowJobForm] = useState(false);
   const [communications, setCommunications] = useState<CommunicationRecord[]>([]);
   const [photos, setPhotos] = useState<PortfolioPhoto[]>([]);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
   function loadClient() {
     if (!id) return;
@@ -55,11 +58,64 @@ export function ClientDetail() {
   if (error) return <div className="error-banner">{error}</div>;
   if (!client) return <p>Loading…</p>;
 
+  async function archiveCurrentClient() {
+    if (!id || !client) return;
+    setError(null);
+    setArchiving(true);
+    try {
+      await api.clients.archive(id, false);
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.code !== "CONFIRMATION_REQUIRED") {
+        setError(err instanceof ApiError ? err.message : "Could not archive client.");
+        setArchiving(false);
+        return;
+      }
+      const preview = err.details?.preview as { preservedRecords?: Record<string, number> } | undefined;
+      const recordCount = Object.values(preview?.preservedRecords ?? {}).reduce((sum, count) => sum + count, 0);
+      const confirmed = window.confirm(
+        `Archive ${client.displayName}? The client will disappear from the active client list. ${recordCount} linked record${recordCount === 1 ? "" : "s"} will be preserved.`
+      );
+      if (!confirmed) {
+        setArchiving(false);
+        return;
+      }
+      try {
+        await api.clients.archive(id, true);
+        navigate("/clients", { replace: true });
+      } catch (confirmError) {
+        setError(confirmError instanceof ApiError ? confirmError.message : "Could not archive client.");
+      }
+    } finally {
+      setArchiving(false);
+    }
+  }
+
   return (
     <div>
       <Link to="/clients">← Back to clients</Link>
-      <h1>{client.displayName}</h1>
+      <div className="page-header client-heading">
+        <h1>{client.displayName}</h1>
+        <div className="client-actions">
+          <button type="button" onClick={() => setShowEditForm((visible) => !visible)}>
+            {showEditForm ? "Cancel editing" : "Edit client"}
+          </button>
+          <button type="button" className="danger-button" disabled={archiving} onClick={() => void archiveCurrentClient()}>
+            {archiving ? "Archiving…" : "Delete / archive client"}
+          </button>
+        </div>
+      </div>
+      {showEditForm && (
+        <EditClientForm
+          client={client}
+          onSaved={(updated) => {
+            setClient(updated);
+            setShowEditForm(false);
+          }}
+        />
+      )}
       <dl className="detail-list">
+        <dt>Company</dt>
+        <dd>{client.companyName ?? "—"}</dd>
         <dt>Email</dt>
         <dd>{client.emailPrimary ?? "—"}</dd>
         <dt>Phone</dt>
@@ -169,6 +225,74 @@ export function ClientDetail() {
         </table>
       )}
     </div>
+  );
+}
+
+function EditClientForm({ client, onSaved }: { client: Client; onSaved: (client: Client) => void }) {
+  const [displayName, setDisplayName] = useState(client.displayName);
+  const [firstName, setFirstName] = useState(client.firstName ?? "");
+  const [lastName, setLastName] = useState(client.lastName ?? "");
+  const [companyName, setCompanyName] = useState(client.companyName ?? "");
+  const [email, setEmail] = useState(client.emailPrimary ?? "");
+  const [phone, setPhone] = useState(client.phonePrimary ?? "");
+  const [clientType, setClientType] = useState(client.clientType ?? "");
+  const [address, setAddress] = useState(client.billingLine1 ?? "");
+  const [city, setCity] = useState(client.billingCity ?? "");
+  const [postcode, setPostcode] = useState(client.billingPostcode ?? "");
+  const [notes, setNotes] = useState(client.notes ?? "");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const updated = await api.clients.update(client.id, {
+        display_name: displayName,
+        first_name: firstName,
+        last_name: lastName,
+        company_name: companyName,
+        email_primary: email,
+        phone_primary: phone,
+        client_type: clientType,
+        billing_address_line1: address,
+        billing_city: city,
+        billing_postcode: postcode,
+        notes,
+      });
+      onSaved(updated);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "EMAIL_BELONGS_TO_USER") {
+        setError("This email belongs to a Secretary user and cannot also be assigned to a client.");
+      } else if (err instanceof ApiError && err.code === "DUPLICATE_CLIENT_POSSIBLE") {
+        setError("Another active client already uses this email or the same name and phone.");
+      } else if (err instanceof ApiError && err.code === "VALIDATION_FAILED") {
+        setError(err.message || "Check the email address and use a valid UK or international phone number.");
+      } else {
+        setError(err instanceof ApiError ? err.message : "Could not update client.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form className="inline-form client-edit-form" onSubmit={submit}>
+      <label>Display name<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required maxLength={200} /></label>
+      <label>First name<input value={firstName} onChange={(event) => setFirstName(event.target.value)} maxLength={100} /></label>
+      <label>Last name<input value={lastName} onChange={(event) => setLastName(event.target.value)} maxLength={100} /></label>
+      <label>Company<input value={companyName} onChange={(event) => setCompanyName(event.target.value)} maxLength={200} /></label>
+      <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={254} /></label>
+      <label>Phone<input type="tel" inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} maxLength={40} placeholder="07700 900123 or +44…" /></label>
+      <label>Client type<input value={clientType} onChange={(event) => setClientType(event.target.value)} maxLength={100} /></label>
+      <label>Billing address<input value={address} onChange={(event) => setAddress(event.target.value)} maxLength={500} /></label>
+      <label>City<input value={city} onChange={(event) => setCity(event.target.value)} maxLength={200} /></label>
+      <label>Postcode<input value={postcode} onChange={(event) => setPostcode(event.target.value)} maxLength={40} /></label>
+      <label className="client-edit-notes">Notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={10000} rows={4} /></label>
+      <div className="client-edit-submit"><button type="submit" disabled={submitting}>{submitting ? "Saving…" : "Save changes"}</button></div>
+      {error && <div className="error-banner client-edit-error">{error}</div>}
+    </form>
   );
 }
 

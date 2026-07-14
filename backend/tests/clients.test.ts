@@ -50,6 +50,31 @@ describe("crm/clients", () => {
     assert.equal(res.body.error, "VALIDATION_FAILED");
   });
 
+  it("rejects invalid email and invalid phone values", async () => {
+    const invalidEmail = await request(app)
+      .post("/crm/clients")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ display_name: "Bad Email", email_primary: "not-an-email" });
+    assert.equal(invalidEmail.status, 400);
+    assert.equal(invalidEmail.body.error, "VALIDATION_FAILED");
+
+    const invalidPhone = await request(app)
+      .post("/crm/clients")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ display_name: "Bad Phone", phone_primary: "123" });
+    assert.equal(invalidPhone.status, 400);
+    assert.equal(invalidPhone.body.error, "VALIDATION_FAILED");
+  });
+
+  it("rejects assigning an application user's email to a client", async () => {
+    const res = await request(app)
+      .post("/crm/clients")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ display_name: "Wrong Identity", email_primary: "ADMIN@test.local" });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.error, "EMAIL_BELONGS_TO_USER");
+  });
+
   it("creates a client on the success path and writes an audit entry", async () => {
     const res = await request(app)
       .post("/crm/clients")
@@ -86,5 +111,38 @@ describe("crm/clients", () => {
     assert.equal(res.status, 200);
     assert.ok(Array.isArray(res.body));
     assert.ok(res.body.length >= 1);
+  });
+
+  it("updates a client through the validated service", async () => {
+    const existing = await prisma.client.findFirstOrThrow({ where: { displayName: "Jane Smith" } });
+    const res = await request(app)
+      .put(`/crm/clients/${existing.id}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ display_name: "Jane Brown", email_primary: "JANE.BROWN@EXAMPLE.COM", phone_primary: "+44 7700 900003" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.displayName, "Jane Brown");
+    assert.equal(res.body.emailPrimary, "jane.brown@example.com");
+    assert.equal(res.body.phonePrimary, "+447700900003");
+  });
+
+  it("requires confirmation to archive a client and preserves the database row", async () => {
+    const existing = await prisma.client.findFirstOrThrow({ where: { displayName: "Jane Brown" } });
+    const preview = await request(app)
+      .delete(`/crm/clients/${existing.id}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ confirmed: false });
+    assert.equal(preview.status, 409);
+    assert.equal(preview.body.error, "CONFIRMATION_REQUIRED");
+    assert.equal((await prisma.client.findUniqueOrThrow({ where: { id: existing.id } })).isActive, true);
+
+    const confirmed = await request(app)
+      .delete(`/crm/clients/${existing.id}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ confirmed: true });
+    assert.equal(confirmed.status, 200);
+    assert.equal((await prisma.client.findUniqueOrThrow({ where: { id: existing.id } })).isActive, false);
+
+    const activeList = await request(app).get("/crm/clients").set("Authorization", `Bearer ${adminToken}`);
+    assert.equal(activeList.body.some((client: { id: string }) => client.id === existing.id), false);
   });
 });

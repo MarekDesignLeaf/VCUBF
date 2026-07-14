@@ -66,6 +66,175 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
       break;
     }
 
+    case "update_client": {
+      const matches = await clientService.findClientsByName(user, command.entities.client_name);
+      if (matches.length === 0) {
+        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 404, error: "CLIENT_NOT_FOUND", message: `No active client matches "${command.entities.client_name}".` };
+      } else if (matches.length > 1) {
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: false,
+          httpStatus: 409,
+          error: "AMBIGUOUS_REFERENCE",
+          message: `Multiple active clients match "${command.entities.client_name}". Say the full name.`,
+          data: matches.map((client) => ({ id: client.id, displayName: client.displayName })),
+        };
+      } else {
+        const result = await clientService.updateClient(user, matches[0].id, {
+          display_name: command.entities.display_name,
+          email_primary: command.entities.email_primary,
+          phone_primary: command.entities.phone_primary,
+        });
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: result.ok,
+          httpStatus: result.httpStatus,
+          data: result.ok ? result.data : undefined,
+          error: result.ok ? undefined : result.error,
+          message: result.ok ? `${matches[0].displayName} was updated.` : result.message,
+        };
+      }
+      break;
+    }
+
+    case "prepare_archive_client": {
+      const result = await clientService.prepareVoiceClientArchive(user, command.entities.client_name);
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
+      };
+      break;
+    }
+
+    case "confirm_archive_client": {
+      const result = await clientService.confirmVoiceClientArchive(user);
+      response = {
+        intent: command.intent,
+        interpreted: {},
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
+      };
+      break;
+    }
+
+    case "cancel_archive_client": {
+      const result = await clientService.cancelVoiceClientArchive(user);
+      response = {
+        intent: command.intent,
+        interpreted: {},
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
+      };
+      break;
+    }
+
+    case "create_contact": {
+      const result = await contactService.createContact(user, {
+        display_name: command.entities.display_name,
+        email: command.entities.email,
+        phone: command.entities.phone,
+        source: "user_input",
+      });
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? `${command.entities.display_name} was added to contacts.` : result.message,
+      };
+      break;
+    }
+
+    case "update_contact": {
+      const matches = await contactService.findContactsByName(user, command.entities.contact_name);
+      if (matches.length === 0) {
+        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 404, error: "CONTACT_NOT_FOUND", message: `No active contact matches "${command.entities.contact_name}".` };
+      } else if (matches.length > 1) {
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: false,
+          httpStatus: 409,
+          error: "AMBIGUOUS_REFERENCE",
+          message: `Multiple active contacts match "${command.entities.contact_name}". Say the full name.`,
+          data: matches.map((contact) => ({ id: contact.id, displayName: contact.displayName })),
+        };
+      } else {
+        const result = await contactService.updateContact(user, matches[0].id, {
+          display_name: command.entities.display_name,
+          email: command.entities.email,
+          phone: command.entities.phone,
+        });
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: result.ok,
+          httpStatus: result.httpStatus,
+          data: result.ok ? result.data : undefined,
+          error: result.ok ? undefined : result.error,
+          message: result.ok ? `${matches[0].displayName} was updated.` : result.message,
+        };
+      }
+      break;
+    }
+
+    case "prepare_archive_contact": {
+      const result = await contactService.prepareVoiceContactArchive(user, command.entities.contact_name);
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
+      };
+      break;
+    }
+
+    case "confirm_archive_contact": {
+      const result = await contactService.confirmVoiceContactArchive(user);
+      response = {
+        intent: command.intent,
+        interpreted: {},
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
+      };
+      break;
+    }
+
+    case "cancel_archive_contact": {
+      const result = await contactService.cancelVoiceContactArchive(user);
+      response = {
+        intent: command.intent,
+        interpreted: {},
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
+      };
+      break;
+    }
+
     case "create_lead": {
       const result = await leadService.createLead(user, {
         name: command.entities.name,

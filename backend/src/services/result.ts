@@ -9,6 +9,11 @@ export function ok<T>(httpStatus: number, data: T): ServiceResult<T> {
   return { ok: true, httpStatus, data };
 }
 
-export function fail(httpStatus: number, error: string, message?: string, extra?: Record<string, unknown>): ServiceResult<never> {
+export function fail(
+  httpStatus: number,
+  error: string,
+  message?: string,
+  extra?: Record<string, unknown>
+): Extract<ServiceResult<never>, { ok: false }> {
   return { ok: false, httpStatus, error, message, extra };
 }

@@ -20,7 +20,13 @@ export const EMMA_CAPABILITIES = [
   { id: "navigation.help", category: "navigation", mode: "read", label: "Read the menu and guide users", description: "Emma may read the application hierarchy and explain where functions are.", intents: ["describe_menu"] },
   { id: "preferences.language", category: "navigation", mode: "write", label: "Change application language", description: "Emma may change her spoken language and the Secretary menu language together.", intents: ["set_voice_language"] },
   { id: "customers.read", category: "customers", mode: "read", label: "Read customers, contacts and leads", description: "Emma may list customer, contact and lead records.", intents: ["list_clients", "list_contacts", "list_leads"] },
-  { id: "customers.write", category: "customers", mode: "write", label: "Create customers and leads", description: "Emma may create clients and leads or convert a lead to a client.", intents: ["create_client", "create_lead", "convert_lead"] },
+  { id: "customers.clients.create", category: "customers", mode: "write", label: "Create clients", description: "Emma may create a client after validating the name, email and phone number.", intents: ["create_client"] },
+  { id: "customers.clients.update", category: "customers", mode: "write", label: "Edit clients", description: "Emma may change an existing client's validated details.", intents: ["update_client"] },
+  { id: "customers.clients.archive", category: "customers", mode: "write", label: "Archive clients", description: "Emma may prepare and, after explicit confirmation, archive a client without deleting linked records.", intents: ["prepare_archive_client", "confirm_archive_client", "cancel_archive_client"] },
+  { id: "customers.contacts.create", category: "customers", mode: "write", label: "Create contacts", description: "Emma may add a validated person to the contact directory.", intents: ["create_contact"] },
+  { id: "customers.contacts.update", category: "customers", mode: "write", label: "Edit contacts", description: "Emma may change an existing contact's validated details.", intents: ["update_contact"] },
+  { id: "customers.contacts.archive", category: "customers", mode: "write", label: "Archive contacts", description: "Emma may prepare and, after explicit confirmation, archive a contact.", intents: ["prepare_archive_contact", "confirm_archive_contact", "cancel_archive_contact"] },
+  { id: "customers.leads.write", category: "customers", mode: "write", label: "Create and convert leads", description: "Emma may create leads and convert a reviewed lead to a client.", intents: ["create_lead", "convert_lead"] },
   { id: "work.read", category: "work", mode: "read", label: "Read jobs, tasks and calendar", description: "Emma may list work, tasks, follow-ups, calendar events and capacity information.", intents: ["list_jobs", "list_tasks", "list_calendar_events", "list_follow_ups", "detect_overload"] },
   { id: "work.write", category: "work", mode: "write", label: "Change jobs and tasks", description: "Emma may create or update jobs and tasks and assign work to employees.", intents: ["create_job", "change_job_status", "assign_job", "create_task", "change_task_status"] },
   { id: "services.write", category: "sales", mode: "write", label: "Create services", description: "Emma may add an item to the service catalogue.", intents: ["create_service"] },
@@ -48,7 +54,22 @@ const SAFE_CANCELLATION_INTENTS = new Set<ParsedCommand["intent"]>([
   "cancel_gmail_message",
   "cancel_whatsapp_message",
   "cancel_delete_notifications",
+  "cancel_archive_client",
+  "cancel_archive_contact",
 ]);
+
+const LEGACY_CUSTOMER_WRITE_CAPABILITY = "customers.write";
+const CUSTOMER_MUTATION_CAPABILITIES = EMMA_CAPABILITIES
+  .filter((item) => item.id.startsWith("customers.") && item.mode === "write")
+  .map((item) => item.id);
+
+function effectiveDisabledCapabilities(stored: string[]) {
+  const disabled = new Set(stored);
+  if (disabled.has(LEGACY_CUSTOMER_WRITE_CAPABILITY)) {
+    for (const id of CUSTOMER_MUTATION_CAPABILITIES) disabled.add(id);
+  }
+  return disabled;
+}
 const INTENT_CAPABILITY = new Map<ParsedCommand["intent"], EmmaCapabilityId>();
 for (const capability of EMMA_CAPABILITIES) {
   for (const intent of capability.intents) INTENT_CAPABILITY.set(intent, capability.id);
@@ -71,7 +92,7 @@ export async function getEmmaPolicy(user: AuthedUser) {
     select: { emmaDisabledCapabilities: true },
   });
   if (!company) return null;
-  const disabled = new Set(company.emmaDisabledCapabilities);
+  const disabled = effectiveDisabledCapabilities(company.emmaDisabledCapabilities);
   return {
     capabilities: EMMA_CAPABILITIES.map((capability) => ({
       id: capability.id,
@@ -115,7 +136,7 @@ export async function evaluateEmmaCommand(user: AuthedUser, intent: ParsedComman
   if (!capabilityId) return { allowed: false as const, capabilityId: "unclassified", message: "This Emma action has not been assigned an administrator policy yet." };
   const company = await prisma.company.findUnique({ where: { id: user.companyId }, select: { emmaDisabledCapabilities: true } });
   if (!company) return { allowed: false as const, capabilityId, message: "The company policy could not be loaded." };
-  if (!company.emmaDisabledCapabilities.includes(capabilityId)) return { allowed: true as const, capabilityId };
+  if (!effectiveDisabledCapabilities(company.emmaDisabledCapabilities).has(capabilityId)) return { allowed: true as const, capabilityId };
   const capability = EMMA_CAPABILITIES.find((item) => item.id === capabilityId)!;
   const message = user.voiceLanguage === "pl-PL"
     ? `Administrator wyłączył dla Emmy uprawnienie: ${capability.label}.`

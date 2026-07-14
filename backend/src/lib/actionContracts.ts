@@ -50,7 +50,27 @@ export const CREATE_CLIENT_ACTION: ActionContract = {
   riskLevel: 2,
   confirmationRequired: false,
   dataSources: ["user_input"],
-  possibleErrors: ["MISSING_PERMISSION", "MISSING_DATA", "DUPLICATE_CLIENT_POSSIBLE", "VALIDATION_FAILED"],
+  possibleErrors: ["MISSING_PERMISSION", "MISSING_DATA", "DUPLICATE_CLIENT_POSSIBLE", "EMAIL_BELONGS_TO_USER", "VALIDATION_FAILED"],
+};
+
+export const UPDATE_CLIENT_ACTION: ActionContract = {
+  actionName: "update_client",
+  purpose: "Update an active client through the same validated CRM Core identity rules used when the client is created.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.clients", "auth.users"],
+  possibleErrors: ["MISSING_PERMISSION", "CLIENT_NOT_FOUND", "DUPLICATE_CLIENT_POSSIBLE", "EMAIL_BELONGS_TO_USER", "VALIDATION_FAILED"],
+};
+
+export const ARCHIVE_CLIENT_ACTION: ActionContract = {
+  actionName: "archive_client",
+  purpose: "Archive a client after explicit confirmation while preserving jobs, invoices, communications and audit history.",
+  requiredPermission: "crm.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.clients", "crm.jobs", "crm.invoices", "crm.communications"],
+  possibleErrors: ["MISSING_PERMISSION", "CLIENT_NOT_FOUND", "CONFIRMATION_REQUIRED", "VALIDATION_FAILED"],
 };
 
 // Canonical job statuses — must stay in sync with prisma/schema.prisma and the
@@ -1055,6 +1075,16 @@ export const UPDATE_CONTACT_ACTION: ActionContract = {
   confirmationRequired: false,
   dataSources: ["user_input", "crm.contacts", "crm.clients"],
   possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONTACT_NOT_FOUND", "CLIENT_NOT_FOUND", "DUPLICATE_CONTACT_POSSIBLE"],
+};
+
+export const ARCHIVE_CONTACT_ACTION: ActionContract = {
+  actionName: "archive_contact",
+  purpose: "Archive a contact after explicit confirmation while preserving its source, client link and audit history.",
+  requiredPermission: "crm.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.contacts", "crm.clients"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONTACT_NOT_FOUND", "CONFIRMATION_REQUIRED"],
 };
 
 // Document Registry — metadata only until an authorised file-storage

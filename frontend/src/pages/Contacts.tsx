@@ -25,10 +25,20 @@ export function Contacts() {
 
   async function archive(contact: Contact) {
     try {
-      await api.contacts.update(contact.id, { is_active: false });
-      load();
+      await api.contacts.archive(contact.id, false);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not archive contact.");
+      if (!(err instanceof ApiError) || err.code !== "CONFIRMATION_REQUIRED") {
+        setError(err instanceof ApiError ? err.message : "Could not archive contact.");
+        return;
+      }
+      if (!window.confirm(`Archive contact ${contact.displayName}? The source and client relationship will be preserved.`)) return;
+      try {
+        await api.contacts.archive(contact.id, true);
+      } catch (confirmError) {
+        setError(confirmError instanceof ApiError ? confirmError.message : "Could not archive contact.");
+        return;
+      }
+      load();
     }
   }
 

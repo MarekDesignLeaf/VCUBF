@@ -22,6 +22,44 @@ describe("commandParser", () => {
     }
   });
 
+  it("parses client edits and confirmed archival in English, Czech and Polish", () => {
+    assert.deepEqual(parseTextCommand("change email for client Jane Smith to jane.new@example.com"), {
+      intent: "update_client",
+      entities: { client_name: "Jane Smith", email_primary: "jane.new@example.com" },
+    });
+    assert.deepEqual(parseTextCommand("změň telefon klienta Jane Smith na +420 777 123 456"), {
+      intent: "update_client",
+      entities: { client_name: "Jane Smith", phone_primary: "+420 777 123 456" },
+    });
+    assert.deepEqual(parseTextCommand("rename client Jane Smith to Jane Brown"), {
+      intent: "update_client",
+      entities: { client_name: "Jane Smith", display_name: "Jane Brown" },
+    });
+    assert.deepEqual(parseTextCommand("usuń klienta Jane Brown"), {
+      intent: "prepare_archive_client",
+      entities: { client_name: "Jane Brown" },
+    });
+    assert.equal(parseTextCommand("potvrď smazání klienta").intent, "confirm_archive_client");
+    assert.equal(parseTextCommand("cancel client deletion").intent, "cancel_archive_client");
+  });
+
+  it("parses contact creation, editing and confirmed archival", () => {
+    assert.deepEqual(parseTextCommand("create contact Alice Green, email alice@example.com, phone 07700900001"), {
+      intent: "create_contact",
+      entities: { display_name: "Alice Green", email: "alice@example.com", phone: "07700900001" },
+    });
+    assert.deepEqual(parseTextCommand("change phone for contact Alice Green to +44 7700 900002"), {
+      intent: "update_contact",
+      entities: { contact_name: "Alice Green", phone: "+44 7700 900002" },
+    });
+    assert.deepEqual(parseTextCommand("archive contact Alice Green"), {
+      intent: "prepare_archive_contact",
+      entities: { contact_name: "Alice Green" },
+    });
+    assert.equal(parseTextCommand("confirm contact deletion").intent, "confirm_archive_contact");
+    assert.equal(parseTextCommand("zruš smazání kontaktu").intent, "cancel_archive_contact");
+  });
+
   it("parses 'create lead' with a service and email", () => {
     const result = parseTextCommand("new lead Alice Green, email alice@example.com for fencing");
     assert.equal(result.intent, "create_lead");

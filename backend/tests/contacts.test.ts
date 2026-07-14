@@ -112,10 +112,24 @@ describe("Contact Directory", () => {
     const update = await request(app)
       .put(`/crm/contacts/${contactId}`)
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ department: "Estates", is_active: false });
+      .send({ department: "Estates" });
     assert.equal(update.status, 200);
     assert.equal(update.body.department, "Estates");
-    assert.equal(update.body.isActive, false);
+
+    const preview = await request(app)
+      .delete(`/crm/contacts/${contactId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ confirmed: false });
+    assert.equal(preview.status, 409);
+    assert.equal(preview.body.error, "CONFIRMATION_REQUIRED");
+    assert.equal((await prisma.contact.findUniqueOrThrow({ where: { id: contactId } })).isActive, true);
+
+    const archived = await request(app)
+      .delete(`/crm/contacts/${contactId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ confirmed: true });
+    assert.equal(archived.status, 200);
+    assert.equal((await prisma.contact.findUniqueOrThrow({ where: { id: contactId } })).isActive, false);
   });
 
   it("keeps contacts and client links isolated between tenants", async () => {

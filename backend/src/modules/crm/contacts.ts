@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { CREATE_CONTACT_ACTION, UPDATE_CONTACT_ACTION } from "../../lib/actionContracts.js";
+import { ARCHIVE_CONTACT_ACTION, CREATE_CONTACT_ACTION, UPDATE_CONTACT_ACTION } from "../../lib/actionContracts.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import * as contactService from "../../services/contactService.js";
@@ -38,6 +38,12 @@ contactsRouter.post("/", requirePermission(CREATE_CONTACT_ACTION.requiredPermiss
 
 contactsRouter.put("/:id", requirePermission(UPDATE_CONTACT_ACTION.requiredPermission), async (req, res) => {
   const result = await contactService.updateContact(req.user!, req.params.id, req.body);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.status(result.httpStatus).json(result.data);
+});
+
+contactsRouter.delete("/:id", requirePermission(ARCHIVE_CONTACT_ACTION.requiredPermission), async (req, res) => {
+  const result = await contactService.archiveContact(req.user!, req.params.id, req.body);
   if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   res.status(result.httpStatus).json(result.data);
 });

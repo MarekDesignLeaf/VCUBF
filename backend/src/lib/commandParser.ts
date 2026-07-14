@@ -21,6 +21,18 @@ import { resolveNavigationSection, type NavigationSectionId } from "./navigation
 export type ParsedCommand =
   | { intent: "create_client"; entities: { display_name: string; email_primary?: string; phone_primary?: string } }
   | {
+      intent: "update_client";
+      entities: { client_name: string; display_name?: string; email_primary?: string; phone_primary?: string };
+    }
+  | { intent: "prepare_archive_client"; entities: { client_name: string } }
+  | { intent: "confirm_archive_client"; entities: Record<string, never> }
+  | { intent: "cancel_archive_client"; entities: Record<string, never> }
+  | { intent: "create_contact"; entities: { display_name: string; email?: string; phone?: string } }
+  | { intent: "update_contact"; entities: { contact_name: string; display_name?: string; email?: string; phone?: string } }
+  | { intent: "prepare_archive_contact"; entities: { contact_name: string } }
+  | { intent: "confirm_archive_contact"; entities: Record<string, never> }
+  | { intent: "cancel_archive_contact"; entities: Record<string, never> }
+  | {
       intent: "create_lead";
       entities: { name: string; service_requested?: string; email?: string; phone?: string };
     }
@@ -268,6 +280,109 @@ function parseNotificationDeletionCommand(text: string): Extract<
   return undefined;
 }
 
+function parseClientMutationCommand(text: string): Extract<
+  ParsedCommand,
+  { intent: "update_client" | "prepare_archive_client" | "confirm_archive_client" | "cancel_archive_client" }
+> | undefined {
+  const normalized = text.trim().replace(/[.!?]+$/g, "");
+
+  if (
+    /^(?:confirm|approve)\s+(?:the\s+)?(?:client\s+)?(?:deletion|archive|archiving)$/iu.test(normalized)
+    || /^(?:potvrď|potvrd)\s+(?:smazání|smazani|archivaci)\s+klienta$/iu.test(normalized)
+    || /^(?:potwierdź|potwierdz)\s+(?:usunięcie|usuniecie|archiwizację|archiwizacje)\s+klienta$/iu.test(normalized)
+  ) return { intent: "confirm_archive_client", entities: {} };
+
+  if (
+    /^(?:cancel|stop|abort)\s+(?:the\s+)?(?:client\s+)?(?:deletion|archive|archiving)$/iu.test(normalized)
+    || /^(?:zruš|zrus)\s+(?:smazání|smazani|archivaci)\s+klienta$/iu.test(normalized)
+    || /^(?:anuluj|przerwij)\s+(?:usunięcie|usuniecie|archiwizację|archiwizacje)\s+klienta$/iu.test(normalized)
+  ) return { intent: "cancel_archive_client", entities: {} };
+
+  let match = normalized.match(/^(?:delete|remove|archive)\s+(?:the\s+)?client\s+(.+)$/iu)
+    ?? normalized.match(/^(?:smaž|smaz|vymaž|vymaz|odstraň|odstran|archivuj)\s+klienta\s+(.+)$/iu)
+    ?? normalized.match(/^(?:usuń|usun|skasuj|zarchiwizuj)\s+klienta\s+(.+)$/iu);
+  if (match) return { intent: "prepare_archive_client", entities: { client_name: match[1].trim() } };
+
+  match = normalized.match(/^(?:rename)\s+(?:the\s+)?client\s+(.+?)\s+to\s+(.+)$/iu)
+    ?? normalized.match(/^(?:přejmenuj|prejmenuj)\s+klienta\s+(.+?)\s+na\s+(.+)$/iu)
+    ?? normalized.match(/^(?:zmień|zmien)\s+nazwę\s+klienta\s+(.+?)\s+na\s+(.+)$/iu);
+  if (match) return { intent: "update_client", entities: { client_name: match[1].trim(), display_name: match[2].trim() } };
+
+  match = normalized.match(/^(?:change|set|update)\s+(?:the\s+)?(?:email|email address)\s+(?:for|of)\s+(?:the\s+)?client\s+(.+?)\s+to\s+(\S+@\S+)$/iu)
+    ?? normalized.match(/^(?:change|set|update)\s+(?:the\s+)?client\s+(.+?)\s+(?:email|email address)\s+to\s+(\S+@\S+)$/iu)
+    ?? normalized.match(/^(?:změň|zmen)\s+(?:e-?mail|email)\s+klienta\s+(.+?)\s+na\s+(\S+@\S+)$/iu)
+    ?? normalized.match(/^(?:zmień|zmien)\s+(?:e-?mail|email)\s+klienta\s+(.+?)\s+na\s+(\S+@\S+)$/iu);
+  if (match) return { intent: "update_client", entities: { client_name: match[1].trim(), email_primary: match[2].trim() } };
+
+  match = normalized.match(/^(?:change|set|update)\s+(?:the\s+)?(?:phone|phone number)\s+(?:for|of)\s+(?:the\s+)?client\s+(.+?)\s+to\s+(.+)$/iu)
+    ?? normalized.match(/^(?:change|set|update)\s+(?:the\s+)?client\s+(.+?)\s+(?:phone|phone number)\s+to\s+(.+)$/iu)
+    ?? normalized.match(/^(?:změň|zmen)\s+(?:telefon|telefonní číslo|telefonni cislo)\s+klienta\s+(.+?)\s+na\s+(.+)$/iu)
+    ?? normalized.match(/^(?:zmień|zmien)\s+(?:telefon|numer telefonu)\s+klienta\s+(.+?)\s+na\s+(.+)$/iu);
+  if (match) return { intent: "update_client", entities: { client_name: match[1].trim(), phone_primary: match[2].trim() } };
+
+  match = normalized.match(/^(?:update|edit)\s+(?:the\s+)?client\s+(.+)$/iu);
+  if (match) {
+    let rest = match[1];
+    const email = extractLabelled(rest, "email");
+    rest = email.rest;
+    const phone = extractLabelled(rest, "phone");
+    rest = phone.rest;
+    const newName = extractLabelled(rest, "new name");
+    rest = newName.rest;
+    const clientName = rest.replace(/,\s*$/, "").trim();
+    if (clientName && (email.value || phone.value || newName.value)) {
+      return {
+        intent: "update_client",
+        entities: {
+          client_name: clientName,
+          email_primary: email.value,
+          phone_primary: phone.value,
+          display_name: newName.value,
+        },
+      };
+    }
+  }
+  return undefined;
+}
+
+function parseContactMutationCommand(text: string): Extract<
+  ParsedCommand,
+  { intent: "update_contact" | "prepare_archive_contact" | "confirm_archive_contact" | "cancel_archive_contact" }
+> | undefined {
+  const normalized = text.trim().replace(/[.!?]+$/g, "");
+  if (
+    /^(?:confirm|approve)\s+(?:the\s+)?contact\s+(?:deletion|archive|archiving)$/iu.test(normalized)
+    || /^(?:potvrď|potvrd)\s+(?:smazání|smazani|archivaci)\s+kontaktu$/iu.test(normalized)
+    || /^(?:potwierdź|potwierdz)\s+(?:usunięcie|usuniecie|archiwizację|archiwizacje)\s+kontaktu$/iu.test(normalized)
+  ) return { intent: "confirm_archive_contact", entities: {} };
+  if (
+    /^(?:cancel|stop|abort)\s+(?:the\s+)?contact\s+(?:deletion|archive|archiving)$/iu.test(normalized)
+    || /^(?:zruš|zrus)\s+(?:smazání|smazani|archivaci)\s+kontaktu$/iu.test(normalized)
+    || /^(?:anuluj|przerwij)\s+(?:usunięcie|usuniecie|archiwizację|archiwizacje)\s+kontaktu$/iu.test(normalized)
+  ) return { intent: "cancel_archive_contact", entities: {} };
+
+  let match = normalized.match(/^(?:delete|remove|archive)\s+(?:the\s+)?contact\s+(.+)$/iu)
+    ?? normalized.match(/^(?:smaž|smaz|vymaž|vymaz|odstraň|odstran|archivuj)\s+kontakt\s+(.+)$/iu)
+    ?? normalized.match(/^(?:usuń|usun|skasuj|zarchiwizuj)\s+kontakt\s+(.+)$/iu);
+  if (match) return { intent: "prepare_archive_contact", entities: { contact_name: match[1].trim() } };
+
+  match = normalized.match(/^(?:rename)\s+(?:the\s+)?contact\s+(.+?)\s+to\s+(.+)$/iu)
+    ?? normalized.match(/^(?:přejmenuj|prejmenuj)\s+kontakt\s+(.+?)\s+na\s+(.+)$/iu)
+    ?? normalized.match(/^(?:zmień|zmien)\s+nazwę\s+kontaktu\s+(.+?)\s+na\s+(.+)$/iu);
+  if (match) return { intent: "update_contact", entities: { contact_name: match[1].trim(), display_name: match[2].trim() } };
+
+  match = normalized.match(/^(?:change|set|update)\s+(?:the\s+)?(?:email|email address)\s+(?:for|of)\s+(?:the\s+)?contact\s+(.+?)\s+to\s+(\S+@\S+)$/iu)
+    ?? normalized.match(/^(?:změň|zmen)\s+(?:e-?mail|email)\s+kontaktu\s+(.+?)\s+na\s+(\S+@\S+)$/iu)
+    ?? normalized.match(/^(?:zmień|zmien)\s+(?:e-?mail|email)\s+kontaktu\s+(.+?)\s+na\s+(\S+@\S+)$/iu);
+  if (match) return { intent: "update_contact", entities: { contact_name: match[1].trim(), email: match[2].trim() } };
+
+  match = normalized.match(/^(?:change|set|update)\s+(?:the\s+)?(?:phone|phone number)\s+(?:for|of)\s+(?:the\s+)?contact\s+(.+?)\s+to\s+(.+)$/iu)
+    ?? normalized.match(/^(?:změň|zmen)\s+(?:telefon|telefonní číslo|telefonni cislo)\s+kontaktu\s+(.+?)\s+na\s+(.+)$/iu)
+    ?? normalized.match(/^(?:zmień|zmien)\s+(?:telefon|numer telefonu)\s+kontaktu\s+(.+?)\s+na\s+(.+)$/iu);
+  if (match) return { intent: "update_contact", entities: { contact_name: match[1].trim(), phone: match[2].trim() } };
+  return undefined;
+}
+
 export function parseTextCommand(rawText: string): ParsedCommand {
   const text = rawText.trim();
 
@@ -283,6 +398,10 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (calendarAgenda) return calendarAgenda;
   const notificationDeletion = parseNotificationDeletionCommand(text);
   if (notificationDeletion) return notificationDeletion;
+  const clientMutation = parseClientMutationCommand(text);
+  if (clientMutation) return clientMutation;
+  const contactMutation = parseContactMutationCommand(text);
+  if (contactMutation) return contactMutation;
   if (/^(?:confirm|send)\s+(?:the\s+)?(?:email|message)(?:\s+now)?$/iu.test(text)
     || /^(?:potvrď|potvrd|odešli|odesli)\s+(?:ten\s+)?(?:e-?mail|zprávu|zpravu)$/iu.test(text)
     || /^(?:potwierdź|potwierdz|wyślij|wyslij)\s+(?:ten\s+)?(?:e-?mail|wiadomość|wiadomosc)$/iu.test(text))
@@ -333,6 +452,20 @@ export function parseTextCommand(rawText: string): ParsedCommand {
       intent: "create_client",
       entities: { display_name: displayName, email_primary: email.value, phone_primary: phone.value },
     };
+  }
+
+  m = text.match(/^(?:create|add|new)\s+contact\s+(.+)$/i)
+    ?? text.match(/^(?:vytvoř|vytvor|přidej|pridej)\s+kontakt\s+(.+)$/iu)
+    ?? text.match(/^(?:utwórz|utworz|dodaj)\s+kontakt\s+(.+)$/iu);
+  if (m) {
+    let rest = m[1];
+    const email = extractLabelled(rest, "email");
+    rest = email.rest;
+    const phone = extractLabelled(rest, "phone");
+    rest = phone.rest;
+    const displayName = rest.replace(/,\s*$/, "").trim();
+    if (!displayName || (!email.value && !phone.value)) return { intent: "unrecognized", entities: {} };
+    return { intent: "create_contact", entities: { display_name: displayName, email: email.value, phone: phone.value } };
   }
 
   m = text.match(/^(?:create|add|new)\s+lead\s+(.+)$/i);

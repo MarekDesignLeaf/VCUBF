@@ -80,4 +80,32 @@ describe("company Emma capability policy", () => {
     }, "cancel_gmail_message");
     assert.equal(decision.allowed, true);
   });
+
+  it("controls client and contact create, edit and archive permissions independently", async () => {
+    const changed = await request(app)
+      .put("/company/emma-policy")
+      .set("Authorization", `Bearer ${administratorToken}`)
+      .send({ disabled_capabilities: ["customers.clients.create", "customers.contacts.archive"] });
+    assert.equal(changed.status, 200);
+
+    const authedUser = {
+      id: adminUser.id,
+      companyId: adminUser.companyId,
+      email: adminUser.email,
+      displayName: adminUser.displayName,
+      role: adminUser.role,
+      permissions: adminUser.permissions,
+      mustChangePassword: adminUser.mustChangePassword,
+      voiceWakeWord: adminUser.voiceWakeWord,
+      voiceContinuous: adminUser.voiceContinuous,
+      voiceLanguage: adminUser.voiceLanguage,
+    };
+    assert.equal((await evaluateEmmaCommand(authedUser, "create_client")).allowed, false);
+    assert.equal((await evaluateEmmaCommand(authedUser, "update_client")).allowed, true);
+    assert.equal((await evaluateEmmaCommand(authedUser, "prepare_archive_client")).allowed, true);
+    assert.equal((await evaluateEmmaCommand(authedUser, "create_contact")).allowed, true);
+    assert.equal((await evaluateEmmaCommand(authedUser, "update_contact")).allowed, true);
+    assert.equal((await evaluateEmmaCommand(authedUser, "prepare_archive_contact")).allowed, false);
+    assert.equal((await evaluateEmmaCommand(authedUser, "cancel_archive_contact")).allowed, true);
+  });
 });
