@@ -7,6 +7,7 @@ export const PROGRAM_KNOWLEDGE = `
 VCUBF Secretary application map and operator guide
 
 FOUNDATION
+- First-time setup (/setup): the system begins with the owning company and its primary administrator in one atomic step. Until that finishes, no ordinary user account can exist. The administrator then adds users with an access profile and optional individual permissions.
 - Sign in (/login): enter email and password, then choose Sign in. Saved credentials are offered by the browser or Windows credential provider, not read by Emma.
 - Password recovery (/forgot-password): choose Forgot your password, enter the account email and use Send reset link. The response never reveals whether an account exists. When the company Gmail recovery source is available, it sends a one-time recovery link; the bootstrap administrator account uses the Gmail connector owner's mailbox rather than the placeholder admin@example.com address.
 - Set new password (/reset-password): open only from the one-time recovery link, then enter and confirm a strong new password. The link expires after 30 minutes, cannot be reused, invalidates existing sessions and never deletes workspace data.
@@ -23,7 +24,8 @@ CUSTOMERS AND WORK
 - Jobs (/jobs, /jobs/:id): work records linked to clients, assigned employees, status, resources, photos and commercial context.
 - Tasks (/tasks): actionable work linked to clients, jobs, communications and employees, including due dates and completion.
 - Calendar (/calendar): scheduled work and capacity; use overload checks before promising dates.
-- Employees (/employees, /employees/new, /employees/:id/edit): users, roles, permissions, skills and capacity. Use New employee or Manage; account creation, password reset and material employment changes require review.
+- Company (/company): company name, primary administrator and the access hierarchy. Only company administrators can maintain it.
+- Users & access (/employees, /employees/new, /employees/:id/edit): user accounts, access profiles, optional permissions, skills and capacity. Use New user or Manage; account creation, password reset and material access changes require review. Secretary always retains at least one active administrator.
 
 COMMUNICATION
 - Enquiries (/enquiries): unresolved customer enquiries and resolution state.

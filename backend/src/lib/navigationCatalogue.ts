@@ -91,6 +91,7 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
     aliases: ["start", "control", "overview", "account", "začátek", "ovládání", "přehled", "účet"],
     items: [
       item("dashboard", "The operational overview and normal starting point."),
+      item("setup", "First-time setup creates the owning company and its primary administrator together. It is available only before the workspace has been configured.", ["Create company and administrator"]),
       item(
         "forgot_password",
         "Public account recovery. Enter the account email to request a single-use recovery link. The response never reveals whether an account exists.",
@@ -149,12 +150,18 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
       ),
       item("tasks", "Actionable work linked to clients, jobs, communications and employees, with due dates and completion.", ["New task", "Start", "Complete"]),
       item(
+        "company",
+        "The owning company is the root of Secretary: company first, then its primary administrator, then user accounts. Company changes require company-management permission.",
+        ["Save company profile"],
+        { access: { all: ["company.manage"] }, children: [child("Company profile", "/company", "Shows the primary administrator and links to user access management.", ["Save company profile", "Users & access"])] }
+      ),
+      item(
         "employees",
-        "Users, roles, permissions, skills and capacity. Material employment changes always require review.",
-        ["New employee", "Manage"],
+        "User accounts, access profiles, optional permissions, skills and capacity. Secretary keeps at least one active administrator. Material access changes always require review.",
+        ["New user", "Manage"],
         { children: [
-          child("New employee", "/employees/new", "Creates a proposed employee record; review before confirmation.", ["Review changes", "Confirm changes"]),
-          child("Employee management", "/employees/:id/edit", "Edits roles, permissions, skills, capacity and access under the reviewed workflow.", ["Review changes", "Confirm changes", "Review reset", "Confirm reset"]),
+          child("New user", "/employees/new", "Creates a proposed user account from an access profile; optional permissions stay visible and reviewable before confirmation.", ["Review changes", "Confirm changes"]),
+          child("User access management", "/employees/:id/edit", "Edits access profiles, optional permissions, skills, capacity and access under the reviewed workflow.", ["Review changes", "Confirm changes", "Review reset", "Confirm reset"]),
         ] }
       ),
       item("calendar", "Scheduled work and capacity. Check overload before promising a date."),

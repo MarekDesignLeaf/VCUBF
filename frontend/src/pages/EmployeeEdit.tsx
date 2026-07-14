@@ -1,6 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { api, ApiError, KNOWN_PERMISSIONS, type ManagedEmployee } from "../api/client";
+import { api, ApiError, KNOWN_PERMISSIONS, type AccessProfile, type ManagedEmployee } from "../api/client";
+import { useAuth } from "../context/useAuth";
+
+const FALLBACK_ACCESS_PROFILES: AccessProfile[] = [
+  { id: "administrator", label: "Administrator", description: "Full company and access control.", permissions: [...KNOWN_PERMISSIONS] },
+  { id: "manager", label: "Manager", description: "Runs daily work and non-administrator accounts.", permissions: ["crm.read", "crm.manage", "users.manage", "voice.execute", "recruitment.manage", "connectors.read"] },
+  { id: "office", label: "Office", description: "Customer, work and office operations.", permissions: ["crm.read", "crm.manage", "voice.execute", "connectors.read"] },
+  { id: "field_worker", label: "Field worker", description: "Assigned work and Emma support.", permissions: ["crm.read", "voice.execute"] },
+  { id: "viewer", label: "Viewer", description: "Read-only operational access.", permissions: ["crm.read"] },
+  { id: "custom", label: "Custom", description: "Individual permissions selected below.", permissions: [] },
+];
 
 // Employee and Permission Model — create or edit an employee account.
 // This is the first UI in the app for a confirmationRequired action: the
@@ -9,6 +19,7 @@ import { api, ApiError, KNOWN_PERMISSIONS, type ManagedEmployee } from "../api/c
 // only the second submit (after the user reviews the preview) sends
 // confirmed: true and actually creates/changes the account.
 export function EmployeeEdit() {
+  const { user } = useAuth();
   const { id } = useParams<{ id: string }>();
   const isNew = !id || id === "new";
   const navigate = useNavigate();
@@ -16,8 +27,9 @@ export function EmployeeEdit() {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("worker");
+  const [role, setRole] = useState("field_worker");
   const [permissions, setPermissions] = useState<string[]>([]);
+  const [accessProfiles, setAccessProfiles] = useState<AccessProfile[]>(FALLBACK_ACCESS_PROFILES);
   const [skills, setSkills] = useState("");
   const [weeklyCapacityHours, setWeeklyCapacityHours] = useState("40");
   const [isActive, setIsActive] = useState(true);
@@ -47,8 +59,18 @@ export function EmployeeEdit() {
       .catch(() => setError("Could not load employee."));
   }, [id, isNew]);
 
+  useEffect(() => {
+    api.employees.accessProfiles().then(setAccessProfiles).catch(() => undefined);
+  }, []);
+
   function togglePermission(p: string) {
     setPermissions((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
+  }
+
+  function selectAccessProfile(nextRole: string) {
+    setRole(nextRole);
+    const profile = accessProfiles.find((candidate) => candidate.id === nextRole);
+    if (profile && profile.id !== "custom") setPermissions([...profile.permissions]);
   }
 
   function buildPayload(confirmed: boolean) {
@@ -133,10 +155,14 @@ export function EmployeeEdit() {
 
   if (!loaded) return <p>Loading…</p>;
 
+  const canAssignAdministrator = user?.role === "administrator" || user?.role === "admin";
+  const visibleProfiles = accessProfiles.filter((profile) => canAssignAdministrator || profile.id !== "administrator" || profile.id === role);
+  const selectedProfile = accessProfiles.find((profile) => profile.id === role);
+
   return (
     <div>
       <Link to="/employees">← Back to employees</Link>
-      <h1>{isNew ? "New employee" : "Edit employee"}</h1>
+      <h1>{isNew ? "New user account" : "Edit user access"}</h1>
       {error && <div className="error-banner">{error}</div>}
 
       {preview ? (
@@ -175,9 +201,12 @@ export function EmployeeEdit() {
             </>
           )}
           <label>
-            Role
-            <input value={role} onChange={(e) => setRole(e.target.value)} />
+            Access profile
+            <select value={role} onChange={(event) => selectAccessProfile(event.target.value)}>
+              {visibleProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
+            </select>
           </label>
+          {selectedProfile && <p className="hint">{selectedProfile.description} Choosing a profile fills the permissions below; you can then tailor them individually.</p>}
           <label>
             Skills (comma-separated)
             <input value={skills} onChange={(e) => setSkills(e.target.value)} />
@@ -198,7 +227,7 @@ export function EmployeeEdit() {
             </label>
           )}
           <div>
-            <div className="hint">Permissions</div>
+            <div className="hint">Effective permissions</div>
             {KNOWN_PERMISSIONS.map((p) => (
               <label key={p} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 <input type="checkbox" checked={permissions.includes(p)} onChange={() => togglePermission(p)} />

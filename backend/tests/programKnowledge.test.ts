@@ -45,7 +45,7 @@ describe("Emma program knowledge", () => {
     }
     assert.match(catalogue.readout, /Client details/);
     assert.match(catalogue.readout, /Quote details/);
-    assert.match(catalogue.readout, /Employee management/);
+    assert.match(catalogue.readout, /User access management/);
 
     const restricted = getNavigationCatalogue([]);
     const connectors = restricted.sections.flatMap((section) => section.items).find((item) => item.id === "connectors");

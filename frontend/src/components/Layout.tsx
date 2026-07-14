@@ -23,6 +23,7 @@ export function Layout() {
   const canReadAudit = user?.permissions?.includes("audit.read") ?? false;
   const canUseEmmaMemory = user?.permissions?.includes("voice.execute") ?? false;
   const canReadConnectors = user?.permissions?.includes("connectors.read") ?? false;
+  const canManageCompany = user?.permissions?.includes("company.manage") ?? false;
   const language = appLanguage(user?.voiceLanguage);
   const t = (key: MenuKey) => menuText(language, key);
 
@@ -78,6 +79,7 @@ export function Layout() {
       id: "management",
       label: t("management"),
       items: [
+        { key: "company", to: "/company", visible: canManageCompany },
         { key: "employees", to: "/employees" },
         { key: "recruitment", to: "/recruitment", visible: canRecruit },
         { key: "dataQuality", to: "/data-quality" },

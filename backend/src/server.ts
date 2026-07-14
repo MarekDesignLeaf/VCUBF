@@ -31,6 +31,7 @@ import { metricsRouter } from "./modules/metrics/routes.js";
 import { invoicesRouter } from "./modules/invoices/routes.js";
 import { devicePairingRouter } from "./modules/auth/devicePairing.js";
 import { voiceStateRouter } from "./modules/command/voiceState.js";
+import { companyRouter } from "./modules/company/routes.js";
 import { startConnectorBackgroundSync } from "./services/connectorBackgroundSyncService.js";
 
 export function createServer() {
@@ -62,6 +63,7 @@ export function createServer() {
 
   app.use("/auth", authRouter);
   app.use("/auth/device", devicePairingRouter);
+  app.use("/company", companyRouter);
   app.use("/crm/clients", clientsRouter);
   app.use("/crm/jobs", jobsRouter);
   app.use("/crm/leads", leadsRouter);

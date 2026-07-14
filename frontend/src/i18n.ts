@@ -27,7 +27,7 @@ export function languageLabel(value: string | null | undefined, native = false) 
 export const MENU_KEYS = [
   "dashboard", "account", "notifications", "dataQuality", "metrics", "leads", "clients", "contacts", "documents", "jobs",
   "tasks", "enquiries", "communicationIntake", "communications", "photos", "photoSelection", "businessContext", "industries",
-  "connectors", "websiteAudit", "websiteContent", "employees", "calendar", "services", "quotes", "invoices", "recruitment",
+  "connectors", "websiteAudit", "websiteContent", "company", "employees", "calendar", "services", "quotes", "invoices", "recruitment",
   "playbooks", "learning", "emmaMemory", "logout", "overview", "customers", "workFinance", "growth", "management",
   "workspace", "openMenu", "closeMenu",
 ] as const;
@@ -39,7 +39,7 @@ const ENGLISH: Record<MenuKey, string> = {
   leads: "Leads", clients: "Clients", contacts: "Contacts", documents: "Documents", jobs: "Jobs", tasks: "Tasks", enquiries: "Enquiries",
   communicationIntake: "Communication Intake", communications: "Communications", photos: "Photos", photoSelection: "Photo Selection",
   businessContext: "Business Context", industries: "Industries", connectors: "Connectors", websiteAudit: "Website Audit", websiteContent: "Website Content",
-  employees: "Employees", calendar: "Calendar", services: "Services", quotes: "Quotes", invoices: "Invoices", recruitment: "Recruitment",
+  company: "Company", employees: "Users & access", calendar: "Calendar", services: "Services", quotes: "Quotes", invoices: "Invoices", recruitment: "Recruitment",
   playbooks: "Playbooks", learning: "Learning", emmaMemory: "Emma Memory", logout: "Log out",
   overview: "Overview", customers: "Customers & communication", workFinance: "Work & finance", growth: "Growth & presentation", management: "Management & system",
   workspace: "Secretary workspace", openMenu: "Open menu", closeMenu: "Close menu",
@@ -53,7 +53,7 @@ const TRANSLATIONS: Record<AppLanguage, Partial<Record<MenuKey, string>>> = {
     leads: "Poptávky", clients: "Klienti", contacts: "Kontakty", documents: "Dokumenty", jobs: "Zakázky", tasks: "Úkoly", enquiries: "Dotazy",
     communicationIntake: "Příjem komunikace", communications: "Komunikace", photos: "Fotografie", photoSelection: "Výběr fotografií",
     businessContext: "Kontext firmy", industries: "Obory", connectors: "Konektory", websiteAudit: "Audit webu", websiteContent: "Obsah webu",
-    employees: "Zaměstnanci", calendar: "Kalendář", services: "Služby", quotes: "Nabídky", invoices: "Faktury", recruitment: "Nábor",
+    company: "Firma", employees: "Uživatelé a přístupy", calendar: "Kalendář", services: "Služby", quotes: "Nabídky", invoices: "Faktury", recruitment: "Nábor",
     playbooks: "Postupy", learning: "Učení", emmaMemory: "Paměť Emmy", logout: "Odhlásit se",
     overview: "Přehled", customers: "Klienti a komunikace", workFinance: "Práce a finance", growth: "Růst a prezentace", management: "Řízení a systém",
     workspace: "Pracovní prostor Secretary", openMenu: "Otevřít menu", closeMenu: "Zavřít menu",

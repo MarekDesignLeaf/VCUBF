@@ -45,14 +45,14 @@ export async function findEmployeesByName(user: AuthedUser, name: string) {
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { recordAudit } from "../lib/audit.js";
-import { CREATE_EMPLOYEE_ACTION, KNOWN_PERMISSIONS, RESET_EMPLOYEE_PASSWORD_ACTION, UPDATE_EMPLOYEE_ACTION } from "../lib/actionContracts.js";
+import { ACCESS_PROFILE_IDS, CREATE_EMPLOYEE_ACTION, isAdministratorRole, KNOWN_PERMISSIONS, RESET_EMPLOYEE_PASSWORD_ACTION, UPDATE_EMPLOYEE_ACTION } from "../lib/actionContracts.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
 export const createEmployeeSchema = z.object({
   display_name: z.string().min(1, "display_name is required"),
   email: z.string().email("a valid email is required"),
   password: z.string().min(12).regex(/[a-z]/).regex(/[A-Z]/).regex(/[0-9]/),
-  role: z.string().min(1).default("worker"),
+  role: z.enum(ACCESS_PROFILE_IDS).default("field_worker"),
   permissions: z.array(z.enum(KNOWN_PERMISSIONS)).default([]),
   skills: z.array(z.string()).default([]),
   weekly_capacity_hours: z.number().int().positive().default(40),
@@ -66,13 +66,45 @@ export const resetEmployeePasswordSchema = z.object({
 
 export const updateEmployeeSchema = z.object({
   display_name: z.string().min(1).optional(),
-  role: z.string().min(1).optional(),
+  role: z.enum(ACCESS_PROFILE_IDS).optional(),
   permissions: z.array(z.enum(KNOWN_PERMISSIONS)).optional(),
   skills: z.array(z.string()).optional(),
   weekly_capacity_hours: z.number().int().positive().optional(),
   is_active: z.boolean().optional(),
   confirmed: z.boolean().optional(),
 });
+
+function uniquePermissions(permissions: readonly string[]) {
+  return [...new Set(permissions)];
+}
+
+// A user-management permission may manage day-to-day accounts, but it must
+// never be a route to create, modify or reset an administrator account or to
+// grant rights the actor does not already possess.
+function delegatedAccessError(actor: AuthedUser, target: { role: string } | null, role: string, permissions: readonly string[]) {
+  const actorIsAdministrator = isAdministratorRole(actor.role);
+  if (!actorIsAdministrator && (isAdministratorRole(role) || (target && isAdministratorRole(target.role)))) {
+    return { code: "ADMINISTRATOR_MANAGEMENT_REQUIRED", message: "Only an administrator can create, change or reset an administrator account." };
+  }
+  const unavailable = permissions.find((permission) => !actor.permissions.includes(permission));
+  if (!actorIsAdministrator && unavailable) {
+    return { code: "PERMISSION_DELEGATION_DENIED", message: "You can assign only permissions that you already hold." };
+  }
+  return null;
+}
+
+async function remainingAdministrator(user: AuthedUser, excludedUserId: string) {
+  return prisma.user.findFirst({
+    where: {
+      companyId: user.companyId,
+      id: { not: excludedUserId },
+      isActive: true,
+      role: { in: ["administrator", "admin"] },
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+}
 
 // Fetches an employee for management purposes (unlike getEmployee, this
 // includes inactive employees so an admin can review and reactivate them).
@@ -113,6 +145,21 @@ export async function createEmployee(user: AuthedUser, rawInput: unknown): Promi
     return fail(400, "VALIDATION_FAILED", parsed.error.message);
   }
   const data = parsed.data;
+  const permissions = uniquePermissions(data.permissions);
+  const accessError = delegatedAccessError(user, null, data.role, permissions);
+  if (accessError) {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: CREATE_EMPLOYEE_ACTION.actionName,
+      inputPayload: { display_name: data.display_name, email: data.email, role: data.role, permissions },
+      riskLevel: CREATE_EMPLOYEE_ACTION.riskLevel,
+      confirmationRequired: CREATE_EMPLOYEE_ACTION.confirmationRequired,
+      result: "rejected",
+      errorMessage: accessError.code,
+    });
+    return fail(403, accessError.code, accessError.message);
+  }
 
   const existing = await prisma.user.findUnique({ where: { email: data.email } });
   if (existing) {
@@ -133,7 +180,7 @@ export async function createEmployee(user: AuthedUser, rawInput: unknown): Promi
     display_name: data.display_name,
     email: data.email,
     role: data.role,
-    permissions: data.permissions,
+    permissions,
     skills: data.skills,
     weekly_capacity_hours: data.weekly_capacity_hours,
   };
@@ -160,7 +207,7 @@ export async function createEmployee(user: AuthedUser, rawInput: unknown): Promi
       email: data.email,
       passwordHash,
       role: data.role,
-      permissions: data.permissions,
+      permissions,
       skills: data.skills,
       weeklyCapacityHours: data.weekly_capacity_hours,
       mustChangePassword: true,
@@ -230,10 +277,48 @@ export async function updateEmployee(
     return fail(404, "EMPLOYEE_NOT_FOUND");
   }
 
+  const targetRole = data.role ?? existing.role;
+  const targetPermissions = uniquePermissions(data.permissions ?? existing.permissions);
+  const targetIsActive = data.is_active ?? existing.isActive;
+  const accessError = delegatedAccessError(user, existing, targetRole, targetPermissions);
+  if (accessError) {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: UPDATE_EMPLOYEE_ACTION.actionName,
+      inputPayload: { employeeId, role: targetRole, permissions: targetPermissions, isActive: targetIsActive },
+      riskLevel: UPDATE_EMPLOYEE_ACTION.riskLevel,
+      confirmationRequired: UPDATE_EMPLOYEE_ACTION.confirmationRequired,
+      result: "rejected",
+      errorMessage: accessError.code,
+    });
+    return fail(403, accessError.code, accessError.message);
+  }
+
+  let replacementAdministratorId: string | null = null;
+  const removesAdministrator = existing.isActive && isAdministratorRole(existing.role) && (!targetIsActive || !isAdministratorRole(targetRole));
+  if (removesAdministrator) {
+    const replacement = await remainingAdministrator(user, existing.id);
+    if (!replacement) {
+      await recordAudit({
+        companyId: user.companyId,
+        userId: user.id,
+        actionName: UPDATE_EMPLOYEE_ACTION.actionName,
+        inputPayload: { employeeId, role: targetRole, isActive: targetIsActive },
+        riskLevel: UPDATE_EMPLOYEE_ACTION.riskLevel,
+        confirmationRequired: UPDATE_EMPLOYEE_ACTION.confirmationRequired,
+        result: "rejected",
+        errorMessage: "LAST_ADMINISTRATOR_PROTECTED",
+      });
+      return fail(409, "LAST_ADMINISTRATOR_PROTECTED", "Secretary must always retain at least one active administrator.");
+    }
+    replacementAdministratorId = replacement.id;
+  }
+
   const changes: Record<string, unknown> = {};
   if (data.display_name !== undefined) changes.displayName = data.display_name;
   if (data.role !== undefined) changes.role = data.role;
-  if (data.permissions !== undefined) changes.permissions = data.permissions;
+  if (data.permissions !== undefined) changes.permissions = targetPermissions;
   if (data.skills !== undefined) changes.skills = data.skills;
   if (data.weekly_capacity_hours !== undefined) changes.weeklyCapacityHours = data.weekly_capacity_hours;
   if (data.is_active !== undefined) changes.isActive = data.is_active;
@@ -264,21 +349,29 @@ export async function updateEmployee(
     });
   }
 
-  const updated = await prisma.user.update({
-    where: { id: existing.id },
-    data: changes,
-    select: {
-      id: true,
-      displayName: true,
-      email: true,
-      role: true,
-      permissions: true,
-      skills: true,
-      weeklyCapacityHours: true,
-      isActive: true,
-      mustChangePassword: true,
-    },
-  });
+  const select = {
+    id: true,
+    displayName: true,
+    email: true,
+    role: true,
+    permissions: true,
+    skills: true,
+    weeklyCapacityHours: true,
+    isActive: true,
+    mustChangePassword: true,
+  } as const;
+  const company = replacementAdministratorId
+    ? await prisma.company.findUnique({ where: { id: user.companyId }, select: { primaryAdminUserId: true } })
+    : null;
+  const updated = replacementAdministratorId
+    ? await prisma.$transaction(async (tx) => {
+      const employee = await tx.user.update({ where: { id: existing.id }, data: changes, select });
+      if (company?.primaryAdminUserId === existing.id) {
+        await tx.company.update({ where: { id: user.companyId }, data: { primaryAdminUserId: replacementAdministratorId } });
+      }
+      return employee;
+    })
+    : await prisma.user.update({ where: { id: existing.id }, data: changes, select });
 
   await recordAudit({
     companyId: user.companyId,
@@ -314,6 +407,10 @@ export async function resetEmployeePassword(user: AuthedUser, employeeId: string
   if (!employee) {
     await recordAudit({ ...auditBase, result: "error", errorMessage: "EMPLOYEE_NOT_FOUND" });
     return fail(404, "EMPLOYEE_NOT_FOUND");
+  }
+  if (!isAdministratorRole(user.role) && isAdministratorRole(employee.role)) {
+    await recordAudit({ ...auditBase, result: "rejected", errorMessage: "ADMINISTRATOR_MANAGEMENT_REQUIRED" });
+    return fail(403, "ADMINISTRATOR_MANAGEMENT_REQUIRED", "Only an administrator can reset an administrator password.");
   }
   if (employee.id === user.id) {
     await recordAudit({ ...auditBase, result: "rejected", errorMessage: "SELF_PASSWORD_RESET_NOT_ALLOWED" });

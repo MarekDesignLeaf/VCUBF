@@ -191,5 +191,20 @@ describe("Employee and Permission Model management", () => {
     const res = await request(app).get("/crm/employees/meta/permissions").set("Authorization", `Bearer ${adminToken}`);
     assert.equal(res.status, 200);
     assert.ok(res.body.includes("crm.manage"));
+    assert.ok(res.body.includes("company.manage"));
+  });
+
+  it("returns named access profiles and protects the last administrator", async () => {
+    const profiles = await request(app).get("/crm/employees/meta/access-profiles").set("Authorization", `Bearer ${adminToken}`);
+    assert.equal(profiles.status, 200);
+    assert.ok(profiles.body.some((profile: any) => profile.id === "administrator"));
+
+    const admin = await prisma.user.findUniqueOrThrow({ where: { email: "admin@test.local" } });
+    const demote = await request(app)
+      .put(`/crm/employees/${admin.id}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ role: "viewer", is_active: false, confirmed: true });
+    assert.equal(demote.status, 409);
+    assert.equal(demote.body.error, "LAST_ADMINISTRATOR_PROTECTED");
   });
 });

@@ -11,9 +11,14 @@ datasource db {
 }
 
 model Company {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
+  id                 String    @id @default(uuid())
+  name               String
+  primaryAdminUserId String?   @unique @map("primary_admin_user_id")
+  setupCompletedAt   DateTime? @map("setup_completed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  primaryAdministrator User? @relation("CompanyPrimaryAdministrator", fields: [primaryAdminUserId], references: [id], onDelete: SetNull)
+  systemSetup          SystemSetup?
 
   users                        User[]
   clients                      Client[]
@@ -165,6 +170,7 @@ model User {
   createdAt           DateTime @default(now()) @map("created_at")
 
   company       Company    @relation(fields: [companyId], references: [id])
+  primaryAdministratorFor Company? @relation("CompanyPrimaryAdministrator")
   auditLogs     AuditLog[]
   assignedJobs  Job[]      @relation("AssignedJobs")
   voiceDeviceState VoiceDeviceState?
@@ -176,6 +182,19 @@ model User {
   passwordResetTokens PasswordResetToken[]
 
   @@map("users")
+}
+
+// Single-row installation marker. It prevents a second unauthenticated setup
+// from creating another tenant and lets the public onboarding route enforce:
+// company first, primary administrator second, all other accounts afterwards.
+model SystemSetup {
+  id            String   @id @default("primary")
+  companyId     String   @unique @map("company_id")
+  initializedAt DateTime @default(now()) @map("initialized_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("system_setup")
 }
 
 // Recovery credentials are stored as SHA-256 hashes, never as usable reset

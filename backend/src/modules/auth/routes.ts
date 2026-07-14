@@ -6,7 +6,7 @@ import { z } from "zod";
 import { prisma } from "../../db.js";
 import { requireAuth, signToken } from "../../middleware/auth.js";
 import { recordAudit } from "../../lib/audit.js";
-import { CHANGE_OWN_PASSWORD_ACTION } from "../../lib/actionContracts.js";
+import { CHANGE_OWN_PASSWORD_ACTION, KNOWN_PERMISSIONS } from "../../lib/actionContracts.js";
 import { frontendUrl } from "../../lib/frontendUrl.js";
 import { deliverGmailSecurityMessage } from "../../services/gmailConnectorService.js";
 import { updateVoicePreferences, voicePreferencesSchema } from "../../services/voicePreferenceService.js";
@@ -22,8 +22,28 @@ const strongPassword = z.string().min(12).regex(/[a-z]/, "new password must cont
 const changePasswordSchema = z.object({ current_password: z.string().min(1), new_password: strongPassword });
 const passwordResetRequestSchema = z.object({ email: z.string().trim().email().max(320) });
 const passwordResetSchema = z.object({ token: z.string().min(40).max(200), new_password: strongPassword });
+const initialSetupSchema = z.object({
+  company_name: z.string().trim().min(2, "company name is required").max(160),
+  administrator_name: z.string().trim().min(2, "administrator name is required").max(120),
+  administrator_email: z.string().trim().email().max(320).transform((email) => email.toLowerCase()),
+  administrator_password: strongPassword,
+});
 const PASSWORD_RESET_LIFETIME_MS = 30 * 60 * 1000;
 const resetTokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
+
+function publicUser(user: { id: string; email: string; displayName: string; role: string; permissions: string[]; mustChangePassword: boolean; voiceWakeWord: string; voiceContinuous: boolean; voiceLanguage: string }) {
+  return {
+    id: user.id,
+    email: user.email,
+    displayName: user.displayName,
+    role: user.role,
+    permissions: user.permissions,
+    mustChangePassword: user.mustChangePassword,
+    voiceWakeWord: user.voiceWakeWord,
+    voiceContinuous: user.voiceContinuous,
+    voiceLanguage: user.voiceLanguage,
+  };
+}
 
 function passwordResetUrl(token: string) {
   const url = frontendUrl("/reset-password");
@@ -54,6 +74,64 @@ const passwordResetRateLimiter = rateLimit({
     return `${ipKeyGenerator(req.ip ?? "unknown")}:${email}`;
   },
   handler: (_req, res) => res.status(202).json({ message: "If this account can be recovered, instructions have been sent." }),
+});
+
+// This route is public only until the first company administrator exists. The
+// marker, company and administrator are written as one transaction, enforcing
+// the lifecycle: company first, administrator second, other users afterwards.
+authRouter.get("/setup-status", async (_req, res) => {
+  const setup = await prisma.systemSetup.findUnique({ where: { id: "primary" }, select: { id: true } });
+  res.json({ setupRequired: !setup });
+});
+
+authRouter.post("/setup", async (req, res) => {
+  const parsed = initialSetupSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
+  const data = parsed.data;
+  const existingSetup = await prisma.systemSetup.findUnique({ where: { id: "primary" }, select: { id: true } });
+  if (existingSetup) return res.status(409).json({ error: "SETUP_ALREADY_COMPLETED", message: "This Secretary workspace already has a company administrator." });
+
+  try {
+    const passwordHash = await bcrypt.hash(data.administrator_password, 12);
+    const setup = await prisma.$transaction(async (tx) => {
+      const company = await tx.company.create({ data: { name: data.company_name, setupCompletedAt: new Date() } });
+      const administrator = await tx.user.create({
+        data: {
+          companyId: company.id,
+          email: data.administrator_email,
+          passwordHash,
+          displayName: data.administrator_name,
+          role: "administrator",
+          permissions: [...KNOWN_PERMISSIONS],
+        },
+      });
+      const configuredCompany = await tx.company.update({
+        where: { id: company.id },
+        data: { primaryAdminUserId: administrator.id },
+      });
+      await tx.systemSetup.create({ data: { id: "primary", companyId: company.id } });
+      return { company: configuredCompany, administrator };
+    });
+    await recordAudit({
+      companyId: setup.company.id,
+      userId: setup.administrator.id,
+      actionName: "complete_initial_setup",
+      inputPayload: { companyName: setup.company.name, administratorEmail: setup.administrator.email },
+      dataAfter: { companyId: setup.company.id, primaryAdminUserId: setup.administrator.id },
+      riskLevel: 3,
+      confirmed: true,
+      result: "success",
+    });
+    res.status(201).json({
+      token: signToken({ ...publicUser(setup.administrator), companyId: setup.company.id }, setup.administrator.authVersion),
+      user: publicUser(setup.administrator),
+    });
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
+      return res.status(409).json({ error: "SETUP_ALREADY_COMPLETED", message: "This Secretary workspace already has a company administrator." });
+    }
+    throw error;
+  }
 });
 
 // POST /auth/login

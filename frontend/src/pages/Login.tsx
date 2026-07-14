@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
-import { ApiError } from "../api/client";
+import { api, ApiError } from "../api/client";
 
 export function Login() {
   const { login } = useAuth();
@@ -11,6 +11,11 @@ export function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    api.setupStatus().then((status) => setSetupRequired(status.setupRequired)).catch(() => setSetupRequired(false));
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -31,6 +36,8 @@ export function Login() {
       setSubmitting(false);
     }
   }
+
+  if (setupRequired) return <Navigate to="/setup" replace />;
 
   return (
     <div className="login-page">

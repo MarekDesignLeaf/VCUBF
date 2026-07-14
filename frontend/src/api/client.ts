@@ -62,6 +62,15 @@ export interface LoginResponse {
     voiceLanguage: AppLanguage;
   };
 }
+
+export interface SetupStatus { setupRequired: boolean; }
+export interface CompanyProfile {
+  id: string;
+  name: string;
+  createdAt: string;
+  setupCompletedAt?: string | null;
+  primaryAdministrator: { id: string; displayName: string; email: string; role: string; isActive: boolean } | null;
+}
 export interface Invoice { id:string; invoiceNumber:string; title:string; invoiceStatus:string; dueDate?:string|null; isOverdue:boolean; client:{id:string;displayName:string}; totals:{total:number;paid:number;balance:number}; }
 
 export interface Client {
@@ -223,6 +232,7 @@ export interface Employee {
 // Employee and Permission Model — the fuller shape used by management
 // screens (create/edit), which also exposes permissions and active status.
 export const KNOWN_PERMISSIONS = [
+  "company.manage",
   "crm.read",
   "crm.manage",
   "users.manage",
@@ -233,6 +243,9 @@ export const KNOWN_PERMISSIONS = [
   "connectors.manage",
 ] as const;
 export type KnownPermission = (typeof KNOWN_PERMISSIONS)[number];
+
+export type AccessProfileId = "administrator" | "manager" | "office" | "field_worker" | "viewer" | "custom";
+export interface AccessProfile { id: AccessProfileId; label: string; description: string; permissions: KnownPermission[]; }
 
 export interface ManagedEmployee {
   id: string;
@@ -1478,7 +1491,14 @@ export const api = {
   },
   login: (email: string, password: string) =>
     request<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  setupStatus: () => request<SetupStatus>("/auth/setup-status"),
+  setup: (data: { company_name: string; administrator_name: string; administrator_email: string; administrator_password: string }) =>
+    request<LoginResponse>("/auth/setup", { method: "POST", body: JSON.stringify(data) }),
   me: () => request<LoginResponse["user"]>("/auth/me"),
+  company: {
+    get: () => request<CompanyProfile>("/company"),
+    update: (name: string) => request<CompanyProfile>("/company", { method: "PUT", body: JSON.stringify({ name }) }),
+  },
   changePassword: (currentPassword: string, newPassword: string) =>
     request<void>("/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
   requestPasswordReset: (email: string) =>
@@ -1636,6 +1656,7 @@ export const api = {
       request<CapacityResult>(`/crm/employees/${id}/capacity${week ? `?week=${encodeURIComponent(week)}` : ""}`),
     getManaged: (id: string) => request<ManagedEmployee>(`/crm/employees/${id}/manage`),
     permissions: () => request<string[]>("/crm/employees/meta/permissions"),
+    accessProfiles: () => request<AccessProfile[]>("/crm/employees/meta/access-profiles"),
     create: (data: Record<string, unknown>) =>
       request<ManagedEmployee>("/crm/employees", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Record<string, unknown>) =>

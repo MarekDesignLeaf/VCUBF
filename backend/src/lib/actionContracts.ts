@@ -258,6 +258,7 @@ export const RESET_EMPLOYEE_PASSWORD_ACTION: ActionContract = {
 // structured data (not invented per-request) so the UI can offer exactly
 // these as checkboxes and the backend can validate against exactly these.
 export const KNOWN_PERMISSIONS = [
+  "company.manage",
   "crm.read",
   "crm.manage",
   "users.manage",
@@ -268,6 +269,39 @@ export const KNOWN_PERMISSIONS = [
   "connectors.manage",
 ] as const;
 export type KnownPermission = (typeof KNOWN_PERMISSIONS)[number];
+
+// Company and Access Model — every Secretary installation is owned by one
+// company. The initial administrator is created with the company and later
+// administrators choose a named access profile before optionally tailoring
+// individual permissions. Profiles are templates, not hidden permission
+// rules: the effective permission list is always visible and reviewable.
+export const ACCESS_PROFILE_IDS = ["administrator", "manager", "office", "field_worker", "viewer", "custom"] as const;
+export type AccessProfileId = (typeof ACCESS_PROFILE_IDS)[number];
+
+export interface AccessProfile {
+  id: AccessProfileId;
+  label: string;
+  description: string;
+  permissions: readonly KnownPermission[];
+}
+
+export const ACCESS_PROFILES: readonly AccessProfile[] = [
+  { id: "administrator", label: "Administrator", description: "Full company, user, data, connector and assistant control.", permissions: KNOWN_PERMISSIONS },
+  { id: "manager", label: "Manager", description: "Runs day-to-day work and manages non-administrator user accounts.", permissions: ["crm.read", "crm.manage", "users.manage", "voice.execute", "recruitment.manage", "connectors.read"] },
+  { id: "office", label: "Office", description: "Works with customers, enquiries, jobs and Secretary assistance.", permissions: ["crm.read", "crm.manage", "voice.execute", "connectors.read"] },
+  { id: "field_worker", label: "Field worker", description: "Views assigned work and uses Emma without company administration access.", permissions: ["crm.read", "voice.execute"] },
+  { id: "viewer", label: "Viewer", description: "Read-only operational access.", permissions: ["crm.read"] },
+  { id: "custom", label: "Custom", description: "A bespoke permission set chosen by an administrator.", permissions: [] },
+];
+
+export function isAdministratorRole(role: string): boolean {
+  return role === "administrator" || role === "admin";
+}
+
+export function accessProfile(role: string): AccessProfile {
+  const normalized = role === "admin" ? "administrator" : role === "worker" ? "field_worker" : role;
+  return ACCESS_PROFILES.find((profile) => profile.id === normalized) ?? ACCESS_PROFILES.find((profile) => profile.id === "custom")!;
+}
 
 // Connector Engine — source registration and lifecycle. Provider contracts
 // declare capabilities separately; these actions never imply that an adapter

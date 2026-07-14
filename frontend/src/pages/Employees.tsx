@@ -27,8 +27,8 @@ export function Employees() {
   return (
     <div>
       <div className="page-header">
-        <h1>Employees</h1>
-        {canManage && <Link to="/employees/new">New employee</Link>}
+        <div><h1>Users & access</h1><p className="hint">Company → administrator → user accounts. Each user receives a role profile and an explicit permission set.</p></div>
+        {canManage && <Link to="/employees/new">New user</Link>}
       </div>
       <p className="hint">
         Workload is computed from jobs assigned to each person this week (with a planned date and an

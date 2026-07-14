@@ -119,6 +119,11 @@ body {
 .login-feature-list p { margin: 0; color: #c7e1d1; font-size: .9rem; }
 .login-feature-list strong { display: block; margin-bottom: 2px; color: white; font-size: .92rem; }
 .login-version { position: relative; z-index: 1; margin: 30px 0 0; color: #a7cab4; font-size: .76rem; }
+.setup-steps { position: relative; z-index: 1; display: grid; gap: 14px; margin: 34px 0 0; padding: 0; list-style: none; counter-reset: setup; }
+.setup-steps li { display: grid; grid-template-columns: 28px 1fr; column-gap: 10px; color: #d9efdf; font-size: .86rem; }
+.setup-steps li::before { counter-increment: setup; content: counter(setup); display: grid; place-items: center; grid-row: span 2; width: 24px; height: 24px; border: 1px solid rgb(220 248 228 / 48%); border-radius: 50%; font-size: .72rem; }
+.setup-steps strong { color: white; }
+.setup-steps span { grid-column: 2; color: #a7cab4; line-height: 1.45; }
 .login-panel { display: grid; place-items: center; padding: clamp(24px, 5vw, 76px); }
 .login-card { width: min(100%, 410px); padding: clamp(28px, 4vw, 44px); display: flex; flex-direction: column; gap: 17px; border: 1px solid #e0e8e3; border-radius: 20px; background: rgb(255 255 255 / 92%); box-shadow: 0 24px 70px rgb(24 57 40 / 10%); }
 .login-card-heading { display: grid; gap: 8px; margin-bottom: 5px; }
@@ -134,6 +139,9 @@ body {
 .login-submit { min-height: 47px; margin-top: 3px; border-radius: 9px; font-weight: 750; }
 .login-reset-hint { margin: -2px 0 0; color: var(--muted); font-size: .82rem; text-align: center; }
 .login-reset-hint a { color: #277451; font-weight: 750; }
+.settings-page { display: grid; gap: 18px; max-width: 760px; }
+.settings-card { padding: 20px; border: 1px solid #dde8e0; border-radius: 14px; background: #fbfdfb; }
+.settings-card h2 { margin-top: 0; }
 
 label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
 

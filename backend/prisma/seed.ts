@@ -4,44 +4,37 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function main() {
-  const company = await prisma.company.upsert({
-    where: { id: "00000000-0000-0000-0000-000000000001" },
-    update: {},
-    create: {
-      id: "00000000-0000-0000-0000-000000000001",
-      name: "Demo Company",
-    },
-  });
+  // Never create a hidden Demo Company or a known administrator password.
+  // Local/demo setup is explicit and follows the same company-first model as
+  // the public onboarding screen.
+  const companyName = process.env.SEED_COMPANY_NAME?.trim();
+  const administratorEmail = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase();
+  const administratorPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (!companyName || !administratorEmail || !administratorPassword) {
+    console.log("Seed skipped. Use the first-run setup screen, or provide SEED_COMPANY_NAME, SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD for an explicit local seed.");
+    return;
+  }
 
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe123!";
-  const passwordHash = await bcrypt.hash(adminPassword, 10);
-  const adminPermissions = [
-    "crm.read",
-    "crm.manage",
-    "users.manage",
-    "audit.read",
-    "voice.execute",
-    "recruitment.manage",
-    "connectors.read",
-    "connectors.manage",
+  const existingSetup = await prisma.systemSetup.findUnique({ where: { id: "primary" } });
+  if (existingSetup) {
+    console.log("Seed skipped. This Secretary workspace is already configured.");
+    return;
+  }
+
+  const permissions = [
+    "company.manage", "crm.read", "crm.manage", "users.manage", "audit.read",
+    "voice.execute", "recruitment.manage", "connectors.read", "connectors.manage",
   ];
-
-  await prisma.user.upsert({
-    where: { email: "admin@example.com" },
-    // Seeding must never replace a password that an administrator has chosen.
-    // The configured password applies only while creating the initial account.
-    update: { permissions: adminPermissions },
-    create: {
-      companyId: company.id,
-      email: "admin@example.com",
-      passwordHash,
-      displayName: "Admin",
-      role: "admin",
-      permissions: adminPermissions,
-    },
+  const passwordHash = await bcrypt.hash(administratorPassword, 12);
+  await prisma.$transaction(async (tx) => {
+    const company = await tx.company.create({ data: { name: companyName, setupCompletedAt: new Date() } });
+    const administrator = await tx.user.create({
+      data: { companyId: company.id, email: administratorEmail, passwordHash, displayName: "Administrator", role: "administrator", permissions },
+    });
+    await tx.company.update({ where: { id: company.id }, data: { primaryAdminUserId: administrator.id } });
+    await tx.systemSetup.create({ data: { id: "primary", companyId: company.id } });
   });
-
-  console.log(`Seed complete. Login with admin@example.com / ${process.env.SEED_ADMIN_PASSWORD ? "the configured SEED_ADMIN_PASSWORD" : "ChangeMe123!"}`);
+  console.log("Seed complete. The named company and its explicit administrator were created.");
 }
 
 main().finally(() => prisma.$disconnect());

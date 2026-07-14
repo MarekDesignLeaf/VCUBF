@@ -4,6 +4,8 @@ import { RequireAuth } from "./components/RequireAuth";
 import { Layout } from "./components/Layout";
 import { Login } from "./pages/Login";
 import { PasswordRecovery } from "./pages/PasswordRecovery";
+import { InitialSetup } from "./pages/InitialSetup";
+import { CompanySettings } from "./pages/CompanySettings";
 import { Dashboard } from "./pages/Dashboard";
 import { Clients } from "./pages/Clients";
 import { ClientDetail } from "./pages/ClientDetail";
@@ -50,6 +52,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<PasswordRecovery />} />
           <Route path="/reset-password" element={<PasswordRecovery />} />
+          <Route path="/setup" element={<InitialSetup />} />
           <Route
             element={
               <RequireAuth>
@@ -71,6 +74,7 @@ export default function App() {
             <Route path="/employees" element={<Employees />} />
             <Route path="/employees/new" element={<EmployeeEdit />} />
             <Route path="/employees/:id/edit" element={<EmployeeEdit />} />
+            <Route path="/company" element={<CompanySettings />} />
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/tasks" element={<Tasks />} />
             <Route path="/services" element={<ServiceCatalogue />} />
