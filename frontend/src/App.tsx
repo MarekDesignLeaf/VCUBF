@@ -44,11 +44,13 @@ import { Metrics } from "./pages/Metrics";
 import { Account } from "./pages/Account";
 import { Invoices } from "./pages/Invoices";
 import { EmmaPermissions } from "./pages/EmmaPermissions";
+import { BuildRefresh } from "./components/BuildRefresh";
 
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <BuildRefresh />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<PasswordRecovery />} />

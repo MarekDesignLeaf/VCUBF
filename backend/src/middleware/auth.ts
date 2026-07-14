@@ -27,7 +27,7 @@ declare global {
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-me";
 
-export function signToken(user: AuthedUser, authVersion: number, expiresIn: SignOptions["expiresIn"] = "12h"): string {
+export function signToken(user: AuthedUser, authVersion: number, expiresIn: SignOptions["expiresIn"] = "7d"): string {
   return jwt.sign({ sub: user.id, authVersion }, JWT_SECRET, { expiresIn });
 }
 

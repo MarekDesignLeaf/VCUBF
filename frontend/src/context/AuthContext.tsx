@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, getToken, setToken, type LoginResponse } from "../api/client";
+import { api, ApiError, getToken, setToken, type LoginResponse } from "../api/client";
 import { AuthContext } from "./auth-state";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -11,11 +11,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    api
-      .me()
-      .then(setUser)
-      .catch(() => setToken(null))
-      .finally(() => setLoading(false));
+    let active = true;
+    let retryTimer: number | undefined;
+    const loadSession = async (attempt = 0) => {
+      try {
+        const profile = await api.me();
+        if (active) setUser(profile);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          setToken(null);
+        } else if (active && attempt < 3) {
+          retryTimer = window.setTimeout(() => void loadSession(attempt + 1), 750 * (attempt + 1));
+          return;
+        }
+      }
+      if (active) setLoading(false);
+    };
+    void loadSession();
+    return () => {
+      active = false;
+      if (retryTimer) window.clearTimeout(retryTimer);
+    };
   }, []);
 
   async function login(email: string, password: string) {
