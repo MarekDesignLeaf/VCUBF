@@ -28,7 +28,7 @@ describe("Data Quality Engine", () => {
 
   before(async () => {
     await resetDb();
-    await seedCompanyAndAdmin();
+    const seeded = await seedCompanyAndAdmin();
     adminToken = await loginAs("admin@test.local");
     workerToken = await loginAs("worker@test.local");
 
@@ -38,7 +38,18 @@ describe("Data Quality Engine", () => {
     }
 
     emailDupAId = await createClient({ display_name: "Riverside Apartments Ltd", email_primary: "info@riverside.example.com" });
-    emailDupBId = await createClient({ display_name: "Riverside Apts", email_primary: "Info@Riverside.example.com" });
+    // The public create path now rejects this duplicate. Insert one legacy /
+    // imported record directly so the Data Quality Engine still proves that
+    // it detects duplicates which pre-date or bypassed the guarded API.
+    emailDupBId = (await prisma.client.create({
+      data: {
+        companyId: seeded.company.id,
+        displayName: "Riverside Apts",
+        emailPrimary: "Info@Riverside.example.com",
+        source: "legacy_test_fixture",
+        createdBy: seeded.admin.id,
+      },
+    })).id;
 
     phoneDupAId = await createClient({ display_name: "Oak Home Renovations", phone_primary: "+44 7700 900123" });
     phoneDupBId = await createClient({ display_name: "Oak Renovations Co", phone_primary: "07700900123" });
