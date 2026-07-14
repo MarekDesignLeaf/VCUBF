@@ -19,8 +19,10 @@ from difflib import SequenceMatcher
 import json
 import os
 from pathlib import Path
+import queue
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -31,6 +33,10 @@ import websockets
 
 RATE = 24_000
 CHUNK = 2_400  # 100 ms PCM16 frames
+PLAYBACK_FRAME_MS = 20
+PLAYBACK_FRAME_BYTES = RATE * 2 * PLAYBACK_FRAME_MS // 1000
+PLAYBACK_PREBUFFER_MS = 160
+PLAYBACK_PREBUFFER_BYTES = RATE * 2 * PLAYBACK_PREBUFFER_MS // 1000
 MAX_SESSION_SECONDS = 180
 IDLE_AFTER_RESPONSE_SECONDS = 25
 # Feed the exact speaker reference and microphone stream through WebRTC AEC in
@@ -40,10 +46,16 @@ OUTPUT_ECHO_GUARD_SECONDS = 0.75
 AEC_FRAME_SAMPLES = RATE // 100
 AEC_FRAME_BYTES = AEC_FRAME_SAMPLES * 2
 AEC_DEFAULT_DELAY_MS = 80
-AEC_WARMUP_SECONDS = 0.20
-BARGE_IN_MIN_RMS = 550.0
-BARGE_IN_MIN_PEAK = 1600
-BARGE_IN_CONFIRM_FRAMES = 3
+AEC_WARMUP_SECONDS = 0.30
+BARGE_IN_MIN_RMS = 700.0
+BARGE_IN_MIN_PEAK = 2000
+# A real spoken interruption remains above the post-AEC threshold for at
+# least a syllable. Thirty milliseconds admitted residual speaker echo and
+# could cancel Emma mid-word; 100 ms remains responsive without that failure.
+BARGE_IN_CONFIRM_FRAMES = 10
+
+PLAYBACK_DONE = object()
+PLAYBACK_STOP = object()
 
 LANGUAGE_NAMES = {
     "en-GB": "English (United Kingdom)",
@@ -76,6 +88,69 @@ LIVE_PATH = APP_DIR / "emma-live.json"
 
 class DATA_BLOB(ctypes.Structure):
     _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+
+class PcmPlaybackBuffer:
+    """Small deterministic jitter buffer for 24 kHz mono PCM16 output."""
+
+    def __init__(self, frame_bytes: int = PLAYBACK_FRAME_BYTES, prebuffer_bytes: int = PLAYBACK_PREBUFFER_BYTES):
+        self.frame_bytes = frame_bytes
+        self.prebuffer_bytes = prebuffer_bytes
+        self.data = bytearray()
+        self.finished = False
+        self.started = False
+
+    def append(self, payload: bytes) -> None:
+        if payload:
+            self.data.extend(payload)
+        if len(self.data) >= self.prebuffer_bytes:
+            self.started = True
+
+    def finish(self) -> None:
+        self.finished = True
+        if self.data:
+            self.started = True
+
+    def clear(self) -> None:
+        self.data.clear()
+        self.finished = False
+        self.started = False
+
+    def rebuffer(self) -> None:
+        """Keep a short tail but rebuild the safety margin after an underrun."""
+        self.started = False
+
+    def take_frame(self) -> bytes | None:
+        if not self.started:
+            return None
+        if len(self.data) >= self.frame_bytes:
+            frame = bytes(self.data[:self.frame_bytes])
+            del self.data[:self.frame_bytes]
+            return frame
+        if self.finished and self.data:
+            frame = bytes(self.data)
+            self.data.clear()
+            return frame + (b"\x00" * (self.frame_bytes - len(frame)))
+        return None
+
+    @property
+    def drained(self) -> bool:
+        return self.finished and not self.data
+
+
+def playback_buffer_self_test() -> bool:
+    buffer = PcmPlaybackBuffer(frame_bytes=8, prebuffer_bytes=24)
+    buffer.append(b"a" * 23)
+    if buffer.take_frame() is not None:
+        return False
+    buffer.append(b"b")
+    first = buffer.take_frame()
+    if first != b"a" * 8:
+        return False
+    buffer.finish()
+    second = buffer.take_frame()
+    third = buffer.take_frame()
+    return second == b"a" * 8 and third == (b"a" * 7 + b"b") and buffer.drained
 
 
 def log(message: str) -> None:
@@ -170,7 +245,11 @@ class RealtimeEmma:
         self.latest_user_request = self.initial_command
         self.stop = asyncio.Event()
         self.send_lock = asyncio.Lock()
-        self.output_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=100)
+        self.output_queue: queue.Queue[bytes | object] = queue.Queue()
+        self.playback_pending = threading.Event()
+        self.playback_reset = threading.Event()
+        self.playback_completion_signaled = True
+        self.playback_underruns = 0
         self.last_activity = time.monotonic()
         self.response_complete_at: float | None = None
         self.current_response_text = ""
@@ -204,6 +283,7 @@ class RealtimeEmma:
         self.audio = pyaudio.PyAudio()
         self.input_stream = None
         self.output_stream = None
+        self.aec_lock = threading.Lock()
         self.echo_processor = AudioProcessor(
             enable_aec=True,
             enable_ns=True,
@@ -469,9 +549,14 @@ SECRETARY_NAVIGATION={navigation_json}"""
                     log(f"microphone error: {type(exc).__name__}")
                 self.stop.set()
 
-    async def playback(self) -> None:
+    def _playback_worker(self) -> None:
+        """Own the audio device and feed it fixed frames from one stable thread."""
         self.output_stream = self.audio.open(
-            format=pyaudio.paInt16, channels=1, rate=RATE, output=True, frames_per_buffer=CHUNK
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=RATE,
+            output=True,
+            frames_per_buffer=PLAYBACK_FRAME_BYTES // 2,
         )
         try:
             output_delay_ms = int(round(self.output_stream.get_output_latency() * 1000)) + 30
@@ -480,23 +565,66 @@ SECRETARY_NAVIGATION={navigation_json}"""
             log(f"WebRTC acoustic echo cancellation active; delay={output_delay_ms}ms")
         except Exception as exc:
             log(f"AEC delay detection failed; using {AEC_DEFAULT_DELAY_MS}ms: {type(exc).__name__}")
+
+        jitter = PcmPlaybackBuffer()
+        underrun_reported = False
         while not self.stop.is_set():
-            chunk = await self.output_queue.get()
-            if chunk is None:
-                return
+            if self.playback_reset.is_set():
+                jitter.clear()
+                self.playback_reset.clear()
+                self.playback_pending.clear()
+                underrun_reported = False
+
+            if jitter.drained:
+                jitter.clear()
+                self.playback_pending.clear()
+                underrun_reported = False
+
+            frame = jitter.take_frame()
+            if frame is None:
+                try:
+                    item = self.output_queue.get(timeout=0.05)
+                except queue.Empty:
+                    if jitter.started and not jitter.finished:
+                        jitter.rebuffer()
+                        self.playback_underruns += 1
+                        if not underrun_reported:
+                            log("playback jitter buffer underrun; rebuilding prebuffer")
+                            underrun_reported = True
+                    continue
+                if item is PLAYBACK_STOP:
+                    return
+                if item is PLAYBACK_DONE:
+                    jitter.finish()
+                elif isinstance(item, bytes):
+                    jitter.append(item)
+                continue
+
+            if self.playback_reset.is_set():
+                continue
             # Feed the exact far-end PCM to WebRTC before it reaches the
             # speaker. The matching microphone frame can then have the room
             # echo removed while preserving a different near-end voice.
-            self.process_output_reference(chunk)
+            self.process_output_reference(frame)
             self.speaker_echo_until = max(self.speaker_echo_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS)
-            await asyncio.to_thread(self.output_stream.write, chunk)
+            self.output_stream.write(frame, exception_on_underflow=False)
             self.speaker_echo_until = max(self.speaker_echo_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS)
+
+    async def playback(self) -> None:
+        try:
+            await asyncio.to_thread(self._playback_worker)
+        except Exception as exc:
+            if not self.stop.is_set():
+                log(f"playback error: {type(exc).__name__}")
+                self.stop.set()
+            raise
 
     def process_output_reference(self, chunk: bytes) -> None:
         pending = self.reverse_remainder + chunk
         complete = len(pending) - (len(pending) % AEC_FRAME_BYTES)
-        for offset in range(0, complete, AEC_FRAME_BYTES):
-            self.echo_processor.process_reverse_stream(pending[offset:offset + AEC_FRAME_BYTES])
+        with self.aec_lock:
+            for offset in range(0, complete, AEC_FRAME_BYTES):
+                self.echo_processor.process_reverse_stream(pending[offset:offset + AEC_FRAME_BYTES])
         self.reverse_remainder = pending[complete:]
 
     @staticmethod
@@ -518,15 +646,16 @@ SECRETARY_NAVIGATION={navigation_json}"""
         processed_frames: list[bytes] = []
         consecutive_voice_frames = self.barge_in_voice_frames
         longest_voice_run = consecutive_voice_frames
-        for offset in range(0, complete, AEC_FRAME_BYTES):
-            processed = self.echo_processor.process_stream(chunk[offset:offset + AEC_FRAME_BYTES])
-            processed_frames.append(processed)
-            rms, peak = self.frame_levels(processed)
-            if rms >= BARGE_IN_MIN_RMS and peak >= BARGE_IN_MIN_PEAK:
-                consecutive_voice_frames += 1
-                longest_voice_run = max(longest_voice_run, consecutive_voice_frames)
-            else:
-                consecutive_voice_frames = 0
+        with self.aec_lock:
+            for offset in range(0, complete, AEC_FRAME_BYTES):
+                processed = self.echo_processor.process_stream(chunk[offset:offset + AEC_FRAME_BYTES])
+                processed_frames.append(processed)
+                rms, peak = self.frame_levels(processed)
+                if rms >= BARGE_IN_MIN_RMS and peak >= BARGE_IN_MIN_PEAK:
+                    consecutive_voice_frames += 1
+                    longest_voice_run = max(longest_voice_run, consecutive_voice_frames)
+                else:
+                    consecutive_voice_frames = 0
         if complete < len(chunk):
             # PyAudio currently supplies exact 100 ms blocks. Preserve any
             # future partial tail instead of silently losing user audio.
@@ -566,11 +695,24 @@ SECRETARY_NAVIGATION={navigation_json}"""
         await self.update_state("hearing", True)
 
     def clear_playback(self) -> None:
+        self.playback_completion_signaled = True
+        self.playback_reset.set()
         while True:
             try:
                 self.output_queue.get_nowait()
-            except asyncio.QueueEmpty:
+            except queue.Empty:
                 break
+        self.playback_pending.clear()
+
+    def enqueue_playback(self, chunk: bytes) -> None:
+        self.playback_pending.set()
+        self.output_queue.put_nowait(chunk)
+
+    def finish_playback(self) -> None:
+        if self.playback_completion_signaled:
+            return
+        self.playback_completion_signaled = True
+        self.output_queue.put_nowait(PLAYBACK_DONE)
 
     async def begin_output(self) -> None:
         """Enter speaker mode before the first PCM frame can reach the mic."""
@@ -578,6 +720,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
         if self.reported_speaking:
             return
         self.reported_speaking = True
+        self.playback_completion_signaled = False
         self.output_started_at = time.monotonic()
         self.barge_in_active = False
         self.barge_in_voice_frames = 0
@@ -588,7 +731,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
     async def resume_after_output(self, response: str, generation: int) -> None:
         """Expose the completed reply only after queued audio and echo end."""
         while not self.stop.is_set() and (
-            not self.output_queue.empty() or time.monotonic() < self.speaker_echo_until
+            self.playback_pending.is_set() or time.monotonic() < self.speaker_echo_until
         ):
             await asyncio.sleep(0.05)
         if self.stop.is_set() or generation != self.speaking_generation:
@@ -696,7 +839,9 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 await self.begin_output()
                 chunk = base64.b64decode(event.get("delta", ""))
                 if chunk:
-                    await self.output_queue.put(chunk)
+                    self.enqueue_playback(chunk)
+            elif event_type in ("response.output_audio.done", "response.audio.done"):
+                self.finish_playback()
             elif event_type in ("response.output_audio_transcript.delta", "response.audio_transcript.delta"):
                 response_id = str(event.get("response_id") or "")
                 delta = str(event.get("delta") or "")
@@ -770,6 +915,10 @@ SECRETARY_NAVIGATION={navigation_json}"""
                     asyncio.create_task(self.create_response_for_user())
             elif event_type == "response.done":
                 self.response_active = False
+                # Current Realtime servers emit response.output_audio.done.
+                # Keep response.done as a safe protocol fallback without
+                # enqueueing a duplicate completion marker.
+                self.finish_playback()
                 response_id = str((event.get("response") or {}).get("id") or "")
                 completed_text = response_text(event) or self.response_texts.pop(response_id, "").strip() or self.current_response_text.strip()
                 output = (event.get("response") or {}).get("output") or []
@@ -836,18 +985,19 @@ SECRETARY_NAVIGATION={navigation_json}"""
             async with websockets.connect(uri, additional_headers={"Authorization": f"Bearer {secret}"}, max_size=8 * 1024 * 1024) as ws:
                 self.ws = ws
                 await self.configure()
+                playback_task = asyncio.create_task(self.playback())
                 tasks = [
                     asyncio.create_task(self.microphone()),
-                    asyncio.create_task(self.playback()),
                     asyncio.create_task(self.receive()),
                     asyncio.create_task(self.watchdog()),
                     asyncio.create_task(self.control_watchdog()),
                 ]
                 await self.stop.wait()
-                await self.output_queue.put(None)
+                self.output_queue.put_nowait(PLAYBACK_STOP)
                 for task in tasks:
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
+                await playback_task
             if self.exit_code == 10:
                 transcript_status = "interrupted"
         except Exception:
@@ -874,17 +1024,29 @@ def main() -> int:
     parser.add_argument("--diagnostic", action="store_true")
     args = parser.parse_args()
     if args.diagnostic:
-        devices = []
+        input_devices = []
+        output_devices = []
         audio = pyaudio.PyAudio()
         try:
             for index in range(audio.get_device_count()):
                 info = audio.get_device_info_by_index(index)
                 if int(info.get("maxInputChannels", 0)) > 0:
-                    devices.append(info.get("name"))
+                    input_devices.append(info.get("name"))
+                if int(info.get("maxOutputChannels", 0)) > 0:
+                    output_devices.append(info.get("name"))
         finally:
             audio.terminate()
-        print(json.dumps({"status": "ok", "input_devices": len(devices), "token_protected": TOKEN_PATH.exists()}))
-        return 0
+        buffer_ok = playback_buffer_self_test()
+        print(json.dumps({
+            "status": "ok" if buffer_ok and output_devices else "failed",
+            "input_devices": len(input_devices),
+            "output_devices": len(output_devices),
+            "playback_frame_ms": PLAYBACK_FRAME_MS,
+            "playback_prebuffer_ms": PLAYBACK_PREBUFFER_MS,
+            "jitter_buffer": buffer_ok,
+            "token_protected": TOKEN_PATH.exists(),
+        }))
+        return 0 if buffer_ok and output_devices else 1
     initial = sys.stdin.readline().strip() if args.stdin else ""
     runtime = RealtimeEmma(initial)
     try:
