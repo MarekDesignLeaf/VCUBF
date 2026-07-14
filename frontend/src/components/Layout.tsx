@@ -3,7 +3,8 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 import { CommandBar } from "./CommandBar";
 import { VoiceControlCenter } from "./VoiceControlCenter";
-import { MobileVoiceControl, isAndroidNative } from "./MobileVoiceControl";
+import { MobileVoiceControl } from "./MobileVoiceControl";
+import { isAndroidNative } from "../lib/platform";
 import { appLanguage, languageLabel, menuText, type MenuKey } from "../i18n";
 
 type NavigationItem = { key: MenuKey; to: string; visible?: boolean };

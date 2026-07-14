@@ -1,4 +1,3 @@
-import { Capacitor } from "@capacitor/core";
 import { SpeechRecognition } from "@capacitor-community/speech-recognition";
 import { TextToSpeech, QueueStrategy } from "@capacitor-community/text-to-speech";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -8,10 +7,6 @@ import { appLanguage, languageLabel } from "../i18n";
 import { useAuth } from "../context/useAuth";
 
 type TranscriptTurn = { role: "user" | "assistant"; content: string };
-
-export function isAndroidNative() {
-  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
-}
 
 function normaliseForWakeWord(value: string) {
   return value.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");

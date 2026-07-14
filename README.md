@@ -55,6 +55,16 @@ Or run tests with a disposable embedded Postgres (no Docker required):
 npm run test:embedded
 ```
 
+On Windows ARM64, `embedded-postgres` has no native binary. The same command
+automatically starts temporary PostgreSQL and Node.js Linux Docker containers,
+runs the suite inside that isolated stack, then removes both containers and the
+temporary network. It never uses the normal development database or the host
+Prisma engine; Docker Desktop must be running for that platform.
+
+The test runner starts each test file in a clean Node.js process. This keeps
+provider mocks and temporary connector environment values isolated between
+modules while still using the same temporary database for the full run.
+
 ## Frontend — local setup
 
 ```bash
