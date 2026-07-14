@@ -201,6 +201,11 @@ function parseVoiceLanguageCommand(text: string): Extract<ParsedCommand, { inten
   return undefined;
 }
 
+export function isExplicitVoiceLanguageChange(text: string, language: VoiceLanguage): boolean {
+  const command = parseVoiceLanguageCommand(text.trim().replace(/[.!?]+$/g, ""));
+  return command?.entities.language === language;
+}
+
 function parseMenuDescriptionCommand(text: string): Extract<ParsedCommand, { intent: "describe_menu" }> | undefined {
   const normalized = text.trim().replace(/[.!?]+$/g, "");
   if (

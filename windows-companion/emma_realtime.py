@@ -167,6 +167,7 @@ def response_text(event: dict) -> str:
 class RealtimeEmma:
     def __init__(self, initial_command: str):
         self.initial_command = initial_command.strip()
+        self.latest_user_request = self.initial_command
         self.stop = asyncio.Event()
         self.send_lock = asyncio.Lock()
         self.output_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=100)
@@ -631,7 +632,11 @@ SECRETARY_NAVIGATION={navigation_json}"""
         await self.update_state("thinking", False)
         try:
             arguments = json.loads(event.get("arguments") or "{}")
-            request_text = str(arguments.get("request") or "").strip()
+            model_request = str(arguments.get("request") or "").strip()
+            # Send the user's validated transcript to the backend, never a
+            # model paraphrase. This prevents a hallucinated function argument
+            # such as "change language to English" from changing the account.
+            request_text = self.latest_user_request or model_request
             if not request_text:
                 raise ValueError("missing request")
             result = await asyncio.to_thread(
@@ -754,6 +759,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
                         await self.send({"type": "conversation.item.delete", "item_id": item_id})
                     continue
                 if heard:
+                    self.latest_user_request = heard
                     await self.update_state("thinking", False, transcript=heard)
                     sequence = self.item_sequences.pop(item_id, self.current_user_sequence or 1)
                     await self.append_transcript("user", heard, sequence, str(event.get("event_id") or item_id))

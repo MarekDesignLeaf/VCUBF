@@ -4,7 +4,7 @@ import { requireAuth, type AuthedUser } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { recordAudit } from "../../lib/audit.js";
 import { EXECUTE_TEXT_COMMAND_ACTION } from "../../lib/actionContracts.js";
-import { isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../../lib/commandParser.js";
+import { isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../../lib/commandParser.js";
 import { dispatchParsedCommand } from "../../lib/commandExecutor.js";
 import { resolveLearningAliases } from "../../services/learningService.js";
 import { createRealtimeClientSession, interpretVoiceRequest, transcribeVoiceAudio } from "../../services/voiceAssistantService.js";
@@ -14,6 +14,7 @@ import { hasPendingVoiceGmailMessage } from "../../services/voiceGmailService.js
 import { hasPendingVoiceWhatsAppMessage } from "../../services/voiceWhatsAppService.js";
 import { hasPendingVoiceNotificationDeletion } from "../../services/voiceNotificationService.js";
 import { getNavigationCatalogue } from "../../lib/navigationCatalogue.js";
+import { languageChangeRejectedMessage } from "../../lib/voiceLanguages.js";
 import { evaluateEmmaCommand } from "../../services/emmaPolicyService.js";
 import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorService.js";
 
@@ -235,6 +236,25 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     command = await resolveUserCommand(user, assistant.canonical_command);
     if (command.intent === "unrecognized") {
       return res.json({ ok: true, kind: "clarification", message: "I understood the request, but this action is not supported yet. Please rephrase it as one direct action." });
+    }
+    if (command.intent === "set_voice_language" && !isExplicitVoiceLanguageChange(alias.resolvedText, command.entities.language)) {
+      await recordAudit({
+        companyId: user.companyId,
+        userId: user.id,
+        actionName: "reject_inferred_voice_language_change",
+        interpretedIntent: command.intent,
+        inputPayload: { text: auditAssistantInput(text), inputMethod: input_method },
+        dataAfter: { requestedLanguage: command.entities.language },
+        riskLevel: 0,
+        confirmationRequired: false,
+        result: "error",
+        errorMessage: "LANGUAGE_CHANGE_NOT_EXPLICIT",
+      });
+      return res.json({
+        ok: true,
+        kind: "clarification",
+        message: languageChangeRejectedMessage(user.voiceLanguage),
+      });
     }
   }
 

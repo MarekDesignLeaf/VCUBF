@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../src/lib/commandParser.js";
+import { isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../src/lib/commandParser.js";
 
 describe("commandParser", () => {
   it("parses 'create client' with email and phone", () => {
@@ -131,6 +131,9 @@ describe("commandParser", () => {
     assert.deepEqual(parseTextCommand("mluv německy"), { intent: "set_voice_language", entities: { language: "de-DE" } });
     assert.deepEqual(parseTextCommand("mów po polsku"), { intent: "set_voice_language", entities: { language: "pl-PL" } });
     assert.deepEqual(parseTextCommand("zmień język na angielski"), { intent: "set_voice_language", entities: { language: "en-GB" } });
+    assert.equal(isExplicitVoiceLanguageChange("změň jazyk na češtinu", "cs-CZ"), true);
+    assert.equal(isExplicitVoiceLanguageChange("show me contacts", "en-GB"), false);
+    assert.equal(isExplicitVoiceLanguageChange("mluv česky", "en-GB"), false);
   });
 
   it("parses calendar agenda requests in English, Czech and Polish", () => {

@@ -99,3 +99,18 @@ export function languageSwitchMessage(language: VoiceLanguage) {
   };
   return messages[language];
 }
+
+export function languageChangeRejectedMessage(language: string) {
+  const selected: VoiceLanguage = isVoiceLanguage(language) ? language : "en-GB";
+  const messages: Record<VoiceLanguage, string> = {
+    "en-GB": "I will keep the current language. Ask me explicitly if you want to change it.",
+    "en-US": "I will keep the current language. Ask me explicitly if you want to change it.",
+    "cs-CZ": "Ponechám současný jazyk. Pokud ho chcete změnit, požádejte mě o to výslovně.",
+    "pl-PL": "Pozostanę przy obecnym języku. Jeśli chcesz go zmienić, poproś mnie o to wyraźnie.",
+    "fr-FR": "Je conserve la langue actuelle. Demandez-moi explicitement si vous souhaitez la changer.",
+    "de-DE": "Ich behalte die aktuelle Sprache bei. Bitten Sie mich ausdrücklich, wenn Sie sie ändern möchten.",
+    "es-ES": "Mantendré el idioma actual. Pídame explícitamente que lo cambie si así lo desea.",
+    "it-IT": "Manterrò la lingua attuale. Chiedimi esplicitamente di cambiarla se lo desideri.",
+  };
+  return messages[selected];
+}

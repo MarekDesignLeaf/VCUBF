@@ -131,6 +131,43 @@ describe("command/text", () => {
     assert.equal(state.body.lastUiAction.language, "cs-CZ");
   });
 
+  it("does not execute an AI-inferred language change that the user did not request", async () => {
+    await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "změň jazyk na češtinu", input_method: "voice_transcript" });
+    const previousKey = process.env.OPENAI_API_KEY;
+    const previousFetch = globalThis.fetch;
+    process.env.OPENAI_API_KEY = "test-key";
+    globalThis.fetch = async () => Response.json({
+      output: [{ content: [{ text: JSON.stringify({
+        kind: "command",
+        canonical_command: "set language en-GB",
+        message: "Switching to English.",
+      }) }] }],
+    });
+    try {
+      const res = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ text: "tell me something useful", input_method: "voice_transcript", language: "cs-CZ", history: [] });
+      assert.equal(res.status, 200);
+      assert.equal(res.body.kind, "clarification");
+
+      const me = await request(app).get("/auth/me").set("Authorization", `Bearer ${adminToken}`);
+      assert.equal(me.body.voiceLanguage, "cs-CZ");
+      const audit = await prisma.auditLog.findFirst({
+        where: { actionName: "reject_inferred_voice_language_change" },
+        orderBy: { createdAt: "desc" },
+      });
+      assert.equal(audit?.errorMessage, "LANGUAGE_CHANGE_NOT_EXPLICIT");
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousKey;
+    }
+  });
+
   it("creates a job via text command by resolving the client name", async () => {
     const res = await request(app)
       .post("/command/text")

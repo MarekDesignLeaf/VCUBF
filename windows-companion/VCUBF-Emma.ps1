@@ -371,6 +371,14 @@ function Show-HearingMonitor {
   $privacy=New-Object Windows.Forms.Label -Property @{Left=20;Top=168;Width=500;Height=36;Text='This live pre-wake text stays on this PC. It is not uploaded or saved in conversation history.'}
   $form.Controls.AddRange(@($title,$status,$level,$heard,$privacy))
   $script:HearingMonitor=$form;$script:HearingMonitorStatus=$status;$script:HearingMonitorText=$heard;$script:HearingMonitorLevel=$level
+  $form.Add_FormClosing({
+    param($sender,$event)
+    if($event.CloseReason -eq [Windows.Forms.CloseReason]::UserClosing){
+      Write-EmmaLog 'Live hearing window closed by user; exiting Emma completely.'
+      if($script:RealtimeProcess -and !$script:RealtimeProcess.HasExited){try{$script:RealtimeProcess.Kill()}catch{}}
+      if($script:Context){$script:Context.ExitThread()}else{[Windows.Forms.Application]::ExitThread()}
+    }
+  })
   $form.Add_FormClosed({$script:HearingMonitor=$null;$script:HearingMonitorStatus=$null;$script:HearingMonitorText=$null;$script:HearingMonitorLevel=$null;if($script:DictationGrammar -and [datetime]::UtcNow -ge $script:ArmedUntil){$script:DictationGrammar.Enabled=$false}})
   Position-HearingMonitor $form
   $form.Show()
