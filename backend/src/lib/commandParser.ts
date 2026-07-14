@@ -201,15 +201,33 @@ function parseGmailMessageCommand(text: string): Extract<ParsedCommand, { intent
 }
 
 function parseVoiceLanguageCommand(text: string): Extract<ParsedCommand, { intent: "set_voice_language" }> | undefined {
+  const resolveTarget = (rawTarget: string) => {
+    const direct = resolveVoiceLanguage(rawTarget);
+    if (direct) return direct;
+    const cleaned = rawTarget
+      .replace(/[^\p{L}\p{N}-]+/gu, " ")
+      .split(/\s+/u)
+      .filter((word) => word.length > 0 && !new Set([
+        "the", "language", "język", "jezyk", "jazyk", "now", "teraz", "please", "proszę", "prosze",
+        "prosím", "prosim", "mi", "na", "do", "to", "into", "on", "kurwa", "fucking",
+      ]).has(word.toLocaleLowerCase("en")))
+      .join(" ");
+    return resolveVoiceLanguage(cleaned);
+  };
   const patterns = [
     /^(?:set|change|switch)\s+(?:the\s+)?(?:(?:emma(?:'s)?|voice|menu|secretary)\s+)?language\s+(?:to\s+)?(.+)$/iu,
     /^(?:yes[,\s]+)?(?:change|switch)(?:\s+(?:yourself|over))?\s+to\s+(.+)$/iu,
+    /^(?:please\s+)?(?:turn|set|change|switch)(?:\s+the)?(?:\s+language)?(?:\s+(?:on|to|into))?\s+(.+)$/iu,
     /^(?:speak|talk|respond)\s+(?:in\s+)?(.+)$/iu,
     /^(?:zm[eě]ň|zmen|přepni|prepn[ií]|nastav)\s+(?:(?:jazyk\s+)?(?:emmy|menu|sekretary|sekretáře)|jazyk)\s*(?:(?:na|do)\s+)?(.+)$/iu,
     /^(?:(?:ano|ne)[,\s]+)?(?:přepni|prepni|zepni)(?:\s+se)?(?:\s+okamžitě)?\s+(?:do|na)\s+(.+)$/iu,
     /^(?:mluv|mluvte|odpov[ií]dej)\s+(?:pros[ií]m\s+)?(?:v\s+)?(.+)$/iu,
     /^(?:zmień|zmien|przełącz|przelacz|ustaw)\s+(?:język|jezyk)(?:\s+emmy|\s+menu)?\s*(?:(?:na|do)\s+)?(.+)$/iu,
     /^(?:tak[,\s]+)?(?:przełącz|przelacz)(?:\s+się|\s+sie)?\s+na\s+(.+)$/iu,
+    /^(?:włącz|wlacz|zmień|zmien|przełącz|przelacz|ustaw|uruchom)(?:\s+mi)?\s+(.+)$/iu,
+    /^(?:.+\s+)?(?:zmień|zmien|przełącz|przelacz|ustaw)(?:\s+to)?(?:\s+od\s+razu)?(?:\s+język|\s+jezyk)?\s*(?:(?:na|do)\s+)?(.+)$/iu,
+    /^(?:chcę|chce|poproszę|poprosze)(?:\s+mieć|\s+miec)?\s+(.+)$/iu,
+    /^(?:język|jezyk|language)\s+(.+)$/iu,
     /^(?:mów|mow|odpowiadaj)\s+(?:po\s+)?(.+)$/iu,
     /^(?:change|passe|bascule|mets)\s+(?:la\s+)?langue\s*(?:(?:en|vers)\s+)?(.+)$/iu,
     /^(?:parle|réponds|reponds)\s+(?:en\s+)?(.+)$/iu,
@@ -222,9 +240,13 @@ function parseVoiceLanguageCommand(text: string): Extract<ParsedCommand, { inten
   ];
   for (const pattern of patterns) {
     const match = text.match(pattern);
-    const language = match ? resolveVoiceLanguage(match[1]) : undefined;
+    const language = match ? resolveTarget(match[1]) : undefined;
     if (language) return { intent: "set_voice_language", entities: { language } };
   }
+  // A bare language variant is an explicit answer to a preceding variant
+  // question and is safe because changing language is reversible.
+  const bareLanguage = resolveVoiceLanguage(text);
+  if (bareLanguage) return { intent: "set_voice_language", entities: { language: bareLanguage } };
   return undefined;
 }
 

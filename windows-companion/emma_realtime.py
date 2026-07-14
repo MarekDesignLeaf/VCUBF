@@ -74,9 +74,13 @@ LANGUAGE_NAMES = {
 # it before asking the Realtime model for a reply so success never depends on
 # the model deciding to call execute_business_request.
 LANGUAGE_ALIASES = {
-    "en gb": "en-GB", "en": "en-GB", "english": "en-GB", "british english": "en-GB",
+    "en gb": "en-GB", "n gb": "en-GB", "n g b": "en-GB", "ngb": "en-GB",
+    "m gb": "en-GB", "mgb": "en-GB", "en": "en-GB",
+    "english": "en-GB", "british": "en-GB", "british english": "en-GB", "english british": "en-GB",
     "anglictina": "en-GB", "anglictiny": "en-GB", "anglictinu": "en-GB", "anglicky": "en-GB",
-    "angielski": "en-GB", "angielsku": "en-GB", "anglais": "en-GB", "englisch": "en-GB",
+    "angielski": "en-GB", "angielsku": "en-GB", "angielski brytyjski": "en-GB",
+    "brytyjski angielski": "en-GB", "brytyjski": "en-GB", "brytyjskim": "en-GB",
+    "anglais": "en-GB", "englisch": "en-GB",
     "ingles": "en-GB", "inglese": "en-GB",
     "en us": "en-US", "american english": "en-US", "us english": "en-US",
     "cs cz": "cs-CZ", "cs": "cs-CZ", "czech": "cs-CZ", "cestina": "cs-CZ",
@@ -102,11 +106,16 @@ LANGUAGE_ALIASES = {
 LANGUAGE_COMMAND_PATTERNS = tuple(re.compile(pattern) for pattern in (
     r"(?:please )?(?:set|change|switch)(?: the)?(?:(?: emma s| voice| menu| secretary))? language(?: to)? (.+)",
     r"(?:yes )?(?:change|switch)(?: yourself| over)? to (.+)",
+    r"(?:please )?(?:turn|set|change|switch)(?: the)?(?: language)?(?: on| to| into)? (.+)",
     r"(?:please )?(?:speak|talk|respond)(?: in)? (.+)",
     r"(?:(?:ano|ne) )?(?:zmen|prepni|nastav)(?: se)?(?: okamzite)?(?:(?: jazyk)?(?: emmy| menu| sekretare| secretary)?| jazyk)(?: na| do)? (.+)",
     r"(?:(?:ano|ne) )?(?:zmen|prepni)(?: se)?(?: okamzite)? (?:do|na) (.+)",
     r"(?:mluv|mluvte|odpovidej)(?: prosim)?(?: v| cesky| polsky)? (.+)",
     r"(?:(?:tak|nie) )?(?:zmien|przelacz|ustaw)(?: sie)?(?: jezyk)?(?: emmy| menu)?(?: na| do)? (.+)",
+    r"(?:wlacz|zmien|przelacz|ustaw|uruchom)(?: mi)? (.+)",
+    r"(?:.+ )?(?:zmien|przelacz|ustaw)(?: to)?(?: od razu)?(?: jezyk)?(?: na| do)? (.+)",
+    r"(?:chce|poprosze)(?: miec)? (.+)",
+    r"(?:jezyk|language) (.+)",
     r"(?:mow|odpowiadaj)(?: po| w)? (.+)",
     r"(?:change|passe|bascule|mets)(?: la)? langue(?: en| vers)? (.+)",
     r"(?:parle|reponds)(?: en)? (.+)",
@@ -120,9 +129,27 @@ LANGUAGE_COMMAND_PATTERNS = tuple(re.compile(pattern) for pattern in (
 
 
 def normalize_language_command(text: str) -> str:
-    decomposed = unicodedata.normalize("NFD", text.casefold())
+    # Polish ł is not decomposed by Unicode NFD, so transliterate it before
+    # applying the same accent-insensitive matching used for the other locales.
+    folded = text.casefold().replace("ł", "l")
+    decomposed = unicodedata.normalize("NFD", folded)
     ascii_text = "".join(character for character in decomposed if unicodedata.category(character) != "Mn")
     return " ".join(re.findall(r"[a-z0-9]+", ascii_text))
+
+
+LANGUAGE_TARGET_FILLERS = {
+    "the", "language", "jezyk", "jazyk", "now", "teraz", "please", "prosze", "prosim",
+    "mi", "na", "do", "to", "into", "on", "kurva", "kurwa", "fucking",
+}
+
+
+def resolve_language_target(text: str) -> str | None:
+    normalized = normalize_language_command(text)
+    direct = LANGUAGE_ALIASES.get(normalized)
+    if direct:
+        return direct
+    cleaned = " ".join(word for word in normalized.split() if word not in LANGUAGE_TARGET_FILLERS)
+    return LANGUAGE_ALIASES.get(cleaned)
 
 
 def detect_language_change(text: str) -> str | None:
@@ -130,18 +157,30 @@ def detect_language_change(text: str) -> str | None:
     for pattern in LANGUAGE_COMMAND_PATTERNS:
         match = pattern.fullmatch(normalized)
         if match:
-            return LANGUAGE_ALIASES.get(match.group(1).strip())
-    return None
+            language = resolve_language_target(match.group(1))
+            if language:
+                return language
+    # A bare language name or code is a valid answer after Emma asks which
+    # language variant the user wants (for example "brytyjskim" or "en-GB").
+    return LANGUAGE_ALIASES.get(normalized)
 
 
 def language_detection_self_test() -> bool:
     examples = {
         "Switch language to Polish.": "pl-PL",
+        "Turn on Polish language now.": "pl-PL",
         "Přepni se do angličtiny.": "en-GB",
         "Přepni jazyk do češtiny.": "cs-CZ",
         "Změň jazyk Emmy na francouzštinu.": "fr-FR",
         "Zmień język na niemiecki.": "de-DE",
         "Mów po polsku.": "pl-PL",
+        "Włącz angielski, brytyjski język, kurwa.": "en-GB",
+        "Przełącz na angielski język brytyjski.": "en-GB",
+        "Nie będę się kurwa prosił, przełącz to od razu na angielski język.": "en-GB",
+        "Chcę język na angielski, kurwa.": "en-GB",
+        "język NGB.": "en-GB",
+        "Ustaw język MGB.": "en-GB",
+        "brytyjskim": "en-GB",
         "Cambia el idioma a español.": "es-ES",
         "Cambia la lingua in italiano.": "it-IT",
         "Passe la langue en allemand.": "de-DE",
