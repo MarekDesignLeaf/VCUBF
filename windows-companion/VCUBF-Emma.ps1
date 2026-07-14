@@ -160,6 +160,41 @@ function Get-VoiceLanguageName([string]$Language) {
   return $Language
 }
 
+function Get-LocalizedSpeech([string]$Key) {
+  $language = ([string]$script:Config.Language).Split('-')[0].ToLowerInvariant()
+  $messages = @{
+    ready = @{ en='Yes?'; cs='Ano?'; pl='Tak?'; fr='Oui ?'; de='Ja?'; es='¿Sí?'; it='Sì?' }
+    realtime_unavailable = @{
+      en='Live conversation is unavailable. Please say your request now.'
+      cs='Živý rozhovor není dostupný. Řekněte nyní svůj požadavek.'
+      pl='Rozmowa na żywo jest niedostępna. Proszę teraz powiedzieć, czego potrzebujesz.'
+      fr='La conversation en direct est indisponible. Dites-moi maintenant ce dont vous avez besoin.'
+      de='Das Live-Gespräch ist nicht verfügbar. Sagen Sie mir jetzt bitte, was Sie benötigen.'
+      es='La conversación en directo no está disponible. Dígame ahora qué necesita.'
+      it='La conversazione in tempo reale non è disponibile. Mi dica ora di cosa ha bisogno.'
+    }
+    ready_request = @{
+      en='I am ready. Please say your request.'; cs='Jsem připravena. Řekněte svůj požadavek.'; pl='Jestem gotowa. Proszę powiedzieć, czego potrzebujesz.'
+      fr='Je suis prête. Dites-moi ce dont vous avez besoin.'; de='Ich bin bereit. Sagen Sie mir bitte, was Sie benötigen.'; es='Estoy lista. Dígame qué necesita.'; it='Sono pronta. Mi dica di cosa ha bisogno.'
+    }
+    not_accurate = @{
+      en='I did not catch that accurately. Please say the command again.'; cs='Nerozuměla jsem tomu přesně. Řekněte příkaz znovu.'; pl='Nie zrozumiałam tego dokładnie. Proszę powtórzyć polecenie.'
+      fr="Je n'ai pas bien compris. Répétez la commande, s'il vous plaît."; de='Ich habe das nicht genau verstanden. Bitte wiederholen Sie den Befehl.'; es='No lo entendí con precisión. Repita el comando, por favor.'; it='Non ho capito con precisione. Ripeta il comando, per favore.'
+    }
+    cancelled = @{ en='Cancelled.'; cs='Zrušeno.'; pl='Anulowano.'; fr='Annulé.'; de='Abgebrochen.'; es='Cancelado.'; it='Annullato.' }
+    command_failed = @{
+      en='The command could not be sent.'; cs='Příkaz se nepodařilo odeslat.'; pl='Nie udało się wysłać polecenia.'; fr="La commande n'a pas pu être envoyée."; de='Der Befehl konnte nicht gesendet werden.'; es='No se pudo enviar el comando.'; it='Non è stato possibile inviare il comando.'
+    }
+    active = @{
+      en='Emma is active and listening.'; cs='Emma je aktivní a poslouchá.'; pl='Emma jest aktywna i słucha.'; fr='Emma est active et vous écoute.'; de='Emma ist aktiv und hört zu.'; es='Emma está activa y escuchando.'; it='Emma è attiva e in ascolto.'
+    }
+  }
+  if (!$messages.ContainsKey($Key)) { return '' }
+  $translations = $messages[$Key]
+  if ($translations.ContainsKey($language)) { return [string]$translations[$language] }
+  return [string]$translations.en
+}
+
 function Select-SynthesisVoice {
   try {
     $target = [string]$script:Config.Language
@@ -180,7 +215,9 @@ function Sync-VoicePreferences {
     if ($nextWakeWord -and $script:Config.WakeWord -ne $nextWakeWord) { $script:Config.WakeWord = $nextWakeWord; $changed = $true }
     if (!$changed) { return $false }
     Save-Config $script:Config
-    Initialize-Recognizer
+    # At process startup the recognizer does not exist yet. Persist the server
+    # profile first, then let the normal startup path create it in that language.
+    if ($script:Recognizer) { Initialize-Recognizer }
     Select-SynthesisVoice
     $label = Get-VoiceLanguageName $script:Config.Language
     Write-EmmaLog "Voice preferences synchronised. Language: $label."
@@ -385,6 +422,9 @@ function Spoken-Result($Response) {
 }
 
 function Handle-LocalConversation([string]$Command) {
+  # These small offline replies are English-only. Other languages are always
+  # sent to the multilingual assistant instead of producing an English answer.
+  if (!([string]$script:Config.Language).StartsWith('en',[StringComparison]::OrdinalIgnoreCase)) { return $false }
   $normal=$Command.Trim().ToLowerInvariant()
   if($normal -match '^(hello|hi|good morning|good afternoon)[.! ]*$'){$answer='Hello. How can I help?';Record-TranscriptExchange $Command $answer;Speak $answer;$script:ArmedUntil=[datetime]::UtcNow.AddSeconds([int]$script:Config.ConversationSeconds);return $true}
   if($normal -match '^(what can you do|help|commands)[?!. ]*$'){$answer='I can create and list clients, leads, jobs, tasks and services, assign jobs, change job status, list quotes, communications, follow ups, notifications and more.';Record-TranscriptExchange $Command $answer;Speak $answer;$script:ArmedUntil=[datetime]::UtcNow.AddSeconds([int]$script:Config.ConversationSeconds);return $true}
@@ -489,7 +529,7 @@ function Show-Review([string]$RecognizedText) {
   $run = New-Object Windows.Forms.Button -Property @{ Left=410; Top=140; Width=120; Text='Run'; DialogResult='OK' }
   $cancel = New-Object Windows.Forms.Button -Property @{ Left=280; Top=140; Width=120; Text='Cancel'; DialogResult='Cancel' }
   $form.Controls.AddRange(@($label,$text,$run,$cancel)); $form.AcceptButton=$run; $form.CancelButton=$cancel
-  if ($form.ShowDialog() -ne 'OK' -or [string]::IsNullOrWhiteSpace($text.Text)) { Speak 'Cancelled'; return }
+  if ($form.ShowDialog() -ne 'OK' -or [string]::IsNullOrWhiteSpace($text.Text)) { Speak (Get-LocalizedSpeech 'cancelled'); return }
   $command=$text.Text.Trim()
   try {
     if (!(Ensure-Login)) { return }
@@ -503,7 +543,7 @@ function Show-Review([string]$RecognizedText) {
     Speak $message
     End-TranscriptConversation 'completed'
   } catch {
-    $failure='The command could not be sent.'
+    $failure=Get-LocalizedSpeech 'command_failed'
     Add-TranscriptMessage 'assistant' $failure
     End-TranscriptConversation 'error'
     Write-EmmaLog "Command failed: $($_.Exception.Message)"
@@ -602,7 +642,7 @@ function Execute-VoiceCommand([string]$Command) {
       $script:ArmedUntil=[datetime]::UtcNow.AddSeconds(10)
       Update-HearingMonitor '' 'Live conversation unavailable — say your request now'
       Update-VoiceState 'listening' $true 'wake_word'|Out-Null
-      $prompt=if($realtimeFailure){'Live conversation is unavailable. Please say your request now.'}else{'I am ready. Please say your request.'}
+      $prompt=if($realtimeFailure){Get-LocalizedSpeech 'realtime_unavailable'}else{Get-LocalizedSpeech 'ready_request'}
       if($script:Notify){$script:Notify.ShowBalloonTip(4500,'VCUBF Emma',$prompt,'Warning')}
       Speak $prompt
       return
@@ -623,7 +663,7 @@ function Execute-VoiceCommand([string]$Command) {
     Update-VoiceState $(if($response.kind -eq 'error'){'error'}else{'listening'}) $true 'reviewed_text' $Command.Trim() $message|Out-Null
     $script:Notify.ShowBalloonTip(4000,'VCUBF Emma',$message,$(if($response.ok){'Info'}else{'Warning'}));Speak $message
     $script:ArmedUntil=[datetime]::UtcNow.AddSeconds([int]$script:Config.ConversationSeconds)
-  } catch {Write-EmmaLog "Command failed: $($_.Exception.Message)";$message='The command could not be sent.';$script:LastResponse=$message;Add-TranscriptMessage 'assistant' $message;End-TranscriptConversation 'error';$script:Notify.ShowBalloonTip(4000,'VCUBF Emma',$message,'Error');Speak $message}
+  } catch {Write-EmmaLog "Command failed: $($_.Exception.Message)";$message=Get-LocalizedSpeech 'command_failed';$script:LastResponse=$message;Add-TranscriptMessage 'assistant' $message;End-TranscriptConversation 'error';$script:Notify.ShowBalloonTip(4000,'VCUBF Emma',$message,'Error');Speak $message}
 }
 
 function Start-HandsFreeRealtime {
@@ -634,7 +674,8 @@ function Start-HandsFreeRealtime {
     $script:Listening=$false
     Show-HearingMonitor
     Update-VoiceState 'hearing' $true 'wake_word' $script:Config.WakeWord|Out-Null
-    Speak 'Yes?'
+    # Realtime immediately starts listening. Speaking here delayed activation
+    # and, historically, injected a hard-coded English response.
     Execute-VoiceCommand ''
   } finally {$script:Busy=$false;Start-Listening}
 }
@@ -660,7 +701,7 @@ function Handle-Recognition([string]$Text,[double]$Confidence,[byte[]]$AudioWav)
       Start-HandsFreeRealtime
       return
     }
-    if (!$command) { $script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8); Speak 'Yes?'; return }
+    if (!$command) { $script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8); Speak (Get-LocalizedSpeech 'ready'); return }
   } elseif ([datetime]::UtcNow -lt $script:ArmedUntil) { $command=$text } else { return }
   if($AudioWav -and $AudioWav.Length -ge 44){
     try {
@@ -676,7 +717,7 @@ function Handle-Recognition([string]$Text,[double]$Confidence,[byte[]]$AudioWav)
       Write-EmmaLog "Accurate command transcription failed: $($_.Exception.Message)"
       Update-HearingMonitor $text 'Online transcription failed — please repeat the command'
       $script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8)
-      Speak 'I did not catch that accurately. Please say the command again.'
+      Speak (Get-LocalizedSpeech 'not_accurate')
       return
     }
   }
@@ -775,13 +816,17 @@ $mutex=[Threading.Mutex]::new($true,'Local\VCUBFEmmaCompanion',[ref]$createdNew)
 if(!$createdNew){[Windows.Forms.MessageBox]::Show('VCUBF Emma is already running.','VCUBF Emma')|Out-Null;exit 0}
 
 try {
+  # The user profile is the language source of truth. Load it before the first
+  # recognizer and synthesis voice are selected so startup cannot fall back to
+  # English and only correct itself on the later background synchronization.
+  if (Load-Token) { Sync-VoicePreferences | Out-Null }
   Write-EmmaLog 'Startup: initializing speech recognizer.'
   Initialize-Recognizer
   Write-EmmaLog 'Startup: speech recognizer initialized.'
   $script:Notify=New-Object Windows.Forms.NotifyIcon -Property @{ Icon=[Drawing.SystemIcons]::Information; Visible=$true; Text='VCUBF Emma — starting' }
   $menu=New-Object Windows.Forms.ContextMenuStrip
   $talk=$menu.Items.Add('Talk to Emma now'); $monitor=$menu.Items.Add('Show live hearing'); $start=$menu.Items.Add('Start listening'); $stop=$menu.Items.Add('Stop listening'); $settings=$menu.Items.Add('Settings'); $open=$menu.Items.Add('Open VCUBF'); $signin=$menu.Items.Add('Connect in browser'); $menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))|Out-Null; $exit=$menu.Items.Add('Exit')
-  $talk.Add_Click({if([bool]$script:Config.HandsFree -and [bool]$script:Config.Realtime){Start-HandsFreeRealtime}else{$script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8);Speak 'Yes?'}})
+  $talk.Add_Click({if([bool]$script:Config.HandsFree -and [bool]$script:Config.Realtime){Start-HandsFreeRealtime}else{$script:ArmedUntil=[datetime]::UtcNow.AddSeconds(8);Speak (Get-LocalizedSpeech 'ready')}})
   $monitor.Add_Click({Show-HearingMonitor});$start.Add_Click({$script:RemotePaused=$false;Start-Listening}); $stop.Add_Click({Stop-Listening}); $settings.Add_Click({Show-Settings}); $open.Add_Click({Start-Process 'https://frontend-production-ee13.up.railway.app'}); $signin.Add_Click({Remove-Item -LiteralPath $script:TokenPath -Force -ErrorAction SilentlyContinue; Show-Login|Out-Null}); $exit.Add_Click({$script:Context.ExitThread()})
   $script:Notify.ContextMenuStrip=$menu; $script:Notify.Add_DoubleClick({Start-Process 'https://frontend-production-ee13.up.railway.app'})
   $script:StateTimer=New-Object Windows.Forms.Timer -Property @{Interval=3000}
@@ -807,7 +852,7 @@ try {
     }
     $wasListening=$script:Listening
     Start-Listening
-    if(!$wasListening -and $script:Listening -and $Announce){Speak 'Emma is active and listening.'}
+    if(!$wasListening -and $script:Listening -and $Announce){Speak (Get-LocalizedSpeech 'active')}
     $state=Update-VoiceState $(if($script:RemotePaused){'paused'}elseif($script:Listening){'listening'}else{'thinking'}) (!$script:RemotePaused -and $script:Listening) 'wake_word'
     Apply-RemoteControl $state
     if($script:TranscriptConversationId -and !$script:Busy -and $script:ArmedUntil -ne [datetime]::MinValue -and [datetime]::UtcNow -ge $script:ArmedUntil){End-TranscriptConversation 'completed'}
@@ -825,7 +870,7 @@ try {
   if($ShowMonitor -or [bool]$script:Config.ShowMonitor){Show-HearingMonitor;Write-EmmaLog 'Startup: live hearing monitor shown.'}
   if($script:Listening){$script:Notify.ShowBalloonTip(3000,'VCUBF Emma',"Listening locally for $($script:Config.WakeWord).",'Info')}
   else{$script:Notify.ShowBalloonTip(4500,'VCUBF Emma','Sign in in the browser to activate hands-free listening.','Info')}
-  if($Announce -and $script:Listening){Speak 'Emma is active and listening.'}
+  if($Announce -and $script:Listening){Speak (Get-LocalizedSpeech 'active')}
   $script:Context=New-Object Windows.Forms.ApplicationContext
   [Windows.Forms.Application]::Run($script:Context)
 } catch { Write-EmmaLog "Fatal: $($_.Exception)"; [Windows.Forms.MessageBox]::Show($_.Exception.Message,'VCUBF Emma','OK','Error')|Out-Null }

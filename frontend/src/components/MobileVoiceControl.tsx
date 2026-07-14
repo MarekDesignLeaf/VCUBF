@@ -16,6 +16,19 @@ function transcriptStorageKey(userId: string) {
   return `vcubf.mobile-emma.transcript.${userId}`;
 }
 
+function wakeAcknowledgement(language: string) {
+  const base = language.split("-")[0]?.toLowerCase();
+  return ({
+    en: "Yes, I am listening.",
+    cs: "Ano, poslouchám.",
+    pl: "Tak, słucham.",
+    fr: "Oui, je vous écoute.",
+    de: "Ja, ich höre zu.",
+    es: "Sí, le escucho.",
+    it: "Sì, la ascolto.",
+  } as Record<string, string>)[base] ?? "Yes, I am listening.";
+}
+
 export function MobileVoiceControl() {
   const { user, updateUser } = useAuth();
   const navigate = useNavigate();
@@ -129,7 +142,7 @@ export function MobileVoiceControl() {
       const remainder = text.slice(index + wakeWord.length).replace(/^[\s,.:;!?-]+/, "").trim();
       activeUntil.current = Date.now() + 20_000;
       if (!remainder) {
-        await speak(language.startsWith("cs") ? "Ano, poslouchám." : "Yes, I am listening.");
+        await speak(wakeAcknowledgement(language));
         scheduleRestart();
         return;
       }
