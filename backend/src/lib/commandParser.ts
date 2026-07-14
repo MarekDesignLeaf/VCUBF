@@ -52,6 +52,9 @@ export type ParsedCommand =
   | { intent: "list_follow_ups"; entities: Record<string, never> }
   | { intent: "list_unresolved_enquiries"; entities: { since_days?: number } }
   | { intent: "list_notifications"; entities: Record<string, never> }
+  | { intent: "prepare_delete_notifications"; entities: Record<string, never> }
+  | { intent: "confirm_delete_notifications"; entities: Record<string, never> }
+  | { intent: "cancel_delete_notifications"; entities: Record<string, never> }
   | { intent: "list_data_quality"; entities: Record<string, never> }
   | { intent: "detect_action_patterns"; entities: Record<string, never> }
   | { intent: "list_clients"; entities: Record<string, never> }
@@ -226,6 +229,33 @@ export function isGmailCancellationPhrase(rawText: string) {
   return /^(?:no|cancel|cancel it|don't send|do not send|stop email|ne|zruš|zrus|nezasilat|neodesilat|nie|anuluj|nie\s+wysyłaj|nie\s+wysylaj)$/iu.test(text);
 }
 
+function parseNotificationDeletionCommand(text: string): Extract<
+  ParsedCommand,
+  { intent: "prepare_delete_notifications" | "confirm_delete_notifications" | "cancel_delete_notifications" }
+> | undefined {
+  const normalized = text.trim().replace(/[.!?]+$/g, "");
+  if (
+    /^(?:confirm|approve)\s+(?:deleting|deletion|removing|clearing)\s+(?:all\s+)?notifications?$/iu.test(normalized)
+    || /^(?:potvrď|potvrd)\s+(?:smazání|smazani|odstranění|odstraneni)\s+(?:všech|vsech|všechna|vsechna|všechny|vsechny)?\s*(?:oznámení|oznameni|upozornění|upozorneni)$/iu.test(normalized)
+    || /^(?:potwierdź|potwierdz)\s+(?:usunięcie|usuniecie|kasowanie)\s+(?:wszystkich|wszystkie)?\s*(?:powiadomień|powiadomien|powiadomienia)$/iu.test(normalized)
+  ) return { intent: "confirm_delete_notifications", entities: {} };
+
+  if (
+    /^(?:cancel|stop|abort)\s+(?:deleting|deletion|removing|clearing)\s+(?:all\s+)?notifications?$/iu.test(normalized)
+    || /^(?:zruš|zrus)\s+(?:smazání|smazani|odstranění|odstraneni)\s+(?:všech|vsech|všechna|vsechna|všechny|vsechny)?\s*(?:oznámení|oznameni|upozornění|upozorneni)$/iu.test(normalized)
+    || /^(?:anuluj|przerwij)\s+(?:usunięcie|usuniecie|kasowanie)\s+(?:wszystkich|wszystkie)?\s*(?:powiadomień|powiadomien|powiadomienia)$/iu.test(normalized)
+  ) return { intent: "cancel_delete_notifications", entities: {} };
+
+  if (
+    /^(?:delete|remove|clear|dismiss)\s+(?:all\s+)?notifications?$/iu.test(normalized)
+    || /^(?:smaž|smaz|vymaž|vymaz|odstraň|odstran)\s+(?:všechna|vsechna|všechny|vsechny)?\s*(?:oznámení|oznameni|upozornění|upozorneni)$/iu.test(normalized)
+    || /^(?:usuń|usun|skasuj|wyczyść|wyczysc)\s+(?:wszystkie)?\s*(?:powiadomienia|powiadomień|powiadomien)$/iu.test(normalized)
+    || /^(?:mazání|mazani|usuwanie)\s+(?:oznámení|oznameni|powiadomienia|powiadomień|powiadomien)$/iu.test(normalized)
+  ) return { intent: "prepare_delete_notifications", entities: {} };
+
+  return undefined;
+}
+
 export function parseTextCommand(rawText: string): ParsedCommand {
   const text = rawText.trim();
 
@@ -239,6 +269,8 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (whatsappMessage) return whatsappMessage;
   const calendarAgenda = parseCalendarAgendaCommand(text);
   if (calendarAgenda) return calendarAgenda;
+  const notificationDeletion = parseNotificationDeletionCommand(text);
+  if (notificationDeletion) return notificationDeletion;
   if (/^(?:confirm|send)\s+(?:the\s+)?(?:email|message)(?:\s+now)?$/iu.test(text)
     || /^(?:potvrď|potvrd|odešli|odesli)\s+(?:ten\s+)?(?:e-?mail|zprávu|zpravu)$/iu.test(text)
     || /^(?:potwierdź|potwierdz|wyślij|wyslij)\s+(?:ten\s+)?(?:e-?mail|wiadomość|wiadomosc)$/iu.test(text))
@@ -477,7 +509,11 @@ export function parseTextCommand(rawText: string): ParsedCommand {
 
   // Notification and Escalation Module — surfaces the unified attention
   // feed (overdue follow-ups, capacity overload, expiring quotes).
-  if (/^(?:list|show)\s+notifications?$/i.test(text)) return { intent: "list_notifications", entities: {} };
+  if (/^(?:list|show)\s+notifications?$/i.test(text)
+    || /^(?:ukaž|ukaz|zobraz|vypiš|vypis)\s+(?:oznámení|oznameni|upozornění|upozorneni)$/iu.test(text)
+    || /^(?:pokaż|pokaz|wyświetl|wyswietl)\s+powiadomienia$/iu.test(text)
+    || /^(?:notifications?|oznámení|oznameni|upozornění|upozorneni|powiadomienia)$/iu.test(text))
+    return { intent: "list_notifications", entities: {} };
   if (/^what\s+needs\s+attention\??$/i.test(text)) return { intent: "list_notifications", entities: {} };
 
   // Data Quality Engine — read-only, structural duplicate/missing-contact

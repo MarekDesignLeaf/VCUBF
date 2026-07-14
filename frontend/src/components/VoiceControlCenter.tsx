@@ -98,6 +98,7 @@ export function VoiceControlCenter() {
   }
 
   const isPaused = state.status === "paused";
+  const activeConversationCount = conversations.filter((conversation) => conversation.status === "active").length;
   return (
     <section className="voice-control-center" aria-label="Windows Emma control centre">
       <div className="voice-control-header">
@@ -105,19 +106,21 @@ export function VoiceControlCenter() {
           <strong>Windows Emma</strong>{" "}
           <span className={`voice-device-status status-${state.status}`} role="status">{STATUS_LABELS[state.status]}</span>
           <span className="hint"> · {state.mode === "realtime" ? "Realtime conversation" : state.mode === "reviewed_text" ? "Reviewed transcript" : "Local wake word"}</span>
+          <span className="hint"> · Active conversations: <strong>{activeConversationCount}</strong> (maximum 1) · Saved transcripts shown: {conversations.length}</span>
         </div>
         <div className="voice-control-actions">
           <button type="button" className="voice-button" disabled={busy || state.status === "offline"} onClick={() => control(isPaused ? "resume" : "pause")}>{isPaused ? "Resume listening" : "Pause listening"}</button>
-          <button type="button" className="voice-button" disabled={busy || state.status === "offline"} onClick={() => control("end_conversation")}>End conversation</button>
+          <button type="button" className="voice-button" disabled={busy || (state.status === "offline" && activeConversationCount === 0)} onClick={() => control("end_conversation")}>End active conversation</button>
           <button type="button" className="voice-button" disabled={busy || (!state.lastTranscript && !state.lastResponse && conversations.length === 0)} onClick={clearHistory}>Delete transcript history</button>
         </div>
       </div>
       <div className={`voice-listening-assurance ${state.listening ? "is-active" : ""}`} role="status">
         <span aria-hidden="true" />
         {state.listening
-          ? "Microphone active. Say “Emma” clearly; saying Emma alone starts a Realtime conversation."
+          ? "Background wake-word listener is active; it is not a conversation. " + (activeConversationCount === 1 ? "One Realtime conversation is active." : "No Realtime conversation is active.") + " Say “Emma” clearly to start one."
           : state.status === "paused" ? "Microphone reactions are paused." : "Emma is not receiving microphone input."}
       </div>
+      {activeConversationCount > 1 && <div className="error-banner" role="alert">More than one Emma conversation is marked active. End the active conversation before starting another.</div>}
       {lastAction && (
         <div className="voice-ui-action" role="status">
           {lastAction.kind === "navigate"
@@ -164,7 +167,7 @@ export function VoiceControlCenter() {
       )}
       {navigationError && <p className="hint">Emma’s complete menu map could not be loaded right now.</p>}
       <details className="voice-transcript-history">
-        <summary>Recent saved conversation transcripts ({conversations.length})</summary>
+        <summary>Saved conversation transcripts — history, not active sessions ({conversations.length})</summary>
         {conversations.length === 0 ? <p className="hint">No saved conversations yet.</p> : conversations.map((conversation) => (
           <section className="voice-transcript-conversation" key={conversation.id}>
             <div className="voice-transcript-heading">

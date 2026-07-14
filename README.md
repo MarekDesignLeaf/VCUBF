@@ -440,17 +440,20 @@ npm run dev                 # http://localhost:5173
   (`NotificationAcknowledgement`, keyed by a deterministic `notificationKey` such as
   `follow_up:<id>`), so a handled item stops resurfacing without ever touching the
   underlying communication record, overload finding, or quote it points to.
-  `POST /notifications/acknowledge` (Action Contract `acknowledge_notification`, risk 1)
-  and `POST /notifications/:key/unacknowledge` (Action Contract
-  `unacknowledge_notification`, risk 1) are both idempotent and fully reversible — no
-  confirmation is required since nothing but a "seen" marker changes, matching the
-  Learning Engine's visible/editable/reversible standard for low-risk state. Text
+  `DELETE /notifications/:key` hides one item, while confirmed
+  `POST /notifications/delete-all` hides all currently visible items. Both use the same
+  reversible acknowledgement state as `POST /notifications/acknowledge`;
+  `POST /notifications/:key/unacknowledge` restores an item. Hiding one item needs no
+  confirmation; hiding all requires an explicit confirmation even though only reversible
+  "seen" markers change. Text
   commands: "list notifications" / "show notifications" / "what needs attention".
+  Emma also supports reviewed deletion in English, Czech and Polish; deleting all first
+  reports the exact count and requires a separate spoken confirmation.
 - **Frontend — Notifications**: new Notifications page (linked in the sidebar right
   under Dashboard) listing every attention-feed item with a severity badge, type, title,
-  message, and due date, an "Acknowledge"/"Unacknowledge" button per row, and a "show
-  acknowledged items too" toggle so a handled item can still be reviewed rather than
-  disappearing for good.
+  message, and due date, a "Delete"/"Restore" button per row, a confirmation-gated
+  "Delete all" control, and a "show deleted items too" toggle so a hidden item can still
+  be reviewed rather than disappearing for good.
 
 - **Data Quality Engine**: `GET /data-quality` (Action Contract `analyze_data_quality`,
   risk 0, read-only) is a purely structural, rule-based scan of real CRM Core client

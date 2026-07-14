@@ -27,6 +27,21 @@ const messageSchema = z.object({
   source_event_id: z.string().trim().min(1).max(200).optional(),
 });
 const endConversationSchema = z.object({ status: z.enum(["completed", "interrupted", "error"]).default("completed") });
+const ACTIVE_CONVERSATION_STALE_MS = 20_000;
+
+async function closeOrphanedActiveConversations(userId: string, companyId: string) {
+  const state = await prisma.voiceDeviceState.findUnique({ where: { userId }, select: { heartbeatAt: true, mode: true } });
+  const hasLiveRealtimeOwner = Boolean(
+    state
+    && state.mode === "realtime"
+    && Date.now() - state.heartbeatAt.getTime() <= ACTIVE_CONVERSATION_STALE_MS
+  );
+  if (hasLiveRealtimeOwner) return;
+  await prisma.voiceConversation.updateMany({
+    where: { userId, companyId, status: "active" },
+    data: { status: "interrupted", endedAt: new Date() },
+  });
+}
 
 function publicState(state: any) {
   if (!state) return { status: "offline", mode: "wake_word", listening: false, lastTranscript: null, lastResponse: null, lastUiAction: null, lastHeardAt: null, pendingControl: null, heartbeatAt: null };
@@ -64,6 +79,7 @@ function publicConversation(conversation: any) {
 voiceStateRouter.get("/voice-conversations", async (req, res) => {
   const parsed = z.coerce.number().int().min(1).max(20).default(10).safeParse(req.query.limit);
   if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
+  await closeOrphanedActiveConversations(req.user!.id, req.user!.companyId);
   const conversations = await prisma.voiceConversation.findMany({
     where: { userId: req.user!.id, companyId: req.user!.companyId },
     orderBy: { startedAt: "desc" },
@@ -192,11 +208,20 @@ voiceStateRouter.put("/voice-state", async (req, res) => {
 voiceStateRouter.post("/voice-state/control", async (req, res) => {
   const parsed = controlSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
-  const state = await prisma.voiceDeviceState.upsert({
-    where: { userId: req.user!.id },
-    create: { companyId: req.user!.companyId, userId: req.user!.id, pendingControl: parsed.data.control },
-    update: { pendingControl: parsed.data.control },
-  });
+  const now = new Date();
+  const [state] = await prisma.$transaction([
+    prisma.voiceDeviceState.upsert({
+      where: { userId: req.user!.id },
+      create: { companyId: req.user!.companyId, userId: req.user!.id, pendingControl: parsed.data.control },
+      update: { pendingControl: parsed.data.control },
+    }),
+    ...(parsed.data.control === "end_conversation"
+      ? [prisma.voiceConversation.updateMany({
+          where: { userId: req.user!.id, companyId: req.user!.companyId, status: "active" },
+          data: { status: "interrupted", endedAt: now },
+        })]
+      : []),
+  ]);
   await recordAudit({
     companyId: req.user!.companyId,
     userId: req.user!.id,

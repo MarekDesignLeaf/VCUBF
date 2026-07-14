@@ -1445,6 +1445,47 @@ export const UNACKNOWLEDGE_NOTIFICATION_ACTION: ActionContract = {
   dataSources: ["user_input"],
   possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
 };
+
+export const DELETE_ALL_NOTIFICATIONS_ACTION: ActionContract = {
+  actionName: "delete_all_notifications",
+  purpose:
+    "Hide all currently visible attention-feed items after explicit confirmation, without deleting or changing any underlying business record; every hidden item remains restorable.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: true,
+  dataSources: ["crm.notification_acknowledgements", "attention_feed"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONFIRMATION_REQUIRED"],
+};
+
+export const PREPARE_VOICE_NOTIFICATION_DELETION_ACTION: ActionContract = {
+  actionName: "prepare_voice_notification_deletion",
+  purpose: "Prepare a short-lived review containing the exact notification keys Emma will hide if the user confirms.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: true,
+  dataSources: ["attention_feed", "voice_pending_actions"],
+  possibleErrors: ["MISSING_PERMISSION", "NO_NOTIFICATIONS"],
+};
+
+export const CONFIRM_VOICE_NOTIFICATION_DELETION_ACTION: ActionContract = {
+  actionName: "confirm_voice_notification_deletion",
+  purpose: "Use one pending Emma review exactly once to hide the previously reviewed notification items.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: true,
+  dataSources: ["voice_pending_actions", "crm.notification_acknowledgements"],
+  possibleErrors: ["MISSING_PERMISSION", "NO_PENDING_NOTIFICATION_DELETION", "PENDING_NOTIFICATION_DELETION_INVALID"],
+};
+
+export const CANCEL_VOICE_NOTIFICATION_DELETION_ACTION: ActionContract = {
+  actionName: "cancel_voice_notification_deletion",
+  purpose: "Cancel the current short-lived Emma notification-deletion review without hiding anything.",
+  requiredPermission: "crm.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["voice_pending_actions"],
+  possibleErrors: ["MISSING_PERMISSION", "NO_PENDING_NOTIFICATION_DELETION"],
+};
 // Data Quality Engine — read-only, structural analysis over real CRM Core
 // Client data already entered by the user (email, phone, display name). It
 // never invents an identity match: duplicates are surfaced as *possible*

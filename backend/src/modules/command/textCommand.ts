@@ -12,6 +12,7 @@ import { publishVoiceUiAction } from "../../services/voiceUiActionService.js";
 import { getAssistantContext } from "../../services/assistantMemoryService.js";
 import { hasPendingVoiceGmailMessage } from "../../services/voiceGmailService.js";
 import { hasPendingVoiceWhatsAppMessage } from "../../services/voiceWhatsAppService.js";
+import { hasPendingVoiceNotificationDeletion } from "../../services/voiceNotificationService.js";
 import { getNavigationCatalogue } from "../../lib/navigationCatalogue.js";
 
 export const commandRouter = Router();
@@ -49,17 +50,32 @@ type ParsedTextCommand = ReturnType<typeof parseTextCommand>;
 async function resolveUserCommand(user: AuthedUser, text: string): Promise<ParsedTextCommand> {
   const parsed = parseTextCommand(text);
   if (parsed.intent !== "unrecognized") return parsed;
-  const [gmailPending, whatsappPending] = await Promise.all([
+  const [gmailPending, whatsappPending, notificationDeletionPending] = await Promise.all([
     hasPendingVoiceGmailMessage(user),
     hasPendingVoiceWhatsAppMessage(user),
+    hasPendingVoiceNotificationDeletion(user),
   ]);
-  if (gmailPending === whatsappPending) return parsed;
-  if (isGmailConfirmationPhrase(text)) return gmailPending
-    ? { intent: "confirm_gmail_message", entities: {} }
-    : { intent: "confirm_whatsapp_message", entities: {} };
-  if (isGmailCancellationPhrase(text)) return gmailPending
-    ? { intent: "cancel_gmail_message", entities: {} }
-    : { intent: "cancel_whatsapp_message", entities: {} };
+  const pendingActions: Array<{ pending: boolean; confirm: ParsedTextCommand; cancel: ParsedTextCommand }> = [
+    {
+      pending: gmailPending,
+      confirm: { intent: "confirm_gmail_message", entities: {} },
+      cancel: { intent: "cancel_gmail_message", entities: {} },
+    },
+    {
+      pending: whatsappPending,
+      confirm: { intent: "confirm_whatsapp_message", entities: {} },
+      cancel: { intent: "cancel_whatsapp_message", entities: {} },
+    },
+    {
+      pending: notificationDeletionPending,
+      confirm: { intent: "confirm_delete_notifications", entities: {} },
+      cancel: { intent: "cancel_delete_notifications", entities: {} },
+    },
+  ];
+  const active = pendingActions.filter((candidate) => candidate.pending);
+  if (active.length !== 1) return parsed;
+  if (isGmailConfirmationPhrase(text)) return active[0].confirm;
+  if (isGmailCancellationPhrase(text)) return active[0].cancel;
   return parsed;
 }
 

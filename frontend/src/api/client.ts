@@ -1863,6 +1863,16 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ notification_key: notificationKey }),
       }),
+    delete: (notificationKey: string) =>
+      request<{ notification_key: string; deleted: boolean; reversible: boolean }>(
+        `/notifications/${encodeURIComponent(notificationKey)}`,
+        { method: "DELETE" }
+      ),
+    deleteAll: () =>
+      request<{ deletedCount: number; underlyingRecordsChanged: boolean; reversible: boolean; message: string }>(
+        "/notifications/delete-all",
+        { method: "POST", body: JSON.stringify({ confirmed: true }) }
+      ),
     unacknowledge: (notificationKey: string) =>
       request<unknown>(`/notifications/${encodeURIComponent(notificationKey)}/unacknowledge`, { method: "POST" }),
   },

@@ -67,6 +67,21 @@ describe("commandParser", () => {
     assert.equal(parseTextCommand("list leads").intent, "list_leads");
   });
 
+  it("parses reviewed notification deletion in English, Czech and Polish", () => {
+    assert.equal(parseTextCommand("powiadomienia").intent, "list_notifications");
+    assert.equal(parseTextCommand("ukaž oznámení").intent, "list_notifications");
+    assert.equal(parseTextCommand("delete all notifications").intent, "prepare_delete_notifications");
+    assert.equal(parseTextCommand("smaž všechna oznámení").intent, "prepare_delete_notifications");
+    assert.equal(parseTextCommand("usuń wszystkie powiadomienia").intent, "prepare_delete_notifications");
+    assert.equal(parseTextCommand("mazání powiadomienia").intent, "prepare_delete_notifications");
+    assert.equal(parseTextCommand("confirm deleting notifications").intent, "confirm_delete_notifications");
+    assert.equal(parseTextCommand("potvrď smazání všech oznámení").intent, "confirm_delete_notifications");
+    assert.equal(parseTextCommand("potwierdź usunięcie wszystkich powiadomień").intent, "confirm_delete_notifications");
+    assert.equal(parseTextCommand("cancel deleting notifications").intent, "cancel_delete_notifications");
+    assert.equal(parseTextCommand("zruš smazání všech oznámení").intent, "cancel_delete_notifications");
+    assert.equal(parseTextCommand("anuluj usunięcie wszystkich powiadomień").intent, "cancel_delete_notifications");
+  });
+
   it("parses connector status, guided setup and synchronisation commands", () => {
     assert.deepEqual(parseTextCommand("check connectors"), { intent: "connector_status", entities: { connector_key: "all" } });
     assert.deepEqual(parseTextCommand("set up all connectors"), { intent: "setup_connectors", entities: { connector_key: "all" } });

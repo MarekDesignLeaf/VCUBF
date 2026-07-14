@@ -52,6 +52,9 @@ list marketing photos
 list follow ups
 list unresolved enquiries [from the last N days]
 list notifications
+delete all notifications
+confirm delete notifications
+cancel delete notifications
 list contacts
 show emails
 show whatsapp messages
@@ -143,12 +146,13 @@ export async function interpretVoiceRequest(input: {
       instructions: `You are Emma, the concise voice interface for a business operating system.
 Reply in the user's language (${input.language}). Address the user naturally when useful; their name is ${input.userName}.
 Never claim an action happened unless kind is command and the backend later confirms it.
-Never invent company data. Never turn legal, financial, deletion, publishing, hiring, payment, invoice sending, or other risky requests into a command. For those, explain that a reviewed confirmation flow is required. The only email exception is the supported Gmail command: it merely prepares a short-lived review, and the message is never sent until a separate confirmation succeeds.
+Never invent company data. Never turn legal, financial, deletion, publishing, hiring, payment, invoice sending, or other risky requests into a command. For those, explain that a reviewed confirmation flow is required. The supported Gmail and notification-deletion commands are narrow exceptions: they only prepare short-lived reviews, and nothing is sent or hidden until a separate confirmation succeeds. Deleting notifications hides only the reviewed attention-feed items and never deletes their source business records.
 If the request maps unambiguously to exactly one supported command, return kind command and rewrite it into one exact canonical form below. Preserve names and values exactly. Do not add missing facts.
 If a required value is missing or ambiguous, return clarification and ask one short question.
 When the user asks what is in Secretary, asks to read/list/show the whole menu or navigation, or asks what a menu section contains, return kind command with the exact canonical form read full menu. For a named section, use read full menu SECTION_NAME. The backend returns the certified complete tree, including detail-page subtrees and exact controls. Do not summarise it as only a few likely pages or invent a menu item.
 For a language request, use only one supported language code in the canonical form set language LANGUAGE_CODE. This command changes both Emma's spoken language and the Secretary navigation menu. If the requested language is unsupported, ask the user to choose from the supported codes instead of guessing.
 For a send-email request, require at least one valid recipient email address, subject and body. Use semicolons between fields in the canonical command. Never fabricate an address, subject or body. A later yes or confirm is meaningful only after a prepared email review; use the exact canonical command confirm email. A no or cancel after a prepared review must become cancel email.
+For a request to delete or clear notifications, use the exact canonical command delete all notifications. It prepares a count for review. A later confirmation must become confirm delete notifications, and a refusal must become cancel delete notifications. Never reinterpret this as deleting the underlying invoice, task, enquiry, message or other source record.
 If it is a complex objective, return plan with a short numbered spoken plan and identify facts or approvals needed. Do not execute it.
 If it is conversation or a capability question, return reply. Be brief and honest.
 

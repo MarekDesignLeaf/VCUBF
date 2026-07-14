@@ -117,7 +117,7 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
     description: "Operational attention, evidence quality and company-level measurements.",
     aliases: ["attention", "insight", "alerts", "notifications", "data", "metrics", "upozornění", "kvalita dat", "metriky"],
     items: [
-      item("notifications", "Attention feed for overdue follow-ups, capacity and quote facts; acknowledging an item does not alter its source record."),
+      item("notifications", "Attention feed for overdue follow-ups, capacity and quote facts; deleting hides an item without altering its source record and deleted items can be restored.", ["Delete", "Delete all", "Restore"]),
       item("data_quality", "Evidence of possible duplicate clients and missing contact methods. A client merge always shows a preview and needs explicit confirmation.", ["Merge", "Confirm"]),
       item("metrics", "Operational business measurements calculated from stored company records."),
     ],

@@ -20,6 +20,7 @@ import * as contactService from "../services/contactService.js";
 import * as connectorSetupService from "../services/connectorSetupService.js";
 import * as voiceGmailService from "../services/voiceGmailService.js";
 import * as voiceWhatsAppService from "../services/voiceWhatsAppService.js";
+import * as voiceNotificationService from "../services/voiceNotificationService.js";
 import * as voicePreferenceService from "../services/voicePreferenceService.js";
 import * as googleCalendarConnectorService from "../services/googleCalendarConnectorService.js";
 import { buildCommandUiAction, VOICE_PAGE_ROUTES, type CommandUiAction } from "./voiceNavigation.js";
@@ -628,6 +629,48 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
     case "list_notifications": {
       const data = await notificationService.getAttentionFeed(user);
       response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "prepare_delete_notifications": {
+      const result = await voiceNotificationService.prepareVoiceNotificationDeletion(user);
+      response = {
+        intent: command.intent,
+        interpreted: {},
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
+      };
+      break;
+    }
+
+    case "confirm_delete_notifications": {
+      const result = await voiceNotificationService.confirmVoiceNotificationDeletion(user);
+      response = {
+        intent: command.intent,
+        interpreted: {},
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
+      };
+      break;
+    }
+
+    case "cancel_delete_notifications": {
+      const result = await voiceNotificationService.cancelVoiceNotificationDeletion(user);
+      response = {
+        intent: command.intent,
+        interpreted: {},
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : undefined,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
+      };
       break;
     }
 

@@ -15,8 +15,10 @@ export function Notifications() {
   const [items, setItems] = useState<AttentionItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAcknowledged, setShowAcknowledged] = useState(false);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   function load() {
+    setError(null);
     api.notifications
       .feed(showAcknowledged)
       .then(setItems)
@@ -25,14 +27,46 @@ export function Notifications() {
 
   useEffect(load, [showAcknowledged]);
 
-  async function acknowledge(key: string) {
-    await api.notifications.acknowledge(key);
-    load();
+  async function deleteNotification(key: string) {
+    setBusyKey(key);
+    setError(null);
+    try {
+      await api.notifications.delete(key);
+      load();
+    } catch {
+      setError("Could not delete the notification.");
+    } finally {
+      setBusyKey(null);
+    }
   }
 
   async function unacknowledge(key: string) {
-    await api.notifications.unacknowledge(key);
-    load();
+    setBusyKey(key);
+    setError(null);
+    try {
+      await api.notifications.unacknowledge(key);
+      load();
+    } catch {
+      setError("Could not restore the notification.");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function deleteAll() {
+    const visibleCount = items?.filter((item) => !item.acknowledged).length ?? 0;
+    if (!visibleCount) return;
+    if (!window.confirm(`Delete all ${visibleCount} visible notifications? Source records will not be changed.`)) return;
+    setBusyKey("all");
+    setError(null);
+    try {
+      await api.notifications.deleteAll();
+      load();
+    } catch {
+      setError("Could not delete all notifications.");
+    } finally {
+      setBusyKey(null);
+    }
   }
 
   function entityLink(item: AttentionItem): string | null {
@@ -48,12 +82,19 @@ export function Notifications() {
     <div>
       <div className="page-header">
         <h1>Notifications</h1>
+        <button
+          type="button"
+          onClick={deleteAll}
+          disabled={busyKey !== null || !items?.some((item) => !item.acknowledged)}
+        >
+          {busyKey === "all" ? "Deleting…" : "Delete all"}
+        </button>
       </div>
       <p className="hint">
         Everything here is computed from real data already in the system — unresolved inbound
         intakes, overdue Communication Log follow-ups, real capacity overload and other stored
-        signals. Nothing is invented. Acknowledging an item only marks it as
-        seen/handled — it never changes the underlying record, and can always be undone.
+        signals. Nothing is invented. Deleting an item removes it from this feed only — it
+        never changes the underlying record, and deleted items can always be restored.
       </p>
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
@@ -62,7 +103,7 @@ export function Notifications() {
           checked={showAcknowledged}
           onChange={(e) => setShowAcknowledged(e.target.checked)}
         />
-        Show acknowledged items too
+        Show deleted items too
       </label>
 
       {!items ? (
@@ -95,9 +136,13 @@ export function Notifications() {
                 <td>{item.dueAt ? new Date(item.dueAt).toLocaleDateString() : "—"}</td>
                 <td>
                   {item.acknowledged ? (
-                    <button onClick={() => unacknowledge(item.key)}>Unacknowledge</button>
+                    <button disabled={busyKey !== null} onClick={() => unacknowledge(item.key)}>
+                      {busyKey === item.key ? "Restoring…" : "Restore"}
+                    </button>
                   ) : (
-                    <button onClick={() => acknowledge(item.key)}>Acknowledge</button>
+                    <button disabled={busyKey !== null} onClick={() => deleteNotification(item.key)}>
+                      {busyKey === item.key ? "Deleting…" : "Delete"}
+                    </button>
                   )}
                 </td>
               </tr>

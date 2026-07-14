@@ -66,4 +66,21 @@ describe("native voice device state", () => {
     await request(app).delete("/command/voice-state/history").set("Authorization", `Bearer ${token}`).expect(200);
     assert.equal(await prisma.voiceConversation.count({ where: { id: conversationId } }), 0);
   });
+
+  it("keeps at most one active conversation and ends it immediately from the web control", async () => {
+    const first = await request(app).post("/command/voice-conversations").set("Authorization", `Bearer ${token}`).send({ mode: "realtime" });
+    const second = await request(app).post("/command/voice-conversations").set("Authorization", `Bearer ${token}`).send({ mode: "realtime" });
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 201);
+    assert.equal(await prisma.voiceConversation.count({ where: { status: "active" } }), 1);
+    assert.equal((await prisma.voiceConversation.findUniqueOrThrow({ where: { id: first.body.id } })).status, "interrupted");
+
+    const ended = await request(app)
+      .post("/command/voice-state/control")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ control: "end_conversation" });
+    assert.equal(ended.status, 202);
+    assert.equal(await prisma.voiceConversation.count({ where: { status: "active" } }), 0);
+    assert.equal((await prisma.voiceConversation.findUniqueOrThrow({ where: { id: second.body.id } })).status, "interrupted");
+  });
 });

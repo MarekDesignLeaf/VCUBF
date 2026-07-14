@@ -171,7 +171,10 @@ export function buildCommandUiAction(intent: string, data: unknown, interpreted:
     case "log_portfolio_photo":
     case "list_portfolio_photos": return { kind: "navigate", path: "/portfolio", label: "Photos" };
     case "list_unresolved_enquiries": return { kind: "navigate", path: "/enquiries?resolution=unresolved", label: "Unresolved Enquiries" };
-    case "list_notifications": return { kind: "navigate", path: "/notifications", label: "Notifications" };
+    case "list_notifications":
+    case "prepare_delete_notifications":
+    case "confirm_delete_notifications":
+    case "cancel_delete_notifications": return { kind: "navigate", path: "/notifications", label: "Notifications" };
     case "list_data_quality": return { kind: "navigate", path: "/data-quality", label: "Data Quality" };
     case "detect_action_patterns": return { kind: "navigate", path: "/memory-model", label: "Memory Model" };
     case "list_clients": return { kind: "navigate", path: "/clients", label: "Clients" };

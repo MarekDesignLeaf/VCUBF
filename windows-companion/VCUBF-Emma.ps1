@@ -94,6 +94,7 @@ $script:HearingMonitorText = $null
 $script:HearingMonitorLevel = $null
 $script:LastLocalHypothesis = ''
 $script:RealtimePreviewPath = Join-Path $script:AppDir 'emma-live.json'
+$script:RealtimeProcess = $null
 $script:PreferenceSyncTicks = 0
 $script:RefreshRecognizerAfterLogin = $false
 $script:VoiceLanguageNames = @{
@@ -554,19 +555,29 @@ function Invoke-RealtimeProcess([string]$RealtimeScript,[string]$Command) {
   $process=New-Object Diagnostics.Process
   $process.StartInfo=$startInfo
   if(!$process.Start()){throw 'REALTIME_START_FAILED'}
-  Write-EmmaLog "Realtime started with $($python.Version): $($python.Path)"
-  if($Command){$process.StandardInput.WriteLine($Command);$process.StandardInput.Close()}
-  while(!$process.WaitForExit(100)){
-    [Windows.Forms.Application]::DoEvents()
+  $script:RealtimeProcess=$process
+  if($script:Notify){$script:Notify.Text='VCUBF Emma — active conversation 1 of 1'}
+  Update-HearingMonitor $script:Config.WakeWord 'Realtime conversation active — 1 of 1'
+  try {
+    Write-EmmaLog "Realtime started with $($python.Version): $($python.Path)"
+    if($Command){$process.StandardInput.WriteLine($Command);$process.StandardInput.Close()}
+    while(!$process.WaitForExit(100)){
+      [Windows.Forms.Application]::DoEvents()
+      Sync-RealtimePreview
+    }
     Sync-RealtimePreview
+    $exitCode=$process.ExitCode
+    $stderr=$process.StandardError.ReadToEnd().Trim()
+    if($stderr){Write-EmmaLog "Realtime stderr: $($stderr.Substring(0,[math]::Min(1500,$stderr.Length)))"}
+    Write-EmmaLog "Realtime exited with code $exitCode."
+    return $exitCode
+  } finally {
+    if(!$process.HasExited){try{$process.Kill()}catch{}}
+    $script:RealtimeProcess=$null
+    Remove-Item -LiteralPath $script:RealtimePreviewPath -Force -ErrorAction SilentlyContinue
+    Update-HearingMonitor '' "No active conversation — listening for $($script:Config.WakeWord)"
+    if($script:Notify){$script:Notify.Text="VCUBF Emma — listening for $($script:Config.WakeWord)"}
   }
-  Sync-RealtimePreview
-  $exitCode=$process.ExitCode
-  $stderr=$process.StandardError.ReadToEnd().Trim()
-  if($stderr){Write-EmmaLog "Realtime stderr: $($stderr.Substring(0,[math]::Min(1500,$stderr.Length)))"}
-  Write-EmmaLog "Realtime exited with code $exitCode."
-  Remove-Item -LiteralPath $script:RealtimePreviewPath -Force -ErrorAction SilentlyContinue
-  return $exitCode
 }
 
 function Execute-VoiceCommand([string]$Command) {
@@ -621,6 +632,7 @@ function Start-HandsFreeRealtime {
   try{
     try{$script:Recognizer.RecognizeAsyncCancel()}catch{}
     $script:Listening=$false
+    Show-HearingMonitor
     Update-VoiceState 'hearing' $true 'wake_word' $script:Config.WakeWord|Out-Null
     Speak 'Yes?'
     Execute-VoiceCommand ''
@@ -640,7 +652,7 @@ function Handle-Recognition([string]$Text,[double]$Confidence,[byte[]]$AudioWav)
   $confidence=$Confidence
   Update-HearingMonitor $text ("Recognized locally ({0:P0} confidence)" -f $confidence)
   $command = Find-WakeCommand $text
-  $minimumConfidence=if($null -ne $command){[math]::Min([double]$script:Config.Confidence,0.35)}else{[double]$script:Config.Confidence}
+  $minimumConfidence=[double]$script:Config.Confidence
   if($confidence -lt $minimumConfidence){return}
   if ($null -ne $command) {
     if (!$command -and [bool]$script:Config.HandsFree -and [bool]$script:Config.Realtime) {
@@ -786,6 +798,13 @@ try {
     Sync-LocalVoiceConfig | Out-Null
     $script:PreferenceSyncTicks++
     if($script:PreferenceSyncTicks -ge 10){$script:PreferenceSyncTicks=0;Sync-VoicePreferences | Out-Null}
+    # While the Realtime child is active it owns heartbeat and remote controls.
+    # The parent must not overwrite its state or acknowledge End conversation
+    # without actually stopping the child.
+    if($script:RealtimeProcess -and !$script:RealtimeProcess.HasExited){
+      Sync-RealtimePreview
+      return
+    }
     $wasListening=$script:Listening
     Start-Listening
     if(!$wasListening -and $script:Listening -and $Announce){Speak 'Emma is active and listening.'}

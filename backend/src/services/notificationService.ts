@@ -3,6 +3,7 @@ import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
 import {
   ACKNOWLEDGE_NOTIFICATION_ACTION,
+  DELETE_ALL_NOTIFICATIONS_ACTION,
   UNACKNOWLEDGE_NOTIFICATION_ACTION,
   JOB_STATUS_COMPLETED,
   CHANGE_JOB_STATUS_ACTION,
@@ -473,4 +474,71 @@ export async function unacknowledgeNotification(user: AuthedUser, notificationKe
   });
 
   return ok(200, { notification_key: notificationKey, acknowledged: false });
+}
+
+const deleteAllSchema = z.object({ confirmed: z.literal(true) });
+
+export async function deleteNotificationsByKeys(
+  user: AuthedUser,
+  notificationKeys: string[],
+  confirmed: boolean
+): Promise<ServiceResult<unknown>> {
+  const keys = [...new Set(notificationKeys.map((key) => key.trim()).filter(Boolean))];
+  if (!confirmed) {
+    return fail(409, "CONFIRMATION_REQUIRED", "Confirm before deleting all notifications.", {
+      confirmationRequired: true,
+      preview: { count: keys.length },
+    });
+  }
+  if (keys.length === 0) {
+    return ok(200, { deletedCount: 0, underlyingRecordsChanged: false, reversible: true, message: "There are no notifications to delete." });
+  }
+
+  const acknowledgedAt = new Date();
+  await prisma.$transaction(
+    keys.map((notificationKey) =>
+      prisma.notificationAcknowledgement.upsert({
+        where: { companyId_notificationKey: { companyId: user.companyId, notificationKey } },
+        create: { companyId: user.companyId, notificationKey, acknowledgedBy: user.id, acknowledgedAt },
+        update: { acknowledgedBy: user.id, acknowledgedAt },
+      })
+    )
+  );
+
+  await recordAudit({
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: DELETE_ALL_NOTIFICATIONS_ACTION.actionName,
+    inputPayload: { notificationCount: keys.length },
+    dataAfter: { hiddenNotificationKeys: keys, underlyingRecordsChanged: false, reversible: true },
+    riskLevel: DELETE_ALL_NOTIFICATIONS_ACTION.riskLevel,
+    confirmationRequired: true,
+    confirmed: true,
+    result: "success",
+  });
+
+  return ok(200, {
+    deletedCount: keys.length,
+    underlyingRecordsChanged: false,
+    reversible: true,
+    message: `${keys.length} notification${keys.length === 1 ? " was" : "s were"} deleted from the feed. Source records were not changed.`,
+  });
+}
+
+export async function deleteAllNotifications(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
+  const feed = await getAttentionFeed(user);
+  const parsed = deleteAllSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return fail(409, "CONFIRMATION_REQUIRED", "Confirm before deleting all notifications.", {
+      confirmationRequired: true,
+      preview: {
+        count: feed.length,
+        severities: feed.reduce<Record<string, number>>((counts, item) => {
+          counts[item.severity] = (counts[item.severity] ?? 0) + 1;
+          return counts;
+        }, {}),
+      },
+    });
+  }
+  return deleteNotificationsByKeys(user, feed.map((item) => item.key), parsed.data.confirmed);
 }
