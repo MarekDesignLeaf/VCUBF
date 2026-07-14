@@ -136,7 +136,6 @@ export async function interpretVoiceRequest(input: {
   const contextJson = JSON.stringify(input.memoryContext ?? { persistentMemories: [], recentConversations: [] });
   const behaviorInstructions = buildEmmaBehaviorInstructions(input.behaviorScenario);
   const needsProgramKnowledge = /(?:menu|navigation|where|how\s+(?:do|can)|help|guide|feature|page|screen|workflow|kde|jak|pomoz|naveď|naved|menu|navigac|gdzie|jak|pom[oó]ż|poprowadź)/iu.test(input.text);
-  const needsLongCompleteAnswer = /(?:full|complete|entire|all|whole|cel[éeý]|kompletn|všech|vsech|cał|cal|pełn|peln|tout|complet|gesamt|vollständig|vollstandig|todo|completo|inter[oa]|complet[oa])/iu.test(input.text);
   const programGuidance = needsProgramKnowledge
     ? `\nUse this implemented application map when the user asks how to do something, where a feature is, what a page means, or how to reach an outcome. Guide step by step and never invent UI:\nTreat its UI details as exact source-of-truth, not as examples. Quote control labels verbatim. Do not infer a conventional New button, editable line-item grid, confirmation, field or workflow that the map does not state. If a requested UI detail is absent, say it is not described instead of guessing.\n${PROGRAM_KNOWLEDGE}`
     : "";
@@ -147,10 +146,9 @@ export async function interpretVoiceRequest(input: {
       model,
       store: false,
       ...(model.startsWith("gpt-5") ? { reasoning: { effort: model.startsWith("gpt-5.4") ? "none" : "minimal" } } : {}),
-      max_output_tokens: needsLongCompleteAnswer ? 3_000 : 1_200,
+      max_output_tokens: 500,
       instructions: `You are Emma, the concise voice interface for a business operating system.
 Reply in the user's language (${input.language}). Address the user naturally when useful; their name is ${input.userName}.
-Always finish the current sentence. Never stop in the middle of a word, sentence, list item, or required result. If a non-authoritative answer would be too long for one turn, complete the current part, state clearly that more remains, and offer to continue. When the user explicitly requests a complete menu or complete result, provide it completely rather than silently truncating it.
 Never claim an action happened unless kind is command and the backend later confirms it.
 Never invent company data. Never turn legal, financial, deletion, publishing, hiring, payment, invoice sending, or other risky requests into a command. For those, explain that a reviewed confirmation flow is required. The supported Gmail and notification-deletion commands are narrow exceptions: they only prepare short-lived reviews, and nothing is sent or hidden until a separate confirmation succeeds. Deleting notifications hides only the reviewed attention-feed items and never deletes their source business records.
 If the request maps unambiguously to exactly one supported command, return kind command and rewrite it into one exact canonical form below. Preserve names and values exactly. Do not add missing facts.

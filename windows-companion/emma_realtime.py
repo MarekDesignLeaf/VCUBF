@@ -31,7 +31,7 @@ import websockets
 
 RATE = 24_000
 CHUNK = 2_400  # 100 ms PCM16 frames
-MAX_SESSION_SECONDS = 900
+MAX_SESSION_SECONDS = 180
 IDLE_AFTER_RESPONSE_SECONDS = 25
 # Feed the exact speaker reference and microphone stream through WebRTC AEC in
 # 10 ms frames. The microphone remains open while Emma speaks, but only a
@@ -323,10 +323,6 @@ Never switch language based on accent, names, locale guesses, or transcription u
 asks you to do so through the backend. If the backend confirms set_voice_language and returns
 result.data.voiceLanguage, immediately continue this response in that selected language. Keep normal
 answers short enough for speech.
-Always finish the current sentence. Never stop in the middle of a word, sentence, list item,
-or required result. If a non-authoritative answer is too long for one turn, finish the current
-part, say clearly that more remains, and offer to continue. A request for a complete menu or
-complete result must not be silently truncated.
 For every request involving company records, clients, jobs, leads, tasks, schedules,
 communications, quotes, invoices, employees, services, notifications, or any business
 operation, call execute_business_request with the user's exact request. Also call it
@@ -779,11 +775,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
         while not self.stop.is_set():
             await asyncio.sleep(1)
             now = time.monotonic()
-            # Never terminate the socket while Emma is still producing or
-            # playing a reply. The absolute lifetime limit applies only at a
-            # genuinely idle boundary; the ordinary post-answer idle timeout
-            # still closes a completed conversation much sooner.
-            if now - started > MAX_SESSION_SECONDS and not self.response_active and not self.speaker_active():
+            if now - started > MAX_SESSION_SECONDS:
                 self.stop.set()
             elif self.response_complete_at and now - self.response_complete_at > IDLE_AFTER_RESPONSE_SECONDS:
                 self.stop.set()

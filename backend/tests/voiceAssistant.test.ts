@@ -27,7 +27,7 @@ describe("voice assistant interpretation", () => {
       assert.equal(body.store, false);
       assert.equal(body.model, "gpt-5.4-mini");
       assert.equal(body.reasoning.effort, "none");
-      assert.equal(body.max_output_tokens, 1200);
+      assert.equal(body.max_output_tokens, 500);
       assert.equal(body.text.format.type, "json_schema");
       assert.doesNotMatch(body.instructions, /\/communication-intake/);
       assert.match(body.instructions, /show calendar today\|tomorrow\|next 7 days/);
@@ -90,13 +90,12 @@ describe("voice assistant interpretation", () => {
       assert.match(body.instructions, /Client details/);
       assert.match(body.instructions, /never invent UI/i);
       assert.match(body.instructions, /Do not infer a conventional New button/i);
-      assert.equal(body.max_output_tokens, 3000);
       return Response.json({
         output: [{ content: [{ text: JSON.stringify({ kind: "reply", canonical_command: null, message: "Open Communications." }) }] }],
       });
     };
     const result = await interpretVoiceRequest({
-      text: "How do I open communication intake and explain the complete workflow?",
+      text: "How do I open communication intake?",
       userName: "Test",
       language: "en-GB",
     });
