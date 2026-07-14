@@ -13,6 +13,7 @@ import {
 import {
   parseWhatsAppWebhook,
   sendWhatsAppText,
+  validateWhatsAppConfiguration,
   verifyWhatsAppWebhookChallenge,
   verifyWhatsAppWebhookSignature,
   WhatsAppBusinessAdapterError,
@@ -84,6 +85,26 @@ describe("Gmail draft and send adapter", () => {
 });
 
 describe("WhatsApp Business adapter", () => {
+  it("validates the configured phone number without exposing the access token", async () => {
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v99.0/123456789");
+      assert.equal(url.searchParams.get("fields"), "id,display_phone_number,verified_name,quality_rating");
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer test-access-token");
+      return Response.json({ id: "123456789", display_phone_number: "+44 7700 900123", verified_name: "VCUBF", quality_rating: "GREEN" });
+    };
+    const status = await validateWhatsAppConfiguration();
+    assert.equal(status.verifiedName, "VCUBF");
+    assert.equal(JSON.stringify(status).includes("test-access-token"), false);
+  });
+
+  it("reports an expired provider token as authorization required", async () => {
+    globalThis.fetch = async () => Response.json({ error: { code: 190, error_subcode: 463 } }, { status: 401 });
+    await assert.rejects(validateWhatsAppConfiguration(), (error) =>
+      error instanceof WhatsAppBusinessAdapterError && error.code === "CONNECTOR_AUTHORIZATION_REQUIRED"
+    );
+  });
+
   it("verifies webhook ownership and signed raw payloads", () => {
     assert.equal(verifyWhatsAppWebhookChallenge({ mode: "subscribe", token: "test-verify-token", challenge: "challenge-1" }), "challenge-1");
     const raw = Buffer.from('{"object":"whatsapp_business_account","entry":[]}');

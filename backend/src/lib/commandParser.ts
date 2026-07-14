@@ -63,6 +63,10 @@ export type ParsedCommand =
     }
   | { intent: "confirm_gmail_message"; entities: Record<string, never> }
   | { intent: "cancel_gmail_message"; entities: Record<string, never> }
+  | { intent: "list_calendar_events"; entities: { period: "today" | "tomorrow" | "next_7_days" } }
+  | { intent: "prepare_whatsapp_message"; entities: { to: string; body: string } }
+  | { intent: "confirm_whatsapp_message"; entities: Record<string, never> }
+  | { intent: "cancel_whatsapp_message"; entities: Record<string, never> }
   | { intent: "set_voice_language"; entities: { language: VoiceLanguage } }
   | { intent: "describe_menu"; entities: { section?: NavigationSectionId } }
   | { intent: "connector_status"; entities: { connector_key: ConnectorKey | "all" } }
@@ -83,18 +87,41 @@ function extractLabelled(text: string, label: string): { value?: string; rest: s
 }
 
 function resolveConnectorTarget(raw: string): ConnectorKey | "all" | undefined {
-  const normalized = raw.trim().toLowerCase().replace(/[.!?]+$/g, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ")
+  const normalized = raw.trim().normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().replace(/[.!?]+$/g, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ")
     .replace(/^(?:the|my)\s+/, "").replace(/\s+(?:connector|integration)$/, "");
   const aliases: Record<string, ConnectorKey | "all"> = {
     all: "all", connectors: "all", integrations: "all", "all connectors": "all", "all integrations": "all",
-    gmail: "gmail", email: "gmail", mail: "gmail",
-    "google contacts": "google_contacts", contacts: "google_contacts",
-    "google calendar": "google_calendar", calendar: "google_calendar",
+    vsechny: "all", vse: "all", konektory: "all", integrace: "all", wszystkie: "all", integracje: "all",
+    gmail: "gmail", email: "gmail", mail: "gmail", posta: "gmail", poczta: "gmail", poczte: "gmail",
+    "google contacts": "google_contacts", contacts: "google_contacts", kontakty: "google_contacts",
+    "google calendar": "google_calendar", calendar: "google_calendar", kalendar: "google_calendar", kalendarz: "google_calendar",
     "google drive": "google_drive", "google drive photos": "google_drive", drive: "google_drive",
     "google photos": "google_photos", "google photo": "google_photos", photos: "google_photos",
     whatsapp: "whatsapp_business", "whatsapp business": "whatsapp_business",
   };
   return aliases[normalized];
+}
+
+function parseWhatsAppMessageCommand(text: string): Extract<ParsedCommand, { intent: "prepare_whatsapp_message" }> | undefined {
+  const match = text.match(/^(?:(?:send|write)\s+(?:a\s+)?whatsapp\s+(?:message\s+)?to|(?:pošli|posli|napiš|napis)\s+(?:zprávu\s+)?(?:na\s+)?whatsapp\s+(?:na|pro)|(?:wyślij|wyslij|napisz)\s+(?:wiadomość\s+)?(?:na\s+)?whatsapp\s+(?:do|na))\s*:?[ ]*(\+?[\d ()-]{7,30})\s*(?:;|,)?\s*(?:(?:message|body|text|zpráva|zprava|wiadomość|wiadomosc|treść|tresc)\s*:?)?\s*(.+)$/iu);
+  if (!match) return undefined;
+  const to = match[1].trim();
+  const body = match[2].trim();
+  return to && body ? { intent: "prepare_whatsapp_message", entities: { to, body } } : undefined;
+}
+
+function parseCalendarAgendaCommand(text: string): Extract<ParsedCommand, { intent: "list_calendar_events" }> | undefined {
+  const normalized = text.trim().replace(/[.!?]+$/g, "");
+  const isAgendaRequest = /^(?:what|show|list|read|open|check|tell|co|jak[éeý]?|ukaž|ukaz|přečti|precti|zkontroluj|pokaż|pokaz|sprawdź|sprawdz|przeczytaj|jakie)(?:\s|$)/iu.test(normalized);
+  if (!isAgendaRequest) return undefined;
+  const isCalendarRequest = /(?:calendar|schedule|events?|kalendar|kalendář|kalendari|událost|udalost|program|kalendarz|wydarzeni|termin)/iu.test(normalized)
+    || /^(?:what\s+do\s+i\s+have|co\s+m[aá]m|jakie\s+mam)/iu.test(normalized);
+  if (!isCalendarRequest) return undefined;
+  if (/(?:tomorrow|z[ií]tra|jutro)/iu.test(normalized)) return { intent: "list_calendar_events", entities: { period: "tomorrow" } };
+  if (/(?:next\s+(?:seven|7)\s+days|this\s+week|př[ií]št[ií]ch\s+(?:sedm|7)\s+dn[ií]|tento\s+t[yý]den|najbliższe\s+(?:siedem|7)\s+dni|ten\s+tydzień)/iu.test(normalized))
+    return { intent: "list_calendar_events", entities: { period: "next_7_days" } };
+  if (/(?:today|dnes|dzisiaj|dziś)/iu.test(normalized)) return { intent: "list_calendar_events", entities: { period: "today" } };
+  return undefined;
 }
 
 function parseEmailAddresses(raw: string) {
@@ -105,14 +132,14 @@ function parseEmailAddresses(raw: string) {
 }
 
 function parseGmailMessageCommand(text: string): Extract<ParsedCommand, { intent: "prepare_gmail_message" }> | undefined {
-  const prefix = text.match(/^(?:send|write|compose)\s+(?:an?\s+)?(?:email|mail)\s+to\s*:?\s*(.+)$/i);
+  const prefix = text.match(/^(?:(?:send|write|compose)\s+(?:an?\s+)?(?:email|mail)\s+to|(?:pošli|posli|odešli|odesli|napiš|napis)\s+(?:e-?mail|mail)\s+(?:na|pro)|(?:wyślij|wyslij|napisz)\s+(?:e-?mail|mail)\s+(?:do|na))\s*:?\s*(.+)$/iu);
   if (!prefix) return undefined;
   const rest = prefix[1].trim();
 
   // A natural spoken form is often transcribed with commas. It intentionally
   // supports only To, Subject and Body; the semicolon form below also permits
   // CC and BCC without confusing commas inside the message body.
-  const commaForm = rest.match(/^(.+?)\s*,\s*subject\s*:?\s*(.+?)\s*,\s*(?:body|message)\s*:?\s*(.+)$/i);
+  const commaForm = rest.match(/^(.+?)\s*,\s*(?:subject|předmět|predmet|temat)\s*:?\s*(.+?)\s*,\s*(?:body|message|zpráva|zprava|text|treść|tresc|wiadomość|wiadomosc)\s*:?\s*(.+)$/iu);
   if (commaForm) {
     const to = parseEmailAddresses(commaForm[1]);
     const subject = commaForm[2].trim();
@@ -139,12 +166,12 @@ function parseGmailMessageCommand(text: string): Extract<ParsedCommand, { intent
       bcc = parseEmailAddresses(match[1]);
       continue;
     }
-    match = section.match(/^subject\s*:?\s*(.+)$/i);
+    match = section.match(/^(?:subject|předmět|predmet|temat)\s*:?\s*(.+)$/iu);
     if (match) {
       subject = match[1].trim();
       continue;
     }
-    match = section.match(/^(?:body|message)\s*:?\s*(.*)$/i);
+    match = section.match(/^(?:body|message|zpráva|zprava|text|treść|tresc|wiadomość|wiadomosc)\s*:?\s*(.*)$/iu);
     if (match) {
       body = [match[1], ...sections.slice(index + 1)].join("; ").trim();
       break;
@@ -160,6 +187,8 @@ function parseVoiceLanguageCommand(text: string): Extract<ParsedCommand, { inten
     /^(?:speak|talk|respond)\s+(?:in\s+)?(.+)$/iu,
     /^(?:zm[eě]ň|zmen|přepni|prepn[ií]|nastav)\s+(?:(?:jazyk\s+)?(?:emmy|menu|sekretary|sekretáře)|jazyk)\s*(?:na\s+)?(.+)$/iu,
     /^(?:mluv|mluvte|odpov[ií]dej)\s+(?:pros[ií]m\s+)?(?:v\s+)?(.+)$/iu,
+    /^(?:zmień|zmien|przełącz|przelacz|ustaw)\s+(?:język|jezyk)(?:\s+emmy|\s+menu)?\s*(?:na\s+)?(.+)$/iu,
+    /^(?:mów|mow|odpowiadaj)\s+(?:po\s+)?(.+)$/iu,
   ];
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -189,12 +218,12 @@ function parseMenuDescriptionCommand(text: string): Extract<ParsedCommand, { int
 
 export function isGmailConfirmationPhrase(rawText: string) {
   const text = rawText.trim().toLocaleLowerCase().replace(/[.!?]+$/g, "");
-  return /^(?:yes|yeah|yep|confirm|go ahead|do it|send it|ano|potvrzuji|potvrďuji|potvrdit)$/iu.test(text);
+  return /^(?:yes|yeah|yep|confirm|go ahead|do it|send it|ano|potvrzuji|potvrďuji|potvrdit|odešli|odesli|tak\s+ano|tak\s+jo|potwierdzam|potwierdź|potwierdz|wyślij|wyslij)$/iu.test(text);
 }
 
 export function isGmailCancellationPhrase(rawText: string) {
   const text = rawText.trim().toLocaleLowerCase().replace(/[.!?]+$/g, "");
-  return /^(?:no|cancel|cancel it|don't send|do not send|stop email|ne|zruš|zrus|nezasilat|neodesilat)$/iu.test(text);
+  return /^(?:no|cancel|cancel it|don't send|do not send|stop email|ne|zruš|zrus|nezasilat|neodesilat|nie|anuluj|nie\s+wysyłaj|nie\s+wysylaj)$/iu.test(text);
 }
 
 export function parseTextCommand(rawText: string): ParsedCommand {
@@ -206,12 +235,28 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (menuDescription) return menuDescription;
   const gmailMessage = parseGmailMessageCommand(text);
   if (gmailMessage) return gmailMessage;
-  if (/^(?:confirm|send)\s+(?:the\s+)?(?:email|message)(?:\s+now)?$/i.test(text))
+  const whatsappMessage = parseWhatsAppMessageCommand(text);
+  if (whatsappMessage) return whatsappMessage;
+  const calendarAgenda = parseCalendarAgendaCommand(text);
+  if (calendarAgenda) return calendarAgenda;
+  if (/^(?:confirm|send)\s+(?:the\s+)?(?:email|message)(?:\s+now)?$/iu.test(text)
+    || /^(?:potvrď|potvrd|odešli|odesli)\s+(?:ten\s+)?(?:e-?mail|zprávu|zpravu)$/iu.test(text)
+    || /^(?:potwierdź|potwierdz|wyślij|wyslij)\s+(?:ten\s+)?(?:e-?mail|wiadomość|wiadomosc)$/iu.test(text))
     return { intent: "confirm_gmail_message", entities: {} };
-  if (/^(?:cancel|discard)\s+(?:the\s+)?(?:email|message)$/i.test(text))
+  if (/^(?:cancel|discard)\s+(?:the\s+)?(?:email|message)$/iu.test(text)
+    || /^(?:zruš|zrus)\s+(?:ten\s+)?(?:e-?mail|zprávu|zpravu)$/iu.test(text)
+    || /^(?:anuluj)\s+(?:ten\s+)?(?:e-?mail|wiadomość|wiadomosc)$/iu.test(text))
     return { intent: "cancel_gmail_message", entities: {} };
+  if (/^(?:confirm|send)\s+(?:the\s+)?whatsapp(?:\s+message)?(?:\s+now)?$/iu.test(text)
+    || /^(?:potvrď|potvrd|odešli|odesli)\s+(?:zprávu\s+)?(?:na\s+)?whatsapp$/iu.test(text)
+    || /^(?:potwierdź|potwierdz|wyślij|wyslij)\s+(?:wiadomość\s+)?(?:na\s+)?whatsapp$/iu.test(text))
+    return { intent: "confirm_whatsapp_message", entities: {} };
+  if (/^(?:cancel|discard)\s+(?:the\s+)?whatsapp(?:\s+message)?$/iu.test(text)
+    || /^(?:zruš|zrus)\s+(?:zprávu\s+)?(?:na\s+)?whatsapp$/iu.test(text)
+    || /^(?:anuluj)\s+(?:wiadomość\s+)?(?:na\s+)?whatsapp$/iu.test(text))
+    return { intent: "cancel_whatsapp_message", entities: {} };
 
-  let connectorMatch = text.match(/^(?:check|show|list)\s+(.+?)\s+(?:connector\s+)?status$/i);
+  let connectorMatch = text.match(/^(?:check|show|list|zkontroluj|ukaž|ukaz|sprawdź|sprawdz|pokaż|pokaz)\s+(.+?)\s+(?:(?:connector|konektoru|konektora)\s+)?(?:status|stav)$/iu);
   if (connectorMatch) {
     const connectorKey = resolveConnectorTarget(connectorMatch[1]);
     if (connectorKey) return { intent: "connector_status", entities: { connector_key: connectorKey } };
@@ -219,13 +264,13 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (/^(?:check|show|list)\s+(?:my\s+)?(?:connectors?|integrations?)(?:\s+status)?$/i.test(text))
     return { intent: "connector_status", entities: { connector_key: "all" } };
 
-  connectorMatch = text.match(/^(?:set\s*up|setup|configure|connect|start|activate)\s+(.+)$/i);
+  connectorMatch = text.match(/^(?:set\s*up|setup|configure|connect|start|activate|nastav|nakonfiguruj|připoj|pripoj|spusť|spust|skonfiguruj|połącz|polacz|uruchom)\s+(.+)$/iu);
   if (connectorMatch) {
     const connectorKey = resolveConnectorTarget(connectorMatch[1]);
     if (connectorKey) return { intent: "setup_connectors", entities: { connector_key: connectorKey } };
   }
 
-  connectorMatch = text.match(/^(?:sync|synchronise|synchronize|refresh)\s+(.+)$/i);
+  connectorMatch = text.match(/^(?:sync|synchronise|synchronize|refresh|synchronizuj|obnov|zsynchronizuj|odśwież|odswiez)\s+(.+)$/iu);
   if (connectorMatch) {
     const connectorKey = resolveConnectorTarget(connectorMatch[1]);
     if (connectorKey) return { intent: "sync_connectors", entities: { connector_key: connectorKey } };
@@ -466,6 +511,9 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (/^(?:list|show(?:\s+me)?|open)\s+clients?$/i.test(text)) return { intent: "list_clients", entities: {} };
   if (/^(?:list|show(?:\s+me)?|open)\s+contacts?$/i.test(text)) return { intent: "list_contacts", entities: {} };
   if (/^(?:list|show(?:\s+me)?|read|open)\s+(?:my\s+)?(?:email|mail)(?:\s+messages?)?s?$/i.test(text))
+    return { intent: "list_channel_messages", entities: { channel: "email" } };
+  if (/^(?:ukaž|ukaz|přečti|precti|otevři|otevri)\s+(?:mi\s+)?(?:e-?maily|poštu|postu)$/iu.test(text)
+    || /^(?:pokaż|pokaz|przeczytaj|otwórz|otworz)\s+(?:mi\s+)?(?:e-?maile|pocztę|poczte)$/iu.test(text))
     return { intent: "list_channel_messages", entities: { channel: "email" } };
   if (/^(?:list|show(?:\s+me)?|read|open)\s+(?:my\s+)?whatsapp(?:\s+messages?)?$/i.test(text))
     return { intent: "list_channel_messages", entities: { channel: "whatsapp" } };

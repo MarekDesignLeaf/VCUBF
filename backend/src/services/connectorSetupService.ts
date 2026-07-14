@@ -4,6 +4,7 @@ import * as connectorService from "./connectorService.js";
 import * as gmailConnectorService from "./gmailConnectorService.js";
 import * as googleContactsConnectorService from "./googleContactsConnectorService.js";
 import * as googleCalendarConnectorService from "./googleCalendarConnectorService.js";
+import { validateWhatsAppConfiguration, WhatsAppBusinessAdapterError } from "../connectors/whatsappBusinessAdapter.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
 export type ConnectorSetupTarget = ConnectorKey | "all";
@@ -37,6 +38,17 @@ export async function connectorSetupStatus(user: AuthedUser, target: ConnectorSe
   if (!user.permissions.includes("connectors.read")) return fail(403, "MISSING_PERMISSION", "Connector read permission is required.");
   const keys = selectedKeys(target);
   const sources = await connectorService.listConnectorSources(user, false);
+  let whatsappProviderStatus: { ok: boolean; error?: string; message?: string; details?: unknown } | undefined;
+  if (keys.includes("whatsapp_business")) {
+    try {
+      const details = await validateWhatsAppConfiguration();
+      whatsappProviderStatus = { ok: true, details };
+    } catch (error) {
+      whatsappProviderStatus = error instanceof WhatsAppBusinessAdapterError
+        ? { ok: false, error: error.code, message: error.message }
+        : { ok: false, error: "CONNECTOR_INTERNAL_ERROR" };
+    }
+  }
   const items = keys.map((connectorKey) => {
     const candidates = sources.filter((source) => source.connectorKey === connectorKey);
     const source = candidates.find((item) => item.isActive && item.isEnabled)
@@ -44,7 +56,14 @@ export async function connectorSetupStatus(user: AuthedUser, target: ConnectorSe
       ?? candidates.find((item) => item.isActive)
       ?? candidates[0];
     return source
-      ? { connectorKey, source, setupState: setupState(source) }
+      ? {
+          connectorKey,
+          source,
+          setupState: connectorKey === "whatsapp_business" && whatsappProviderStatus && !whatsappProviderStatus.ok
+            ? "needs_authorization"
+            : setupState(source),
+          ...(connectorKey === "whatsapp_business" ? { providerStatus: whatsappProviderStatus } : {}),
+        }
       : { connectorKey, source: null, setupState: "not_registered" };
   });
   return ok(200, { target, items });
@@ -91,7 +110,19 @@ export async function syncConnectors(user: AuthedUser, target: ConnectorSetupTar
       continue;
     }
     if (connectorKey === "whatsapp_business") {
-      results.push({ connectorKey, ok: true, status: "listening_for_signed_webhooks", sourceId: source.id });
+      try {
+        const provider = await validateWhatsAppConfiguration();
+        results.push({ connectorKey, ok: true, status: "listening_for_signed_webhooks", sourceId: source.id, provider });
+      } catch (error) {
+        results.push({
+          connectorKey,
+          ok: false,
+          status: "authorization_failed",
+          sourceId: source.id,
+          error: error instanceof WhatsAppBusinessAdapterError ? error.code : "CONNECTOR_INTERNAL_ERROR",
+          message: error instanceof Error ? error.message : undefined,
+        });
+      }
       continue;
     }
     const result = connectorKey === "google_contacts"

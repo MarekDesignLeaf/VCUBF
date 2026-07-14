@@ -73,6 +73,8 @@ describe("commandParser", () => {
     assert.deepEqual(parseTextCommand("configure Google Contacts"), { intent: "setup_connectors", entities: { connector_key: "google_contacts" } });
     assert.deepEqual(parseTextCommand("start WhatsApp Business connector"), { intent: "setup_connectors", entities: { connector_key: "whatsapp_business" } });
     assert.deepEqual(parseTextCommand("sync Gmail"), { intent: "sync_connectors", entities: { connector_key: "gmail" } });
+    assert.deepEqual(parseTextCommand("synchronizuj kalendář"), { intent: "sync_connectors", entities: { connector_key: "google_calendar" } });
+    assert.deepEqual(parseTextCommand("odśwież pocztę"), { intent: "sync_connectors", entities: { connector_key: "gmail" } });
   });
 
   it("parses a reviewed Gmail send command and explicit email confirmation controls", () => {
@@ -97,13 +99,47 @@ describe("commandParser", () => {
     assert.equal(parseTextCommand("cancel email").intent, "cancel_gmail_message");
     assert.equal(isGmailConfirmationPhrase("Yes."), true);
     assert.equal(isGmailCancellationPhrase("Do not send"), true);
+    assert.deepEqual(parseTextCommand("pošli email na jane@example.com; předmět Nabídka; zpráva Dobrý den."), {
+      intent: "prepare_gmail_message",
+      entities: { to: ["jane@example.com"], cc: [], bcc: [], subject: "Nabídka", body: "Dobrý den." },
+    });
+    assert.deepEqual(parseTextCommand("wyślij email do jane@example.com; temat Oferta; treść Dzień dobry."), {
+      intent: "prepare_gmail_message",
+      entities: { to: ["jane@example.com"], cc: [], bcc: [], subject: "Oferta", body: "Dzień dobry." },
+    });
   });
 
-  it("parses language changes in English and Czech", () => {
+  it("parses language changes in English, Czech and Polish", () => {
     assert.deepEqual(parseTextCommand("set language cs-CZ"), { intent: "set_voice_language", entities: { language: "cs-CZ" } });
     assert.deepEqual(parseTextCommand("switch language to Polish"), { intent: "set_voice_language", entities: { language: "pl-PL" } });
     assert.deepEqual(parseTextCommand("změň jazyk na francouzštinu"), { intent: "set_voice_language", entities: { language: "fr-FR" } });
     assert.deepEqual(parseTextCommand("mluv německy"), { intent: "set_voice_language", entities: { language: "de-DE" } });
+    assert.deepEqual(parseTextCommand("mów po polsku"), { intent: "set_voice_language", entities: { language: "pl-PL" } });
+    assert.deepEqual(parseTextCommand("zmień język na angielski"), { intent: "set_voice_language", entities: { language: "en-GB" } });
+  });
+
+  it("parses calendar agenda requests in English, Czech and Polish", () => {
+    assert.deepEqual(parseTextCommand("what is on my calendar tomorrow"), { intent: "list_calendar_events", entities: { period: "tomorrow" } });
+    assert.deepEqual(parseTextCommand("co mám zítra v kalendáři"), { intent: "list_calendar_events", entities: { period: "tomorrow" } });
+    assert.deepEqual(parseTextCommand("jakie mam jutro wydarzenia w kalendarzu"), { intent: "list_calendar_events", entities: { period: "tomorrow" } });
+    assert.deepEqual(parseTextCommand("ukaž kalendář na příštích 7 dní"), { intent: "list_calendar_events", entities: { period: "next_7_days" } });
+  });
+
+  it("parses reviewed WhatsApp messages in English, Czech and Polish", () => {
+    assert.deepEqual(parseTextCommand("send WhatsApp to +447700900123; message Hello"), {
+      intent: "prepare_whatsapp_message",
+      entities: { to: "+447700900123", body: "Hello" },
+    });
+    assert.deepEqual(parseTextCommand("pošli zprávu na WhatsApp na +420777123456 zpráva Ahoj"), {
+      intent: "prepare_whatsapp_message",
+      entities: { to: "+420777123456", body: "Ahoj" },
+    });
+    assert.deepEqual(parseTextCommand("wyślij wiadomość na WhatsApp do +48500100200 wiadomość Cześć"), {
+      intent: "prepare_whatsapp_message",
+      entities: { to: "+48500100200", body: "Cześć" },
+    });
+    assert.equal(parseTextCommand("potwierdź WhatsApp").intent, "confirm_whatsapp_message");
+    assert.equal(parseTextCommand("zruš zprávu na WhatsApp").intent, "cancel_whatsapp_message");
   });
 
   it("parses complete menu and named menu-subtree requests in English and Czech", () => {

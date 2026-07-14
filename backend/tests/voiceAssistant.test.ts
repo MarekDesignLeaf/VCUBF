@@ -25,13 +25,13 @@ describe("voice assistant interpretation", () => {
     globalThis.fetch = async (_url, init) => {
       const body = JSON.parse(String(init?.body));
       assert.equal(body.store, false);
+      assert.equal(body.model, "gpt-5.4-mini");
+      assert.equal(body.reasoning.effort, "none");
+      assert.equal(body.max_output_tokens, 500);
       assert.equal(body.text.format.type, "json_schema");
-      assert.match(body.instructions, /\/communication-intake/);
-      assert.match(body.instructions, /\/invoices/);
-      assert.match(body.instructions, /COMPLETE SECRETARY MENU AND SUBTREE CATALOGUE/);
-      assert.match(body.instructions, /Client details/);
-      assert.match(body.instructions, /never invent UI/i);
-      assert.match(body.instructions, /Do not infer a conventional New button/i);
+      assert.doesNotMatch(body.instructions, /\/communication-intake/);
+      assert.match(body.instructions, /show calendar today\|tomorrow\|next 7 days/);
+      assert.match(body.instructions, /send WhatsApp to INTERNATIONAL_PHONE/);
       return new Response(
         JSON.stringify({
           output: [
@@ -59,6 +59,28 @@ describe("voice assistant interpretation", () => {
     });
     assert.equal(result.kind, "command");
     assert.equal(result.canonical_command, "list clients");
+  });
+
+  it("includes the certified application map only for navigation and help requests", async () => {
+    process.env.OPENAI_API_KEY = "test-only-key";
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      assert.match(body.instructions, /\/communication-intake/);
+      assert.match(body.instructions, /\/invoices/);
+      assert.match(body.instructions, /COMPLETE SECRETARY MENU AND SUBTREE CATALOGUE/);
+      assert.match(body.instructions, /Client details/);
+      assert.match(body.instructions, /never invent UI/i);
+      assert.match(body.instructions, /Do not infer a conventional New button/i);
+      return Response.json({
+        output: [{ content: [{ text: JSON.stringify({ kind: "reply", canonical_command: null, message: "Open Communications." }) }] }],
+      });
+    };
+    const result = await interpretVoiceRequest({
+      text: "How do I open communication intake?",
+      userName: "Test",
+      language: "en-GB",
+    });
+    assert.equal(result.kind, "reply");
   });
 
   it("creates a short-lived realtime client secret without exposing the server key", async () => {

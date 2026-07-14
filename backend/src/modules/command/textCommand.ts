@@ -11,6 +11,7 @@ import { createRealtimeClientSession, interpretVoiceRequest, transcribeVoiceAudi
 import { publishVoiceUiAction } from "../../services/voiceUiActionService.js";
 import { getAssistantContext } from "../../services/assistantMemoryService.js";
 import { hasPendingVoiceGmailMessage } from "../../services/voiceGmailService.js";
+import { hasPendingVoiceWhatsAppMessage } from "../../services/voiceWhatsAppService.js";
 import { getNavigationCatalogue } from "../../lib/navigationCatalogue.js";
 
 export const commandRouter = Router();
@@ -48,34 +49,49 @@ type ParsedTextCommand = ReturnType<typeof parseTextCommand>;
 async function resolveUserCommand(user: AuthedUser, text: string): Promise<ParsedTextCommand> {
   const parsed = parseTextCommand(text);
   if (parsed.intent !== "unrecognized") return parsed;
-  if (!(await hasPendingVoiceGmailMessage(user))) return parsed;
-  if (isGmailConfirmationPhrase(text)) return { intent: "confirm_gmail_message", entities: {} };
-  if (isGmailCancellationPhrase(text)) return { intent: "cancel_gmail_message", entities: {} };
+  const [gmailPending, whatsappPending] = await Promise.all([
+    hasPendingVoiceGmailMessage(user),
+    hasPendingVoiceWhatsAppMessage(user),
+  ]);
+  if (gmailPending === whatsappPending) return parsed;
+  if (isGmailConfirmationPhrase(text)) return gmailPending
+    ? { intent: "confirm_gmail_message", entities: {} }
+    : { intent: "confirm_whatsapp_message", entities: {} };
+  if (isGmailCancellationPhrase(text)) return gmailPending
+    ? { intent: "cancel_gmail_message", entities: {} }
+    : { intent: "cancel_whatsapp_message", entities: {} };
   return parsed;
 }
 
 function auditText(command: ParsedTextCommand, value: string | null | undefined) {
-  return command.intent === "prepare_gmail_message" && value ? "[REDACTED_GMAIL_MESSAGE]" : value;
+  return ["prepare_gmail_message", "prepare_whatsapp_message"].includes(command.intent) && value
+    ? "[REDACTED_OUTBOUND_MESSAGE]"
+    : value;
 }
 
 function auditAssistantInput(text: string) {
-  // A natural-language email request may be clarified before it becomes a
+  // A natural-language outbound request may be clarified before it becomes a
   // deterministic command. Keep that message content in the conversation
   // transcript (the user's chosen history), but never copy it into the audit.
-  return /\b(?:send|write|compose|draft)\s+(?:an?\s+)?(?:e-?mail|mail)\b/i.test(text)
-    ? "[REDACTED_GMAIL_MESSAGE]"
+  return /(?:send|write|compose|draft|pošli|posli|odešli|odesli|napiš|napis|wyślij|wyslij|napisz).*?(?:e-?mail|mail|whatsapp)/iu.test(text)
+    ? "[REDACTED_OUTBOUND_MESSAGE]"
     : text;
 }
 
 function auditInterpreted(command: ParsedTextCommand, interpreted: unknown) {
-  if (command.intent !== "prepare_gmail_message") return interpreted;
-  return {
-    toCount: command.entities.to.length,
-    ccCount: command.entities.cc.length,
-    bccCount: command.entities.bcc.length,
-    subjectLength: command.entities.subject.length,
-    bodyLength: command.entities.body.length,
-  };
+  if (command.intent === "prepare_gmail_message") {
+    return {
+      toCount: command.entities.to.length,
+      ccCount: command.entities.cc.length,
+      bccCount: command.entities.bcc.length,
+      subjectLength: command.entities.subject.length,
+      bodyLength: command.entities.body.length,
+    };
+  }
+  if (command.intent === "prepare_whatsapp_message") {
+    return { recipientLength: command.entities.to.length, bodyLength: command.entities.body.length };
+  }
+  return interpreted;
 }
 
 commandRouter.post(
@@ -167,7 +183,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     }
     command = await resolveUserCommand(user, assistant.canonical_command);
     if (command.intent === "unrecognized") {
-      return res.status(422).json({ ok: false, kind: "clarification", error: "UNSUPPORTED_ACTION", message: "I understood the request, but it is not yet a supported action." });
+      return res.json({ ok: true, kind: "clarification", message: "I understood the request, but this action is not supported yet. Please rephrase it as one direct action." });
     }
   }
 

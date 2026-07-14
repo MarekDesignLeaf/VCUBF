@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from array import array
 import base64
 import ctypes
 from ctypes import wintypes
+from collections import deque
 import json
 import os
 from pathlib import Path
@@ -29,10 +31,12 @@ CHUNK = 2_400  # 100 ms PCM16 frames
 MAX_SESSION_SECONDS = 180
 IDLE_AFTER_RESPONSE_SECONDS = 25
 # PyAudio exposes raw microphone and speaker streams, not Windows' acoustic
-# echo cancellation.  Do not feed Emma's own PCM output back into Realtime;
-# retain a short tail after playback for room echo to decay before reopening
-# the microphone.
+# echo cancellation. Keep a speaker reference so only Emma's acoustic echo is
+# removed; the microphone itself remains live for human barge-in.
 OUTPUT_ECHO_GUARD_SECONDS = 0.75
+ECHO_REFERENCE_SECONDS = 1.5
+ECHO_CORRELATION_THRESHOLD = 0.30
+ECHO_RESIDUAL_RATIO = 0.38
 
 LANGUAGE_NAMES = {
     "en-GB": "English (United Kingdom)",
@@ -95,6 +99,15 @@ def load_config() -> dict:
         return json.load(handle)
 
 
+def save_config_language(language: str) -> None:
+    """Persist a backend-confirmed language without losing local settings."""
+    config = load_config()
+    config["Language"] = language
+    temporary = CONFIG_PATH.with_suffix(".tmp")
+    temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(CONFIG_PATH)
+
+
 def load_token() -> str:
     return unprotect_dpapi(TOKEN_PATH.read_bytes()).decode("utf-8")
 
@@ -145,7 +158,8 @@ class RealtimeEmma:
         self.current_status = "listening"
         self.current_listening = True
         self.reported_speaking = False
-        self.microphone_suppressed_until = 0.0
+        self.speaker_echo_until = 0.0
+        self.output_reference: deque[int] = deque(maxlen=int(RATE * ECHO_REFERENCE_SECONDS))
         self.suppressed_input_items: set[str] = set()
         self.speaking_generation = 0
         self.exit_code = 0
@@ -266,15 +280,17 @@ class RealtimeEmma:
         except Exception as exc:
             log(f"transcript end error: {type(exc).__name__}")
 
-    async def configure(self) -> None:
+    async def configure(self, initialize: bool = True) -> None:
         # The backend already enforces strict character budgets before returning
         # this object, so keep the JSON structurally complete instead of cutting
         # it in the middle of a string.
         context_json = json.dumps(self.assistant_context, ensure_ascii=False, separators=(",", ":"))
         navigation_json = json.dumps(self.navigation_catalogue, ensure_ascii=False, separators=(",", ":"))
         instructions = f"""You are Emma, a concise, warm voice assistant for VCUBF Secretary.
-Always speak and respond in {self.spoken_language}. Never switch language based on accent, names,
-locale guesses, or transcription uncertainty. Change spoken language only when the user explicitly
+Always speak and respond exclusively in {self.spoken_language}, including numbers, dates, times,
+units, confirmations, and connector results. Do not mix Czech, Polish, English, or any other
+language in one answer; only proper names and literal user data may retain their original form.
+Never switch language based on accent, names, locale guesses, or transcription uncertainty. Change spoken language only when the user explicitly
 asks you to do so through the backend. If the backend confirms set_voice_language and returns
 result.data.voiceLanguage, immediately continue this response in that selected language. Keep normal
 answers short enough for speech.
@@ -352,6 +368,8 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 },
             }
         )
+        if not initialize:
+            return
         if self.initial_command:
             self.current_user_sequence = 1
             self.next_user_sequence = 3
@@ -378,12 +396,10 @@ SECRETARY_NAVIGATION={navigation_json}"""
         while not self.stop.is_set():
             try:
                 chunk = await asyncio.to_thread(self.input_stream.read, CHUNK, False)
-                # The desktop microphone can hear the local speaker.  Reading
-                # continues to keep the device healthy, but these frames must
-                # never reach the model while Emma is speaking.
-                if time.monotonic() < self.microphone_suppressed_until:
+                filtered = self.filter_microphone_chunk(chunk)
+                if filtered is None:
                     continue
-                await self.send({"type": "input_audio_buffer.append", "audio": base64.b64encode(chunk).decode("ascii")})
+                await self.send({"type": "input_audio_buffer.append", "audio": base64.b64encode(filtered).decode("ascii")})
             except Exception as exc:
                 if not self.stop.is_set():
                     log(f"microphone error: {type(exc).__name__}")
@@ -397,16 +413,78 @@ SECRETARY_NAVIGATION={navigation_json}"""
             chunk = await self.output_queue.get()
             if chunk is None:
                 return
-            # Set the guard before and after writing.  The first assignment
-            # closes the race with microphone(), while the second includes the
-            # remaining acoustic echo after the last speaker frame.
-            self.microphone_suppressed_until = max(
-                self.microphone_suppressed_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS
-            )
+            # Register the exact PCM before it reaches the speaker so the
+            # concurrent microphone path can remove that signal immediately.
+            self.remember_output_chunk(chunk)
+            self.speaker_echo_until = max(self.speaker_echo_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS)
             await asyncio.to_thread(self.output_stream.write, chunk)
-            self.microphone_suppressed_until = max(
-                self.microphone_suppressed_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS
-            )
+            self.speaker_echo_until = max(self.speaker_echo_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS)
+
+    def remember_output_chunk(self, chunk: bytes) -> None:
+        samples = array("h")
+        samples.frombytes(chunk)
+        self.output_reference.extend(samples)
+
+    def filter_microphone_chunk(self, chunk: bytes) -> bytes | None:
+        """Cancel matched speaker PCM while preserving different human speech."""
+        if time.monotonic() >= self.speaker_echo_until:
+            return chunk
+        microphone = array("h")
+        microphone.frombytes(chunk)
+        sample_count = len(microphone)
+        history = list(self.output_reference)
+        if sample_count == 0 or len(history) < sample_count:
+            return chunk
+
+        # Search recent speaker audio at a coarse resolution. Room and device
+        # latency vary, so matching only the most recent frame is unreliable.
+        stride = 12
+        candidate_step = 60  # 2.5 ms at 24 kHz; enough for typical room delay.
+        search_start = max(0, len(history) - RATE)
+        mic_points = list(range(0, sample_count, stride))
+        microphone_energy = sum(int(microphone[index]) ** 2 for index in mic_points)
+        if microphone_energy <= 0:
+            return None
+        best_score = 0.0
+        best_start: int | None = None
+        for start in range(search_start, len(history) - sample_count + 1, candidate_step):
+            reference_energy = 0
+            cross = 0
+            for index in mic_points:
+                reference = history[start + index]
+                sample = microphone[index]
+                reference_energy += reference * reference
+                cross += sample * reference
+            if reference_energy <= 0:
+                continue
+            score = abs(cross) / (microphone_energy * reference_energy) ** 0.5
+            if score > best_score:
+                best_score = score
+                best_start = start
+        if best_start is None or best_score < ECHO_CORRELATION_THRESHOLD:
+            return chunk
+
+        reference = history[best_start:best_start + sample_count]
+        reference_energy = sum(sample * sample for sample in reference)
+        if reference_energy <= 0:
+            return chunk
+        gain = sum(int(microphone[index]) * reference[index] for index in range(sample_count)) / reference_energy
+        gain = max(-3.0, min(3.0, gain))
+        residual = array("h")
+        residual_energy = 0
+        full_microphone_energy = 0
+        for index, sample in enumerate(microphone):
+            value = int(round(sample - gain * reference[index]))
+            value = max(-32768, min(32767, value))
+            residual.append(value)
+            residual_energy += value * value
+            full_microphone_energy += int(sample) * int(sample)
+        if full_microphone_energy <= 0:
+            return None
+        residual_ratio = (residual_energy / full_microphone_energy) ** 0.5
+        # Echo-only frames disappear. A person speaking over Emma leaves a
+        # distinct residual, which continues to Realtime and triggers barge-in.
+        return None if residual_ratio < ECHO_RESIDUAL_RATIO else residual.tobytes()
 
     def clear_playback(self) -> None:
         while True:
@@ -417,26 +495,17 @@ SECRETARY_NAVIGATION={navigation_json}"""
 
     async def begin_output(self) -> None:
         """Enter speaker mode before the first PCM frame can reach the mic."""
-        self.microphone_suppressed_until = max(
-            self.microphone_suppressed_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS
-        )
+        self.speaker_echo_until = max(self.speaker_echo_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS)
         if self.reported_speaking:
             return
         self.reported_speaking = True
         self.speaking_generation += 1
-        # Discard any microphone tail that arrived immediately before speaker
-        # mode.  Without this, server VAD can treat Emma's first words as an
-        # interruption and create a self-conversation.
-        try:
-            await self.send({"type": "input_audio_buffer.clear"})
-        except Exception:
-            pass
         await self.update_state("speaking", False)
 
     async def resume_after_output(self, response: str, generation: int) -> None:
         """Expose the completed reply only after queued audio and echo end."""
         while not self.stop.is_set() and (
-            not self.output_queue.empty() or time.monotonic() < self.microphone_suppressed_until
+            not self.output_queue.empty() or time.monotonic() < self.speaker_echo_until
         ):
             await asyncio.sleep(0.05)
         if self.stop.is_set() or generation != self.speaking_generation:
@@ -456,8 +525,23 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 backend_json,
                 "POST",
                 "/command/assistant",
-                {"text": request_text, "input_method": "voice_transcript", "language": load_config().get("Language", "en-GB"), "history": []},
+                {"text": request_text, "input_method": "voice_transcript", "language": self.configured_language, "history": []},
             )
+            selected_language = (
+                (result.get("data") or {}).get("voiceLanguage")
+                if result.get("intent") == "set_voice_language" and result.get("ok") is True
+                else None
+            )
+            if selected_language in LANGUAGE_NAMES and selected_language != self.configured_language:
+                self.configured_language = selected_language
+                self.spoken_language = LANGUAGE_NAMES[selected_language]
+                self.transcription_language = selected_language.split("-", 1)[0].lower()
+                save_config_language(selected_language)
+                # Update transcription and response instructions before the
+                # function result is handed back to Realtime. The confirmation
+                # and every subsequent turn then use one language end to end.
+                await self.configure(initialize=False)
+                log(f"realtime language changed to {selected_language}")
             output = compact_tool_result(result)
         except Exception as exc:
             log(f"tool error: {type(exc).__name__}")
@@ -500,16 +584,6 @@ SECRETARY_NAVIGATION={navigation_json}"""
                         self.response_texts[response_id] = transcript
             elif event_type == "input_audio_buffer.speech_started":
                 item_id = str(event.get("item_id") or "")
-                if time.monotonic() < self.microphone_suppressed_until:
-                    # This is speaker feedback.  Never cancel Emma's reply or
-                    # create a transcript turn from it.
-                    if item_id:
-                        self.suppressed_input_items.add(item_id)
-                    try:
-                        await self.send({"type": "input_audio_buffer.clear"})
-                    except Exception:
-                        pass
-                    continue
                 self.current_user_sequence = self.next_user_sequence
                 self.next_user_sequence += 2
                 if item_id:
@@ -520,12 +594,9 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 self.reported_speaking = False
                 self.speaking_generation += 1
                 await self.update_state("hearing", True)
-                # Current Realtime sessions interrupt automatically when
-                # interrupt_response is true. Cancel is harmless if no response is active.
-                try:
-                    await self.send({"type": "response.cancel"})
-                except Exception:
-                    pass
+                # Realtime already interrupts the active answer because
+                # interrupt_response is true. Sending response.cancel here as
+                # well produces cancellation errors when no response is active.
             elif event_type == "response.function_call_arguments.done":
                 asyncio.create_task(self.run_tool(event))
             elif event_type == "conversation.item.created":

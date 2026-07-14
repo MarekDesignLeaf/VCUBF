@@ -63,6 +63,41 @@ export function configuredWhatsAppPhoneNumberId() {
   return whatsAppConfig().phoneNumberId;
 }
 
+export async function validateWhatsAppConfiguration() {
+  const config = whatsAppConfig();
+  let response: Response;
+  try {
+    response = await fetch(
+      `${GRAPH_ENDPOINT}/${config.apiVersion}/${encodeURIComponent(config.phoneNumberId)}?fields=id,display_phone_number,verified_name,quality_rating`,
+      {
+        headers: { Authorization: `Bearer ${config.accessToken}` },
+        signal: AbortSignal.timeout(8_000),
+      }
+    );
+  } catch {
+    throw new WhatsAppBusinessAdapterError("PROVIDER_UNAVAILABLE");
+  }
+  if (response.status === 401) throw new WhatsAppBusinessAdapterError("CONNECTOR_AUTHORIZATION_REQUIRED", "The WhatsApp access token is invalid or expired.");
+  if (response.status === 403) throw new WhatsAppBusinessAdapterError("SCOPE_DENIED");
+  if (response.status === 429) throw new WhatsAppBusinessAdapterError("RATE_LIMITED");
+  if (response.status >= 500) throw new WhatsAppBusinessAdapterError("PROVIDER_UNAVAILABLE");
+  if (!response.ok) throw new WhatsAppBusinessAdapterError("PROVIDER_RESPONSE_INVALID");
+  let payload: Record<string, unknown> | null;
+  try {
+    payload = record(await response.json());
+  } catch {
+    throw new WhatsAppBusinessAdapterError("PROVIDER_RESPONSE_INVALID");
+  }
+  const id = stringValue(payload?.id);
+  if (!id || id !== config.phoneNumberId) throw new WhatsAppBusinessAdapterError("PROVIDER_RESPONSE_INVALID");
+  return {
+    phoneNumberId: id,
+    displayPhoneNumber: stringValue(payload?.display_phone_number),
+    verifiedName: stringValue(payload?.verified_name),
+    qualityRating: stringValue(payload?.quality_rating),
+  };
+}
+
 function equalSecret(actual: string, expected: string) {
   const left = Buffer.from(actual);
   const right = Buffer.from(expected);

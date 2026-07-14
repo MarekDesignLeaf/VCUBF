@@ -66,4 +66,93 @@ export async function syncGoogleCalendar(user: AuthedUser, sourceId: string): Pr
 
 export async function listExternalCalendarEvents(user: AuthedUser, sourceId: string, raw: unknown): Promise<ServiceResult<unknown>> { const parsed = eventQuerySchema.safeParse(raw); if (!parsed.success) return fail(400, "VALIDATION_FAILED", parsed.error.message); const source = await prisma.connectorSource.findFirst({ where: { id: sourceId, companyId: user.companyId, connectorKey: "google_calendar" } }); if (!source) return fail(404, "CONNECTOR_SOURCE_NOT_FOUND"); const where: Prisma.ExternalCalendarEventWhereInput = { companyId: user.companyId, connectorSourceId: sourceId, ...(parsed.data.include_deleted === "true" ? {} : { isDeleted: false }) }; const [items, total] = await prisma.$transaction([prisma.externalCalendarEvent.findMany({ where, include: { externalCalendar: { select: { summary: true, timeZone: true, isPrimary: true } } }, orderBy: [{ startAt: "asc" }, { startDate: "asc" }], skip: parsed.data.offset, take: parsed.data.limit }), prisma.externalCalendarEvent.count({ where })]); return ok(200, { items, total, offset: parsed.data.offset, limit: parsed.data.limit }); }
 
+export type VoiceCalendarPeriod = "today" | "tomorrow" | "next_7_days";
+
+function localDateKey(value: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function addDateKeyDays(dateKey: string, days: number) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day + days));
+  return value.toISOString().slice(0, 10);
+}
+
+export async function listVoiceCalendarAgenda(
+  user: AuthedUser,
+  period: VoiceCalendarPeriod,
+  now = new Date()
+): Promise<ServiceResult<unknown>> {
+  const sources = await prisma.connectorSource.findMany({
+    where: { companyId: user.companyId, connectorKey: "google_calendar", isActive: true, isEnabled: true },
+    include: { credential: { select: { sourceId: true } } },
+    orderBy: { displayName: "asc" },
+  });
+  if (!sources.length) return fail(409, "GOOGLE_CALENDAR_NOT_CONFIGURED", "Google Calendar is not connected and enabled.");
+  if (!sources.some((source) => source.credential)) return fail(409, "CONNECTOR_AUTHORIZATION_REQUIRED", "Google Calendar needs to be authorized again.");
+
+  const primaryCalendar = await prisma.externalCalendar.findFirst({
+    where: { companyId: user.companyId, connectorSourceId: { in: sources.map((source) => source.id) }, isDeleted: false },
+    orderBy: [{ isPrimary: "desc" }, { summary: "asc" }],
+    select: { timeZone: true },
+  });
+  const timeZone = primaryCalendar?.timeZone || "UTC";
+  let todayKey: string;
+  try {
+    todayKey = localDateKey(now, timeZone);
+  } catch {
+    todayKey = localDateKey(now, "UTC");
+  }
+  const startOffset = period === "tomorrow" ? 1 : 0;
+  const dayCount = period === "next_7_days" ? 7 : 1;
+  const startKey = addDateKeyDays(todayKey, startOffset);
+  const endKey = addDateKeyDays(startKey, dayCount);
+  const candidates = await prisma.externalCalendarEvent.findMany({
+    where: {
+      companyId: user.companyId,
+      connectorSourceId: { in: sources.map((source) => source.id) },
+      isDeleted: false,
+      OR: [
+        { startAt: { gte: new Date(now.getTime() - 2 * 86_400_000), lt: new Date(now.getTime() + 9 * 86_400_000) } },
+        { startDate: { gte: startKey, lt: endKey } },
+      ],
+    },
+    include: { externalCalendar: { select: { summary: true, timeZone: true, isPrimary: true } } },
+    orderBy: [{ startAt: "asc" }, { startDate: "asc" }],
+    take: 250,
+  });
+  const items = candidates.filter((event) => {
+    const eventKey = event.startDate ?? (event.startAt ? localDateKey(event.startAt, event.timeZone || event.externalCalendar.timeZone || timeZone) : "");
+    return eventKey >= startKey && eventKey < endKey;
+  });
+  const label = period === "today" ? "today" : period === "tomorrow" ? "tomorrow" : "the next seven days";
+  const message = items.length
+    ? `${items.length} calendar event${items.length === 1 ? "" : "s"} found for ${label}.`
+    : `No calendar events were found for ${label}.`;
+  return ok(200, {
+    period,
+    timeZone,
+    startDate: startKey,
+    endDateExclusive: endKey,
+    items: items.map((event) => ({
+      id: event.id,
+      summary: event.summary || "Untitled event",
+      startAt: event.startAt,
+      startDate: event.startDate,
+      endAt: event.endAt,
+      endDate: event.endDate,
+      location: event.location,
+      calendar: event.externalCalendar.summary,
+    })),
+    message,
+  });
+}
+
 export async function disconnectGoogleCalendarSource(user: AuthedUser, sourceId: string, raw: unknown): Promise<ServiceResult<unknown>> { const parsed = disconnectSchema.safeParse(raw); if (!parsed.success) return fail(400, "VALIDATION_FAILED"); const source = await prisma.connectorSource.findFirst({ where: { id: sourceId, companyId: user.companyId, connectorKey: "google_calendar", isActive: true }, include: { credential: true } }); if (!source) return fail(404, "CONNECTOR_SOURCE_NOT_FOUND"); const preview = { sourceId, provider: "google_calendar", willRevokeGoogleProjectGrant: Boolean(source.credential), willKeepStagedEvents: true }; if (!parsed.data.confirmed) return fail(409, "CONFIRMATION_REQUIRED", undefined, { preview }); await prisma.connectorSource.update({ where: { id: source.id }, data: { isEnabled: false, connectionStatus: "disconnecting" } }); try { if (source.credential) await revokeGoogleCalendarCredential(decryptConnectorPayload<StoredGoogleCalendarCredential>(source.credential, context(source.companyId, source.id)).refreshToken); const disconnectedAt = new Date(); await prisma.$transaction([prisma.connectorCredential.deleteMany({ where: { sourceId } }), prisma.connectorOAuthState.deleteMany({ where: { sourceId } }), prisma.connectorSource.update({ where: { id: sourceId }, data: { isEnabled: false, connectionStatus: "disconnected", syncCursor: null, syncPageToken: null, lastFullSyncAt: null, lastErrorCode: null } })]); const result = { sourceId, provider: "google_calendar", providerGrantRevoked: Boolean(source.credential), disconnectedAt }; await recordAudit({ companyId: user.companyId, userId: user.id, actionName: DISCONNECT_GOOGLE_CALENDAR_SOURCE_ACTION.actionName, inputPayload: { sourceId, confirmed: true }, dataAfter: result, riskLevel: 3, confirmationRequired: true, confirmed: true, result: "success" }); return ok(200, result); } catch (error) { const result = providerError(error); await prisma.connectorSource.update({ where: { id: sourceId }, data: { isEnabled: false, connectionStatus: "disconnect_failed", lastErrorCode: result.ok ? "CONNECTOR_INTERNAL_ERROR" : result.error } }); return result; } }
