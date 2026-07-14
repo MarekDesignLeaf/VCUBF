@@ -1,6 +1,7 @@
 export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 export const GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+export const GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
 const GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GOOGLE_REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
@@ -136,9 +137,15 @@ function scopesFrom(value?: string) {
 
 export function gmailProviderScopes(logicalScopes: string[]) {
   const requested = new Set<string>();
-  if (logicalScopes.includes("read:messages")) requested.add(GMAIL_READONLY_SCOPE);
-  if (logicalScopes.includes("write:drafts")) requested.add(GMAIL_COMPOSE_SCOPE);
-  if (logicalScopes.includes("send:messages") && !requested.has(GMAIL_COMPOSE_SCOPE)) requested.add(GMAIL_SEND_SCOPE);
+  // gmail.modify is the least-privileged Gmail scope that can move a message
+  // to Trash. It also covers reading, composing and sending, so do not request
+  // redundant narrower scopes when deletion is enabled.
+  if (logicalScopes.includes("delete:messages")) requested.add(GMAIL_MODIFY_SCOPE);
+  if (!requested.has(GMAIL_MODIFY_SCOPE)) {
+    if (logicalScopes.includes("read:messages")) requested.add(GMAIL_READONLY_SCOPE);
+    if (logicalScopes.includes("write:drafts")) requested.add(GMAIL_COMPOSE_SCOPE);
+    if (logicalScopes.includes("send:messages") && !requested.has(GMAIL_COMPOSE_SCOPE)) requested.add(GMAIL_SEND_SCOPE);
+  }
   return [...requested];
 }
 
@@ -268,13 +275,16 @@ async function gmailJson<T>(
   }
 }
 
-async function gmailPostJson<T>(url: URL, accessToken: string, body: unknown): Promise<T> {
+async function gmailPostJson<T>(url: URL, accessToken: string, body?: unknown, requestKind?: "message"): Promise<T> {
   let response: Response;
   try {
     response = await fetch(url, {
       method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
   } catch {
     throw new GmailAdapterError("PROVIDER_UNAVAILABLE");
@@ -283,6 +293,7 @@ async function gmailPostJson<T>(url: URL, accessToken: string, body: unknown): P
     if (response.status === 401) throw new GmailAdapterError("CONNECTOR_AUTHORIZATION_REQUIRED");
     if (response.status === 403) throw new GmailAdapterError("SCOPE_DENIED");
     if (response.status === 429) throw new GmailAdapterError("RATE_LIMITED");
+    if (requestKind === "message" && response.status === 404) throw new GmailAdapterError("MESSAGE_NOT_FOUND");
     if (response.status >= 500) throw new GmailAdapterError("PROVIDER_UNAVAILABLE");
     throw new GmailAdapterError("OAUTH_PROVIDER_REJECTED");
   }
@@ -322,6 +333,15 @@ export async function sendGmailMessage(accessToken: string, input: GmailComposeI
   return gmailPostJson<GmailSendResult>(new URL(`${GMAIL_MESSAGES_ENDPOINT}/send`), accessToken, {
     raw: buildGmailRawMessage(input),
   });
+}
+
+export async function trashGmailMessage(accessToken: string, messageId: string) {
+  return gmailPostJson<GmailMessage>(
+    new URL(`${GMAIL_MESSAGES_ENDPOINT}/${encodeURIComponent(messageId)}/trash`),
+    accessToken,
+    undefined,
+    "message"
+  );
 }
 
 export async function listGmailMessages(

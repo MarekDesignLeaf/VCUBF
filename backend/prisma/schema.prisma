@@ -15,6 +15,7 @@ model Company {
   name               String
   primaryAdminUserId String?   @unique @map("primary_admin_user_id")
   setupCompletedAt   DateTime? @map("setup_completed_at")
+  emmaDisabledCapabilities String[] @default([]) @map("emma_disabled_capabilities")
   createdAt          DateTime  @default(now()) @map("created_at")
 
   primaryAdministrator User? @relation("CompanyPrimaryAdministrator", fields: [primaryAdminUserId], references: [id], onDelete: SetNull)

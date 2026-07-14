@@ -39,7 +39,7 @@ function loadPickerScript() {
 }
 
 function defaultScopes(key: ConnectorKey) {
-  if (key === "gmail") return ["read:messages", "write:drafts", "send:messages"];
+  if (key === "gmail") return ["read:messages", "write:drafts", "send:messages", "delete:messages"];
   if (key === "google_contacts") return ["read:contacts"];
   if (key === "google_calendar") return ["read:calendar"];
   if (key === "google_drive") return ["select:image_files"];
@@ -278,6 +278,24 @@ export function Connectors() {
       window.location.assign(result.authorizationUrl);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not start Google authorization.");
+      setBusySourceId(null);
+    }
+  }
+
+  async function enableGmailDeletion(source: ConnectorSource) {
+    if (!window.confirm("Enable deletion from Gmail? The source will be disabled and Google will ask you to approve Gmail modify access. Deleted messages are moved to Gmail Trash, not permanently erased.")) return;
+    setError(null);
+    setNotice(null);
+    setBusySourceId(source.id);
+    try {
+      if (source.isEnabled) await api.connectors.disableSource(source.id);
+      await api.connectors.updateSource(source.id, {
+        configured_scopes: [...new Set([...source.configuredScopes, "delete:messages"])],
+      });
+      const result = await api.connectors.startOAuth(source.id);
+      window.location.assign(result.authorizationUrl);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not prepare Gmail deletion access.");
       setBusySourceId(null);
     }
   }
@@ -575,6 +593,12 @@ export function Connectors() {
                     {source.connectorKey === "google_photos" && source.isEnabled ? <button onClick={() => openGooglePhotosPicker(source)} disabled={busySourceId === source.id}>Select Google Photos</button> : null}
                     {source.connectorKey === "google_photos" ? <button className="secondary" onClick={() => loadGooglePhotosItems(source)}>Review Google Photos</button> : null}
                     {source.connectorKey === "gmail" && source.isEnabled && source.configuredScopes.some(scope => scope === "write:drafts" || scope === "send:messages") ? <button onClick={() => setComposeSourceId(source.id)}>Write email</button> : null}
+                    {source.connectorKey === "gmail" && !source.configuredScopes.includes("delete:messages") ? (
+                      <button className="secondary" onClick={() => enableGmailDeletion(source)} disabled={busySourceId === source.id}>Enable email deletion</button>
+                    ) : null}
+                    {source.connectorKey === "gmail" && source.configuredScopes.includes("delete:messages") && !source.isEnabled ? (
+                      <button className="secondary" onClick={() => authorize(source)} disabled={busySourceId === source.id}>Reauthorize Gmail</button>
+                    ) : null}
                     {source.connectorKey === "whatsapp_business" && source.isEnabled && source.configuredScopes.includes("send:messages") ? <button onClick={() => setComposeSourceId(source.id)}>Write WhatsApp</button> : null}
                     {source.authorizationConfigured ? (
                       <button className="secondary" onClick={() => disconnect(source)} disabled={busySourceId === source.id}>Disconnect</button>

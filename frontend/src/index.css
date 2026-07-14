@@ -142,6 +142,29 @@ body {
 .settings-page { display: grid; gap: 18px; max-width: 760px; }
 .settings-card { padding: 20px; border: 1px solid #dde8e0; border-radius: 14px; background: #fbfdfb; }
 .settings-card h2 { margin-top: 0; }
+.emma-permissions-page { display: grid; gap: 18px; max-width: 980px; }
+.emma-policy-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.emma-policy-summary > div { display: flex; flex-direction: column; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: #fff; }
+.emma-policy-summary strong { color: var(--accent); font-size: 1.7rem; }
+.emma-policy-summary span { color: var(--muted); font-size: .82rem; }
+.emma-policy-toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+.emma-policy-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.emma-policy-groups .settings-card { padding: 16px; }
+.emma-policy-groups h2 { font-size: 1.02rem; }
+.emma-capability-list { display: grid; gap: 9px; }
+.emma-capability { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 11px; border: 1px solid var(--border); border-radius: 9px; background: #fff; cursor: pointer; }
+.emma-capability.is-disabled { opacity: .67; background: #f4f5f4; }
+.emma-capability input { width: auto; margin-top: 3px; }
+.emma-capability span { display: grid; gap: 3px; }
+.emma-capability small { color: var(--muted); line-height: 1.4; }
+.emma-capability-mode { padding: 3px 7px; border-radius: 999px; background: #e8f5ed; color: #175c35; font-size: .68rem; font-style: normal; white-space: nowrap; }
+.emma-capability-mode.mode-external, .emma-capability-mode.mode-administration { background: #fff1dd; color: #80510b; }
+.emma-policy-save { position: sticky; bottom: 12px; display: flex; justify-content: flex-end; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: rgb(255 255 255 / 94%); box-shadow: 0 8px 30px rgb(14 45 29 / 12%); }
+@media (max-width: 760px) {
+  .emma-policy-summary, .emma-policy-groups { grid-template-columns: 1fr; }
+  .emma-capability { grid-template-columns: auto minmax(0, 1fr); }
+  .emma-capability-mode { grid-column: 2; justify-self: start; }
+}
 
 label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
 

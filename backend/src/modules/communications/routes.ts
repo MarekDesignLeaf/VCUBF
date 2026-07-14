@@ -4,6 +4,7 @@ import { requirePermission } from "../../middleware/permissions.js";
 import {
   CREATE_CLIENT_FROM_COMMUNICATION_ACTION,
   CREATE_COMMUNICATION_RECORD_ACTION,
+  DELETE_GMAIL_INTAKE_ACTION,
   EXTRACT_COMMUNICATION_INTAKE_ACTION,
   FIND_UNRESOLVED_ENQUIRIES_ACTION,
   LOG_COMMUNICATION_INTAKE_ACTION,
@@ -12,6 +13,7 @@ import {
   UPDATE_COMMUNICATION_RECORD_ACTION,
 } from "../../lib/actionContracts.js";
 import * as communicationService from "../../services/communicationService.js";
+import * as gmailConnectorService from "../../services/gmailConnectorService.js";
 
 export const communicationsRouter = Router();
 
@@ -104,6 +106,17 @@ communicationsRouter.post(
   requirePermission(PREPARE_COMMUNICATION_REPLY_ACTION.requiredPermission),
   async (req, res) => {
     const result = await communicationService.prepareCommunicationReply(req.user!, req.params.id);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
+communicationsRouter.delete(
+  "/intakes/:id",
+  requirePermission("crm.manage"),
+  requirePermission(DELETE_GMAIL_INTAKE_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await gmailConnectorService.deleteGmailIntake(req.user!, req.params.id, req.body);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
   }

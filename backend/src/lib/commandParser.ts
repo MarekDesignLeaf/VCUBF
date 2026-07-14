@@ -208,13 +208,17 @@ function parseMenuDescriptionCommand(text: string): Extract<ParsedCommand, { int
     || /^(?:what(?:'s|\s+is)\s+(?:in\s+)?(?:the\s+)?(?:menu|navigation)|what\s+can\s+i\s+do(?:\s+in\s+(?:the\s+)?(?:app|secretary))?)$/iu.test(normalized)
     || /^(?:přečti|precti|ukaž|ukaz|vypiš|vypis)\s+(?:mi\s+)?(?:(?:cel[ée]|všechny)\s+)?(?:(?:položky|polozky)\s+)?(?:menu|navigaci|navigace)(?:\s+programu)?$/iu.test(normalized)
     || /^co\s+je\s+v\s+(?:cel[ée]m\s+)?(?:menu|navigaci)$/iu.test(normalized)
+    || /^(?:przeczytaj|pokaż|pokaz|wyświetl|wyswietl)\s+(?:mi\s+)?(?:(?:całe|cale|pełne|pelne|wszystkie)\s+)?(?:(?:pozycje|elementy)\s+)?(?:menu|nawigację|nawigacje)(?:\s+programu)?$/iu.test(normalized)
+    || /^co\s+jest\s+w\s+(?:całym|calym|pełnym|pelnym\s+)?(?:menu|nawigacji)$/iu.test(normalized)
   ) {
     return { intent: "describe_menu", entities: {} };
   }
 
   const sectionMatch = normalized.match(/^(?:read|show|list|describe)(?:\s+me)?\s+(?:the\s+)?(?:whole|full|complete)?\s*(?:menu|navigation)(?:\s+section)?\s+(.+)$/iu)
     ?? normalized.match(/^(?:přečti|precti|ukaž|ukaz|vypiš|vypis)\s+(?:mi\s+)?(?:menu|navigaci|navigace)(?:\s+sekci)?\s+(.+)$/iu)
-    ?? normalized.match(/^co\s+je\s+v\s+(?:menu|navigaci)\s+(.+)$/iu);
+    ?? normalized.match(/^co\s+je\s+v\s+(?:menu|navigaci)\s+(.+)$/iu)
+    ?? normalized.match(/^(?:przeczytaj|pokaż|pokaz|wyświetl|wyswietl)\s+(?:mi\s+)?(?:menu|nawigację|nawigacje)(?:\s+sekcję|\s+sekcje)?\s+(.+)$/iu)
+    ?? normalized.match(/^co\s+jest\s+w\s+(?:menu|nawigacji)\s+(.+)$/iu);
   const section = sectionMatch ? resolveNavigationSection(sectionMatch[1]) : undefined;
   return section ? { intent: "describe_menu", entities: { section } } : undefined;
 }
@@ -556,7 +560,7 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (/^(?:list|show(?:\s+me)?|open)\s+jobs?$/i.test(text)) return { intent: "list_jobs", entities: {} };
   if (/^(?:list|show(?:\s+me)?|open)\s+leads?$/i.test(text)) return { intent: "list_leads", entities: {} };
 
-  m = text.match(/^(?:open|go\s+to|navigate\s+to|take\s+me\s+to|show\s+me)\s+(.+)$/i);
+  m = text.match(/^(?:open|go\s+to|navigate\s+to|take\s+me\s+to|show\s+me|otevři|otevri|přejdi\s+na|prejdi\s+na|ukaž|ukaz|otwórz|otworz|przejdź\s+do|przejdz\s+do|pokaż|pokaz|ouvre|ouvrir|va\s+à|va\s+a|affiche|öffne|offne|gehe\s+zu|zeige|abre|abrir|ve\s+a|muestra|apri|vai\s+a|mostra)\s+(.+)$/iu);
   if (m) {
     const page = resolveVoicePage(m[1]);
     if (page) return { intent: "navigate", entities: { page } };

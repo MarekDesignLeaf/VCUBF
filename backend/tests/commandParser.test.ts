@@ -170,6 +170,10 @@ describe("commandParser", () => {
     assert.deepEqual(parseTextCommand("go to invoices"), { intent: "navigate", entities: { page: "invoices" } });
     assert.deepEqual(parseTextCommand("take me to communication intake"), { intent: "navigate", entities: { page: "communication_intake" } });
     assert.deepEqual(parseTextCommand("show me business metrics"), { intent: "navigate", entities: { page: "metrics" } });
+    assert.deepEqual(parseTextCommand("otwórz oferty"), { intent: "navigate", entities: { page: "quotes" } });
+    assert.deepEqual(parseTextCommand("otwórz usługi"), { intent: "navigate", entities: { page: "services" } });
+    assert.deepEqual(parseTextCommand("otevři nabídky"), { intent: "navigate", entities: { page: "quotes" } });
+    assert.deepEqual(parseTextCommand("öffne Angebote"), { intent: "navigate", entities: { page: "quotes" } });
   });
 
   it("parses 'assign job X to Y'", () => {

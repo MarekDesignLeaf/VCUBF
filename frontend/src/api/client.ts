@@ -71,6 +71,16 @@ export interface CompanyProfile {
   setupCompletedAt?: string | null;
   primaryAdministrator: { id: string; displayName: string; email: string; role: string; isActive: boolean } | null;
 }
+export interface EmmaCapabilityPolicyItem {
+  id: string;
+  category: string;
+  mode: "read" | "write" | "external" | "administration";
+  label: string;
+  description: string;
+  intents: string[];
+  enabled: boolean;
+}
+export interface EmmaPolicy { capabilities: EmmaCapabilityPolicyItem[]; }
 export interface Invoice { id:string; invoiceNumber:string; title:string; invoiceStatus:string; dueDate?:string|null; isOverdue:boolean; client:{id:string;displayName:string}; totals:{total:number;paid:number;balance:number}; }
 
 export interface Client {
@@ -846,6 +856,8 @@ export interface CommunicationExtraction {
 
 export interface CommunicationIntake {
   id: string;
+  connectorSourceId?: string | null;
+  externalMessageId?: string | null;
   channel: CommunicationChannel;
   senderName?: string | null;
   senderEmail?: string | null;
@@ -1498,6 +1510,11 @@ export const api = {
   company: {
     get: () => request<CompanyProfile>("/company"),
     update: (name: string) => request<CompanyProfile>("/company", { method: "PUT", body: JSON.stringify({ name }) }),
+    emmaPolicy: () => request<EmmaPolicy>("/company/emma-policy"),
+    updateEmmaPolicy: (disabledCapabilities: string[]) => request<EmmaPolicy>("/company/emma-policy", {
+      method: "PUT",
+      body: JSON.stringify({ disabled_capabilities: disabledCapabilities }),
+    }),
   },
   changePassword: (currentPassword: string, newPassword: string) =>
     request<void>("/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
@@ -1852,6 +1869,19 @@ export const api = {
         request<CommunicationResolutionResult>(`/communications/intakes/${id}/resolution`, {
           method: "PUT",
           body: JSON.stringify({ resolution_needed: resolutionNeeded }),
+        }),
+      deleteGmail: (id: string, confirmed: boolean) =>
+        request<{
+          intakeId: string;
+          sourceId: string;
+          movedToGmailTrash: boolean;
+          sourceAlreadyMissing: boolean;
+          localDeleted: boolean;
+          linkedCommunicationRecordPreserved: boolean;
+          message: string;
+        }>(`/communications/intakes/${id}`, {
+          method: "DELETE",
+          body: JSON.stringify({ confirmed }),
         }),
     },
   },

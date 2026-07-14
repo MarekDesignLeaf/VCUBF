@@ -23,7 +23,7 @@ import * as voiceWhatsAppService from "../services/voiceWhatsAppService.js";
 import * as voiceNotificationService from "../services/voiceNotificationService.js";
 import * as voicePreferenceService from "../services/voicePreferenceService.js";
 import * as googleCalendarConnectorService from "../services/googleCalendarConnectorService.js";
-import { buildCommandUiAction, VOICE_PAGE_ROUTES, type CommandUiAction } from "./voiceNavigation.js";
+import { buildCommandUiAction, openingVoicePageMessage, type CommandUiAction } from "./voiceNavigation.js";
 import { getNavigationCatalogue } from "./navigationCatalogue.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
@@ -877,7 +877,7 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
     }
 
     case "describe_menu": {
-      const navigation = getNavigationCatalogue(user.permissions, command.entities.section);
+      const navigation = getNavigationCatalogue(user.permissions, command.entities.section, user.voiceLanguage);
       response = {
         intent: command.intent,
         interpreted: command.entities,
@@ -889,13 +889,12 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
     }
 
     case "navigate": {
-      const page = VOICE_PAGE_ROUTES[command.entities.page];
       response = {
         intent: command.intent,
         interpreted: command.entities,
         ok: true,
         httpStatus: 200,
-        message: `Opening ${page.label}.`,
+        message: openingVoicePageMessage(command.entities.page, user.voiceLanguage),
       };
       break;
     }
@@ -913,6 +912,6 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
   }
 
 
-  if (response.ok) response.uiAction = buildCommandUiAction(response.intent, response.data, response.interpreted);
+  if (response.ok) response.uiAction = buildCommandUiAction(response.intent, response.data, response.interpreted, user.voiceLanguage);
   return response;
 }

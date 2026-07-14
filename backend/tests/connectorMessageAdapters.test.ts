@@ -6,9 +6,11 @@ import {
   buildGmailRawMessage,
   createGmailDraft,
   GMAIL_COMPOSE_SCOPE,
+  GMAIL_MODIFY_SCOPE,
   GMAIL_READONLY_SCOPE,
   gmailProviderScopes,
   sendGmailMessage,
+  trashGmailMessage,
 } from "../src/connectors/gmailAdapter.js";
 import {
   parseWhatsAppWebhook,
@@ -54,6 +56,13 @@ describe("Gmail draft and send adapter", () => {
     assert.deepEqual(url.searchParams.get("scope")?.split(" "), scopes);
   });
 
+  it("uses gmail.modify alone when source-message deletion is enabled", () => {
+    assert.deepEqual(
+      gmailProviderScopes(["read:messages", "write:drafts", "send:messages", "delete:messages"]),
+      [GMAIL_MODIFY_SCOPE]
+    );
+  });
+
   it("builds a UTF-8 base64url MIME message without allowing header injection", () => {
     const raw = buildGmailRawMessage({
       to: ["customer@example.com"],
@@ -81,6 +90,17 @@ describe("Gmail draft and send adapter", () => {
     assert.equal(calls[1].url, "https://gmail.googleapis.com/gmail/v1/users/me/messages/send");
     assert.ok((calls[0].body.message as Record<string, unknown>).raw);
     assert.ok(calls[1].body.raw);
+  });
+
+  it("moves one exact Gmail message to Trash with an empty request body", async () => {
+    globalThis.fetch = async (input, init) => {
+      assert.equal(String(input), "https://gmail.googleapis.com/gmail/v1/users/me/messages/message%2Fone/trash");
+      assert.equal(init?.method, "POST");
+      assert.equal(init?.body, undefined);
+      assert.deepEqual(init?.headers, { Authorization: "Bearer access-token" });
+      return Response.json({ id: "message/one", labelIds: ["TRASH"] });
+    };
+    assert.equal((await trashGmailMessage("access-token", "message/one")).id, "message/one");
   });
 });
 

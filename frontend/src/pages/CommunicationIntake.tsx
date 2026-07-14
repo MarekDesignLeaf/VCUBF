@@ -9,6 +9,7 @@ import {
   type CommunicationConversionPreview,
   type CommunicationIntake,
 } from "../api/client";
+import { useAuth } from "../context/useAuth";
 
 const CONFIDENCE_LABELS = {
   exact_contact_match: "One exact email/phone match",
@@ -24,8 +25,11 @@ const MISSING_FIELD_LABELS: Record<string, string> = {
 };
 
 export function CommunicationIntakePage() {
+  const { user } = useAuth();
+  const canDeleteSourceEmail = Boolean(user?.permissions.includes("crm.manage") && user.permissions.includes("connectors.manage"));
   const [intakes, setIntakes] = useState<CommunicationIntake[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [preview, setPreview] = useState<CommunicationConversionPreview | null>(null);
   const [selectedClientId, setSelectedClientId] = useState("");
@@ -76,6 +80,36 @@ export function CommunicationIntakePage() {
     }
   }
 
+  async function deleteGmailEmail(intake: CommunicationIntake) {
+    setBusyId(intake.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.communications.intakes.deleteGmail(intake.id, false);
+    } catch (caught) {
+      if (!(caught instanceof ApiError) || caught.code !== "CONFIRMATION_REQUIRED") {
+        setError(caught instanceof ApiError ? caught.message : "Could not prepare email deletion.");
+        setBusyId(null);
+        return;
+      }
+      const preview = caught.details?.preview as { sender?: string; subject?: string | null; receivedAt?: string } | undefined;
+      const details = [preview?.sender, preview?.subject, preview?.receivedAt ? new Date(preview.receivedAt).toLocaleString() : null].filter(Boolean).join(" · ");
+      if (!window.confirm(`Move this email to Gmail Trash and delete its local Secretary copy?${details ? `\n\n${details}` : ""}\n\nAny linked CRM communication record will be preserved.`)) {
+        setBusyId(null);
+        return;
+      }
+    }
+    try {
+      const result = await api.communications.intakes.deleteGmail(intake.id, true);
+      setNotice(result.message);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "The email could not be deleted.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function confirmConversion() {
     if (!preview) return;
     setBusyId(preview.intakeId);
@@ -103,6 +137,7 @@ export function CommunicationIntakePage() {
       </p>
       <IntakeForm onCreated={load} />
       {error ? <div className="error-banner" style={{ marginTop: 16 }}>{error}</div> : null}
+      {notice ? <div className="success-banner" style={{ marginTop: 16 }}>{notice}</div> : null}
 
       {preview ? (
         <ConversionPreview
@@ -150,6 +185,11 @@ export function CommunicationIntakePage() {
                   {intake.extractedData && intake.intakeStatus !== "converted" ? (
                     <button onClick={() => void requestConversionPreview(intake.id)} disabled={busyId === intake.id}>
                       Review CRM conversion
+                    </button>
+                  ) : null}
+                  {canDeleteSourceEmail && intake.channel === "email" && intake.connectorSourceId && intake.externalMessageId ? (
+                    <button type="button" className="secondary" onClick={() => void deleteGmailEmail(intake)} disabled={busyId === intake.id}>
+                      {busyId === intake.id ? "Deleting…" : "Delete from Secretary and Gmail"}
                     </button>
                   ) : null}
                 </div>

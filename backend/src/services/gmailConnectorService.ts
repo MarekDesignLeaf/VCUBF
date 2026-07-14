@@ -14,6 +14,7 @@ import {
   exchangeGmailAuthorizationCode,
   GMAIL_INBOX_LABEL,
   GMAIL_COMPOSE_SCOPE,
+  GMAIL_MODIFY_SCOPE,
   GMAIL_SEND_SCOPE,
   getGmailMessage,
   getGmailProfile,
@@ -24,11 +25,13 @@ import {
   refreshGmailCredential,
   revokeGmailCredential,
   sendGmailMessage,
+  trashGmailMessage,
   type StoredGmailCredential,
 } from "../connectors/gmailAdapter.js";
 import {
   COMPLETE_GMAIL_OAUTH_ACTION,
   CREATE_GMAIL_DRAFT_ACTION,
+  DELETE_GMAIL_INTAKE_ACTION,
   DISCONNECT_GMAIL_SOURCE_ACTION,
   START_GMAIL_OAUTH_ACTION,
   SEND_GMAIL_MESSAGE_ACTION,
@@ -64,6 +67,7 @@ export const syncGmailSchema = z
   });
 
 export const disconnectGmailSchema = z.object({ confirmed: z.boolean().optional() }).strict();
+export const deleteGmailIntakeSchema = z.object({ confirmed: z.boolean().optional() }).strict();
 
 const gmailAddressSchema = z.string().trim().email().max(320).refine((value) => !/[\r\n]/.test(value), "Invalid email address");
 const gmailComposeFields = {
@@ -668,7 +672,9 @@ export async function createGmailDraftMessage(
   }
   try {
     const credential = await usableCredential({ credential: lookup.source.credential! });
-    if (!credential.scopes.includes(GMAIL_COMPOSE_SCOPE)) throw new GmailAdapterError("SCOPE_DENIED");
+    if (!credential.scopes.some((scope) => scope === GMAIL_COMPOSE_SCOPE || scope === GMAIL_MODIFY_SCOPE)) {
+      throw new GmailAdapterError("SCOPE_DENIED");
+    }
     const draft = await createGmailDraft(credential.accessToken, parsed.data);
     if (!draft.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
     const result = { sourceId, draftId: draft.id, messageId: draft.message?.id ?? null, threadId: draft.message?.threadId ?? null };
@@ -721,7 +727,7 @@ export async function sendGmailMessageNow(
   }
   try {
     const credential = await usableCredential({ credential: lookup.source.credential! });
-    if (!credential.scopes.some((scope) => scope === GMAIL_COMPOSE_SCOPE || scope === GMAIL_SEND_SCOPE)) {
+    if (!credential.scopes.some((scope) => scope === GMAIL_COMPOSE_SCOPE || scope === GMAIL_SEND_SCOPE || scope === GMAIL_MODIFY_SCOPE)) {
       throw new GmailAdapterError("SCOPE_DENIED");
     }
     const sent = await sendGmailMessage(credential.accessToken, message);
@@ -744,6 +750,132 @@ export async function sendGmailMessageNow(
     await auditFailure(SEND_GMAIL_MESSAGE_ACTION, user, sourceId, result.ok ? "CONNECTOR_INTERNAL_ERROR" : result.error);
     return result;
   }
+}
+
+export async function deleteGmailIntake(
+  user: AuthedUser,
+  intakeId: string,
+  rawInput: unknown
+): Promise<ServiceResult<unknown>> {
+  const parsed = deleteGmailIntakeSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    await auditFailure(DELETE_GMAIL_INTAKE_ACTION, user, intakeId, "VALIDATION_FAILED");
+    return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  }
+  if (!user.permissions.includes("crm.manage")) {
+    await auditFailure(DELETE_GMAIL_INTAKE_ACTION, user, intakeId, "MISSING_PERMISSION");
+    return fail(403, "MISSING_PERMISSION", "CRM management permission is required to delete a local email copy.");
+  }
+
+  const intake = await prisma.communicationIntake.findFirst({
+    where: { id: intakeId, companyId: user.companyId },
+    include: { connectorSource: { include: { credential: true } } },
+  });
+  if (!intake) {
+    await auditFailure(DELETE_GMAIL_INTAKE_ACTION, user, intakeId, "COMMUNICATION_INTAKE_NOT_FOUND");
+    return fail(404, "COMMUNICATION_INTAKE_NOT_FOUND");
+  }
+  const source = intake.connectorSource;
+  if (intake.channel !== "email" || !intake.externalMessageId || !source || source.connectorKey !== "gmail") {
+    await auditFailure(DELETE_GMAIL_INTAKE_ACTION, user, intakeId, "GMAIL_SOURCE_REQUIRED");
+    return fail(409, "GMAIL_SOURCE_REQUIRED", "Only an email imported from Gmail can be removed from both Secretary and its source mailbox.");
+  }
+
+  const subject = intake.messageText.match(/^Subject:\s*(.+)$/im)?.[1]?.trim() ?? null;
+  const preview = {
+    intakeId: intake.id,
+    sourceId: source.id,
+    sender: intake.senderName || intake.senderEmail || "Unknown sender",
+    subject,
+    receivedAt: intake.receivedAt,
+    providerAction: "move_to_gmail_trash",
+    localAction: "delete_communication_intake",
+    linkedCommunicationRecordPreserved: Boolean(intake.communicationRecordId),
+    reversibleAtProvider: true,
+  };
+  if (!parsed.data.confirmed) {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: DELETE_GMAIL_INTAKE_ACTION.actionName,
+      inputPayload: { intakeId, sourceId: source.id, confirmed: false },
+      dataBefore: { externalMessageId: intake.externalMessageId, receivedAt: intake.receivedAt },
+      riskLevel: DELETE_GMAIL_INTAKE_ACTION.riskLevel,
+      confirmationRequired: true,
+      result: "rejected",
+      errorMessage: "CONFIRMATION_REQUIRED",
+    });
+    return fail(409, "CONFIRMATION_REQUIRED", "Confirm moving this message to Gmail Trash and deleting its local Secretary copy.", { preview });
+  }
+  if (!source.isEnabled) return fail(409, "CONNECTOR_NOT_ENABLED", "Enable the Gmail source before deleting mail.");
+  if (!source.configuredScopes.includes("delete:messages")) {
+    return fail(409, "CONNECTOR_SCOPE_REQUIRED", "Enable email deletion in Connectors and reauthorize Gmail first.");
+  }
+  if (!source.credential) return fail(409, "CONNECTOR_AUTHORIZATION_REQUIRED", "Reauthorize Gmail before deleting mail.");
+
+  let sourceAlreadyMissing = false;
+  try {
+    const credential = await usableCredential({ credential: source.credential });
+    if (!credential.scopes.includes(GMAIL_MODIFY_SCOPE)) throw new GmailAdapterError("SCOPE_DENIED");
+    const trashed = await trashGmailMessage(credential.accessToken, intake.externalMessageId);
+    if (!trashed.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+  } catch (error) {
+    if (error instanceof GmailAdapterError && error.code === "MESSAGE_NOT_FOUND") {
+      sourceAlreadyMissing = true;
+    } else {
+      const result = providerErrorResult(error);
+      await auditFailure(DELETE_GMAIL_INTAKE_ACTION, user, source.id, result.ok ? "CONNECTOR_INTERNAL_ERROR" : result.error);
+      return result;
+    }
+  }
+
+  try {
+    await prisma.$transaction([
+      prisma.notificationAcknowledgement.deleteMany({
+        where: { companyId: user.companyId, notificationKey: `unresolved_enquiry:${intake.id}` },
+      }),
+      prisma.communicationIntake.delete({ where: { id: intake.id } }),
+    ]);
+  } catch {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: DELETE_GMAIL_INTAKE_ACTION.actionName,
+      inputPayload: { intakeId, sourceId: source.id, confirmed: true },
+      dataAfter: { providerTrashed: !sourceAlreadyMissing, sourceAlreadyMissing, localDeleted: false },
+      riskLevel: DELETE_GMAIL_INTAKE_ACTION.riskLevel,
+      confirmationRequired: true,
+      confirmed: true,
+      result: "error",
+      errorMessage: "LOCAL_DELETE_FAILED",
+    });
+    return fail(500, "LOCAL_DELETE_FAILED", "The source message is in Gmail Trash, but the local copy could not be removed. Retry the deletion.");
+  }
+
+  const result = {
+    intakeId,
+    sourceId: source.id,
+    movedToGmailTrash: !sourceAlreadyMissing,
+    sourceAlreadyMissing,
+    localDeleted: true,
+    linkedCommunicationRecordPreserved: Boolean(intake.communicationRecordId),
+    message: sourceAlreadyMissing
+      ? "The source message was already absent. Its local Secretary copy was deleted."
+      : "The email was moved to Gmail Trash and its local Secretary copy was deleted.",
+  };
+  await recordAudit({
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: DELETE_GMAIL_INTAKE_ACTION.actionName,
+    inputPayload: { intakeId, sourceId: source.id, confirmed: true },
+    dataBefore: { externalMessageId: intake.externalMessageId, receivedAt: intake.receivedAt },
+    dataAfter: result,
+    riskLevel: DELETE_GMAIL_INTAKE_ACTION.riskLevel,
+    confirmationRequired: true,
+    confirmed: true,
+    result: "success",
+  });
+  return ok(200, result);
 }
 
 export async function disconnectGmailSource(

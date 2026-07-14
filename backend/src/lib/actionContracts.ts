@@ -144,6 +144,16 @@ export const EXECUTE_TEXT_COMMAND_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "UNSUPPORTED_ACTION", "AMBIGUOUS_REFERENCE", "NOT_FOUND"],
 };
 
+export const UPDATE_EMMA_COMPANY_POLICY_ACTION: ActionContract = {
+  actionName: "update_emma_company_policy",
+  purpose: "Allow a company administrator to choose which read, write, external and connector actions Emma may execute for the company.",
+  requiredPermission: "company.manage",
+  riskLevel: 3,
+  confirmationRequired: false,
+  dataSources: ["user_input", "companies.emma_disabled_capabilities"],
+  possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
+};
+
 // Job Allocation and Capacity Management Module — see VCUF master
 // documentation section 24A / 26. Assignment is capacity-aware: it computes
 // real workload from existing jobs (estimated_duration_hours, planned dates)
@@ -394,6 +404,46 @@ export const SEND_GMAIL_MESSAGE_ACTION: ActionContract = {
   confirmationRequired: true,
   dataSources: ["connector_sources", "connector_credentials", "gmail.messages"],
   possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "CONFIRMATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
+};
+
+export const DELETE_GMAIL_INTAKE_ACTION: ActionContract = {
+  actionName: "delete_gmail_intake",
+  purpose: "After explicit confirmation, move one imported Gmail message to the provider Trash and remove only its linked local Communication Intake copy.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["connector_sources", "connector_credentials", "gmail.messages", "crm.communication_intakes"],
+  possibleErrors: ["MISSING_PERMISSION", "COMMUNICATION_INTAKE_NOT_FOUND", "GMAIL_SOURCE_REQUIRED", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "CONFIRMATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "LOCAL_DELETE_FAILED"],
+};
+
+export const PREPARE_VOICE_EMAIL_DELETION_ACTION: ActionContract = {
+  actionName: "prepare_voice_email_deletion",
+  purpose: "Select one imported Gmail message by an explicit latest-message or sender request and store only its local intake id for a short confirmation window.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: true,
+  dataSources: ["crm.communication_intakes", "voice_pending_actions"],
+  possibleErrors: ["MISSING_PERMISSION", "EMAIL_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED"],
+};
+
+export const CONFIRM_VOICE_EMAIL_DELETION_ACTION: ActionContract = {
+  actionName: "confirm_voice_email_deletion",
+  purpose: "Use one pending reviewed email deletion exactly once to move the Gmail source message to Trash and remove its local intake copy.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["voice_pending_actions", "connector_sources", "connector_credentials", "gmail.messages", "crm.communication_intakes"],
+  possibleErrors: ["MISSING_PERMISSION", "NO_PENDING_EMAIL_DELETION", "COMMUNICATION_INTAKE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
+
+export const CANCEL_VOICE_EMAIL_DELETION_ACTION: ActionContract = {
+  actionName: "cancel_voice_email_deletion",
+  purpose: "Cancel the current reviewed email deletion without changing Gmail or local communication data.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["voice_pending_actions"],
+  possibleErrors: ["MISSING_PERMISSION", "NO_PENDING_EMAIL_DELETION"],
 };
 
 export const PREPARE_VOICE_GMAIL_MESSAGE_ACTION: ActionContract = {

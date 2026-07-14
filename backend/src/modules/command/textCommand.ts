@@ -14,6 +14,7 @@ import { hasPendingVoiceGmailMessage } from "../../services/voiceGmailService.js
 import { hasPendingVoiceWhatsAppMessage } from "../../services/voiceWhatsAppService.js";
 import { hasPendingVoiceNotificationDeletion } from "../../services/voiceNotificationService.js";
 import { getNavigationCatalogue } from "../../lib/navigationCatalogue.js";
+import { evaluateEmmaCommand } from "../../services/emmaPolicyService.js";
 
 export const commandRouter = Router();
 
@@ -22,7 +23,7 @@ commandRouter.use(requireAuth);
 // Exposes the same authoritative tree used in Emma's prompt. It is read-only
 // and includes page descendants that are not represented by a sidebar link.
 commandRouter.get("/navigation", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission), (req, res) => {
-  const navigation = getNavigationCatalogue(req.user!.permissions);
+  const navigation = getNavigationCatalogue(req.user!.permissions, undefined, req.user!.voiceLanguage);
   res.set("Cache-Control", "no-store");
   return res.json({ title: navigation.title, sections: navigation.sections });
 });
@@ -108,6 +109,23 @@ function auditInterpreted(command: ParsedTextCommand, interpreted: unknown) {
     return { recipientLength: command.entities.to.length, bodyLength: command.entities.body.length };
   }
   return interpreted;
+}
+
+async function blockedByEmmaPolicy(user: AuthedUser, command: ParsedTextCommand) {
+  const decision = await evaluateEmmaCommand(user, command.intent);
+  if (decision.allowed) return undefined;
+  await recordAudit({
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: "execute_text_command",
+    interpretedIntent: command.intent,
+    inputPayload: { capabilityId: decision.capabilityId },
+    riskLevel: 1,
+    confirmationRequired: false,
+    result: "rejected",
+    errorMessage: "EMMA_CAPABILITY_DISABLED",
+  });
+  return decision;
 }
 
 commandRouter.post(
@@ -203,6 +221,15 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     }
   }
 
+  const policyBlock = await blockedByEmmaPolicy(user, command);
+  if (policyBlock) return res.status(403).json({
+    ok: false,
+    kind: "action",
+    error: "EMMA_CAPABILITY_DISABLED",
+    message: policyBlock.message,
+    capabilityId: policyBlock.capabilityId,
+  });
+
   const response = await dispatchParsedCommand(user, command);
   const uiAction = response.uiAction
     ? await publishVoiceUiAction(user, response.intent, response.uiAction)
@@ -247,6 +274,16 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
 
   const alias = await resolveLearningAliases(user, text);
   const command = await resolveUserCommand(user, alias.resolvedText);
+
+  const policyBlock = await blockedByEmmaPolicy(user, command);
+  if (policyBlock) return res.status(403).json({
+    intent: command.intent,
+    interpreted: command.entities,
+    ok: false,
+    error: "EMMA_CAPABILITY_DISABLED",
+    message: policyBlock.message,
+    capabilityId: policyBlock.capabilityId,
+  });
 
   const response = await dispatchParsedCommand(user, command);
   const uiAction = response.uiAction

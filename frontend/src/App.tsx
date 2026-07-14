@@ -43,6 +43,7 @@ import { Connectors } from "./pages/Connectors";
 import { Metrics } from "./pages/Metrics";
 import { Account } from "./pages/Account";
 import { Invoices } from "./pages/Invoices";
+import { EmmaPermissions } from "./pages/EmmaPermissions";
 
 export default function App() {
   return (
@@ -75,6 +76,7 @@ export default function App() {
             <Route path="/employees/new" element={<EmployeeEdit />} />
             <Route path="/employees/:id/edit" element={<EmployeeEdit />} />
             <Route path="/company" element={<CompanySettings />} />
+            <Route path="/emma-permissions" element={<EmmaPermissions />} />
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/tasks" element={<Tasks />} />
             <Route path="/services" element={<ServiceCatalogue />} />

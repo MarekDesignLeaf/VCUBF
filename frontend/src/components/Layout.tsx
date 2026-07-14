@@ -24,6 +24,7 @@ export function Layout() {
   const canUseEmmaMemory = user?.permissions?.includes("voice.execute") ?? false;
   const canReadConnectors = user?.permissions?.includes("connectors.read") ?? false;
   const canManageCompany = user?.permissions?.includes("company.manage") ?? false;
+  const isAdministrator = user?.role === "administrator" || user?.role === "admin";
   const language = appLanguage(user?.voiceLanguage);
   const t = (key: MenuKey) => menuText(language, key);
 
@@ -80,6 +81,7 @@ export function Layout() {
       label: t("management"),
       items: [
         { key: "company", to: "/company", visible: canManageCompany },
+        { key: "emmaPermissions", to: "/emma-permissions", visible: isAdministrator },
         { key: "employees", to: "/employees" },
         { key: "recruitment", to: "/recruitment", visible: canRecruit },
         { key: "dataQuality", to: "/data-quality" },

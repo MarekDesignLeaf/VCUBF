@@ -4,6 +4,7 @@ import { prisma } from "../../db.js";
 import { recordAudit } from "../../lib/audit.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
+import { getEmmaPolicy, isAdministrator, updateEmmaPolicy, updateEmmaPolicySchema } from "../../services/emmaPolicyService.js";
 
 export const companyRouter = Router();
 const companySchema = z.object({ name: z.string().trim().min(2).max(160) });
@@ -41,4 +42,20 @@ companyRouter.put("/", requirePermission("company.manage"), async (req, res) => 
     result: "success",
   });
   res.json(company);
+});
+
+companyRouter.get("/emma-policy", requirePermission("company.manage"), async (req, res) => {
+  if (!isAdministrator(req.user!)) return res.status(403).json({ error: "ADMINISTRATOR_REQUIRED", message: "Only a company administrator can view Emma permissions." });
+  const policy = await getEmmaPolicy(req.user!);
+  if (!policy) return res.status(404).json({ error: "COMPANY_NOT_FOUND" });
+  res.set("Cache-Control", "no-store");
+  return res.json(policy);
+});
+
+companyRouter.put("/emma-policy", requirePermission("company.manage"), async (req, res) => {
+  if (!isAdministrator(req.user!)) return res.status(403).json({ error: "ADMINISTRATOR_REQUIRED", message: "Only a company administrator can change Emma permissions." });
+  const parsed = updateEmmaPolicySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
+  const policy = await updateEmmaPolicy(req.user!, parsed.data.disabled_capabilities);
+  return res.json(policy);
 });

@@ -1,4 +1,4 @@
-import { VOICE_PAGE_ROUTES, type VoicePage } from "./voiceNavigation.js";
+import { VOICE_PAGE_ROUTES, voicePageLabel, type VoicePage } from "./voiceNavigation.js";
 
 // This is the backend-certified map of every signed-in Secretary screen. It
 // deliberately includes page subtrees that do not have their own sidebar row
@@ -109,6 +109,7 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
           child("Windows pairing", undefined, "Approves the current Windows companion after browser sign-in."),
         ] }
       ),
+      item("emma_permissions", "Company-wide administrator controls for every read, write, external and connector capability Emma may execute.", ["Enable", "Disable", "Save Emma permissions"], { access: { all: ["company.manage"] } }),
     ],
   },
   {
@@ -241,6 +242,67 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
   },
 ] as const;
 
+const SECTION_COPY: Record<string, Partial<Record<NavigationSectionId, { label: string; description: string }>>> = {
+  "pl-PL": {
+    start_and_control: { label: "Start i sterowanie", description: "Ustawienia osobiste, przegląd operacyjny i sprawy wymagające uwagi." },
+    attention_and_insight: { label: "Uwagi i analizy", description: "Powiadomienia operacyjne, jakość danych i wskaźniki firmy." },
+    customers_and_work: { label: "Klienci i praca", description: "Potencjalni klienci, klienci, kontakty, dokumenty, zlecenia, zadania, pracownicy i kalendarz." },
+    communication: { label: "Komunikacja", description: "Przychodzące wiadomości, historia komunikacji, zapytania i integracje kanałów." },
+    evidence_and_growth: { label: "Materiały i rozwój", description: "Zdjęcia, kontekst firmy, branże i zawartość strony internetowej." },
+    sales_and_finance: { label: "Sprzedaż i finanse", description: "Katalog usług, oferty i faktury." },
+    people_process_and_learning: { label: "Ludzie, procesy i nauka", description: "Rekrutacja, procedury, uczenie i trwała pamięć Emmy." },
+  },
+  "cs-CZ": {
+    start_and_control: { label: "Začátek a ovládání", description: "Osobní nastavení, provozní přehled a záležitosti vyžadující pozornost." },
+    attention_and_insight: { label: "Pozornost a přehled", description: "Provozní upozornění, kvalita dat a firemní metriky." },
+    customers_and_work: { label: "Klienti a práce", description: "Poptávky, klienti, kontakty, dokumenty, zakázky, úkoly, pracovníci a kalendář." },
+    communication: { label: "Komunikace", description: "Příchozí zprávy, historie komunikace, dotazy a propojené kanály." },
+    evidence_and_growth: { label: "Podklady a růst", description: "Fotografie, kontext firmy, obory a obsah webu." },
+    sales_and_finance: { label: "Obchod a finance", description: "Katalog služeb, nabídky a faktury." },
+    people_process_and_learning: { label: "Lidé, procesy a učení", description: "Nábor, postupy, učení a trvalá paměť Emmy." },
+  },
+  "fr-FR": {
+    start_and_control: { label: "Démarrage et contrôle", description: "Paramètres personnels, vue opérationnelle et éléments nécessitant une attention." },
+    attention_and_insight: { label: "Attention et analyse", description: "Notifications opérationnelles, qualité des données et indicateurs de l’entreprise." },
+    customers_and_work: { label: "Clients et travail", description: "Prospects, clients, contacts, documents, interventions, tâches, employés et calendrier." },
+    communication: { label: "Communication", description: "Messages entrants, historique des communications, demandes et canaux connectés." },
+    evidence_and_growth: { label: "Preuves et croissance", description: "Photos, contexte de l’entreprise, secteurs et contenu du site." },
+    sales_and_finance: { label: "Ventes et finances", description: "Catalogue de services, devis et factures." },
+    people_process_and_learning: { label: "Personnel, processus et apprentissage", description: "Recrutement, procédures, apprentissage et mémoire permanente d’Emma." },
+  },
+  "de-DE": {
+    start_and_control: { label: "Start und Steuerung", description: "Persönliche Einstellungen, Betriebsübersicht und Punkte, die Aufmerksamkeit erfordern." },
+    attention_and_insight: { label: "Aufmerksamkeit und Einblicke", description: "Betriebliche Hinweise, Datenqualität und Unternehmenskennzahlen." },
+    customers_and_work: { label: "Kunden und Arbeit", description: "Interessenten, Kunden, Kontakte, Dokumente, Aufträge, Aufgaben, Mitarbeiter und Kalender." },
+    communication: { label: "Kommunikation", description: "Eingehende Nachrichten, Kommunikationsverlauf, Anfragen und verbundene Kanäle." },
+    evidence_and_growth: { label: "Nachweise und Wachstum", description: "Fotos, Unternehmenskontext, Branchen und Website-Inhalte." },
+    sales_and_finance: { label: "Vertrieb und Finanzen", description: "Leistungskatalog, Angebote und Rechnungen." },
+    people_process_and_learning: { label: "Personal, Prozesse und Lernen", description: "Personalbeschaffung, Abläufe, Lernen und Emmas dauerhaftes Gedächtnis." },
+  },
+  "es-ES": {
+    start_and_control: { label: "Inicio y control", description: "Ajustes personales, visión operativa y elementos que requieren atención." },
+    attention_and_insight: { label: "Atención y análisis", description: "Avisos operativos, calidad de datos y métricas empresariales." },
+    customers_and_work: { label: "Clientes y trabajo", description: "Clientes potenciales, clientes, contactos, documentos, trabajos, tareas, empleados y calendario." },
+    communication: { label: "Comunicación", description: "Mensajes entrantes, historial de comunicaciones, consultas y canales conectados." },
+    evidence_and_growth: { label: "Evidencia y crecimiento", description: "Fotos, contexto empresarial, sectores y contenido web." },
+    sales_and_finance: { label: "Ventas y finanzas", description: "Catálogo de servicios, presupuestos y facturas." },
+    people_process_and_learning: { label: "Personas, procesos y aprendizaje", description: "Selección de personal, procedimientos, aprendizaje y memoria permanente de Emma." },
+  },
+  "it-IT": {
+    start_and_control: { label: "Avvio e controllo", description: "Impostazioni personali, panoramica operativa ed elementi che richiedono attenzione." },
+    attention_and_insight: { label: "Attenzione e analisi", description: "Avvisi operativi, qualità dei dati e metriche aziendali." },
+    customers_and_work: { label: "Clienti e lavoro", description: "Potenziali clienti, clienti, contatti, documenti, lavori, attività, dipendenti e calendario." },
+    communication: { label: "Comunicazione", description: "Messaggi in arrivo, cronologia delle comunicazioni, richieste e canali collegati." },
+    evidence_and_growth: { label: "Materiali e crescita", description: "Foto, contesto aziendale, settori e contenuto del sito." },
+    sales_and_finance: { label: "Vendite e finanze", description: "Catalogo dei servizi, preventivi e fatture." },
+    people_process_and_learning: { label: "Persone, processi e apprendimento", description: "Selezione del personale, procedure, apprendimento e memoria permanente di Emma." },
+  },
+};
+
+function localizedSection(section: NavigationSection, language?: string) {
+  return SECTION_COPY[language ?? ""]?.[section.id] ?? { label: section.label, description: section.description };
+}
+
 function hasAccess(rule: PermissionRule | undefined, permissions: readonly string[]) {
   if (!rule) return true;
   if (rule.all?.some((permission) => !permissions.includes(permission))) return false;
@@ -261,26 +323,30 @@ function accessNote(rule: PermissionRule | undefined) {
 export function resolveNavigationSection(raw: string): NavigationSectionId | undefined {
   const normalized = raw
     .trim()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
     .toLocaleLowerCase()
     .replace(/[.!?]+$/g, "")
     .replace(/[-_]+/g, " ")
     .replace(/\s+/g, " ");
-  const section = SECRETARY_NAVIGATION_CATALOGUE.find((candidate) =>
-    candidate.aliases.some((alias) => alias.toLocaleLowerCase() === normalized) || candidate.label.toLocaleLowerCase() === normalized
-  );
+  const section = SECRETARY_NAVIGATION_CATALOGUE.find((candidate) => {
+    const names = [candidate.label, ...candidate.aliases, ...Object.values(SECTION_COPY).map((copy) => copy[candidate.id]?.label).filter(Boolean)] as string[];
+    return names.some((name) => name.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase() === normalized);
+  });
   return section?.id;
 }
 
-function toView(section: NavigationSection, permissions: readonly string[]): NavigationSectionView {
+function toView(section: NavigationSection, permissions: readonly string[], language?: string): NavigationSectionView {
+  const sectionCopy = localizedSection(section, language);
   return {
     id: section.id,
-    label: section.label,
-    description: section.description,
+    label: sectionCopy.label,
+    description: sectionCopy.description,
     items: section.items.map((entry) => {
       const page = VOICE_PAGE_ROUTES[entry.page];
       return {
         id: entry.page,
-        label: page.label,
+        label: voicePageLabel(entry.page, language),
         path: page.path,
         description: entry.description,
         controls: [...entry.controls],
@@ -303,11 +369,18 @@ function readItem(item: NavigationItemView) {
   return `${item.label} (${item.path}) — ${item.description}${controls}${children}${availability}`;
 }
 
-export function getNavigationCatalogue(permissions: readonly string[], sectionId?: NavigationSectionId): NavigationCatalogueView {
+export function getNavigationCatalogue(permissions: readonly string[], sectionId?: NavigationSectionId, language?: string): NavigationCatalogueView {
   const sections = SECRETARY_NAVIGATION_CATALOGUE
     .filter((section) => !sectionId || section.id === sectionId)
-    .map((section) => toView(section, permissions));
-  const title = sectionId ? `${sections[0]?.label ?? "Secretary"} menu` : "Complete Secretary menu";
+    .map((section) => toView(section, permissions, language));
+  const completeTitle = language === "pl-PL" ? "Pełne menu Secretary"
+    : language === "cs-CZ" ? "Úplné menu Secretary"
+    : language === "fr-FR" ? "Menu complet de Secretary"
+    : language === "de-DE" ? "Vollständiges Secretary-Menü"
+    : language === "es-ES" ? "Menú completo de Secretary"
+    : language === "it-IT" ? "Menu completo di Secretary"
+    : "Complete Secretary menu";
+  const title = sectionId ? sections[0]?.label ?? "Secretary" : completeTitle;
   const readout = [
     `${title}.`,
     ...sections.map((section) => `${section.label}: ${section.description}\n${section.items.map((entry) => `- ${readItem(entry)}`).join("\n")}`),
