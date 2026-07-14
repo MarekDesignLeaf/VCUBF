@@ -56,6 +56,17 @@ LANGUAGE_NAMES = {
     "it-IT": "Italian",
 }
 
+LOCALIZED_TOOL_ERRORS = {
+    "en-GB": "The business request could not be completed.",
+    "en-US": "The business request could not be completed.",
+    "cs-CZ": "Obchodní požadavek se nepodařilo dokončit.",
+    "pl-PL": "Nie udało się wykonać żądania biznesowego.",
+    "fr-FR": "La demande professionnelle n'a pas pu être exécutée.",
+    "de-DE": "Die geschäftliche Anfrage konnte nicht ausgeführt werden.",
+    "es-ES": "No se pudo completar la solicitud empresarial.",
+    "it-IT": "Non è stato possibile completare la richiesta aziendale.",
+}
+
 APP_DIR = Path(os.environ["LOCALAPPDATA"]) / "VCUBF" / "Emma"
 CONFIG_PATH = APP_DIR / "config.json"
 TOKEN_PATH = APP_DIR / "token.bin"
@@ -184,6 +195,7 @@ class RealtimeEmma:
         self.assistant_context: dict = {"persistentMemories": [], "recentConversations": []}
         self.navigation_catalogue: dict = {"title": "Complete Secretary menu", "sections": []}
         self.behavior_instructions = ""
+        self.response_instructions = ""
         self.current_user_sequence = 0
         self.next_user_sequence = 1
         self.item_sequences: dict[str, int] = {}
@@ -206,6 +218,7 @@ class RealtimeEmma:
         self.configured_language = str(load_config().get("Language", "en-GB"))
         self.spoken_language = LANGUAGE_NAMES.get(self.configured_language, self.configured_language)
         self.transcription_language = self.configured_language.split("-", 1)[0].lower() or "en"
+        log(f"realtime session initialized with language {self.configured_language}")
 
     async def send(self, payload: dict) -> None:
         async with self.send_lock:
@@ -363,6 +376,11 @@ EMMA_CONTEXT={context_json}
 SECRETARY_NAVIGATION={navigation_json}"""
         if self.behavior_instructions:
             instructions += self.behavior_instructions
+        # Realtime response.create can override session instructions for one
+        # response. Keep the complete current prompt ready and send it with
+        # every response so a tool result or previous-language turn cannot pull
+        # the conversation back to English.
+        self.response_instructions = instructions
         await self.send(
             {
                 "type": "session.update",
@@ -428,7 +446,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
                     },
                 }
             )
-            await self.send({"type": "response.create"})
+            await self.send(self.response_create_event())
         else:
             await self.update_state("listening", True)
 
@@ -590,13 +608,20 @@ SECRETARY_NAVIGATION={navigation_json}"""
             return True
         return SequenceMatcher(None, heard_normalized, assistant_normalized).ratio() >= 0.62
 
+    def response_create_event(self) -> dict:
+        """Lock each generated turn to the complete current-language prompt."""
+        return {
+            "type": "response.create",
+            "response": {"instructions": self.response_instructions},
+        }
+
     async def create_response_for_user(self) -> None:
         """Create one reply only after a user transcript passed local validation."""
         for _ in range(40):
             if self.stop.is_set():
                 return
             if not self.response_active:
-                await self.send({"type": "response.create"})
+                await self.send(self.response_create_event())
                 return
             await asyncio.sleep(0.025)
         log("validated user turn could not start because a response stayed active")
@@ -633,7 +658,17 @@ SECRETARY_NAVIGATION={navigation_json}"""
             output = compact_tool_result(result)
         except Exception as exc:
             log(f"tool error: {type(exc).__name__}")
-            output = json.dumps({"ok": False, "message": "The business request could not be completed."})
+            output = json.dumps(
+                {
+                    "ok": False,
+                    "message": LOCALIZED_TOOL_ERRORS.get(
+                        self.configured_language,
+                        LOCALIZED_TOOL_ERRORS["en-GB"],
+                    ),
+                    "responseLanguage": self.configured_language,
+                },
+                ensure_ascii=False,
+            )
         await self.send(
             {
                 "type": "conversation.item.create",
