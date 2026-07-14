@@ -1481,6 +1481,10 @@ export const api = {
   me: () => request<LoginResponse["user"]>("/auth/me"),
   changePassword: (currentPassword: string, newPassword: string) =>
     request<void>("/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
+  requestPasswordReset: (email: string) =>
+    request<{ message: string }>("/auth/request-password-reset", { method: "POST", body: JSON.stringify({ email }) }),
+  resetPassword: (token: string, newPassword: string) =>
+    request<void>("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, new_password: newPassword }) }),
   updateVoicePreferences: (wakeWord: string, continuousListening: boolean, language: AppLanguage) =>
     request<Pick<LoginResponse["user"], "voiceWakeWord" | "voiceContinuous" | "voiceLanguage">>("/auth/voice-preferences", { method: "PUT", body: JSON.stringify({ wake_word: wakeWord, continuous_listening: continuousListening, language }) }),
   approveDevicePairing: (code: string) => request<{status:string;expires_at:string}>("/auth/device/approve", { method: "POST", body: JSON.stringify({ code }) }),

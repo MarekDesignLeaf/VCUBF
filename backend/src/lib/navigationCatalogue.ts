@@ -92,6 +92,14 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
     items: [
       item("dashboard", "The operational overview and normal starting point."),
       item(
+        "forgot_password",
+        "Public account recovery. Enter the account email to request a single-use recovery link. The response never reveals whether an account exists.",
+        ["Send reset link"],
+        { children: [
+          child("Set new password", "/reset-password", "Opens only from a one-time recovery link. Set a new strong password; the link expires after 30 minutes and cannot be reused.", ["Save new password"]),
+        ] }
+      ),
+      item(
         "account",
         "Personal account, password, wake word, recognition language, continuous listening and Windows pairing.",
         ["Change password", "Save voice preferences"],

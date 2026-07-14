@@ -8,6 +8,8 @@ VCUBF Secretary application map and operator guide
 
 FOUNDATION
 - Sign in (/login): enter email and password, then choose Sign in. Saved credentials are offered by the browser or Windows credential provider, not read by Emma.
+- Password recovery (/forgot-password): choose Forgot your password, enter the account email and use Send reset link. The response never reveals whether an account exists. When the company Gmail recovery source is available, it sends a one-time recovery link; the bootstrap administrator account uses the Gmail connector owner's mailbox rather than the placeholder admin@example.com address.
+- Set new password (/reset-password): open only from the one-time recovery link, then enter and confirm a strong new password. The link expires after 30 minutes, cannot be reused, invalidates existing sessions and never deletes workspace data.
 - Dashboard (/): overview and starting point.
 - Account (/account): password, wake word, recognition language, continuous listening and Windows pairing.
 - Notifications (/notifications): attention feed built from overdue follow-ups, capacity and quote facts; acknowledgement does not alter source records.

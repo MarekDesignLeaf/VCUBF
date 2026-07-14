@@ -26,6 +26,7 @@ import {
   type ActionContract,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import { frontendUrl } from "../lib/frontendUrl.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -51,10 +52,7 @@ const context = (companyId: string, sourceId: string) => `${companyId}:${sourceI
 const legacyContext = (companyId: string, sourceId: string) => `${companyId}:${sourceId}:google_drive_photos`;
 
 function redirect(sourceId: string) {
-  let base: URL;
-  try { base = new URL(process.env.FRONTEND_URL?.trim() || "http://localhost:5173"); }
-  catch { base = new URL("http://localhost:5173"); }
-  const url = new URL("/connectors", base);
+  const url = frontendUrl("/connectors");
   url.searchParams.set(DRIVE_KEY, "connected");
   url.searchParams.set("source", sourceId);
   return url.toString();

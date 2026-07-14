@@ -28,7 +28,9 @@ async function main() {
 
   await prisma.user.upsert({
     where: { email: "admin@example.com" },
-    update: { permissions: adminPermissions, passwordHash },
+    // Seeding must never replace a password that an administrator has chosen.
+    // The configured password applies only while creating the initial account.
+    update: { permissions: adminPermissions },
     create: {
       companyId: company.id,
       email: "admin@example.com",

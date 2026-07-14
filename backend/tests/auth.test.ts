@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash, randomBytes } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import request from "supertest";
 import { createServer } from "../src/server.js";
@@ -71,6 +72,41 @@ describe("auth", () => {
   it("requires authentication to change a password", async () => {
     const res = await request(app).post("/auth/change-password").send({ current_password: "Password123!", new_password: "AValidPassword456" });
     assert.equal(res.status, 401);
+  });
+
+  it("resets a password from a one-time, expiring recovery token and invalidates old sessions", async () => {
+    const worker = await prisma.user.findUniqueOrThrow({ where: { email: "worker@test.local" } });
+    const token = randomBytes(32).toString("base64url");
+    await prisma.passwordResetToken.create({
+      data: {
+        companyId: worker.companyId,
+        userId: worker.id,
+        tokenHash: createHash("sha256").update(token).digest("hex"),
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+    const oldLogin = await request(app).post("/auth/login").send({ email: worker.email, password: "Password123!" });
+    assert.equal(oldLogin.status, 200);
+    const reset = await request(app).post("/auth/reset-password").send({ token, new_password: "RecoveredPassword456A" });
+    assert.equal(reset.status, 204);
+    const oldSession = await request(app).get("/auth/me").set("Authorization", `Bearer ${oldLogin.body.token}`);
+    assert.equal(oldSession.status, 401);
+    const oldPassword = await request(app).post("/auth/login").send({ email: worker.email, password: "Password123!" });
+    assert.equal(oldPassword.status, 401);
+    const newPassword = await request(app).post("/auth/login").send({ email: worker.email, password: "RecoveredPassword456A" });
+    assert.equal(newPassword.status, 200);
+    const reused = await request(app).post("/auth/reset-password").send({ token, new_password: "AnotherPassword789A" });
+    assert.equal(reused.status, 400);
+    const audit = await prisma.auditLog.findFirst({ where: { actionName: "reset_password", userId: worker.id }, orderBy: { createdAt: "desc" } });
+    assert.deepEqual(audit?.inputPayload, { passwordFieldsRedacted: true });
+  });
+
+  it("does not disclose whether an account can receive a reset message", async () => {
+    const known = await request(app).post("/auth/request-password-reset").send({ email: "admin@test.local" });
+    const unknown = await request(app).post("/auth/request-password-reset").send({ email: "nobody@test.local" });
+    assert.equal(known.status, 202);
+    assert.equal(unknown.status, 202);
+    assert.equal(known.body.message, unknown.body.message);
   });
 
   it("stores per-user wake-word and continuous-listening preferences", async () => {

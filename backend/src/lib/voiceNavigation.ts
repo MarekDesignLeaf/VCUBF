@@ -1,5 +1,7 @@
 export const VOICE_PAGE_ROUTES = {
   dashboard: { path: "/", label: "Dashboard" },
+  forgot_password: { path: "/forgot-password", label: "Password Recovery" },
+  reset_password: { path: "/reset-password", label: "Set New Password" },
   account: { path: "/account", label: "Account" },
   notifications: { path: "/notifications", label: "Notifications" },
   data_quality: { path: "/data-quality", label: "Data Quality" },
@@ -37,6 +39,9 @@ const PAGE_ALIASES: Record<string, VoicePage> = {
   home: "dashboard",
   "home page": "dashboard",
   dashboard: "dashboard",
+  "forgot password": "forgot_password",
+  "password recovery": "forgot_password",
+  "reset password": "forgot_password",
   account: "account",
   "my account": "account",
   notifications: "notifications",

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "../../db.js";
 import { recordAudit } from "../../lib/audit.js";
 import { APPROVE_DEVICE_PAIRING_ACTION } from "../../lib/actionContracts.js";
+import { frontendUrl } from "../../lib/frontendUrl.js";
 import { requireAuth, signToken } from "../../middleware/auth.js";
 
 export const devicePairingRouter = Router();
@@ -24,8 +25,9 @@ devicePairingRouter.post("/start", limiter, async (_req, res) => {
     const bytes=randomBytes(8);let code="";for(const byte of bytes)code+=alphabet[byte%alphabet.length];
     try {
       const pairing=await prisma.devicePairing.create({data:{code,secretHash:secretHash(secret),expiresAt:new Date(Date.now()+10*60_000)}});
-      const frontend=(process.env.FRONTEND_URL??"http://localhost:5173").split(",")[0].trim().replace(/\/$/,"");
-      return res.status(201).json({pairing_id:pairing.id,code,secret,expires_at:pairing.expiresAt.toISOString(),verification_url:`${frontend}/account?pair=${code}`});
+      const verificationUrl = frontendUrl("/account");
+      verificationUrl.searchParams.set("pair", code);
+      return res.status(201).json({pairing_id:pairing.id,code,secret,expires_at:pairing.expiresAt.toISOString(),verification_url:verificationUrl.toString()});
     } catch (error:any) { if(error?.code!=="P2002"||attempt===4)throw error; }
   }
 });

@@ -6,6 +6,7 @@ import { assertConnectorEncryptionConfigured, ConnectorCryptoError, decryptConne
 import { buildGoogleCalendarAuthorizationUrl, exchangeGoogleCalendarAuthorizationCode, GoogleCalendarAdapterError, listGoogleCalendarEvents, listGoogleCalendars, refreshGoogleCalendarCredential, revokeGoogleCalendarCredential, type GoogleCalendarEvent, type StoredGoogleCalendarCredential } from "../connectors/googleCalendarAdapter.js";
 import { COMPLETE_GOOGLE_CALENDAR_OAUTH_ACTION, DISCONNECT_GOOGLE_CALENDAR_SOURCE_ACTION, START_GOOGLE_CALENDAR_OAUTH_ACTION, SYNC_GOOGLE_CALENDAR_ACTION, type ActionContract } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import { frontendUrl } from "../lib/frontendUrl.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -15,7 +16,7 @@ const disconnectSchema = z.object({ confirmed: z.boolean().optional() }).strict(
 export const eventQuerySchema = z.object({ offset: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(100).default(50), include_deleted: z.enum(["true", "false"]).optional() }).strict();
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const context = (companyId: string, sourceId: string) => `${companyId}:${sourceId}:google_calendar`;
-function redirect(sourceId: string) { let base: URL; try { base = new URL(process.env.FRONTEND_URL?.trim() || "http://localhost:5173"); } catch { base = new URL("http://localhost:5173"); } const url = new URL("/connectors", base); url.searchParams.set("google_calendar", "connected"); url.searchParams.set("source", sourceId); return url.toString(); }
+function redirect(sourceId: string) { const url = frontendUrl("/connectors"); url.searchParams.set("google_calendar", "connected"); url.searchParams.set("source", sourceId); return url.toString(); }
 async function auditFailure(action: ActionContract, identity: { companyId: string; userId?: string; id?: string }, sourceId: string, errorMessage: string) { await recordAudit({ companyId: identity.companyId, userId: identity.userId ?? identity.id, actionName: action.actionName, inputPayload: { sourceId }, riskLevel: action.riskLevel, confirmationRequired: action.confirmationRequired, result: "error", errorMessage }); }
 function providerError(error: unknown): ServiceResult<never> { if (error instanceof GoogleCalendarAdapterError) return fail(error.code === "RATE_LIMITED" ? 429 : ["PROVIDER_UNAVAILABLE", "CONNECTOR_CONFIGURATION_MISSING"].includes(error.code) ? 503 : error.code === "PROVIDER_RESPONSE_INVALID" ? 502 : 409, error.code, error.message); if (error instanceof ConnectorCryptoError) return fail(500, error.code); return fail(500, "CONNECTOR_INTERNAL_ERROR"); }
 

@@ -35,6 +35,7 @@ import {
   type ActionContract,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import { frontendUrl } from "../lib/frontendUrl.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -83,15 +84,7 @@ function credentialContext(companyId: string, sourceId: string) {
 }
 
 function safeRedirect(sourceId: string) {
-  const configured = process.env.FRONTEND_URL?.trim() || "http://localhost:5173";
-  let base: URL;
-  try {
-    base = new URL(configured);
-    if (!["http:", "https:"].includes(base.protocol)) throw new Error("Invalid protocol");
-  } catch {
-    base = new URL("http://localhost:5173");
-  }
-  const url = new URL("/connectors", base);
+  const url = frontendUrl("/connectors");
   url.searchParams.set("gmail", "connected");
   url.searchParams.set("source", sourceId);
   return url.toString();
@@ -297,6 +290,59 @@ async function usableCredential(source: { credential: Prisma.ConnectorCredential
     await prisma.connectorCredential.update({ where: { sourceId: source.credential.sourceId }, data: encrypted });
   }
   return credential;
+}
+
+/**
+ * Deliver a security notice from a company's already authorised Gmail source.
+ * This is intentionally narrow: it only sends a supplied plain-text message
+ * to one recipient and never exposes connector credentials to auth routes.
+ */
+export async function deliverGmailSecurityMessage(input: {
+  companyId: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  fallbackToConnectedMailbox?: boolean;
+}) {
+  const sources = await prisma.connectorSource.findMany({
+    where: {
+      companyId: input.companyId,
+      connectorKey: "gmail",
+      isActive: true,
+      isEnabled: true,
+      configuredScopes: { has: "send:messages" },
+    },
+    include: { credential: true },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  for (const source of sources) {
+    if (!source.credential) continue;
+    try {
+      const credential = await usableCredential({ credential: source.credential });
+      if (!credential.scopes.some((scope) => scope === GMAIL_COMPOSE_SCOPE || scope === GMAIL_SEND_SCOPE)) continue;
+      let recipient = input.recipient;
+      // The bootstrap administrator is deliberately a placeholder address.
+      // Its real recovery mailbox is the account that authorised Gmail.
+      if (input.fallbackToConnectedMailbox) {
+        const profile = await getGmailProfile(credential.accessToken);
+        const parsed = gmailAddressSchema.safeParse(profile.emailAddress);
+        if (parsed.success) recipient = parsed.data;
+      }
+      const sent = await sendGmailMessage(credential.accessToken, {
+        to: [recipient],
+        cc: [],
+        bcc: [],
+        subject: input.subject,
+        body: input.body,
+      });
+      if (!sent.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+      return { delivered: true as const, sourceId: source.id, recipient };
+    } catch {
+      // A second configured Gmail source can still provide the recovery path.
+    }
+  }
+  return { delivered: false as const };
 }
 
 type GmailSource = Prisma.ConnectorSourceGetPayload<{ include: { credential: true } }>;

@@ -31,6 +31,7 @@ import {
   type ActionContract,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import { frontendUrl } from "../lib/frontendUrl.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -57,10 +58,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 const context = (companyId: string, sourceId: string) => `${companyId}:${sourceId}:${PHOTOS_KEY}`;
 
 function redirect(sourceId: string) {
-  let base: URL;
-  try { base = new URL(process.env.FRONTEND_URL?.trim() || "http://localhost:5173"); }
-  catch { base = new URL("http://localhost:5173"); }
-  const url = new URL("/connectors", base);
+  const url = frontendUrl("/connectors");
   url.searchParams.set(PHOTOS_KEY, "connected");
   url.searchParams.set("source", sourceId);
   return url.toString();

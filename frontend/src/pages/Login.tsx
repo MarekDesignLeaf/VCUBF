@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 import { ApiError } from "../api/client";
 
@@ -71,6 +71,7 @@ export function Login() {
           <button className="login-submit" type="submit" disabled={submitting}>
             {submitting ? "Signing in…" : "Enter Secretary"}
           </button>
+          <Link className="login-secondary-link" to="/forgot-password">Forgot your password?</Link>
         </form>
       </main>
     </div>

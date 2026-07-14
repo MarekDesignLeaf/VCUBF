@@ -27,6 +27,7 @@ import {
   type ActionContract,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import { frontendUrl } from "../lib/frontendUrl.js";
 import { isValidPhoneNumberFormat, normalizeEmail, normalizePhone } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
@@ -53,12 +54,7 @@ function stateHash(state: string) { return createHash("sha256").update(state).di
 function credentialContext(companyId: string, sourceId: string) { return `${companyId}:${sourceId}:google_contacts`; }
 
 function safeRedirect(sourceId: string) {
-  let base: URL;
-  try {
-    base = new URL(process.env.FRONTEND_URL?.trim() || "http://localhost:5173");
-    if (!["http:", "https:"].includes(base.protocol)) throw new Error("Invalid protocol");
-  } catch { base = new URL("http://localhost:5173"); }
-  const url = new URL("/connectors", base);
+  const url = frontendUrl("/connectors");
   url.searchParams.set("google_contacts", "connected");
   url.searchParams.set("source", sourceId);
   return url.toString();
