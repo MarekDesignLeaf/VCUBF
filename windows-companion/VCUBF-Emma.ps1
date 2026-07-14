@@ -692,7 +692,10 @@ function Handle-Recognition([string]$Text,[double]$Confidence,[byte[]]$AudioWav)
   $confidence=$Confidence
   Update-HearingMonitor $text ("Recognized locally ({0:P0} confidence)" -f $confidence)
   $command = Find-WakeCommand $text
-  $minimumConfidence=[double]$script:Config.Confidence
+  # A short proper name is commonly scored below normal dictation. Keep the
+  # user's stricter threshold for commands, but retain the proven wake-word
+  # threshold so saying "Emma" is not silently discarded.
+  $minimumConfidence=if($null -ne $command){[math]::Min([double]$script:Config.Confidence,0.35)}else{[double]$script:Config.Confidence}
   if($confidence -lt $minimumConfidence){return}
   if ($null -ne $command) {
     if (!$command -and [bool]$script:Config.HandsFree -and [bool]$script:Config.Realtime) {
