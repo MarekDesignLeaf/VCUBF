@@ -93,9 +93,9 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
         interpreted: command.entities,
         ok: result.ok,
         httpStatus: result.httpStatus,
-        data: result.ok ? result.data : undefined,
+        data: result.ok ? result.data : result.extra,
         error: result.ok ? undefined : result.error,
-        message: result.ok ? undefined : result.message,
+        message: result.ok ? `${command.entities.display_name} was created as a client.` : result.message,
       };
       break;
     }

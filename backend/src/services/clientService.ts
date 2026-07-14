@@ -55,6 +55,44 @@ const pendingArchivePayloadSchema = z.object({ clientId: z.string().uuid(), disp
 const PENDING_CLIENT_ARCHIVE = "archive_client";
 const PENDING_CLIENT_ARCHIVE_LIFETIME_MS = 5 * 60 * 1000;
 
+function createClientValidationFailure(rawInput: unknown, error: z.ZodError): FailureResult {
+  const input = rawInput && typeof rawInput === "object" ? rawInput as Record<string, unknown> : {};
+  const displayName = typeof input.display_name === "string" && input.display_name.trim()
+    ? input.display_name.trim()
+    : "The client";
+  const invalidFields = [...new Set(error.issues
+    .map((issue) => String(issue.path[0] ?? ""))
+    .filter((field) => field.length > 0))];
+  const invalidEmail = invalidFields.includes("email_primary");
+  const invalidPhone = invalidFields.includes("phone_primary");
+
+  if (invalidEmail && invalidPhone) {
+    return fail(
+      400,
+      "VALIDATION_FAILED",
+      `The email address and phone number were not recognised as valid, so ${displayName} was not created. Please say both values again.`,
+      { invalidFields }
+    );
+  }
+  if (invalidEmail) {
+    return fail(
+      400,
+      "VALIDATION_FAILED",
+      `The email address was not recognised as valid, so ${displayName} was not created. Please say the complete email address again.`,
+      { invalidFields }
+    );
+  }
+  if (invalidPhone) {
+    return fail(
+      400,
+      "VALIDATION_FAILED",
+      `The phone number was not recognised as valid, so ${displayName} was not created. Please say the full phone number again, including the country or area code.`,
+      { invalidFields }
+    );
+  }
+  return fail(400, "VALIDATION_FAILED", `${displayName} was not created because required client details are invalid.`, { invalidFields });
+}
+
 function canManageClients(user: AuthedUser) {
   return user.permissions.includes("crm.manage");
 }
@@ -167,7 +205,7 @@ export async function createClient(user: AuthedUser, rawInput: unknown): Promise
   const parsed = createClientSchema.safeParse(rawInput);
   if (!parsed.success) {
     await auditFailure(user, CREATE_CLIENT_ACTION, rawInput, "VALIDATION_FAILED");
-    return fail(400, "VALIDATION_FAILED", parsed.error.message);
+    return createClientValidationFailure(rawInput, parsed.error);
   }
   const data = parsed.data;
 

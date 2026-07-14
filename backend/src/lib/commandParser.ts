@@ -210,6 +210,7 @@ function parseVoiceLanguageCommand(text: string): Extract<ParsedCommand, { inten
       .filter((word) => word.length > 0 && !new Set([
         "the", "language", "język", "jezyk", "jazyk", "now", "teraz", "please", "proszę", "prosze",
         "prosím", "prosim", "mi", "na", "do", "to", "into", "on", "kurwa", "fucking",
+        "set", "change", "switch", "turn", "sprache", "spreche", "sprechen",
       ]).has(word.toLocaleLowerCase("en")))
       .join(" ");
     return resolveVoiceLanguage(cleaned);
@@ -232,6 +233,12 @@ function parseVoiceLanguageCommand(text: string): Extract<ParsedCommand, { inten
     /^(?:change|passe|bascule|mets)\s+(?:la\s+)?langue\s*(?:(?:en|vers)\s+)?(.+)$/iu,
     /^(?:parle|réponds|reponds)\s+(?:en\s+)?(.+)$/iu,
     /^(?:wechsle|ändere|andere|stelle)\s+(?:die\s+)?sprache\s*(?:(?:auf|zu)\s+)?(.+)$/iu,
+    /^(?:wechsle|wechsel|schalte)(?:\s+die)?(?:\s+sprache)?\s*(?:(?:auf|zu)\s+)?(.+)$/iu,
+    /^(?:ich\s+(?:will|möchte|mochte)|bitte)(?:\s+die)?(?:\s+sprache)?\s*(?:(?:auf|in)\s+)?(.+)$/iu,
+    /^(?:kann\s+ich|kannst\s+du|können\s+sie|konnen\s+sie)(?:\s+die)?\s+sprache\s*(?:(?:auf|in)\s+)?(.+)$/iu,
+    /^(?:bestell|stell|stelle|setz|setze|wähl|wahl|wahle)(?:\s+die)?(?:\s+sprache)?\s*(?:auf\s+)?(.+)$/iu,
+    /^sprache\s+(.+)$/iu,
+    /^(.+)\s+(?:sprache|language|jazyk|język|jezyk)$/iu,
     /^(?:sprich|antworte)\s+(?:auf\s+)?(.+)$/iu,
     /^(?:cambia|cambiar|pon)\s+(?:el\s+)?idioma\s*(?:(?:a|en)\s+)?(.+)$/iu,
     /^(?:habla|responde)\s+(?:en\s+)?(.+)$/iu,

@@ -187,6 +187,14 @@ describe("commandParser", () => {
     assert.deepEqual(parseTextCommand("Yes, switch to Polish."), { intent: "set_voice_language", entities: { language: "pl-PL" } });
     assert.deepEqual(parseTextCommand("Passe la langue en allemand."), { intent: "set_voice_language", entities: { language: "de-DE" } });
     assert.deepEqual(parseTextCommand("Wechsle die Sprache auf Spanisch."), { intent: "set_voice_language", entities: { language: "es-ES" } });
+    assert.deepEqual(parseTextCommand("Switch English."), { intent: "set_voice_language", entities: { language: "en-GB" } });
+    assert.deepEqual(parseTextCommand("Switch Switch Englischspreche."), { intent: "set_voice_language", entities: { language: "en-GB" } });
+    assert.deepEqual(parseTextCommand("Wechsle auf Englisch."), { intent: "set_voice_language", entities: { language: "en-GB" } });
+    assert.deepEqual(parseTextCommand("Ich will Englisch."), { intent: "set_voice_language", entities: { language: "en-GB" } });
+    assert.deepEqual(parseTextCommand("Kann ich Sprache Englisch?"), { intent: "set_voice_language", entities: { language: "en-GB" } });
+    assert.deepEqual(parseTextCommand("Sprache Englisch."), { intent: "set_voice_language", entities: { language: "en-GB" } });
+    assert.deepEqual(parseTextCommand("Tschechische Sprache."), { intent: "set_voice_language", entities: { language: "cs-CZ" } });
+    assert.deepEqual(parseTextCommand("Bestell ENGB."), { intent: "set_voice_language", entities: { language: "en-GB" } });
     assert.deepEqual(parseTextCommand("Cambia el idioma a italiano."), { intent: "set_voice_language", entities: { language: "it-IT" } });
     assert.deepEqual(parseTextCommand("Cambia la lingua in francese."), { intent: "set_voice_language", entities: { language: "fr-FR" } });
     assert.equal(isExplicitVoiceLanguageChange("změň jazyk na češtinu", "cs-CZ"), true);

@@ -74,18 +74,20 @@ LANGUAGE_NAMES = {
 # it before asking the Realtime model for a reply so success never depends on
 # the model deciding to call execute_business_request.
 LANGUAGE_ALIASES = {
-    "en gb": "en-GB", "n gb": "en-GB", "n g b": "en-GB", "ngb": "en-GB",
+    "en gb": "en-GB", "engb": "en-GB", "n gb": "en-GB", "n g b": "en-GB", "ngb": "en-GB",
     "m gb": "en-GB", "mgb": "en-GB", "en": "en-GB",
     "english": "en-GB", "british": "en-GB", "british english": "en-GB", "english british": "en-GB",
     "anglictina": "en-GB", "anglictiny": "en-GB", "anglictinu": "en-GB", "anglicky": "en-GB",
     "angielski": "en-GB", "angielsku": "en-GB", "angielski brytyjski": "en-GB",
     "brytyjski angielski": "en-GB", "brytyjski": "en-GB", "brytyjskim": "en-GB",
-    "anglais": "en-GB", "englisch": "en-GB",
+    "anglais": "en-GB", "englisch": "en-GB", "britisches englisch": "en-GB",
+    "englischspreche": "en-GB", "englisch sprechen": "en-GB",
     "ingles": "en-GB", "inglese": "en-GB",
     "en us": "en-US", "american english": "en-US", "us english": "en-US",
     "cs cz": "cs-CZ", "cs": "cs-CZ", "czech": "cs-CZ", "cestina": "cs-CZ",
     "cestiny": "cs-CZ", "cestinu": "cs-CZ", "cesky": "cs-CZ", "czeski": "cs-CZ", "czesku": "cs-CZ",
-    "tcheque": "cs-CZ", "tschechisch": "cs-CZ", "checo": "cs-CZ", "ceco": "cs-CZ",
+    "tcheque": "cs-CZ", "tschech": "cs-CZ", "tschechisch": "cs-CZ", "tschechische": "cs-CZ",
+    "tschechische sprache": "cs-CZ", "checo": "cs-CZ", "ceco": "cs-CZ",
     "pl pl": "pl-PL", "pl": "pl-PL", "polish": "pl-PL", "polski": "pl-PL", "polsku": "pl-PL",
     "polsky": "pl-PL", "polstina": "pl-PL", "polstiny": "pl-PL", "polstinu": "pl-PL",
     "polonais": "pl-PL", "polnisch": "pl-PL", "polaco": "pl-PL", "polacco": "pl-PL",
@@ -120,6 +122,12 @@ LANGUAGE_COMMAND_PATTERNS = tuple(re.compile(pattern) for pattern in (
     r"(?:change|passe|bascule|mets)(?: la)? langue(?: en| vers)? (.+)",
     r"(?:parle|reponds)(?: en)? (.+)",
     r"(?:wechsle|andere|stelle)(?: die)? sprache(?: auf| zu)? (.+)",
+    r"(?:wechsle|wechsel|schalte)(?: die)?(?: sprache)?(?: auf| zu)? (.+)",
+    r"(?:ich will|ich mochte|bitte)(?: die)?(?: sprache)?(?: auf| in)? (.+)",
+    r"(?:kann ich|kannst du|konnen sie)(?: die)? sprache(?: auf| in)? (.+)",
+    r"(?:bestell|stell|stelle|setz|setze|wahl|wahle)(?: die)?(?: sprache)?(?: auf)? (.+)",
+    r"sprache (.+)",
+    r"(.+) (?:sprache|language|jazyk|jezyk)",
     r"(?:sprich|antworte)(?: auf)? (.+)",
     r"(?:cambia|cambiar|pon)(?: el)? idioma(?: a| en)? (.+)",
     r"(?:habla|responde)(?: en)? (.+)",
@@ -140,6 +148,7 @@ def normalize_language_command(text: str) -> str:
 LANGUAGE_TARGET_FILLERS = {
     "the", "language", "jezyk", "jazyk", "now", "teraz", "please", "prosze", "prosim",
     "mi", "na", "do", "to", "into", "on", "kurva", "kurwa", "fucking",
+    "set", "change", "switch", "turn", "sprache", "spreche", "sprechen",
 }
 
 
@@ -185,6 +194,14 @@ def language_detection_self_test() -> bool:
         "Cambia la lingua in italiano.": "it-IT",
         "Passe la langue en allemand.": "de-DE",
         "Wechsle die Sprache auf Spanisch.": "es-ES",
+        "Switch English.": "en-GB",
+        "Switch Switch Englischspreche.": "en-GB",
+        "Wechsle auf Englisch.": "en-GB",
+        "Ich will Englisch.": "en-GB",
+        "Kann ich Sprache Englisch?": "en-GB",
+        "Sprache Englisch.": "en-GB",
+        "Tschechische Sprache.": "cs-CZ",
+        "Bestell ENGB.": "en-GB",
     }
     return all(detect_language_change(text) == expected for text, expected in examples.items()) \
         and detect_language_change("Show me contacts") is None
@@ -371,6 +388,55 @@ def backend_json(method: str, path: str, body: dict | None = None) -> dict:
         return json.loads(payload) if payload else {}
 
 
+def backend_command_json(method: str, path: str, body: dict | None = None) -> dict:
+    """Return structured business validation failures instead of hiding them behind HTTP status."""
+    try:
+        return backend_json(method, path, body)
+    except urllib.error.HTTPError as exc:
+        payload = exc.read().decode("utf-8", errors="replace").strip()
+        try:
+            parsed = json.loads(payload) if payload else {}
+        except json.JSONDecodeError:
+            raise
+        if isinstance(parsed, dict) and parsed:
+            parsed.setdefault("ok", False)
+            parsed.setdefault("httpStatus", exc.code)
+            return parsed
+        raise
+
+
+def build_backend_history(entries: list[dict], current_text: str) -> list[dict]:
+    """Build the six prior turns accepted by /command/assistant, excluding the current user turn."""
+    ordered = sorted(entries, key=lambda entry: int(entry.get("sequence", 0)))
+    current = current_text.strip()
+    for index in range(len(ordered) - 1, -1, -1):
+        entry = ordered[index]
+        if entry.get("role") == "user" and str(entry.get("content") or "").strip() == current:
+            del ordered[index]
+            break
+    return [
+        {"role": str(entry["role"]), "content": str(entry["content"])[:800]}
+        for entry in ordered[-6:]
+        if entry.get("role") in {"user", "assistant"} and str(entry.get("content") or "").strip()
+    ]
+
+
+def backend_history_self_test() -> bool:
+    entries = [
+        {"role": "user", "content": "Emma, make a new client.", "sequence": 1},
+        {"role": "assistant", "content": "What is the client name?", "sequence": 2},
+        {"role": "user", "content": "Client name is Roger", "sequence": 3},
+        {"role": "assistant", "content": "What is the email?", "sequence": 4},
+        {"role": "user", "content": "Email is roger@gmail.com", "sequence": 5},
+        {"role": "assistant", "content": "What is the phone number?", "sequence": 6},
+        {"role": "user", "content": "Phone number is 0755 835 085", "sequence": 7},
+    ]
+    history = build_backend_history(entries, "Phone number is 0755 835 085")
+    return len(history) == 6 \
+        and history[0]["content"] == "Emma, make a new client." \
+        and history[-1]["content"] == "What is the phone number?"
+
+
 def compact_tool_result(payload: dict) -> str:
     # Tool output may contain real records requested by the user. Limit size to
     # keep the spoken response focused and prevent an accidental huge transfer.
@@ -424,6 +490,7 @@ class RealtimeEmma:
         self.state_lock = asyncio.Lock()
         self.transcript_lock = asyncio.Lock()
         self.conversation_id: str | None = None
+        self.conversation_history: list[dict] = []
         self.assistant_context: dict = {"persistentMemories": [], "recentConversations": []}
         self.navigation_catalogue: dict = {"title": "Complete Secretary menu", "sections": []}
         self.behavior_instructions = ""
@@ -523,6 +590,14 @@ class RealtimeEmma:
         content = content.strip()
         if not content:
             return
+        self.conversation_history = [
+            entry for entry in self.conversation_history
+            if not (entry.get("role") == role and int(entry.get("sequence", 0)) == sequence)
+        ]
+        self.conversation_history.append({"role": role, "content": content[:800], "sequence": sequence})
+        self.conversation_history = sorted(
+            self.conversation_history, key=lambda entry: int(entry.get("sequence", 0))
+        )[-20:]
         write_live_preview(role, content, "You spoke" if role == "user" else "Emma is answering")
         if not self.conversation_id:
             return
@@ -951,7 +1026,12 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 backend_json,
                 "POST",
                 "/command/assistant",
-                {"text": heard, "input_method": "voice_transcript", "language": self.configured_language, "history": []},
+                {
+                    "text": heard,
+                    "input_method": "voice_transcript",
+                    "language": self.configured_language,
+                    "history": build_backend_history(self.conversation_history, heard),
+                },
             )
             selected_language = (
                 (result.get("data") or {}).get("voiceLanguage")
@@ -987,10 +1067,15 @@ SECRETARY_NAVIGATION={navigation_json}"""
         """
         try:
             result = await asyncio.to_thread(
-                backend_json,
+                backend_command_json,
                 "POST",
                 "/command/assistant",
-                {"text": heard, "input_method": "voice_transcript", "language": self.configured_language, "history": []},
+                {
+                    "text": heard,
+                    "input_method": "voice_transcript",
+                    "language": self.configured_language,
+                    "history": build_backend_history(self.conversation_history, heard),
+                },
             )
             selected_language = (
                 (result.get("data") or {}).get("voiceLanguage")
@@ -999,6 +1084,18 @@ SECRETARY_NAVIGATION={navigation_json}"""
             )
             if selected_language in LANGUAGE_NAMES and selected_language != self.configured_language:
                 await self.apply_language(selected_language)
+            server_message = str(result.get("message") or "").strip()
+            exact_server_message = bool(server_message) and (
+                result.get("intent") == "create_client"
+                or (result.get("actionExecuted") is False and result.get("kind") in {"reply", "clarification", "plan"})
+            )
+            if exact_server_message:
+                await self.create_response_for_user(
+                    "\nIMPORTANT FOR THIS ONE RESPONSE: Do not call any tool. Say exactly this message and nothing else: "
+                    + json.dumps(server_message, ensure_ascii=False),
+                    disable_tools=True,
+                )
+                return
             result_json = compact_tool_result(result)
             await self.create_response_for_user(
                 "\nIMPORTANT FOR THIS ONE RESPONSE: Secretary has already processed the user's request. "
@@ -1037,10 +1134,15 @@ SECRETARY_NAVIGATION={navigation_json}"""
             if not request_text:
                 raise ValueError("missing request")
             result = await asyncio.to_thread(
-                backend_json,
+                backend_command_json,
                 "POST",
                 "/command/assistant",
-                {"text": request_text, "input_method": "voice_transcript", "language": self.configured_language, "history": []},
+                {
+                    "text": request_text,
+                    "input_method": "voice_transcript",
+                    "language": self.configured_language,
+                    "history": build_backend_history(self.conversation_history, request_text),
+                },
             )
             selected_language = (
                 (result.get("data") or {}).get("voiceLanguage")
@@ -1292,17 +1394,19 @@ def main() -> int:
             audio.terminate()
         buffer_ok = playback_buffer_self_test()
         language_ok = language_detection_self_test()
+        history_ok = backend_history_self_test()
         print(json.dumps({
-            "status": "ok" if buffer_ok and language_ok and output_devices else "failed",
+            "status": "ok" if buffer_ok and language_ok and history_ok and output_devices else "failed",
             "input_devices": len(input_devices),
             "output_devices": len(output_devices),
             "playback_frame_ms": PLAYBACK_FRAME_MS,
             "playback_prebuffer_ms": PLAYBACK_PREBUFFER_MS,
             "jitter_buffer": buffer_ok,
             "language_command_detection": language_ok,
+            "conversation_history": history_ok,
             "token_protected": TOKEN_PATH.exists(),
         }))
-        return 0 if buffer_ok and language_ok and output_devices else 1
+        return 0 if buffer_ok and language_ok and history_ok and output_devices else 1
     initial = sys.stdin.readline().strip() if args.stdin else ""
     runtime = RealtimeEmma(initial)
     try:

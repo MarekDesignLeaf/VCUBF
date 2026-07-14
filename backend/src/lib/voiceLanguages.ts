@@ -15,6 +15,7 @@ export const VOICE_LANGUAGE_LABELS: Record<VoiceLanguage, string> = {
 
 const LANGUAGE_ALIASES: Record<string, VoiceLanguage> = {
   "en-gb": "en-GB",
+  engb: "en-GB",
   ngb: "en-GB",
   "n gb": "en-GB",
   "n g b": "en-GB",
@@ -25,6 +26,9 @@ const LANGUAGE_ALIASES: Record<string, VoiceLanguage> = {
   british: "en-GB",
   anglais: "en-GB",
   englisch: "en-GB",
+  "britisches englisch": "en-GB",
+  englischspreche: "en-GB",
+  "englisch sprechen": "en-GB",
   ingles: "en-GB",
   inglese: "en-GB",
   anglictina: "en-GB",
@@ -46,7 +50,10 @@ const LANGUAGE_ALIASES: Record<string, VoiceLanguage> = {
   cs: "cs-CZ",
   czech: "cs-CZ",
   tcheque: "cs-CZ",
+  tschech: "cs-CZ",
   tschechisch: "cs-CZ",
+  tschechische: "cs-CZ",
+  "tschechische sprache": "cs-CZ",
   checo: "cs-CZ",
   ceco: "cs-CZ",
   cestina: "cs-CZ",

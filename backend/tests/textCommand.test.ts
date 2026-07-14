@@ -168,6 +168,76 @@ describe("command/text", () => {
     }
   });
 
+  it("uses multi-turn client details, reports invalid contact data, and confirms only a real create", async () => {
+    const previousKey = process.env.OPENAI_API_KEY;
+    const previousFetch = globalThis.fetch;
+    process.env.OPENAI_API_KEY = "test-key";
+    let assistantResult = {
+      kind: "command",
+      canonical_command: "create client Roger, email roger@gmail.com, phone 0755 835 085",
+      message: "Creating Roger.",
+    };
+    let providerRequest: any;
+    globalThis.fetch = async (_input, init) => {
+      providerRequest = JSON.parse(String(init?.body ?? "{}"));
+      return Response.json({ output: [{ content: [{ text: JSON.stringify(assistantResult) }] }] });
+    };
+    const history = [
+      { role: "user", content: "Emma, make a new client." },
+      { role: "assistant", content: "What is the client name?" },
+      { role: "user", content: "Client name is Roger" },
+      { role: "assistant", content: "What is Roger's email address?" },
+      { role: "user", content: "Email address is roger@gmail.com" },
+    ];
+    try {
+      const invalid = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ text: "Phone number is 0755 835 085.", input_method: "voice_transcript", language: "en-GB", history });
+      assert.equal(invalid.status, 400);
+      assert.equal(invalid.body.kind, "action");
+      assert.equal(invalid.body.intent, "create_client");
+      assert.equal(invalid.body.ok, false);
+      assert.deepEqual(invalid.body.data.invalidFields, ["phone_primary"]);
+      assert.match(invalid.body.message, /Roger was not created/i);
+      assert.equal(await prisma.client.count({ where: { displayName: "Roger" } }), 0);
+      assert.equal(providerRequest.input[0].content, "Emma, make a new client.");
+      assert.equal(providerRequest.input.at(-1).content, "Phone number is 0755 835 085.");
+
+      assistantResult = {
+        kind: "reply",
+        canonical_command: null as any,
+        message: "Understood. I'll go ahead and create Roger now.",
+      };
+      const falsePromise = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ text: "Yes, that's correct.", input_method: "voice_transcript", language: "en-GB", history });
+      assert.equal(falsePromise.status, 200);
+      assert.equal(falsePromise.body.actionExecuted, false);
+      assert.equal(falsePromise.body.message, "No business record was created or changed. I still need a complete, valid request before I can do that.");
+      assert.equal(await prisma.client.count({ where: { displayName: "Roger" } }), 0);
+
+      assistantResult = {
+        kind: "command",
+        canonical_command: "create client Roger, email roger@gmail.com, phone 07700 900123",
+        message: "Creating Roger.",
+      };
+      const created = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ text: "The full phone number is 07700 900123.", input_method: "voice_transcript", language: "en-GB", history });
+      assert.equal(created.status, 201);
+      assert.equal(created.body.ok, true);
+      assert.equal(created.body.message, "Roger was created as a client.");
+      assert.equal(await prisma.client.count({ where: { displayName: "Roger" } }), 1);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousKey;
+    }
+  });
+
   it("creates a job via text command by resolving the client name", async () => {
     const res = await request(app)
       .post("/command/text")

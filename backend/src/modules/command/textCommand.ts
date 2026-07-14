@@ -5,7 +5,7 @@ import { requirePermission } from "../../middleware/permissions.js";
 import { recordAudit } from "../../lib/audit.js";
 import { EXECUTE_TEXT_COMMAND_ACTION } from "../../lib/actionContracts.js";
 import { isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../../lib/commandParser.js";
-import { dispatchParsedCommand } from "../../lib/commandExecutor.js";
+import { dispatchParsedCommand, type CommandResponse } from "../../lib/commandExecutor.js";
 import { resolveLearningAliases } from "../../services/learningService.js";
 import { createRealtimeClientSession, interpretVoiceRequest, transcribeVoiceAudio } from "../../services/voiceAssistantService.js";
 import { publishVoiceUiAction } from "../../services/voiceUiActionService.js";
@@ -118,6 +118,85 @@ function auditInterpreted(command: ParsedTextCommand, interpreted: unknown) {
     return { recipientLength: command.entities.to.length, bodyLength: command.entities.body.length };
   }
   return interpreted;
+}
+
+const NON_ACTION_MUTATION_CLAIM = /(?:\b(?:i(?:'|’)ll|i\s+will|i(?:'|’)m\s+going\s+to|i\s+am\s+going\s+to|go\s+ahead\s+and|proceed(?:ing)?\s+to)\b.{0,120}\b(?:create|add|update|delete|remove|send|change|archive|save|record)\b|\b(?:has|have|was|were)\s+(?:been\s+)?(?:created|added|updated|deleted|removed|sent|changed|archived|saved|recorded)\b|\b(?:vytvořím|vytvorim|přidám|pridam|změním|zmenim|smažu|smazu|odešlu|odeslu)\b|\b(?:utworzę|utworze|dodam|zmienię|zmienie|usunę|usune|wyślę|wysle)\b)/iu;
+
+function nonActionSafetyMessage(language: string) {
+  const messages: Record<string, string> = {
+    cs: "Nebyl vytvořen ani změněn žádný firemní záznam. Nejdříve potřebuji úplný a platný požadavek.",
+    pl: "Żaden rekord firmowy nie został utworzony ani zmieniony. Najpierw potrzebuję kompletnego i prawidłowego polecenia.",
+    fr: "Aucun enregistrement professionnel n’a été créé ou modifié. J’ai d’abord besoin d’une demande complète et valide.",
+    de: "Es wurde kein Geschäftseintrag erstellt oder geändert. Ich benötige zuerst eine vollständige und gültige Anweisung.",
+    es: "No se creó ni modificó ningún registro empresarial. Primero necesito una solicitud completa y válida.",
+    it: "Nessun record aziendale è stato creato o modificato. Prima mi serve una richiesta completa e valida.",
+    en: "No business record was created or changed. I still need a complete, valid request before I can do that.",
+  };
+  return messages[language.slice(0, 2).toLocaleLowerCase("en")] ?? messages.en;
+}
+
+function safeNonActionAssistantMessage(message: string, language: string) {
+  return NON_ACTION_MUTATION_CLAIM.test(message) ? nonActionSafetyMessage(language) : message;
+}
+
+function localizeVoiceClientResponse(response: CommandResponse, language: string): CommandResponse {
+  if (response.intent !== "create_client") return response;
+  const interpreted = response.interpreted as { display_name?: string };
+  const name = interpreted.display_name?.trim() || "client";
+  const invalidFields = Array.isArray((response.data as any)?.invalidFields)
+    ? (response.data as any).invalidFields as string[]
+    : [];
+  const invalidEmail = invalidFields.includes("email_primary");
+  const invalidPhone = invalidFields.includes("phone_primary");
+  const locale = language.slice(0, 2).toLocaleLowerCase("en");
+  const messages: Record<string, { created: string; email: string; phone: string; both: string }> = {
+    en: {
+      created: `${name} was created as a client.`,
+      email: `The email address was not recognised as valid, so ${name} was not created. Please say the complete email address again.`,
+      phone: `The phone number was not recognised as valid, so ${name} was not created. Please say the full phone number again, including the country or area code.`,
+      both: `The email address and phone number were not recognised as valid, so ${name} was not created. Please say both values again.`,
+    },
+    cs: {
+      created: `${name} byl vytvořen jako klient.`,
+      email: `E-mailová adresa nebyla rozpoznána jako platná, takže ${name} nebyl vytvořen. Řekněte prosím celou e-mailovou adresu znovu.`,
+      phone: `Telefonní číslo nebylo rozpoznáno jako platné, takže ${name} nebyl vytvořen. Řekněte prosím celé číslo znovu, včetně předvolby.`,
+      both: `E-mailová adresa ani telefonní číslo nebyly rozpoznány jako platné, takže ${name} nebyl vytvořen. Řekněte prosím oba údaje znovu.`,
+    },
+    pl: {
+      created: `${name} został utworzony jako klient.`,
+      email: `Adres e-mail nie został rozpoznany jako prawidłowy, dlatego ${name} nie został utworzony. Podaj ponownie pełny adres e-mail.`,
+      phone: `Numer telefonu nie został rozpoznany jako prawidłowy, dlatego ${name} nie został utworzony. Podaj ponownie pełny numer wraz z numerem kierunkowym.`,
+      both: `Adres e-mail i numer telefonu nie zostały rozpoznane jako prawidłowe, dlatego ${name} nie został utworzony. Podaj ponownie obie wartości.`,
+    },
+    de: {
+      created: `${name} wurde als Kunde erstellt.`,
+      email: `Die E-Mail-Adresse wurde nicht als gültig erkannt, daher wurde ${name} nicht erstellt. Bitte nennen Sie die vollständige E-Mail-Adresse erneut.`,
+      phone: `Die Telefonnummer wurde nicht als gültig erkannt, daher wurde ${name} nicht erstellt. Bitte nennen Sie die vollständige Nummer einschließlich Vorwahl erneut.`,
+      both: `E-Mail-Adresse und Telefonnummer wurden nicht als gültig erkannt, daher wurde ${name} nicht erstellt. Bitte nennen Sie beide Angaben erneut.`,
+    },
+    fr: {
+      created: `${name} a été créé comme client.`,
+      email: `L’adresse e-mail n’a pas été reconnue comme valide, donc ${name} n’a pas été créé. Veuillez redonner l’adresse e-mail complète.`,
+      phone: `Le numéro de téléphone n’a pas été reconnu comme valide, donc ${name} n’a pas été créé. Veuillez redonner le numéro complet avec l’indicatif.`,
+      both: `L’adresse e-mail et le numéro de téléphone ne sont pas valides, donc ${name} n’a pas été créé. Veuillez redonner les deux valeurs.`,
+    },
+    es: {
+      created: `${name} se creó como cliente.`,
+      email: `El correo electrónico no se reconoció como válido, por lo que ${name} no se creó. Indique de nuevo la dirección completa.`,
+      phone: `El teléfono no se reconoció como válido, por lo que ${name} no se creó. Indique de nuevo el número completo con prefijo.`,
+      both: `El correo y el teléfono no se reconocieron como válidos, por lo que ${name} no se creó. Indique de nuevo ambos datos.`,
+    },
+    it: {
+      created: `${name} è stato creato come cliente.`,
+      email: `L’indirizzo e-mail non è stato riconosciuto come valido, quindi ${name} non è stato creato. Ripeti l’indirizzo completo.`,
+      phone: `Il numero di telefono non è stato riconosciuto come valido, quindi ${name} non è stato creato. Ripeti il numero completo con prefisso.`,
+      both: `L’indirizzo e-mail e il telefono non sono validi, quindi ${name} non è stato creato. Ripeti entrambi i dati.`,
+    },
+  };
+  const selected = messages[locale] ?? messages.en;
+  if (response.ok) return { ...response, message: selected.created };
+  if (response.error !== "VALIDATION_FAILED" || (!invalidEmail && !invalidPhone)) return response;
+  return { ...response, message: invalidEmail && invalidPhone ? selected.both : invalidEmail ? selected.email : selected.phone };
 }
 
 async function blockedByEmmaPolicy(user: AuthedUser, command: ParsedTextCommand) {
@@ -238,7 +317,12 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
         confirmationRequired: false,
         result: "success",
       });
-      return res.json({ ok: true, kind: assistant.kind, message: assistant.message });
+      return res.json({
+        ok: true,
+        kind: assistant.kind,
+        actionExecuted: false,
+        message: safeNonActionAssistantMessage(assistant.message, language),
+      });
     }
     command = await resolveUserCommand(user, assistant.canonical_command);
     if (command.intent === "unrecognized") {
@@ -274,7 +358,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     capabilityId: policyBlock.capabilityId,
   });
 
-  const response = await dispatchParsedCommand(user, command);
+  const response = localizeVoiceClientResponse(await dispatchParsedCommand(user, command), language);
   const uiAction = response.uiAction
     ? await publishVoiceUiAction(user, response.intent, response.uiAction)
     : undefined;

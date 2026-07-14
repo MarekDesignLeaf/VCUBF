@@ -57,6 +57,8 @@ describe("crm/clients", () => {
       .send({ display_name: "Bad Email", email_primary: "not-an-email" });
     assert.equal(invalidEmail.status, 400);
     assert.equal(invalidEmail.body.error, "VALIDATION_FAILED");
+    assert.deepEqual(invalidEmail.body.invalidFields, ["email_primary"]);
+    assert.match(invalidEmail.body.message, /Bad Email was not created/i);
 
     const invalidPhone = await request(app)
       .post("/crm/clients")
@@ -64,6 +66,9 @@ describe("crm/clients", () => {
       .send({ display_name: "Bad Phone", phone_primary: "123" });
     assert.equal(invalidPhone.status, 400);
     assert.equal(invalidPhone.body.error, "VALIDATION_FAILED");
+    assert.deepEqual(invalidPhone.body.invalidFields, ["phone_primary"]);
+    assert.match(invalidPhone.body.message, /Bad Phone was not created/i);
+    assert.equal(await prisma.client.count({ where: { displayName: { in: ["Bad Email", "Bad Phone"] } } }), 0);
   });
 
   it("rejects assigning an application user's email to a client", async () => {
