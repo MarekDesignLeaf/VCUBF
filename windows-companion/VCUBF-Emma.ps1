@@ -1,6 +1,7 @@
 param([switch]$Diagnostic,[string]$CommandTest,[switch]$DesktopLaunch,[switch]$Announce,[switch]$ShowMonitor)
 
 $ErrorActionPreference = 'Stop'
+try { (Get-Process -Id $PID).PriorityClass = 'AboveNormal' } catch {}
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Speech
@@ -603,6 +604,7 @@ function Invoke-RealtimeProcess([string]$RealtimeScript,[string]$Command) {
   $process=New-Object Diagnostics.Process
   $process.StartInfo=$startInfo
   if(!$process.Start()){throw 'REALTIME_START_FAILED'}
+  try { $process.PriorityClass = 'AboveNormal' } catch {}
   $script:RealtimeProcess=$process
   if($script:Notify){$script:Notify.Text='VCUBF Emma — active conversation 1 of 1'}
   Update-HearingMonitor $script:Config.WakeWord 'Realtime conversation active — 1 of 1'
