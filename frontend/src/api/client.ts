@@ -783,6 +783,12 @@ export interface LearningRule {
   createdAt: string;
 }
 
+export interface EmmaBehaviorScenario {
+  enabled: boolean;
+  scenario: string;
+  updatedAt: string | null;
+}
+
 // Communication Log Module — the manual-entry foundation of the
 // Communication Intelligence Module. Every field is exactly what the user
 // typed in; there is no email/WhatsApp/SMS connector yet, so nothing here
@@ -1812,6 +1818,9 @@ export const api = {
       request<LearningRule>("/learning-rules", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Record<string, unknown>) =>
       request<LearningRule>(`/learning-rules/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    behaviorScenario: () => request<EmmaBehaviorScenario>("/learning-rules/behavior-scenario"),
+    updateBehaviorScenario: (data: { enabled: boolean; scenario: string }) =>
+      request<EmmaBehaviorScenario>("/learning-rules/behavior-scenario", { method: "PUT", body: JSON.stringify(data) }),
   },
   leads: {
     list: (params?: { status?: string }) => {

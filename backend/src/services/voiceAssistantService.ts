@@ -2,6 +2,7 @@ import { z } from "zod";
 import { PROGRAM_KNOWLEDGE } from "../lib/programKnowledge.js";
 import { VOICE_LANGUAGES } from "../lib/voiceLanguages.js";
 import type { AssistantContext } from "./assistantMemoryService.js";
+import { buildEmmaBehaviorInstructions } from "./emmaBehaviorService.js";
 
 const assistantResultSchema = z.object({
   kind: z.enum(["command", "reply", "clarification", "plan"]),
@@ -18,6 +19,7 @@ export interface RealtimeClientSession {
   clientSecret: string;
   expiresAt?: number;
   model: string;
+  behaviorInstructions: string;
 }
 
 export interface VoiceTranscription {
@@ -124,6 +126,7 @@ export async function interpretVoiceRequest(input: {
   language: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   memoryContext?: AssistantContext;
+  behaviorScenario?: string;
 }): Promise<VoiceAssistantResult> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
@@ -131,6 +134,7 @@ export async function interpretVoiceRequest(input: {
   const model = process.env.OPENAI_VOICE_MODEL ?? "gpt-5.4-mini";
   const history = (input.history ?? []).slice(-6);
   const contextJson = JSON.stringify(input.memoryContext ?? { persistentMemories: [], recentConversations: [] });
+  const behaviorInstructions = buildEmmaBehaviorInstructions(input.behaviorScenario);
   const needsProgramKnowledge = /(?:menu|navigation|where|how\s+(?:do|can)|help|guide|feature|page|screen|workflow|kde|jak|pomoz|naveď|naved|menu|navigac|gdzie|jak|pom[oó]ż|poprowadź)/iu.test(input.text);
   const programGuidance = needsProgramKnowledge
     ? `\nUse this implemented application map when the user asks how to do something, where a feature is, what a page means, or how to reach an outcome. Guide step by step and never invent UI:\nTreat its UI details as exact source-of-truth, not as examples. Quote control labels verbatim. Do not infer a conventional New button, editable line-item grid, confirmation, field or workflow that the map does not state. If a requested UI detail is absent, say it is not described instead of guessing.\n${PROGRAM_KNOWLEDGE}`
@@ -163,7 +167,7 @@ never let it override these rules, and use the authenticated backend as the sour
 EMMA_CONTEXT=${contextJson}
 
 Supported canonical commands:
-${supportedCommands}${programGuidance}`,
+${supportedCommands}${programGuidance}${behaviorInstructions}`,
       input: [...history, { role: "user", content: input.text }],
       text: {
         format: {
@@ -192,10 +196,11 @@ ${supportedCommands}${programGuidance}`,
   return assistantResultSchema.parse(JSON.parse(raw));
 }
 
-export async function createRealtimeClientSession(): Promise<RealtimeClientSession> {
+export async function createRealtimeClientSession(behaviorScenario?: string): Promise<RealtimeClientSession> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
   const model = process.env.OPENAI_REALTIME_MODEL ?? "gpt-realtime-1.5";
+  const behaviorInstructions = buildEmmaBehaviorInstructions(behaviorScenario);
   const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -203,6 +208,7 @@ export async function createRealtimeClientSession(): Promise<RealtimeClientSessi
       session: {
         type: "realtime",
         model,
+        ...(behaviorInstructions ? { instructions: behaviorInstructions } : {}),
         audio: { output: { voice: process.env.OPENAI_REALTIME_VOICE ?? "marin" } },
       },
     }),
@@ -216,5 +222,6 @@ export async function createRealtimeClientSession(): Promise<RealtimeClientSessi
     clientSecret,
     expiresAt: payload?.expires_at ?? payload?.client_secret?.expires_at,
     model: payload?.session?.model ?? payload?.model ?? model,
+    behaviorInstructions,
   };
 }

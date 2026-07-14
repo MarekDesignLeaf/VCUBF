@@ -15,6 +15,7 @@ import { hasPendingVoiceWhatsAppMessage } from "../../services/voiceWhatsAppServ
 import { hasPendingVoiceNotificationDeletion } from "../../services/voiceNotificationService.js";
 import { getNavigationCatalogue } from "../../lib/navigationCatalogue.js";
 import { evaluateEmmaCommand } from "../../services/emmaPolicyService.js";
+import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorService.js";
 
 export const commandRouter = Router();
 
@@ -161,7 +162,8 @@ commandRouter.post(
 
 commandRouter.post("/realtime/session", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission), async (req, res) => {
   try {
-    const session = await createRealtimeClientSession();
+    const behaviorScenario = await getActiveEmmaBehaviorScenario(req.user!.companyId);
+    const session = await createRealtimeClientSession(behaviorScenario);
     await recordAudit({
       companyId: req.user!.companyId,
       userId: req.user!.id,
@@ -172,7 +174,12 @@ commandRouter.post("/realtime/session", requirePermission(EXECUTE_TEXT_COMMAND_A
       result: "success",
     });
     res.set("Cache-Control", "no-store");
-    return res.json({ client_secret: session.clientSecret, expires_at: session.expiresAt, model: session.model });
+    return res.json({
+      client_secret: session.clientSecret,
+      expires_at: session.expiresAt,
+      model: session.model,
+      behavior_instructions: session.behaviorInstructions,
+    });
   } catch (error) {
     console.error("Realtime session creation failed", error instanceof Error ? error.message : error);
     return res.status(503).json({ error: "REALTIME_UNAVAILABLE", message: "Realtime voice is temporarily unavailable." });
@@ -190,8 +197,18 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
 
   if (command.intent === "unrecognized") {
     try {
-      const memoryContext = await getAssistantContext(user);
-      assistant = await interpretVoiceRequest({ text: alias.resolvedText, userName: user.displayName, language, history, memoryContext });
+      const [memoryContext, behaviorScenario] = await Promise.all([
+        getAssistantContext(user),
+        getActiveEmmaBehaviorScenario(user.companyId),
+      ]);
+      assistant = await interpretVoiceRequest({
+        text: alias.resolvedText,
+        userName: user.displayName,
+        language,
+        history,
+        memoryContext,
+        behaviorScenario,
+      });
     } catch (error) {
       console.error("Voice assistant interpretation failed", error instanceof Error ? error.message : error);
       return res.status(503).json({

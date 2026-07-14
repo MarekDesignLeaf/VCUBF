@@ -154,6 +154,16 @@ export const UPDATE_EMMA_COMPANY_POLICY_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
 };
 
+export const UPDATE_EMMA_BEHAVIOR_SCENARIO_ACTION: ActionContract = {
+  actionName: "update_emma_behavior_scenario",
+  purpose: "Allow a company administrator to define Emma's company-wide conversational style and persona for every new assistant session.",
+  requiredPermission: "company.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "companies.emma_behavior_scenario"],
+  possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
+};
+
 // Job Allocation and Capacity Management Module — see VCUF master
 // documentation section 24A / 26. Assignment is capacity-aware: it computes
 // real workload from existing jobs (estimated_duration_hours, planned dates)

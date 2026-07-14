@@ -16,6 +16,9 @@ model Company {
   primaryAdminUserId String?   @unique @map("primary_admin_user_id")
   setupCompletedAt   DateTime? @map("setup_completed_at")
   emmaDisabledCapabilities String[] @default([]) @map("emma_disabled_capabilities")
+  emmaBehaviorScenario String? @map("emma_behavior_scenario")
+  emmaBehaviorEnabled Boolean @default(false) @map("emma_behavior_enabled")
+  emmaBehaviorUpdatedAt DateTime? @map("emma_behavior_updated_at")
   createdAt          DateTime  @default(now()) @map("created_at")
 
   primaryAdministrator User? @relation("CompanyPrimaryAdministrator", fields: [primaryAdminUserId], references: [id], onDelete: SetNull)

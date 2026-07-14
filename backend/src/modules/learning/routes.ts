@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { CREATE_LEARNING_RULE_ACTION, UPDATE_LEARNING_RULE_ACTION } from "../../lib/actionContracts.js";
+import { getEmmaBehaviorScenario, updateEmmaBehaviorScenario } from "../../services/emmaBehaviorService.js";
 import * as learningService from "../../services/learningService.js";
 
 export const learningRouter = Router();
@@ -11,6 +12,19 @@ learningRouter.use(requireAuth);
 learningRouter.get("/", requirePermission("voice.execute"), async (req, res) => {
   const { status } = req.query;
   res.json(await learningService.listLearningRules(req.user!, { status: typeof status === "string" ? status : undefined }));
+});
+
+learningRouter.get("/behavior-scenario", requirePermission("company.manage"), async (req, res) => {
+  const scenario = await getEmmaBehaviorScenario(req.user!);
+  if (!scenario) return res.status(403).json({ error: "ADMINISTRATOR_REQUIRED" });
+  res.set("Cache-Control", "no-store");
+  return res.json(scenario);
+});
+
+learningRouter.put("/behavior-scenario", requirePermission("company.manage"), async (req, res) => {
+  const result = await updateEmmaBehaviorScenario(req.user!, req.body);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  return res.status(result.httpStatus).json(result.data);
 });
 
 learningRouter.get("/:id", requirePermission("voice.execute"), async (req, res) => {

@@ -61,6 +61,25 @@ describe("voice assistant interpretation", () => {
     assert.equal(result.canonical_command, "list clients");
   });
 
+  it("loads the administrator behavior scenario as subordinate instructions", async () => {
+    process.env.OPENAI_API_KEY = "test-only-key";
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      assert.match(body.instructions, /COMPANY ADMINISTRATOR BEHAVIOR SCENARIO/);
+      assert.match(body.instructions, /warm and conversational/);
+      assert.match(body.instructions, /cannot add a capability or authorize an action/i);
+      return Response.json({
+        output: [{ content: [{ text: JSON.stringify({ kind: "reply", canonical_command: null, message: "Hello." }) }] }],
+      });
+    };
+    await interpretVoiceRequest({
+      text: "Hello",
+      userName: "Test",
+      language: "en-GB",
+      behaviorScenario: "Be warm and conversational.",
+    });
+  });
+
   it("includes the certified application map only for navigation and help requests", async () => {
     process.env.OPENAI_API_KEY = "test-only-key";
     globalThis.fetch = async (_url, init) => {
@@ -91,9 +110,10 @@ describe("voice assistant interpretation", () => {
       assert.equal(body.session.type, "realtime");
       return new Response(JSON.stringify({ value: "ek_test_ephemeral", expires_at: 1234, session: { model: "gpt-realtime-1.5" } }), { status: 200 });
     };
-    const session = await createRealtimeClientSession();
+    const session = await createRealtimeClientSession("Be warm and conversational.");
     assert.equal(session.clientSecret, "ek_test_ephemeral");
     assert.equal(session.expiresAt, 1234);
+    assert.match(session.behaviorInstructions, /warm and conversational/);
   });
 
   it("transcribes an in-memory WAV without persisting or exposing the server key", async () => {
