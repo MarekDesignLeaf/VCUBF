@@ -3,6 +3,7 @@ import type { ActionContract } from "./actionContracts.js";
 import type { ParsedCommand } from "./commandParser.js";
 import { SECRETARY_NAVIGATION_CATALOGUE } from "./navigationCatalogue.js";
 import { VOICE_PAGE_ROUTES, type VoicePage } from "./voiceNavigation.js";
+import { capabilityActionForExecutableAction, EMMA_DYNAMIC_COMMAND_ACTIONS, EMMA_EXECUTABLE_ACTIONS, EMMA_NON_DIRECT_ACTIONS } from "./emmaExecutableActionCatalogue.js";
 
 export type EmmaCapabilityMode = "read" | "write" | "external" | "administration";
 export type EmmaCapabilityKind = "page" | "action" | "command";
@@ -21,6 +22,9 @@ export type EmmaCapability = {
   requiredPermission?: string;
   riskLevel?: ActionContract["riskLevel"];
   confirmationRequired?: boolean;
+  voiceActions?: string[];
+  executionClass?: "voice" | "interactive" | "system" | "superseded";
+  executionNote?: string;
 };
 
 type CommandPolicy = {
@@ -33,6 +37,9 @@ type CommandPolicy = {
 // Exhaustive by type: adding a new ParsedCommand intent cannot compile until
 // it has an administrator-visible policy assignment here.
 export const COMMAND_POLICY = {
+  execute_action: { category: "administration", mode: "write", description: "Dispatch an allowlisted Secretary action through its owning validated service." },
+  confirm_execute_action: { category: "administration", mode: "write", description: "Confirm the single reviewed Secretary action waiting for this user." },
+  cancel_execute_action: { category: "administration", mode: "write", description: "Cancel the single reviewed Secretary action waiting for this user." },
   create_client: { category: "customers", mode: "write", actionName: "create_client" },
   update_client: { category: "customers", mode: "write", actionName: "update_client" },
   prepare_archive_client: { category: "customers", mode: "write", actionName: "archive_client" },
@@ -202,11 +209,25 @@ const actionCapabilities: EmmaCapability[] = EMMA_ACTION_CONTRACTS.map((action) 
   requiredPermission: action.requiredPermission,
   riskLevel: action.riskLevel,
   confirmationRequired: action.confirmationRequired,
+  voiceActions: [...new Set([
+    ...(intentsByAction.get(action.actionName) ?? []),
+    ...Object.entries(EMMA_EXECUTABLE_ACTIONS)
+      .filter(([, definition]) => definition.capabilityAction === action.actionName)
+      .map(([name]) => name),
+  ])],
+  executionClass: Object.prototype.hasOwnProperty.call(EMMA_NON_DIRECT_ACTIONS, action.actionName)
+    ? EMMA_NON_DIRECT_ACTIONS[action.actionName as keyof typeof EMMA_NON_DIRECT_ACTIONS].executionClass
+    : "voice",
+  executionNote: Object.prototype.hasOwnProperty.call(EMMA_NON_DIRECT_ACTIONS, action.actionName)
+    ? EMMA_NON_DIRECT_ACTIONS[action.actionName as keyof typeof EMMA_NON_DIRECT_ACTIONS].note
+    : EMMA_DYNAMIC_COMMAND_ACTIONS.includes(action.actionName as typeof EMMA_DYNAMIC_COMMAND_ACTIONS[number])
+      ? "Executed through a dynamic command that resolves the exact connector or confirmed mutation."
+      : undefined,
 }));
 
 const actionNames = new Set(EMMA_ACTION_CONTRACTS.map((action) => action.actionName));
 const commandCapabilities: EmmaCapability[] = (Object.entries(COMMAND_POLICY) as Array<[ParsedCommand["intent"], CommandPolicy]>)
-  .filter(([intent, policy]) => intent !== "navigate" && intent !== "unrecognized" && (!policy.actionName || !actionNames.has(policy.actionName)))
+  .filter(([intent, policy]) => !["execute_action", "confirm_execute_action", "cancel_execute_action", "navigate", "unrecognized"].includes(intent) && (!policy.actionName || !actionNames.has(policy.actionName)))
   .map(([intent, policy]) => ({
     id: `command.${intent}`,
     category: policy.category,
@@ -224,13 +245,39 @@ export const EMMA_PAGE_CAPABILITY_COUNT = pageCapabilities.length;
 export const EMMA_ACTION_CAPABILITY_COUNT = actionCapabilities.length;
 
 export function capabilityIdForCommand(command: ParsedCommand | ParsedCommand["intent"]): string | undefined {
+  return capabilityIdsForCommand(command)[0];
+}
+
+export function capabilityIdsForCommand(command: ParsedCommand | ParsedCommand["intent"]): string[] {
   const intent = typeof command === "string" ? command : command.intent;
-  if (intent === "unrecognized") return undefined;
+  if (intent === "unrecognized") return [];
   if (intent === "navigate" && typeof command !== "string") {
     const navigation = command as Extract<ParsedCommand, { intent: "navigate" }>;
-    return `page.${navigation.entities.page}`;
+    return [`page.${navigation.entities.page}`];
+  }
+  if (["execute_action", "confirm_execute_action", "cancel_execute_action"].includes(intent) && typeof command !== "string") {
+    const executable = command as Extract<ParsedCommand, { intent: "execute_action" | "confirm_execute_action" | "cancel_execute_action" }>;
+    return [`action.${capabilityActionForExecutableAction(executable.entities.action)}`];
+  }
+  if (intent === "setup_connectors" && typeof command !== "string") {
+    return ["action.register_connector_source"];
+  }
+  if (intent === "sync_connectors" && typeof command !== "string") {
+    const connector = (command as Extract<ParsedCommand, { intent: "sync_connectors" }>).entities.connector_key;
+    const actions = connector === "all"
+      ? ["sync_gmail_messages", "sync_google_contacts", "sync_google_calendar"]
+      : connector === "gmail" ? ["sync_gmail_messages"]
+        : connector === "google_contacts" ? ["sync_google_contacts"]
+          : connector === "google_calendar" ? ["sync_google_calendar"] : [];
+    return actions.length ? actions.map((action) => `action.${action}`) : ["command.sync_connectors"];
+  }
+  if (intent === "confirm_gmail_message") {
+    return ["action.confirm_voice_gmail_message", "action.send_gmail_message"];
+  }
+  if (intent === "confirm_delete_notifications") {
+    return ["action.confirm_voice_notification_deletion", "action.delete_all_notifications"];
   }
   const policy: CommandPolicy = COMMAND_POLICY[intent];
-  if (policy.actionName && actionNames.has(policy.actionName)) return `action.${policy.actionName}`;
-  return `command.${intent}`;
+  if (policy.actionName && actionNames.has(policy.actionName)) return [`action.${policy.actionName}`];
+  return [`command.${intent}`];
 }

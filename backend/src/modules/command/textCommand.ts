@@ -17,6 +17,7 @@ import { getNavigationCatalogue } from "../../lib/navigationCatalogue.js";
 import { languageChangeRejectedMessage } from "../../lib/voiceLanguages.js";
 import { evaluateEmmaCommand } from "../../services/emmaPolicyService.js";
 import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorService.js";
+import { getPendingEmmaActionName } from "../../services/emmaExecutableActionService.js";
 
 export const commandRouter = Router();
 
@@ -53,10 +54,11 @@ type ParsedTextCommand = ReturnType<typeof parseTextCommand>;
 async function resolveUserCommand(user: AuthedUser, text: string): Promise<ParsedTextCommand> {
   const parsed = parseTextCommand(text);
   if (parsed.intent !== "unrecognized") return parsed;
-  const [gmailPending, whatsappPending, notificationDeletionPending] = await Promise.all([
+  const [gmailPending, whatsappPending, notificationDeletionPending, pendingEmmaAction] = await Promise.all([
     hasPendingVoiceGmailMessage(user),
     hasPendingVoiceWhatsAppMessage(user),
     hasPendingVoiceNotificationDeletion(user),
+    getPendingEmmaActionName(user),
   ]);
   const pendingActions: Array<{ pending: boolean; confirm: ParsedTextCommand; cancel: ParsedTextCommand }> = [
     {
@@ -73,6 +75,11 @@ async function resolveUserCommand(user: AuthedUser, text: string): Promise<Parse
       pending: notificationDeletionPending,
       confirm: { intent: "confirm_delete_notifications", entities: {} },
       cancel: { intent: "cancel_delete_notifications", entities: {} },
+    },
+    {
+      pending: Boolean(pendingEmmaAction),
+      confirm: { intent: "confirm_execute_action", entities: { action: pendingEmmaAction! } },
+      cancel: { intent: "cancel_execute_action", entities: { action: pendingEmmaAction! } },
     },
   ];
   const active = pendingActions.filter((candidate) => candidate.pending);

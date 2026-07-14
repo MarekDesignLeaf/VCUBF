@@ -4,7 +4,7 @@ import type { AuthedUser } from "../middleware/auth.js";
 import type { ParsedCommand } from "../lib/commandParser.js";
 import { recordAudit } from "../lib/audit.js";
 import {
-  capabilityIdForCommand,
+  capabilityIdsForCommand,
   EMMA_CAPABILITIES,
   type EmmaCapability,
   type EmmaCapabilityMode,
@@ -24,6 +24,7 @@ const LEGACY_CAPABILITY_IDS = new Set([
 ]);
 const SAFE_CANCELLATION_INTENTS = new Set<ParsedCommand["intent"]>([
   "cancel_gmail_message", "cancel_whatsapp_message", "cancel_delete_notifications", "cancel_archive_client", "cancel_archive_contact",
+  "cancel_execute_action",
 ]);
 
 function legacyMatches(legacyId: string, capability: EmmaCapability) {
@@ -108,19 +109,35 @@ export async function updateEmmaPolicy(user: AuthedUser, disabledCapabilities: s
 export async function evaluateEmmaCommand(user: AuthedUser, command: ParsedCommand | ParsedCommand["intent"]) {
   const intent = typeof command === "string" ? command : command.intent;
   if (intent === "unrecognized" || SAFE_CANCELLATION_INTENTS.has(intent)) return { allowed: true as const };
-  const capabilityId = capabilityIdForCommand(command);
-  if (!capabilityId || !CAPABILITY_IDS.has(capabilityId)) {
+  const capabilityIds = capabilityIdsForCommand(command);
+  if (!capabilityIds.length || capabilityIds.some((capabilityId) => !CAPABILITY_IDS.has(capabilityId))) {
     return { allowed: false as const, capabilityId: "unclassified", message: "This Emma action has not been assigned an administrator policy yet." };
+  }
+  const capabilityId = capabilityIds[0];
+  const missingUserPermission = capabilityIds
+    .map((id) => EMMA_CAPABILITIES.find((item) => item.id === id))
+    .find((capability) => capability?.requiredPermission
+      && capability.requiredPermission !== "authenticated"
+      && !user.permissions.includes(capability.requiredPermission));
+  if (missingUserPermission) {
+    const required = missingUserPermission.requiredPermission!;
+    const message = user.voiceLanguage === "pl-PL"
+      ? `Twoje konto nie ma wymaganego uprawnienia: ${required}.`
+      : user.voiceLanguage === "cs-CZ"
+        ? `Váš účet nemá požadované oprávnění: ${required}.`
+        : `Your account does not have the required permission: ${required}.`;
+    return { allowed: false as const, capabilityId: missingUserPermission.id, message };
   }
   const company = await prisma.company.findUnique({ where: { id: user.companyId }, select: { emmaDisabledCapabilities: true } });
   if (!company) return { allowed: false as const, capabilityId, message: "The company policy could not be loaded." };
-  if (!effectiveDisabledCapabilities(company.emmaDisabledCapabilities).has(capabilityId)) return { allowed: true as const, capabilityId };
-  const capability = EMMA_CAPABILITIES.find((item) => item.id === capabilityId)!;
+  const disabled = effectiveDisabledCapabilities(company.emmaDisabledCapabilities);
+  const blockedCapabilityId = capabilityIds.find((id) => disabled.has(id));
+  if (!blockedCapabilityId) return { allowed: true as const, capabilityId };
+  const capability = EMMA_CAPABILITIES.find((item) => item.id === blockedCapabilityId)!;
   const message = user.voiceLanguage === "pl-PL"
     ? `Administrator wyłączył dla Emmy uprawnienie: ${capability.label}.`
     : user.voiceLanguage === "cs-CZ"
       ? `Správce vypnul Emmě oprávnění: ${capability.label}.`
       : `The administrator has disabled this Emma capability: ${capability.label}.`;
-  return { allowed: false as const, capabilityId, message };
+  return { allowed: false as const, capabilityId: blockedCapabilityId, message };
 }
-

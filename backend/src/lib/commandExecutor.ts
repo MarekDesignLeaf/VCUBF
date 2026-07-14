@@ -25,6 +25,7 @@ import * as voicePreferenceService from "../services/voicePreferenceService.js";
 import * as googleCalendarConnectorService from "../services/googleCalendarConnectorService.js";
 import { buildCommandUiAction, openingVoicePageMessage, type CommandUiAction } from "./voiceNavigation.js";
 import { getNavigationCatalogue } from "./navigationCatalogue.js";
+import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction } from "../services/emmaExecutableActionService.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -48,6 +49,39 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
   let response: CommandResponse;
 
   switch (command.intent) {
+    case "execute_action": {
+      const result = await executeEmmaAction(user, command.entities);
+      response = result.ok
+        ? {
+            intent: command.intent,
+            interpreted: command.entities,
+            ok: true,
+            httpStatus: result.httpStatus,
+            data: result.data,
+            message: `Completed ${command.entities.action.replaceAll("_", " ")}.`,
+          }
+        : {
+            intent: command.intent,
+            interpreted: command.entities,
+            ok: false,
+            httpStatus: result.httpStatus,
+            error: result.error,
+            message: result.message,
+            data: result.extra,
+          };
+      break;
+    }
+    case "confirm_execute_action":
+    case "cancel_execute_action": {
+      const result = command.intent === "confirm_execute_action"
+        ? await confirmPendingEmmaAction(user)
+        : await cancelPendingEmmaAction(user);
+      response = result.ok
+        ? { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: result.httpStatus, data: result.data,
+            message: command.intent === "confirm_execute_action" ? "The reviewed action was completed." : "The reviewed action was cancelled." }
+        : { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: result.httpStatus, error: result.error, message: result.message, data: result.extra };
+      break;
+    }
     case "create_client": {
       const result = await clientService.createClient(user, {
         display_name: command.entities.display_name,

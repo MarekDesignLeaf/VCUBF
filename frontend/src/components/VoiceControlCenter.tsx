@@ -86,6 +86,18 @@ export function VoiceControlCenter() {
               try { window.localStorage.setItem(storageKey, action.id); } catch { /* The in-memory ref still prevents repeats. */ }
               updateUser({ voiceLanguage: action.language });
               setLastAction(action);
+            } else if (!alreadyHandled && action.kind === "external_url" && action.url.startsWith("https://")) {
+              try { window.localStorage.setItem(storageKey, action.id); } catch { /* The in-memory ref still prevents repeats. */ }
+              setLastAction(action);
+              window.location.assign(action.url);
+            } else if (!alreadyHandled && action.kind === "download" && /^\/(?:quotes|invoices)\/[a-f0-9-]+\/pdf$/i.test(action.path)) {
+              try { window.localStorage.setItem(storageKey, action.id); } catch { /* The in-memory ref still prevents repeats. */ }
+              const blob = await api.command.download(action.path);
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url; link.download = action.filename; link.click();
+              URL.revokeObjectURL(url);
+              setLastAction(action);
             }
           }
         }
@@ -142,7 +154,9 @@ export function VoiceControlCenter() {
         <div className="voice-ui-action" role="status">
           {lastAction.kind === "navigate"
             ? <>{copy.opened} <strong>{lastAction.label}</strong> {copy.openedSuffix}</>
-            : <>{copy.changed} <strong>{languageLabel(lastAction.language, true)}</strong>.</>}
+            : lastAction.kind === "set_language"
+              ? <>{copy.changed} <strong>{languageLabel(lastAction.language, true)}</strong>.</>
+              : <>{copy.opened} <strong>{lastAction.label}</strong>.</>}
         </div>
       )}
       <div className="voice-observation-grid" aria-live="polite">

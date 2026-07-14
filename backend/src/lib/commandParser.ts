@@ -14,11 +14,15 @@ import { resolveVoicePage, type VoicePage } from "./voiceNavigation.js";
 import type { ConnectorKey } from "../connectors/registry.js";
 import { resolveVoiceLanguage, type VoiceLanguage } from "./voiceLanguages.js";
 import { resolveNavigationSection, type NavigationSectionId } from "./navigationCatalogue.js";
+import { parseEmmaExecutableActionCommand, type EmmaExecutableActionName, type EmmaExecutableActionRequest } from "./emmaExecutableActionCatalogue.js";
 
 // If nothing matches, the result is `unrecognized` — the system must not
 // guess (VCUF error handling rule).
 
 export type ParsedCommand =
+  | { intent: "execute_action"; entities: EmmaExecutableActionRequest }
+  | { intent: "confirm_execute_action"; entities: { action: EmmaExecutableActionName } }
+  | { intent: "cancel_execute_action"; entities: { action: EmmaExecutableActionName } }
   | { intent: "create_client"; entities: { display_name: string; email_primary?: string; phone_primary?: string } }
   | {
       intent: "update_client";
@@ -253,12 +257,12 @@ function parseMenuDescriptionCommand(text: string): Extract<ParsedCommand, { int
 
 export function isGmailConfirmationPhrase(rawText: string) {
   const text = rawText.trim().toLocaleLowerCase().replace(/[.!?]+$/g, "");
-  return /^(?:yes|yeah|yep|confirm|go ahead|do it|send it|ano|potvrzuji|potvrďuji|potvrdit|odešli|odesli|tak\s+ano|tak\s+jo|potwierdzam|potwierdź|potwierdz|wyślij|wyslij)$/iu.test(text);
+  return /^(?:yes|yeah|yep|confirm(?:\s+action)?|go ahead|do it|send it|ano|potvrzuji|potvrďuji|potvrdit|potvrď\s+akci|potvrd\s+akci|odešli|odesli|tak\s+ano|tak\s+jo|potwierdzam|potwierdź|potwierdz|potwierdź\s+akcję|potwierdz\s+akcje|wyślij|wyslij)$/iu.test(text);
 }
 
 export function isGmailCancellationPhrase(rawText: string) {
   const text = rawText.trim().toLocaleLowerCase().replace(/[.!?]+$/g, "");
-  return /^(?:no|cancel|cancel it|don't send|do not send|stop email|ne|zruš|zrus|nezasilat|neodesilat|nie|anuluj|nie\s+wysyłaj|nie\s+wysylaj)$/iu.test(text);
+  return /^(?:no|cancel(?:\s+action)?|cancel it|don't send|do not send|stop email|ne|zruš|zrus|zruš\s+akci|zrus\s+akci|nezasilat|neodesilat|nie|anuluj|anuluj\s+akcję|anuluj\s+akcje|nie\s+wysyłaj|nie\s+wysylaj)$/iu.test(text);
 }
 
 function parseNotificationDeletionCommand(text: string): Extract<
@@ -393,6 +397,12 @@ function parseContactMutationCommand(text: string): Extract<
 
 export function parseTextCommand(rawText: string): ParsedCommand {
   const text = rawText.trim();
+
+  // This format is emitted only by Emma's structured interpretation layer.
+  // It is allowlisted and JSON-parsed here; the owning business service still
+  // performs the authoritative validation before any mutation.
+  const executableAction = parseEmmaExecutableActionCommand(text);
+  if (executableAction) return { intent: "execute_action", entities: executableAction };
 
   const languageCommand = parseVoiceLanguageCommand(text);
   if (languageCommand) return languageCommand;

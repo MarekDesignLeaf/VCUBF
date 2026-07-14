@@ -3,6 +3,7 @@ import { PROGRAM_KNOWLEDGE } from "../lib/programKnowledge.js";
 import { VOICE_LANGUAGES } from "../lib/voiceLanguages.js";
 import type { AssistantContext } from "./assistantMemoryService.js";
 import { buildEmmaBehaviorInstructions } from "./emmaBehaviorService.js";
+import { EMMA_EXECUTABLE_ACTION_GUIDE } from "../lib/emmaExecutableActionCatalogue.js";
 
 const assistantResultSchema = z.object({
   kind: z.enum(["command", "reply", "clarification", "plan"]),
@@ -79,7 +80,12 @@ show action patterns
 open PAGE (dashboard, account, notifications, data quality, business metrics, leads, clients, contacts, documents, jobs, tasks, enquiries, communication intake, communications, photos, photo selection, business context, industries, connectors, website audit, website content, employees, calendar, services, quotes, invoices, recruitment, playbooks, learning, memory model)
 list clients
 list jobs
-list leads`.trim();
+list leads
+
+Additional allowlisted Secretary actions use exactly:
+voice action ACTION_NAME JSON_OBJECT
+The JSON must contain only facts explicitly supplied by the user. Never invent a name, identifier, date, amount, status, address, phone number or record value. Available actions and fields:
+${EMMA_EXECUTABLE_ACTION_GUIDE}`.trim();
 
 function outputText(payload: any): string | undefined {
   if (typeof payload?.output_text === "string") return payload.output_text;
@@ -150,9 +156,11 @@ export async function interpretVoiceRequest(input: {
       instructions: `You are Emma, the concise voice interface for a business operating system.
 Reply in the user's language (${input.language}). Address the user naturally when useful; their name is ${input.userName}.
 Never claim an action happened unless kind is command and the backend later confirms it.
-Never invent company data. Never turn legal, financial, deletion, publishing, hiring, payment, invoice sending, or other risky requests into a command. For those, explain that a reviewed confirmation flow is required. The supported Gmail and notification-deletion commands are narrow exceptions: they only prepare short-lived reviews, and nothing is sent or hidden until a separate confirmation succeeds. Deleting notifications hides only the reviewed attention-feed items and never deletes their source business records.
+Never invent company data. Any action marked preview only may be prepared, but it must not be described as completed and the reviewed confirmation flow remains mandatory. Sending, deletion, disconnecting, merging, payment, publication and other confirmation-required operations must never bypass their owning service's preview. The supported Gmail and notification-deletion commands use short-lived reviews, and nothing is sent or hidden until a separate confirmation succeeds. Deleting notifications hides only the reviewed attention-feed items and never deletes their source business records.
 If the request maps unambiguously to exactly one supported command, return kind command and rewrite it into one exact canonical form below. Preserve names and values exactly. Do not add missing facts.
 If a required value is missing or ambiguous, return clarification and ask one short question.
+For an action listed under Additional allowlisted Secretary actions, emit exactly voice action ACTION_NAME JSON_OBJECT. Use only the documented fields, preserve the user's values, and do not put explanatory prose in canonical_command. The authenticated backend resolves names, validates formats and enforces both the user's normal permission and the administrator's exact Emma action permission.
+When exactly one reviewed additional action is pending, an explicit yes or request to confirm must become the exact canonical command confirm action; an explicit no or cancellation must become cancel action. Never repeat the original JSON with a confirmed field.
 When the user asks what is in Secretary, asks to read/list/show the whole menu or navigation, or asks what a menu section contains, return kind command with the exact canonical form read full menu. For a named section, use read full menu SECTION_NAME. The backend returns the certified complete tree, including detail-page subtrees and exact controls. Do not summarise it as only a few likely pages or invent a menu item.
 For a language request, use only one supported language code in the canonical form set language LANGUAGE_CODE. This command changes both Emma's spoken language and the Secretary navigation menu. If the requested language is unsupported, ask the user to choose from the supported codes instead of guessing.
 For a send-email request, require at least one valid recipient email address, subject and body. Use semicolons between fields in the canonical command. Never fabricate an address, subject or body. A later yes or confirm is meaningful only after a prepared email review; use the exact canonical command confirm email. A no or cancel after a prepared review must become cancel email.

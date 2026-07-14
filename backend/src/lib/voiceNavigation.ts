@@ -1,4 +1,5 @@
 import { isVoiceLanguage, VOICE_LANGUAGE_LABELS, type VoiceLanguage } from "./voiceLanguages.js";
+import { EMMA_EXECUTABLE_ACTION_PAGES, isEmmaExecutableActionName } from "./emmaExecutableActionCatalogue.js";
 
 export const VOICE_PAGE_ROUTES = {
   dashboard: { path: "/", label: "Dashboard" },
@@ -228,7 +229,9 @@ for (const labels of Object.values(LOCALIZED_PAGE_LABELS)) {
 
 export type CommandUiAction =
   | { kind: "navigate"; path: string; label: string }
-  | { kind: "set_language"; language: VoiceLanguage; label: string };
+  | { kind: "set_language"; language: VoiceLanguage; label: string }
+  | { kind: "external_url"; url: string; label: string }
+  | { kind: "download"; path: string; filename: string; label: string };
 
 export type VoiceUiAction = CommandUiAction & {
   id: string;
@@ -257,6 +260,26 @@ export function buildCommandUiAction(intent: string, data: unknown, interpreted:
   });
 
   switch (intent) {
+    case "execute_action": {
+      const action = typeof entities.action === "string" ? entities.action : "";
+      if (isEmmaExecutableActionName(action)) {
+        if (typeof payload.downloadPath === "string" && typeof payload.filename === "string" && payload.downloadPath.startsWith("/")) {
+          return { kind: "download", path: payload.downloadPath, filename: payload.filename, label: "PDF" };
+        }
+        const externalUrl = typeof payload.authorizationUrl === "string"
+          ? payload.authorizationUrl
+          : typeof payload.pickerUri === "string" ? payload.pickerUri : undefined;
+        if ((action.startsWith("start_") || action === "create_google_photos_picker") && externalUrl) {
+          try {
+            const url = new URL(externalUrl);
+            if (url.protocol === "https:") return { kind: "external_url", url: url.toString(), label: action === "create_google_photos_picker" ? "Google Photos selection" : "Connector authorization" };
+          } catch { /* Invalid provider URL is ignored instead of opened. */ }
+        }
+        const page = EMMA_EXECUTABLE_ACTION_PAGES[action] as VoicePage;
+        return navigate(page);
+      }
+      return undefined;
+    }
     case "navigate": {
       const page = entities.page as VoicePage;
       return navigate(page);

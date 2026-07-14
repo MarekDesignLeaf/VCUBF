@@ -389,4 +389,13 @@ describe("commandParser", () => {
     const result = parseTextCommand("please make the weather nicer today");
     assert.equal(result.intent, "unrecognized");
   });
+
+  it("parses only allowlisted structured Emma actions", () => {
+    assert.deepEqual(parseTextCommand('voice action set_quote_status {"quote_title":"Kitchen","quote_status":"sent"}'), {
+      intent: "execute_action",
+      entities: { action: "set_quote_status", parameters: { quote_title: "Kitchen", quote_status: "sent" } },
+    });
+    assert.equal(parseTextCommand('voice action drop_database {"confirmed":true}').intent, "unrecognized");
+    assert.equal(parseTextCommand("voice action set_quote_status not-json").intent, "unrecognized");
+  });
 });

@@ -85,6 +85,9 @@ export interface EmmaCapabilityPolicyItem {
   requiredPermission?: string;
   riskLevel?: number;
   confirmationRequired?: boolean;
+  voiceActions?: string[];
+  executionClass?: "voice" | "interactive" | "system" | "superseded";
+  executionNote?: string;
   enabled: boolean;
 }
 export interface EmmaPolicy {
@@ -1451,6 +1454,21 @@ export type VoiceUiAction = ({
   label: string;
   intent: string;
   createdAt: string;
+} | {
+  id: string;
+  kind: "external_url";
+  url: string;
+  label: string;
+  intent: string;
+  createdAt: string;
+} | {
+  id: string;
+  kind: "download";
+  path: string;
+  filename: string;
+  label: string;
+  intent: string;
+  createdAt: string;
 });
 
 export interface VoiceConversationMessage {
@@ -2066,6 +2084,7 @@ export const api = {
     voiceState: () => request<VoiceDeviceState>("/command/voice-state"),
     voiceConversations: (limit = 10) => request<VoiceConversation[]>(`/command/voice-conversations?limit=${limit}`),
     navigation: () => request<SecretaryNavigationCatalogue>("/command/navigation"),
+    download: (path: string) => download(path),
     controlVoice: (control: "pause" | "resume" | "end_conversation") =>
       request<VoiceDeviceState>("/command/voice-state/control", {
         method: "POST",

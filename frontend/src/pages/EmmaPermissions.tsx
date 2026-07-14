@@ -142,7 +142,8 @@ export function EmmaPermissions() {
               <span>
                 <strong>{localized?.[0] ?? item.label}</strong>
                 <small>{localized?.[1] ?? item.description}</small>
-                <small className="emma-capability-technical">{item.route ?? item.actionName ?? item.id}{item.requiredPermission ? ` · ${item.requiredPermission}` : ""}{item.confirmationRequired ? (polish ? " · wymaga potwierdzenia" : " · confirmation required") : ""}</small>
+                {item.executionNote && <small>{item.executionClass}: {item.executionNote}</small>}
+                <small className="emma-capability-technical">{item.route ?? item.actionName ?? item.id}{item.requiredPermission ? ` · ${item.requiredPermission}` : ""}{item.voiceActions?.length ? ` · Emma: ${item.voiceActions.join(", ")}` : ""}{item.confirmationRequired ? (polish ? " · wymaga potwierdzenia" : " · confirmation required") : ""}</small>
               </span>
               <em className={`emma-capability-mode mode-${item.mode}`}>{item.kind} · {mode}</em>
             </label>;

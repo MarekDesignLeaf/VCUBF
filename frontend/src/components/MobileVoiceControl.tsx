@@ -118,6 +118,14 @@ export function MobileVoiceControl() {
       appendTurn({ role: "assistant", content: responseText });
       if (result.uiAction?.kind === "navigate") navigate(result.uiAction.path);
       if (result.uiAction?.kind === "set_language") updateUser({ voiceLanguage: result.uiAction.language });
+      if (result.uiAction?.kind === "external_url" && result.uiAction.url.startsWith("https://")) window.location.assign(result.uiAction.url);
+      if (result.uiAction?.kind === "download" && /^\/(?:quotes|invoices)\/[a-f0-9-]+\/pdf$/i.test(result.uiAction.path)) {
+        const blob = await api.command.download(result.uiAction.path);
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url; link.download = result.uiAction.filename; link.click();
+        URL.revokeObjectURL(url);
+      }
       await speak(responseText);
       activeUntil.current = Date.now() + 20_000;
     } catch {
