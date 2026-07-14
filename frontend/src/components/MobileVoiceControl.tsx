@@ -29,6 +29,21 @@ function wakeAcknowledgement(language: string) {
   } as Record<string, string>)[base] ?? "Yes, I am listening.";
 }
 
+function speechChunks(text: string, limit = 1800) {
+  const chunks: string[] = [];
+  let remaining = text.trim();
+  while (remaining.length > limit) {
+    const window = remaining.slice(0, limit + 1);
+    const sentenceBreak = Math.max(window.lastIndexOf(". "), window.lastIndexOf("! "), window.lastIndexOf("? "));
+    const wordBreak = window.lastIndexOf(" ");
+    const splitAt = sentenceBreak >= Math.floor(limit * 0.55) ? sentenceBreak + 1 : wordBreak > 0 ? wordBreak : limit;
+    chunks.push(remaining.slice(0, splitAt).trim());
+    remaining = remaining.slice(splitAt).trim();
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
 export function MobileVoiceControl() {
   const { user, updateUser } = useAuth();
   const navigate = useNavigate();
@@ -70,7 +85,17 @@ export function MobileVoiceControl() {
   const speak = useCallback(async (text: string) => {
     setAnswer(text);
     try {
-      await TextToSpeech.speak({ text, lang: language, rate: 1, pitch: 1, volume: 1, queueStrategy: QueueStrategy.Flush });
+      const chunks = speechChunks(text);
+      for (let index = 0; index < chunks.length; index += 1) {
+        await TextToSpeech.speak({
+          text: chunks[index],
+          lang: language,
+          rate: 1,
+          pitch: 1,
+          volume: 1,
+          queueStrategy: index === 0 ? QueueStrategy.Flush : QueueStrategy.Add,
+        });
+      }
     } catch {
       // Voice output must not prevent the action itself. Android can be missing
       // an installed voice for a selected language.
