@@ -126,6 +126,41 @@ body {
 .login-feature-list p { margin: 0; color: #c7e1d1; font-size: .9rem; }
 .login-feature-list strong { display: block; margin-bottom: 2px; color: white; font-size: .92rem; }
 .login-version { position: relative; z-index: 1; margin: 30px 0 0; color: #a7cab4; font-size: .76rem; }
+.login-meta { position: relative; z-index: 1; display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-top: 14px; }
+.login-meta .login-version { margin: 0; }
+
+.designleaf-credit {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  width: max-content;
+  color: #7d8582;
+  font-size: .58rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+.designleaf-powered { font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+.designleaf-wordmark {
+  position: relative;
+  display: inline-flex;
+  padding-bottom: 3px;
+  color: #f6f7f4;
+  font-size: .78rem;
+  font-weight: 750;
+  letter-spacing: -.025em;
+}
+.designleaf-wordmark span:last-child { color: var(--accent); }
+.designleaf-wordmark::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 55%;
+  height: 1px;
+  content: "";
+  background: var(--signal);
+}
+.sidebar-footer .designleaf-credit { margin-top: 4px; }
+.login-introduction > .designleaf-credit { position: relative; z-index: 1; margin-top: 28px; }
 .setup-steps { position: relative; z-index: 1; display: grid; gap: 14px; margin: 34px 0 0; padding: 0; list-style: none; counter-reset: setup; }
 .setup-steps li { display: grid; grid-template-columns: 28px 1fr; column-gap: 10px; color: #d9efdf; font-size: .86rem; }
 .setup-steps li::before { counter-increment: setup; content: counter(setup); display: grid; place-items: center; grid-row: span 2; width: 24px; height: 24px; border: 1px solid rgb(220 248 228 / 48%); border-radius: 50%; font-size: .72rem; }
@@ -457,6 +492,7 @@ h2 { font-size: 1.1rem; margin-top: 24px; }
   .login-feature-list { gap: 10px; }
   .login-feature-list > div { grid-template-columns: 32px 1fr; gap: 8px; padding-top: 10px; }
   .login-version { margin-top: 20px; }
+  .login-meta { align-items: center; margin-top: 14px; }
   .login-panel { padding: 22px 14px 30px; }
   .login-card { width: min(100%, 460px); padding: 27px 22px; border-radius: 16px; }
   .app-shell { display: block; min-height: 100dvh; }
@@ -471,7 +507,8 @@ h2 { font-size: 1.1rem; margin-top: 24px; }
   .menu-open .sidebar nav { display: flex; }
   .nav-group summary { min-height: 38px; padding-inline: 8px; }
   .sidebar nav a { min-height: 42px; padding-inline: 12px; font-size: .94rem; }
-  .sidebar-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; padding: 9px 0 0; border-top: 1px solid rgb(218 239 226 / 16%); }
+  .sidebar-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-top: 9px; padding: 9px 0 0; border-top: 1px solid rgb(218 239 226 / 16%); }
+  .sidebar-footer .designleaf-credit { flex: 0 0 100%; justify-content: flex-end; margin-top: 4px; }
   .account-link { max-width: calc(100% - 82px); }
   .logout-button { min-height: 0; font-size: .76rem; }
   .content { width: 100%; max-width: none; padding: 18px 14px calc(28px + env(safe-area-inset-bottom)); }

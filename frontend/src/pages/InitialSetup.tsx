@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../context/useAuth";
+import { DesignLeafCredit } from "../components/DesignLeafCredit";
 
 export function InitialSetup() {
   const { login } = useAuth();
@@ -49,6 +50,7 @@ export function InitialSetup() {
           <li><strong>2. Administrator</strong><span>Controls company settings, users and permissions.</span></li>
           <li><strong>3. Users</strong><span>Added later with a role profile and optional individual rights.</span></li>
         </ol>
+        <DesignLeafCredit />
       </section>
       <main className="login-panel">
         <form className="login-card" onSubmit={handleSubmit}>

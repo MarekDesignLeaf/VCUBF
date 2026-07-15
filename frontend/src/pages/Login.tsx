@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 import { api, ApiError } from "../api/client";
+import { DesignLeafCredit } from "../components/DesignLeafCredit";
 
 export function Login() {
   const { login } = useAuth();
@@ -56,7 +57,10 @@ export function Login() {
           <div><span>02</span><p><strong>Work in motion</strong>Move from lead to quote, job and invoice without losing the thread.</p></div>
           <div><span>03</span><p><strong>Emma at hand</strong>Use voice guidance and actions where you need them.</p></div>
         </div>
-        <p className="login-version">VCUF Secretary · build {__VCUBF_BUILD__}</p>
+        <div className="login-meta">
+          <p className="login-version">VCUF Secretary · build {__VCUBF_BUILD__}</p>
+          <DesignLeafCredit />
+        </div>
       </section>
 
       <main className="login-panel">

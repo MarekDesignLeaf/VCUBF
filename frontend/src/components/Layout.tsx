@@ -4,6 +4,7 @@ import { useAuth } from "../context/useAuth";
 import { CommandBar } from "./CommandBar";
 import { VoiceControlCenter } from "./VoiceControlCenter";
 import { MobileVoiceControl } from "./MobileVoiceControl";
+import { DesignLeafCredit } from "./DesignLeafCredit";
 import { isAndroidNative } from "../lib/platform";
 import { appLanguage, languageLabel, menuText, type MenuKey } from "../i18n";
 
@@ -157,6 +158,7 @@ export function Layout() {
             <span><strong>{user?.displayName}</strong><small>{languageLabel(language, true)}</small></span>
           </NavLink>
           <button type="button" className="logout-button" onClick={logout}>{t("logout")}</button>
+          <DesignLeafCredit />
         </div>
       </aside>
       <main className="content">

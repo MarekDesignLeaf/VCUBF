@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { DesignLeafCredit } from "../components/DesignLeafCredit";
 
 const passwordHint = "Use at least 12 characters, including lowercase, uppercase and a number.";
 
@@ -52,6 +53,7 @@ export function PasswordRecovery() {
           <h1>{hasToken ? "Choose a new password." : "Recover access without losing your work."}</h1>
           <p>Password recovery invalidates existing sessions, but never deletes company data, contacts, files or Emma transcripts.</p>
         </div>
+        <DesignLeafCredit />
       </section>
       <main className="login-panel">
         <form className="login-card" onSubmit={hasToken ? setNewPassword : requestReset}>
