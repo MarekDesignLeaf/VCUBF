@@ -6,7 +6,9 @@ const config: CapacitorConfig = {
   webDir: "dist",
   bundledWebRuntime: false,
   server: {
+    url: "https://frontend-production-ee13.up.railway.app",
     androidScheme: "https",
+    cleartext: false,
   },
 };
 
