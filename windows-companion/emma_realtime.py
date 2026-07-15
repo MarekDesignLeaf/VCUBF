@@ -48,17 +48,16 @@ OUTPUT_ECHO_GUARD_SECONDS = 0.75
 AEC_FRAME_SAMPLES = RATE // 100
 AEC_FRAME_BYTES = AEC_FRAME_SAMPLES * 2
 AEC_DEFAULT_DELAY_MS = 80
-AEC_WARMUP_SECONDS = 0.45
-BARGE_IN_MIN_RMS = 1_200.0
-BARGE_IN_MIN_PEAK = 3_600
-BARGE_IN_MAX_DYNAMIC_RMS = 2_800.0
-BARGE_IN_MAX_DYNAMIC_PEAK = 9_000
-BARGE_IN_OUTPUT_RMS_RATIO = 0.40
-BARGE_IN_OUTPUT_PEAK_RATIO = 0.35
-# A real interruption persists for several phonemes. Requiring 300 ms after
-# AEC prevents residual loudspeaker speech from repeatedly cancelling Emma,
-# while still allowing a person to interrupt without waiting for her reply.
-BARGE_IN_CONFIRM_FRAMES = 30
+AEC_WARMUP_SECONDS = 0.30
+BARGE_IN_MIN_RMS = 750.0
+BARGE_IN_MIN_PEAK = 2_400
+BARGE_IN_MAX_DYNAMIC_RMS = 1_800.0
+BARGE_IN_MAX_DYNAMIC_PEAK = 6_000
+BARGE_IN_OUTPUT_RMS_RATIO = 0.22
+BARGE_IN_OUTPUT_PEAK_RATIO = 0.20
+# A real interruption persists across a short phoneme. Acoustic admission is
+# deliberately quick because the transcript is validated before cancellation.
+BARGE_IN_CONFIRM_FRAMES = 10
 BARGE_IN_PREFIX_CHUNKS = 4
 
 PLAYBACK_DONE = object()
@@ -314,7 +313,7 @@ def barge_in_policy_self_test() -> bool:
     dynamic = barge_in_thresholds(5_000.0, 16_000)
     capped = barge_in_thresholds(30_000.0, 32_000)
     return quiet == (BARGE_IN_MIN_RMS, BARGE_IN_MIN_PEAK) \
-        and dynamic == (2_000.0, 5_600) \
+        and dynamic == (1_100.0, 3_200) \
         and capped == (BARGE_IN_MAX_DYNAMIC_RMS, BARGE_IN_MAX_DYNAMIC_PEAK)
 
 
@@ -831,11 +830,9 @@ SECRETARY_NAVIGATION={navigation_json}"""
         while not self.stop.is_set():
             try:
                 chunk = await asyncio.to_thread(self.input_stream.read, CHUNK, False)
-                filtered, human_barge_in = self.filter_microphone_chunk(chunk)
+                filtered, _candidate_started = self.filter_microphone_chunk(chunk)
                 if filtered is None:
                     continue
-                if human_barge_in:
-                    await self.interrupt_for_human()
                 await self.send({"type": "input_audio_buffer.append", "audio": base64.b64encode(filtered).decode("ascii")})
             except Exception as exc:
                 if not self.stop.is_set():
@@ -940,7 +937,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
         return self.reported_speaking or time.monotonic() < self.speaker_echo_until
 
     def filter_microphone_chunk(self, chunk: bytes) -> tuple[bytes | None, bool]:
-        """Apply WebRTC AEC and admit only confirmed near-end speech mid-reply."""
+        """Apply AEC and admit a likely near-end candidate for transcript validation."""
         complete = len(chunk) - (len(chunk) % AEC_FRAME_BYTES)
         processed_frames: list[bytes] = []
         consecutive_voice_frames = self.barge_in_voice_frames
@@ -966,6 +963,10 @@ SECRETARY_NAVIGATION={navigation_json}"""
         processed_chunk = b"".join(processed_frames)
 
         if not self.speaker_active():
+            # Once a candidate began during playback, keep its complete audio
+            # flowing even if the assistant response ends before transcription.
+            if self.barge_in_active:
+                return processed_chunk, False
             self.barge_in_prefix.clear()
             self.barge_in_voice_frames = 0
             self.barge_in_active = False
@@ -985,13 +986,13 @@ SECRETARY_NAVIGATION={navigation_json}"""
         self.barge_in_prefix.clear()
         self.barge_in_active = True
         log(
-            "human barge-in confirmed after acoustic echo cancellation "
+            "barge-in candidate admitted for transcript validation "
             f"(rms>={required_rms:.0f}, peak>={required_peak})"
         )
         return admitted, True
 
     async def interrupt_for_human(self) -> None:
-        """Stop only a tracked active reply after local AEC confirms a person."""
+        """Stop a tracked reply only after the candidate transcript is human."""
         with self.output_state_lock:
             item_id = self.current_output_item_id
             content_index = self.current_output_content_index
@@ -1000,10 +1001,6 @@ SECRETARY_NAVIGATION={navigation_json}"""
         self.response_complete_at = None
         self.reported_speaking = False
         self.speaking_generation += 1
-        # No unconfirmed playback audio is uploaded. Clear any stale server
-        # input before the microphone coroutine appends the retained human
-        # prefix immediately after this method returns.
-        await self.send({"type": "input_audio_buffer.clear"})
         if self.response_active:
             await self.send({"type": "response.cancel"})
         if item_id:
@@ -1075,11 +1072,15 @@ SECRETARY_NAVIGATION={navigation_json}"""
 
     def looks_like_self_echo(self, heard: str) -> bool:
         heard_normalized = self.normalized_transcript(heard)
-        assistant_normalized = self.normalized_transcript(self.last_assistant_text or self.current_response_text)
+        assistant_normalized = self.normalized_transcript(self.current_response_text or self.last_assistant_text)
+        if not heard_normalized or not assistant_normalized:
+            return False
+        if min(len(heard_normalized), len(assistant_normalized)) >= 3 and (
+            heard_normalized in assistant_normalized or assistant_normalized in heard_normalized
+        ):
+            return True
         if len(heard_normalized) < 8 or len(assistant_normalized) < 8:
             return False
-        if heard_normalized in assistant_normalized or assistant_normalized in heard_normalized:
-            return True
         return SequenceMatcher(None, heard_normalized, assistant_normalized).ratio() >= 0.62
 
     def response_create_event(self, one_turn_instruction: str = "", disable_tools: bool = False) -> dict:
@@ -1322,7 +1323,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 self.next_user_sequence += 2
                 if item_id:
                     self.item_sequences[item_id] = self.current_user_sequence
-                began_during_playback = self.speaker_active()
+                began_during_playback = self.speaker_active() or self.barge_in_active
                 if item_id and began_during_playback:
                     self.playback_input_items.add(item_id)
                 if began_during_playback and not self.barge_in_active:
@@ -1356,9 +1357,15 @@ SECRETARY_NAVIGATION={navigation_json}"""
                     continue
                 heard = str(event.get("transcript") or "").strip()
                 began_during_playback = item_id in self.playback_input_items
-                confirmed_human = item_id in self.human_barge_in_items
+                confirmed_human = item_id in self.human_barge_in_items or (
+                    began_during_playback and self.barge_in_active
+                )
                 self.playback_input_items.discard(item_id)
                 self.human_barge_in_items.discard(item_id)
+                if confirmed_human:
+                    self.barge_in_active = False
+                    self.barge_in_voice_frames = 0
+                    self.barge_in_prefix.clear()
                 if heard and began_during_playback and self.looks_like_self_echo(heard):
                     self.item_sequences.pop(item_id, None)
                     log(
@@ -1368,6 +1375,8 @@ SECRETARY_NAVIGATION={navigation_json}"""
                     if item_id:
                         await self.send({"type": "conversation.item.delete", "item_id": item_id})
                     continue
+                if heard and began_during_playback and confirmed_human:
+                    await self.interrupt_for_human()
                 if heard:
                     self.latest_user_request = heard
                     await self.update_state("thinking", False, transcript=heard)
@@ -1395,9 +1404,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
                     self.last_assistant_text = completed_text
                     sequence = self.response_sequences.pop(response_id, self.current_user_sequence + 1)
                     await self.append_transcript("assistant", completed_text, sequence, response_id or str(event.get("event_id") or ""))
-                    if self.barge_in_active:
-                        await self.update_state("hearing", True)
-                    elif self.reported_speaking:
+                    if self.reported_speaking:
                         asyncio.create_task(self.resume_after_output(completed_text, self.speaking_generation))
                     else:
                         self.response_complete_at = time.monotonic()
