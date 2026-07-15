@@ -490,6 +490,7 @@ class RealtimeEmma:
         self.state_lock = asyncio.Lock()
         self.transcript_lock = asyncio.Lock()
         self.conversation_id: str | None = None
+        self.pending_transcript_messages: list[dict] = []
         self.conversation_history: list[dict] = []
         self.assistant_context: dict = {"persistentMemories": [], "recentConversations": []}
         self.navigation_catalogue: dict = {"title": "Complete Secretary menu", "sections": []}
@@ -562,6 +563,19 @@ class RealtimeEmma:
         try:
             result = await asyncio.to_thread(backend_json, "POST", "/command/voice-conversations", {"mode": "realtime"})
             self.conversation_id = str(result["id"])
+            async with self.transcript_lock:
+                pending = sorted(
+                    self.pending_transcript_messages,
+                    key=lambda item: int(item.get("sequence", 0)),
+                )
+                self.pending_transcript_messages.clear()
+                for body in pending:
+                    await asyncio.to_thread(
+                        backend_json,
+                        "POST",
+                        f"/command/voice-conversations/{self.conversation_id}/messages",
+                        body,
+                    )
         except Exception as exc:
             log(f"transcript start error: {type(exc).__name__}")
 
@@ -599,11 +613,12 @@ class RealtimeEmma:
             self.conversation_history, key=lambda entry: int(entry.get("sequence", 0))
         )[-20:]
         write_live_preview(role, content, "You spoke" if role == "user" else "Emma is answering")
-        if not self.conversation_id:
-            return
         body = {"role": role, "content": content[:8000], "sequence": sequence}
         if source_event_id:
             body["source_event_id"] = source_event_id[:200]
+        if not self.conversation_id:
+            self.pending_transcript_messages.append(body)
+            return
         try:
             async with self.transcript_lock:
                 await asyncio.to_thread(
@@ -762,7 +777,19 @@ SECRETARY_NAVIGATION={navigation_json}"""
             )
             await self.handle_backend_request(self.initial_command)
         else:
-            await self.update_state("listening", True)
+            # Server presence is informational. It must never hold the local
+            # microphone behind a slow network round trip.
+            asyncio.create_task(self.update_state("listening", True))
+
+    async def refresh_prompt_context(
+        self,
+        context_task: asyncio.Task,
+        navigation_task: asyncio.Task,
+    ) -> None:
+        """Refresh optional memory/navigation after audio is already live."""
+        await asyncio.gather(context_task, navigation_task, return_exceptions=True)
+        if self.ws and not self.stop.is_set():
+            await self.configure(initialize=False)
 
     async def microphone(self) -> None:
         self.input_stream = self.audio.open(
@@ -1327,10 +1354,17 @@ SECRETARY_NAVIGATION={navigation_json}"""
 
     async def run(self) -> None:
         transcript_status = "completed"
+        startup_started = time.monotonic()
         write_live_preview(status="Realtime active — speak now")
-        await self.start_transcript()
-        await self.load_assistant_context()
-        await self.load_navigation_catalogue()
+        # These calls used to run one after another before the microphone was
+        # opened. On a slow backend that accumulated into a 30+ second silent
+        # activation. None of them is required to open the audio stream, so run
+        # them concurrently and refresh the prompt when the optional context is
+        # ready. Transcript messages are queued locally until its ID arrives.
+        transcript_task = asyncio.create_task(self.start_transcript())
+        context_task = asyncio.create_task(self.load_assistant_context())
+        navigation_task = asyncio.create_task(self.load_navigation_catalogue())
+        refresh_task: asyncio.Task | None = None
         try:
             session = await asyncio.to_thread(backend_json, "POST", "/command/realtime/session", {})
             secret = session["client_secret"]
@@ -1340,6 +1374,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
             async with websockets.connect(uri, additional_headers={"Authorization": f"Bearer {secret}"}, max_size=8 * 1024 * 1024) as ws:
                 self.ws = ws
                 await self.configure()
+                refresh_task = asyncio.create_task(self.refresh_prompt_context(context_task, navigation_task))
                 playback_task = asyncio.create_task(self.playback())
                 tasks = [
                     asyncio.create_task(self.microphone()),
@@ -1347,6 +1382,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
                     asyncio.create_task(self.watchdog()),
                     asyncio.create_task(self.control_watchdog()),
                 ]
+                log(f"realtime audio tasks started after {time.monotonic() - startup_started:.2f}s")
                 await self.stop.wait()
                 self.output_queue.put_nowait(PLAYBACK_STOP)
                 for task in tasks:
@@ -1359,6 +1395,21 @@ SECRETARY_NAVIGATION={navigation_json}"""
             transcript_status = "error"
             raise
         finally:
+            if refresh_task and not refresh_task.done():
+                refresh_task.cancel()
+            for task in (context_task, navigation_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in (refresh_task, context_task, navigation_task) if task is not None),
+                return_exceptions=True,
+            )
+            if not transcript_task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(transcript_task), timeout=2)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    transcript_task.cancel()
+            await asyncio.gather(transcript_task, return_exceptions=True)
             await self.end_transcript(transcript_status)
             write_live_preview(status="Realtime conversation ended")
 

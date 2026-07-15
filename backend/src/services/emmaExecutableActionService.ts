@@ -40,6 +40,15 @@ import * as emmaPolicyService from "./emmaPolicyService.js";
 
 type Row = Record<string, any>;
 
+function normalizedReference(value: unknown): string {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/^[\s"'“”„«»‘’]+|[\s"'“”„«»‘’]+$/gu, "")
+    .replace(/\s+/gu, " ")
+    .toLocaleLowerCase();
+}
+
 function stringValue(parameters: Record<string, unknown>, key: string): string | undefined {
   const value = parameters[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -52,9 +61,9 @@ function numberValue(parameters: Record<string, unknown>, key: string): number |
 
 function lookup<T extends Row>(items: T[], query: string | undefined, fields: Array<keyof T>, entity: string): ServiceResult<T> {
   if (!query) return fail(400, "VALIDATION_FAILED", `${entity} name is required.`);
-  const needle = query.toLocaleLowerCase();
-  const exact = items.filter((item) => fields.some((field) => String(item[field] ?? "").toLocaleLowerCase() === needle));
-  const matches = exact.length ? exact : items.filter((item) => fields.some((field) => String(item[field] ?? "").toLocaleLowerCase().includes(needle)));
+  const needle = normalizedReference(query);
+  const exact = items.filter((item) => fields.some((field) => normalizedReference(item[field]) === needle));
+  const matches = exact.length ? exact : items.filter((item) => fields.some((field) => normalizedReference(item[field]).includes(needle)));
   if (!matches.length) return fail(404, `${entity.toUpperCase()}_NOT_FOUND`, `${entity} '${query}' was not found.`);
   if (matches.length > 1) return fail(409, "AMBIGUOUS_REFERENCE", `More than one ${entity} matches '${query}'. Please use the exact name.`);
   return ok(200, matches[0]);

@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import { useAuth } from "../context/useAuth";
+import { appLanguage } from "../i18n";
+import { JOB_RESOURCE_COPY, resourceReadiness } from "./jobResourceCopy";
 import {
   api,
   type Job,
@@ -14,7 +17,11 @@ import {
 } from "../api/client";
 
 export function JobDetail() {
+  const { user } = useAuth();
   const { id } = useParams<{ id: string }>();
+  const language = appLanguage(user?.voiceLanguage);
+  const resourceCopy = JOB_RESOURCE_COPY[language];
+  const canManageResources = user?.permissions.includes("crm.manage") ?? false;
   const [job, setJob] = useState<Job | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +33,7 @@ export function JobDetail() {
   const [resources,setResources]=useState<JobResources|null>(null);
   const [resourceName,setResourceName]=useState(""); const [resourceType,setResourceType]=useState("material");
   const [resourceQuantity,setResourceQuantity]=useState(""),[resourceUnit,setResourceUnit]=useState(""),[resourceEstimate,setResourceEstimate]=useState("");
+  const [resourceError,setResourceError]=useState<string|null>(null),[resourceMessage,setResourceMessage]=useState<string|null>(null),[resourceSaving,setResourceSaving]=useState(false);
 
   function load() {
     if (!id) return;
@@ -43,9 +51,23 @@ export function JobDetail() {
     if (!id) return;
     api.communications.list({ jobId: id }).then(setCommunications).catch(() => undefined);
   }, [id]);
-  useEffect(()=>{if(id)api.jobs.resources(id).then(setResources).catch(()=>undefined)},[id]);
-  async function addResource(e:React.FormEvent){e.preventDefault();if(!id)return;await api.jobs.addResource(id,{resource_type:resourceType,name:resourceName,quantity:resourceQuantity?Number(resourceQuantity):undefined,unit:resourceUnit||undefined,estimated_cost:resourceEstimate?Number(resourceEstimate):undefined});setResourceName("");setResourceQuantity("");setResourceUnit("");setResourceEstimate("");setResources(await api.jobs.resources(id))}
-  async function updateResource(resourceId:string,data:Record<string,unknown>){if(!id)return;await api.jobs.updateResource(id,resourceId,data);setResources(await api.jobs.resources(id))}
+  useEffect(()=>{if(id)api.jobs.resources(id).then(setResources).catch((reason)=>setResourceError(reason instanceof ApiError?reason.message:resourceCopy.loadError))},[id,resourceCopy.loadError]);
+  async function addResource(e:React.FormEvent){
+    e.preventDefault();if(!id||!canManageResources)return;
+    setResourceSaving(true);setResourceError(null);setResourceMessage(null);
+    try{
+      await api.jobs.addResource(id,{resource_type:resourceType,name:resourceName.trim(),quantity:resourceQuantity?Number(resourceQuantity):undefined,unit:resourceUnit.trim()||undefined,estimated_cost:resourceEstimate?Number(resourceEstimate):undefined});
+      setResourceName("");setResourceQuantity("");setResourceUnit("");setResourceEstimate("");setResources(await api.jobs.resources(id));setResourceMessage(resourceCopy.added);
+    }catch(reason){setResourceError(reason instanceof ApiError?reason.message:resourceCopy.addError)}finally{setResourceSaving(false)}
+  }
+  async function updateResource(resourceId:string,data:Record<string,unknown>){
+    if(!id||!canManageResources)return;setResourceSaving(true);setResourceError(null);setResourceMessage(null);
+    try{await api.jobs.updateResource(id,resourceId,data);setResources(await api.jobs.resources(id))}catch(reason){setResourceError(reason instanceof ApiError?reason.message:resourceCopy.updateError)}finally{setResourceSaving(false)}
+  }
+  function setActualCost(resourceId:string,current:number|null|undefined){
+    const value=window.prompt(resourceCopy.actualCostPrompt,current?.toString()??"");if(value===null||value.trim()==="")return;
+    const amount=Number(value);if(!Number.isFinite(amount)||amount<0){setResourceError(resourceCopy.invalidCost);return}void updateResource(resourceId,{actual_cost:amount});
+  }
   useEffect(() => {
     if (!id) return;
     api.portfolio.list({ jobId: id }).then(setPhotos).catch(() => undefined);
@@ -168,11 +190,20 @@ export function JobDetail() {
         <dt>Notes</dt>
         <dd>{job.notes ?? "—"}</dd>
       </dl>
-      <div className="page-header"><h2>Materials and resources</h2></div>
-      {resources&&<div className={resources.readiness.ready?"success-banner":"warning-banner"}>{resources.readiness.total===0?"No resource requirements recorded.":resources.readiness.ready?"All recorded resources are ready.":`${resources.readiness.notReady} of ${resources.readiness.total} resources are not ready.`}</div>}
-      {resources?.readiness.total ? <p className="hint">Estimated: {resources.readiness.estimatedCost==null?"Unknown":`£${resources.readiness.estimatedCost.toFixed(2)}`} · Actual: {resources.readiness.actualCost==null?"Unknown":`£${resources.readiness.actualCost.toFixed(2)}`} · Variance: {resources.readiness.costVariance==null?"Unknown":`£${resources.readiness.costVariance.toFixed(2)}`}</p>:null}
-      <form className="inline-form" onSubmit={addResource}><select value={resourceType} onChange={e=>setResourceType(e.target.value)}><option value="material">Material</option><option value="equipment">Equipment</option><option value="vehicle">Vehicle</option><option value="hire">Hire</option><option value="waste">Waste</option></select><input placeholder="Requirement name" value={resourceName} onChange={e=>setResourceName(e.target.value)} required/><input type="number" min="0.01" step="0.01" placeholder="Quantity" value={resourceQuantity} onChange={e=>setResourceQuantity(e.target.value)}/><input placeholder="Unit" value={resourceUnit} onChange={e=>setResourceUnit(e.target.value)}/><input type="number" min="0" step="0.01" placeholder="Estimated cost" value={resourceEstimate} onChange={e=>setResourceEstimate(e.target.value)}/><button>Add</button></form>
-      {resources&&resources.items.length>0&&<table className="data-table"><thead><tr><th>Type</th><th>Name</th><th>Quantity</th><th>Status</th><th>Estimated</th><th>Actual</th></tr></thead><tbody>{resources.items.map(r=><tr key={r.id}><td>{r.resourceType}</td><td>{r.name}</td><td>{r.quantity??"—"} {r.unit??""}</td><td><select value={r.requirementStatus} onChange={e=>updateResource(r.id,{requirement_status:e.target.value})}><option value="needed">Needed</option><option value="ordered">Ordered</option><option value="ready">Ready</option><option value="unavailable">Unavailable</option></select></td><td>{r.estimatedCost==null?"Unknown":`£${r.estimatedCost.toFixed(2)}`}</td><td><button onClick={()=>{const v=window.prompt("Actual cost",r.actualCost?.toString()??"");if(v!==null&&v!=="")updateResource(r.id,{actual_cost:Number(v)})}}>{r.actualCost==null?"Set cost":`£${r.actualCost.toFixed(2)}`}</button></td></tr>)}</tbody></table>}
+      <div className="page-header"><h2>{resourceCopy.title}</h2></div>
+      {resourceError&&<div className="error-banner">{resourceError}</div>}
+      {resourceMessage&&<div className="success-banner">{resourceMessage}</div>}
+      {resources&&<div className={resources.readiness.ready?"success-banner":"warning-banner"}>{resources.readiness.total===0?resourceCopy.none:resources.readiness.ready?resourceCopy.allReady:resourceReadiness(resourceCopy,resources.readiness.notReady,resources.readiness.total)}</div>}
+      {resources?.readiness.total ? <p className="hint">{resourceCopy.estimated}: {resources.readiness.estimatedCost==null?resourceCopy.unknown:`£${resources.readiness.estimatedCost.toFixed(2)}`} · {resourceCopy.actual}: {resources.readiness.actualCost==null?resourceCopy.unknown:`£${resources.readiness.actualCost.toFixed(2)}`} · {resourceCopy.variance}: {resources.readiness.costVariance==null?resourceCopy.unknown:`£${resources.readiness.costVariance.toFixed(2)}`}</p>:null}
+      {canManageResources?<form className="inline-form" onSubmit={addResource}>
+        <select aria-label={resourceCopy.type} value={resourceType} onChange={e=>setResourceType(e.target.value)} disabled={resourceSaving}>{Object.entries(resourceCopy.types).map(([value,label])=><option value={value} key={value}>{label}</option>)}</select>
+        <input aria-label={resourceCopy.requirementName} placeholder={resourceCopy.requirementName} value={resourceName} onChange={e=>setResourceName(e.target.value)} required disabled={resourceSaving}/>
+        <input aria-label={resourceCopy.quantity} type="number" min="0.01" step="0.01" placeholder={resourceCopy.quantity} value={resourceQuantity} onChange={e=>setResourceQuantity(e.target.value)} disabled={resourceSaving}/>
+        <input aria-label={resourceCopy.unit} placeholder={resourceCopy.unit} value={resourceUnit} onChange={e=>setResourceUnit(e.target.value)} disabled={resourceSaving}/>
+        <input aria-label={resourceCopy.estimatedCost} type="number" min="0" step="0.01" placeholder={resourceCopy.estimatedCost} value={resourceEstimate} onChange={e=>setResourceEstimate(e.target.value)} disabled={resourceSaving}/>
+        <button type="submit" disabled={resourceSaving}>{resourceSaving?resourceCopy.adding:resourceCopy.add}</button>
+      </form>:<p className="hint">{resourceCopy.noPermission}</p>}
+      {resources&&resources.items.length>0&&<table className="data-table"><thead><tr><th>{resourceCopy.type}</th><th>{resourceCopy.name}</th><th>{resourceCopy.quantity}</th><th>{resourceCopy.status}</th><th>{resourceCopy.estimated}</th><th>{resourceCopy.actual}</th></tr></thead><tbody>{resources.items.map(r=><tr key={r.id}><td>{resourceCopy.types[r.resourceType]??r.resourceType}</td><td>{r.name}</td><td>{r.quantity??"—"} {r.unit??""}</td><td><select aria-label={`${resourceCopy.status}: ${r.name}`} value={r.requirementStatus} onChange={e=>void updateResource(r.id,{requirement_status:e.target.value})} disabled={!canManageResources||resourceSaving}>{Object.entries(resourceCopy.statuses).map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></td><td>{r.estimatedCost==null?resourceCopy.unknown:`£${r.estimatedCost.toFixed(2)}`}</td><td><button type="button" disabled={!canManageResources||resourceSaving} onClick={()=>setActualCost(r.id,r.actualCost)}>{r.actualCost==null?resourceCopy.setCost:`£${r.actualCost.toFixed(2)}`}</button></td></tr>)}</tbody></table>}
 
       <div className="page-header">
         <h2>Communications</h2>
