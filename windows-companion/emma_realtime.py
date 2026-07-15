@@ -48,13 +48,18 @@ OUTPUT_ECHO_GUARD_SECONDS = 0.75
 AEC_FRAME_SAMPLES = RATE // 100
 AEC_FRAME_BYTES = AEC_FRAME_SAMPLES * 2
 AEC_DEFAULT_DELAY_MS = 80
-AEC_WARMUP_SECONDS = 0.30
-BARGE_IN_MIN_RMS = 700.0
-BARGE_IN_MIN_PEAK = 2000
-# A real spoken interruption remains above the post-AEC threshold for at
-# least a syllable. Thirty milliseconds admitted residual speaker echo and
-# could cancel Emma mid-word; 100 ms remains responsive without that failure.
-BARGE_IN_CONFIRM_FRAMES = 10
+AEC_WARMUP_SECONDS = 0.45
+BARGE_IN_MIN_RMS = 1_200.0
+BARGE_IN_MIN_PEAK = 3_600
+BARGE_IN_MAX_DYNAMIC_RMS = 2_800.0
+BARGE_IN_MAX_DYNAMIC_PEAK = 9_000
+BARGE_IN_OUTPUT_RMS_RATIO = 0.40
+BARGE_IN_OUTPUT_PEAK_RATIO = 0.35
+# A real interruption persists for several phonemes. Requiring 300 ms after
+# AEC prevents residual loudspeaker speech from repeatedly cancelling Emma,
+# while still allowing a person to interrupt without waiting for her reply.
+BARGE_IN_CONFIRM_FRAMES = 30
+BARGE_IN_PREFIX_CHUNKS = 4
 
 PLAYBACK_DONE = object()
 PLAYBACK_STOP = object()
@@ -291,6 +296,28 @@ def playback_buffer_self_test() -> bool:
     return second == b"a" * 8 and third == (b"a" * 7 + b"b") and buffer.drained
 
 
+def barge_in_thresholds(output_rms: float, output_peak: int) -> tuple[float, int]:
+    """Require near-end speech to dominate the current far-end reference."""
+    required_rms = max(
+        BARGE_IN_MIN_RMS,
+        min(BARGE_IN_MAX_DYNAMIC_RMS, output_rms * BARGE_IN_OUTPUT_RMS_RATIO),
+    )
+    required_peak = max(
+        BARGE_IN_MIN_PEAK,
+        min(BARGE_IN_MAX_DYNAMIC_PEAK, int(output_peak * BARGE_IN_OUTPUT_PEAK_RATIO)),
+    )
+    return required_rms, required_peak
+
+
+def barge_in_policy_self_test() -> bool:
+    quiet = barge_in_thresholds(0.0, 0)
+    dynamic = barge_in_thresholds(5_000.0, 16_000)
+    capped = barge_in_thresholds(30_000.0, 32_000)
+    return quiet == (BARGE_IN_MIN_RMS, BARGE_IN_MIN_PEAK) \
+        and dynamic == (2_000.0, 5_600) \
+        and capped == (BARGE_IN_MAX_DYNAMIC_RMS, BARGE_IN_MAX_DYNAMIC_PEAK)
+
+
 def log(message: str) -> None:
     APP_DIR.mkdir(parents=True, exist_ok=True)
     with LOG_PATH.open("a", encoding="utf-8") as handle:
@@ -480,7 +507,7 @@ class RealtimeEmma:
         self.suppressed_input_items: set[str] = set()
         self.playback_input_items: set[str] = set()
         self.human_barge_in_items: set[str] = set()
-        self.barge_in_prefix: deque[bytes] = deque(maxlen=2)
+        self.barge_in_prefix: deque[bytes] = deque(maxlen=BARGE_IN_PREFIX_CHUNKS)
         self.barge_in_voice_frames = 0
         self.barge_in_active = False
         self.response_active = False
@@ -515,6 +542,12 @@ class RealtimeEmma:
         self.echo_processor.set_reverse_stream_format(RATE, 1)
         self.echo_processor.set_stream_delay(AEC_DEFAULT_DELAY_MS)
         self.reverse_remainder = b""
+        self.recent_output_rms = 0.0
+        self.recent_output_peak = 0
+        self.output_state_lock = threading.Lock()
+        self.current_output_item_id: str | None = None
+        self.current_output_content_index = 0
+        self.played_audio_bytes = 0
         self.ws = None
         self.configured_language = str(load_config().get("Language", "en-GB"))
         self.spoken_language = LANGUAGE_NAMES.get(self.configured_language, self.configured_language)
@@ -868,6 +901,8 @@ SECRETARY_NAVIGATION={navigation_json}"""
             self.process_output_reference(frame)
             self.speaker_echo_until = max(self.speaker_echo_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS)
             self.output_stream.write(frame, exception_on_underflow=False)
+            with self.output_state_lock:
+                self.played_audio_bytes += len(frame)
             self.speaker_echo_until = max(self.speaker_echo_until, time.monotonic() + OUTPUT_ECHO_GUARD_SECONDS)
 
     async def playback(self) -> None:
@@ -884,7 +919,11 @@ SECRETARY_NAVIGATION={navigation_json}"""
         complete = len(pending) - (len(pending) % AEC_FRAME_BYTES)
         with self.aec_lock:
             for offset in range(0, complete, AEC_FRAME_BYTES):
-                self.echo_processor.process_reverse_stream(pending[offset:offset + AEC_FRAME_BYTES])
+                frame = pending[offset:offset + AEC_FRAME_BYTES]
+                rms, peak = self.frame_levels(frame)
+                self.recent_output_rms = (self.recent_output_rms * 0.80) + (rms * 0.20)
+                self.recent_output_peak = max(int(self.recent_output_peak * 0.85), peak)
+                self.echo_processor.process_reverse_stream(frame)
         self.reverse_remainder = pending[complete:]
 
     @staticmethod
@@ -907,11 +946,15 @@ SECRETARY_NAVIGATION={navigation_json}"""
         consecutive_voice_frames = self.barge_in_voice_frames
         longest_voice_run = consecutive_voice_frames
         with self.aec_lock:
+            required_rms, required_peak = barge_in_thresholds(
+                self.recent_output_rms,
+                self.recent_output_peak,
+            )
             for offset in range(0, complete, AEC_FRAME_BYTES):
                 processed = self.echo_processor.process_stream(chunk[offset:offset + AEC_FRAME_BYTES])
                 processed_frames.append(processed)
                 rms, peak = self.frame_levels(processed)
-                if rms >= BARGE_IN_MIN_RMS and peak >= BARGE_IN_MIN_PEAK:
+                if rms >= required_rms and peak >= required_peak:
                     consecutive_voice_frames += 1
                     longest_voice_run = max(longest_voice_run, consecutive_voice_frames)
                 else:
@@ -941,17 +984,38 @@ SECRETARY_NAVIGATION={navigation_json}"""
         admitted = b"".join(self.barge_in_prefix)
         self.barge_in_prefix.clear()
         self.barge_in_active = True
-        log("human barge-in confirmed after acoustic echo cancellation")
+        log(
+            "human barge-in confirmed after acoustic echo cancellation "
+            f"(rms>={required_rms:.0f}, peak>={required_peak})"
+        )
         return admitted, True
 
     async def interrupt_for_human(self) -> None:
         """Stop only a tracked active reply after local AEC confirms a person."""
+        with self.output_state_lock:
+            item_id = self.current_output_item_id
+            content_index = self.current_output_content_index
+            audio_end_ms = int(self.played_audio_bytes * 1000 / (RATE * 2))
         self.clear_playback()
         self.response_complete_at = None
         self.reported_speaking = False
         self.speaking_generation += 1
+        # No unconfirmed playback audio is uploaded. Clear any stale server
+        # input before the microphone coroutine appends the retained human
+        # prefix immediately after this method returns.
+        await self.send({"type": "input_audio_buffer.clear"})
         if self.response_active:
             await self.send({"type": "response.cancel"})
+        if item_id:
+            await self.send(
+                {
+                    "type": "conversation.item.truncate",
+                    "item_id": item_id,
+                    "content_index": content_index,
+                    "audio_end_ms": max(0, audio_end_ms),
+                }
+            )
+            log(f"assistant output truncated after {audio_end_ms}ms for human interruption")
         await self.update_state("hearing", True)
 
     def clear_playback(self) -> None:
@@ -980,6 +1044,8 @@ SECRETARY_NAVIGATION={navigation_json}"""
         if self.reported_speaking:
             return
         self.reported_speaking = True
+        with self.output_state_lock:
+            self.played_audio_bytes = 0
         self.playback_completion_signaled = False
         self.output_started_at = time.monotonic()
         self.barge_in_active = False
@@ -998,6 +1064,10 @@ SECRETARY_NAVIGATION={navigation_json}"""
             return
         self.response_complete_at = time.monotonic()
         await self.update_state("listening", True, response=response)
+        with self.output_state_lock:
+            self.current_output_item_id = None
+            self.current_output_content_index = 0
+            self.played_audio_bytes = 0
 
     @staticmethod
     def normalized_transcript(text: str) -> str:
@@ -1213,6 +1283,18 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 response_id = str((event.get("response") or {}).get("id") or "")
                 if response_id and self.current_user_sequence:
                     self.response_sequences[response_id] = self.current_user_sequence + 1
+            elif event_type in ("response.output_item.added", "response.output_item.created"):
+                item = event.get("item") or {}
+                if item.get("type") == "message" and item.get("role") == "assistant":
+                    with self.output_state_lock:
+                        self.current_output_item_id = str(item.get("id") or "") or None
+                        self.current_output_content_index = 0
+                        self.played_audio_bytes = 0
+            elif event_type == "response.content_part.added":
+                part = event.get("part") or {}
+                if part.get("type") in ("audio", "output_audio"):
+                    with self.output_state_lock:
+                        self.current_output_content_index = int(event.get("content_index") or 0)
             elif event_type in ("response.output_audio.delta", "response.audio.delta"):
                 await self.begin_output()
                 chunk = base64.b64decode(event.get("delta", ""))
@@ -1240,10 +1322,12 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 self.next_user_sequence += 2
                 if item_id:
                     self.item_sequences[item_id] = self.current_user_sequence
-                if self.speaker_active() and not self.barge_in_active:
+                began_during_playback = self.speaker_active()
+                if item_id and began_during_playback:
+                    self.playback_input_items.add(item_id)
+                if began_during_playback and not self.barge_in_active:
                     if item_id:
                         self.suppressed_input_items.add(item_id)
-                        self.playback_input_items.add(item_id)
                     log("suppressed unconfirmed speech start during Emma playback")
                     continue
                 if item_id and self.barge_in_active:
@@ -1275,9 +1359,12 @@ SECRETARY_NAVIGATION={navigation_json}"""
                 confirmed_human = item_id in self.human_barge_in_items
                 self.playback_input_items.discard(item_id)
                 self.human_barge_in_items.discard(item_id)
-                if heard and began_during_playback and not confirmed_human and self.looks_like_self_echo(heard):
+                if heard and began_during_playback and self.looks_like_self_echo(heard):
                     self.item_sequences.pop(item_id, None)
-                    log("ignored transcript matching Emma's own reply")
+                    log(
+                        "ignored transcript matching Emma's own reply"
+                        + (" after a false local interruption" if confirmed_human else "")
+                    )
                     if item_id:
                         await self.send({"type": "conversation.item.delete", "item_id": item_id})
                     continue
@@ -1444,20 +1531,22 @@ def main() -> int:
         finally:
             audio.terminate()
         buffer_ok = playback_buffer_self_test()
+        barge_in_ok = barge_in_policy_self_test()
         language_ok = language_detection_self_test()
         history_ok = backend_history_self_test()
         print(json.dumps({
-            "status": "ok" if buffer_ok and language_ok and history_ok and output_devices else "failed",
+            "status": "ok" if buffer_ok and barge_in_ok and language_ok and history_ok and output_devices else "failed",
             "input_devices": len(input_devices),
             "output_devices": len(output_devices),
             "playback_frame_ms": PLAYBACK_FRAME_MS,
             "playback_prebuffer_ms": PLAYBACK_PREBUFFER_MS,
             "jitter_buffer": buffer_ok,
+            "echo_safe_barge_in": barge_in_ok,
             "language_command_detection": language_ok,
             "conversation_history": history_ok,
             "token_protected": TOKEN_PATH.exists(),
         }))
-        return 0 if buffer_ok and language_ok and history_ok and output_devices else 1
+        return 0 if buffer_ok and barge_in_ok and language_ok and history_ok and output_devices else 1
     initial = sys.stdin.readline().strip() if args.stdin else ""
     runtime = RealtimeEmma(initial)
     try:
