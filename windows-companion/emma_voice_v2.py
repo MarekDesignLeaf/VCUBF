@@ -55,7 +55,11 @@ CHANNELS = 1
 SAMPLE_WIDTH = 2
 INPUT_FRAME_MS = 20
 INPUT_FRAME_BYTES = RATE * SAMPLE_WIDTH * INPUT_FRAME_MS // 1_000
-PLAYBACK_FRAME_BYTES = INPUT_FRAME_BYTES
+# WebRTC AEC consumes exact 10 ms blocks at the selected sample rate. Keep
+# capture at 20 ms for efficient Deepgram streaming, but split it into these
+# 10 ms frames before AEC and use the same frame size for the reverse signal.
+AEC_FRAME_BYTES = RATE * SAMPLE_WIDTH * 10 // 1_000
+PLAYBACK_FRAME_BYTES = AEC_FRAME_BYTES
 PLAYBACK_PREBUFFER_BYTES = RATE * SAMPLE_WIDTH * 160 // 1_000
 MAX_SESSION_SECONDS = 180
 IDLE_AFTER_RESPONSE_SECONDS = 25
@@ -749,17 +753,17 @@ class VoiceSessionV2:
         while not self.stop.is_set():
             try:
                 raw = await asyncio.to_thread(self.input_stream.read, INPUT_FRAME_BYTES // SAMPLE_WIDTH, False)
-                complete = len(raw) - (len(raw) % INPUT_FRAME_BYTES)
+                complete = len(raw) - (len(raw) % AEC_FRAME_BYTES)
                 processed: list[bytes] = []
                 with self.aec_lock:
-                    for offset in range(0, complete, INPUT_FRAME_BYTES):
-                        processed.append(self.aec.process_stream(raw[offset:offset + INPUT_FRAME_BYTES]))
+                    for offset in range(0, complete, AEC_FRAME_BYTES):
+                        processed.append(self.aec.process_stream(raw[offset:offset + AEC_FRAME_BYTES]))
                 if complete < len(raw):
                     processed.append(raw[complete:])
                 await ws.send(b"".join(processed))
             except Exception as exc:
                 if not self.stop.is_set():
-                    log(f"v2 microphone error: {type(exc).__name__}")
+                    log(f"v2 microphone error: {type(exc).__name__}: {str(exc)[:300]}")
                 self.stop.set()
 
     async def handle_transcript(self, text: str) -> None:
