@@ -8,6 +8,14 @@ param(
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
 
+# A desktop shortcut can outlive a change to a user environment variable.
+# Reload the persisted credentials for this process before Python is launched,
+# so an updated provider key is used on the very next Emma restart.
+foreach($secretName in @('DEEPGRAM_API_KEY','ELEVENLABS_API_KEY')) {
+  $userValue=[Environment]::GetEnvironmentVariable($secretName,'User')
+  if($userValue) { Set-Item -Path "Env:$secretName" -Value $userValue }
+}
+
 $app=Split-Path -Parent $PSCommandPath
 $runtime=Join-Path $app 'emma_voice_v2.py'
 if(!(Test-Path -LiteralPath $runtime)){throw 'Emma Voice v2 runtime is missing. Run Install-VoiceV2.ps1 again.'}

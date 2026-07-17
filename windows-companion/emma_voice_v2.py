@@ -670,12 +670,20 @@ class TranscriptStore:
         item = {"role": role, "content": value[:800], "sequence": self.sequence}
         self.history.append(item)
         if self.conversation_id:
-            await asyncio.to_thread(
-                backend_json,
-                "POST",
-                f"/command/voice-conversations/{self.conversation_id}/messages",
-                {"role": role, "content": value[:8_000], "sequence": self.sequence, "source_event_id": source_event_id[:200]},
-            )
+            try:
+                await asyncio.to_thread(
+                    backend_json,
+                    "POST",
+                    f"/command/voice-conversations/{self.conversation_id}/messages",
+                    {"role": role, "content": value[:8_000], "sequence": self.sequence, "source_event_id": source_event_id[:200]},
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # Voice interaction must remain available when the optional
+                # transcript sync is temporarily unavailable. The in-memory
+                # turn remains in history and a later turn can still succeed.
+                log(f"v2 transcript sync error: {type(exc).__name__}")
         self.sequence += 1
 
     async def end(self, status: str) -> None:
@@ -785,7 +793,12 @@ class VoiceSessionV2:
     async def execute_turn(self, heard: str) -> None:
         generation = self.generation
         await self.update_state("thinking", False, transcript=heard)
-        await self.transcript.append("user", heard, f"v2-user-{self.transcript.sequence}")
+        try:
+            await self.transcript.append("user", heard, f"v2-user-{self.transcript.sequence}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log(f"v2 local transcript error: {type(exc).__name__}")
         write_live_preview("user", heard, "Emma Voice v2 is thinking")
         try:
             result = await asyncio.to_thread(
@@ -813,7 +826,12 @@ class VoiceSessionV2:
         if not message or generation != self.generation:
             return
         self.last_assistant_text = message
-        await self.transcript.append("assistant", message, f"v2-assistant-{self.transcript.sequence}")
+        try:
+            await self.transcript.append("assistant", message, f"v2-assistant-{self.transcript.sequence}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log(f"v2 local transcript error: {type(exc).__name__}")
         write_live_preview("assistant", message, "Emma Voice v2 is speaking")
         await self.update_state("speaking", True, response=message)
         self.speaker.active.set()
@@ -823,7 +841,11 @@ class VoiceSessionV2:
                 await asyncio.sleep(0.03)
         except asyncio.CancelledError:
             raise
-        except (OSError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+        except urllib.error.HTTPError as exc:
+            # Provider failures must be distinguishable in the local log
+            # without logging credentials or the spoken text.
+            log(f"v2 tts HTTP error: {exc.code}")
+        except (OSError, urllib.error.URLError) as exc:
             log(f"v2 tts error: {type(exc).__name__}")
         finally:
             if generation == self.generation:
@@ -869,8 +891,9 @@ class VoiceSessionV2:
                 self.stop.set()
                 continue
             if self.turn_task and self.turn_task.done():
+                completed_turn, self.turn_task = self.turn_task, None
                 try:
-                    self.turn_task.result()
+                    completed_turn.result()
                 except asyncio.CancelledError:
                     pass
                 except Exception as exc:
