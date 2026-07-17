@@ -3,6 +3,9 @@
   "wake": {
     "provider": "deepgram_vad",
     "word": "Emma",
+    "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
+    "keywordPath": "",
+    "sensitivity": 0.65,
     "speechThreshold": 450,
     "preRollMs": 600,
     "silenceMs": 1100,

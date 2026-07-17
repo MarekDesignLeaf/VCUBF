@@ -1,3 +1,4 @@
 aec-audio-processing==1.0.1
 PyAudio==0.2.14
+pvporcupine==4.0.3
 websockets==16.0

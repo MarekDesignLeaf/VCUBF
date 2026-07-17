@@ -11,7 +11,7 @@ Add-Type -AssemblyName System.Windows.Forms
 # A desktop shortcut can outlive a change to a user environment variable.
 # Reload the persisted credentials for this process before Python is launched,
 # so an updated provider key is used on the very next Emma restart.
-foreach($secretName in @('DEEPGRAM_API_KEY','ELEVENLABS_API_KEY')) {
+foreach($secretName in @('DEEPGRAM_API_KEY','ELEVENLABS_API_KEY','PICOVOICE_ACCESS_KEY')) {
   $userValue=[Environment]::GetEnvironmentVariable($secretName,'User')
   if($userValue) { Set-Item -Path "Env:$secretName" -Value $userValue }
 }
@@ -19,6 +19,26 @@ foreach($secretName in @('DEEPGRAM_API_KEY','ELEVENLABS_API_KEY')) {
 $app=Split-Path -Parent $PSCommandPath
 $runtime=Join-Path $app 'emma_voice_v2.py'
 if(!(Test-Path -LiteralPath $runtime)){throw 'Emma Voice v2 runtime is missing. Run Install-VoiceV2.ps1 again.'}
+
+$emmaRoot=Split-Path -Parent $app
+$desktopConfigPath=Join-Path $emmaRoot 'config.json'
+$nodeCandidates=@()
+if(Test-Path -LiteralPath $desktopConfigPath){
+  try{
+    $desktopConfig=Get-Content -LiteralPath $desktopConfigPath -Raw|ConvertFrom-Json
+    if($desktopConfig.LocalNodePath){$nodeCandidates+=[string]$desktopConfig.LocalNodePath}
+  }catch{}
+}
+$nodeCandidates+='C:\Users\hutra\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
+$nodeCandidates+=@(Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue|Select-Object -ExpandProperty Source)
+foreach($candidate in @($nodeCandidates|Select-Object -Unique)){
+  if(!(Test-Path -LiteralPath $candidate)){continue}
+  if((& $candidate -p 'process.arch' 2>$null) -eq 'x64'){
+    $env:PICOVOICE_NODE_PATH=$candidate
+    $env:PICOVOICE_NODE_MODULES=Join-Path $emmaRoot 'picovoice-node\node_modules'
+    break
+  }
+}
 
 function Resolve-Python {
   foreach($candidate in @('python.exe','py.exe')) {
@@ -72,9 +92,14 @@ if($alreadyRunning){
 
 if(!$v2Diagnostic.ready){
   $missing=@()
-  if(!$v2Diagnostic.providers.deepgramWake.providerConfigured){$missing+='Deepgram VAD wake-word configuration'}
-  if(!$v2Diagnostic.providers.deepgramWake.wakeWordPresent){$missing+='Emma wake word'}
-  if(!$v2Diagnostic.providers.deepgramWake.vadSettingsValid){$missing+='Deepgram VAD wake-word settings'}
+  if(!$v2Diagnostic.providers.wake.providerConfigured){$missing+='wake-word configuration'}
+  if(!$v2Diagnostic.providers.wake.wakeWordPresent){$missing+='Emma wake word'}
+  if($v2Diagnostic.providers.wake.requestedProvider -eq 'picovoice_porcupine'){
+    if(!$v2Diagnostic.providers.wake.packageInstalled){$missing+='Picovoice package'}
+    if(!$v2Diagnostic.providers.wake.picovoiceAccessKeyPresent){$missing+='PICOVOICE_ACCESS_KEY'}
+    if(!$v2Diagnostic.providers.wake.keywordModelPresent){$missing+='Windows Emma .ppn model'}
+    if(!$v2Diagnostic.providers.wake.picovoiceSettingsValid){$missing+='Picovoice wake-word settings'}
+  }elseif(!$v2Diagnostic.providers.wake.vadSettingsValid){$missing+='Deepgram VAD wake-word settings'}
   if(!$v2Diagnostic.providers.deepgram.apiKeyPresent){$missing+='DEEPGRAM_API_KEY'}
   if(!$v2Diagnostic.providers.deepgram.streamTimingValid){$missing+='Deepgram streaming timing (utterance end must be 1000–5000 ms)'}
   if(!$v2Diagnostic.providers.elevenlabs.apiKeyPresent){$missing+='ELEVENLABS_API_KEY'}
@@ -88,6 +113,7 @@ $ownerPid=if($OwnerProcessId -gt 0){$OwnerProcessId}else{$PID}
 Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
 $arguments=@($python.Prefix) + @("`"$runtime`"",'--run','--parent-pid',$ownerPid,'--stop-file',"`"$stopFile`"")
 $process=Start-Process -FilePath $python.Path -ArgumentList $arguments -WindowStyle Hidden -PassThru
+$wakeEngine=if($v2Diagnostic.providers.wake.effectiveProvider -eq 'picovoice_porcupine'){'Picovoice (lokálně)'}else{'Deepgram VAD'}
 
 $menu=New-Object Windows.Forms.ContextMenuStrip
 $exit=$menu.Items.Add('Ukončit Emmu Voice v2')
@@ -95,7 +121,7 @@ $context=New-Object Windows.Forms.ApplicationContext
 $notify=New-Object Windows.Forms.NotifyIcon -Property @{
   Icon=[Drawing.SystemIcons]::Information
   Visible=$true
-  Text='Emma Voice v2 — čeká na Emma'
+  Text="Emma Voice v2 — $wakeEngine"
   ContextMenuStrip=$menu
 }
 $exit.Add_Click({ $context.ExitThread() })
@@ -109,7 +135,7 @@ $timer.Add_Tick({
 
 try {
   $timer.Start()
-  $notify.ShowBalloonTip(3000,'Emma Voice v2','Naslouchá na oslovení Emma. Ikona zde umožňuje bezpečné ukončení.','Info')
+  $notify.ShowBalloonTip(3000,'Emma Voice v2',"Naslouchá na oslovení Emma přes $wakeEngine. Ikona zde umožňuje bezpečné ukončení.",'Info')
   [Windows.Forms.Application]::Run($context)
 } finally {
   $timer.Stop();$timer.Dispose()

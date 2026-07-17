@@ -19,7 +19,7 @@ function Stop-InstallerProcessTree([int]$ProcessId){
   Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
 }
 
-foreach($file in @('emma_voice_v2.py','emma_common.py','Run-VoiceV2.ps1','Launch-VCUBFSecretary.ps1','voice-v2.example.json','requirements.txt','requirements-v2.txt')){
+foreach($file in @('emma_voice_v2.py','emma_common.py','picovoice_wake.js','Run-VoiceV2.ps1','Configure-PicovoiceWake.ps1','Launch-VCUBFSecretary.ps1','voice-v2.example.json','requirements.txt','requirements-v2.txt')){
   Copy-Item -LiteralPath (Join-Path $source $file) -Destination $target -Force
 }
 
@@ -55,9 +55,9 @@ if(!(Test-Path -LiteralPath $activeConfig)){
   Copy-Item -LiteralPath (Join-Path $source 'voice-v2.example.json') -Destination $activeConfig
 }
 
-# V2 formerly used a local wake provider. Migrate the non-secret configuration
-# to the Deepgram VAD-gated wake listener while preserving the already entered
-# Deepgram and ElevenLabs settings.
+# Preserve the selected wake provider. Picovoice is enabled only after its
+# platform-specific Emma model has been imported; Deepgram remains the safe
+# fallback while that model is absent or invalid.
 $rawConfig=Get-Content -LiteralPath $activeConfig -Raw
 try {
   $voiceConfig=$rawConfig | ConvertFrom-Json
@@ -75,13 +75,17 @@ if(!$voiceConfig.PSObject.Properties['wake']){
   $voiceConfig | Add-Member -NotePropertyName wake -NotePropertyValue ([pscustomobject]@{})
 }
 $wake=$voiceConfig.wake
-if(!$wake.PSObject.Properties['provider']){$wake | Add-Member -NotePropertyName provider -NotePropertyValue 'deepgram_vad'}else{$wake.provider='deepgram_vad'}
+if(!$wake.PSObject.Properties['provider']){$wake | Add-Member -NotePropertyName provider -NotePropertyValue 'deepgram_vad'}
+elseif($wake.provider -notin @('deepgram_vad','picovoice_porcupine')){$wake.provider='deepgram_vad'}
 if(!$wake.PSObject.Properties['word']){$wake | Add-Member -NotePropertyName word -NotePropertyValue 'Emma'}elseif([string]::IsNullOrWhiteSpace([string]$wake.word)){$wake.word='Emma'}
+if(!$wake.PSObject.Properties['accessKeyEnv']){$wake | Add-Member -NotePropertyName accessKeyEnv -NotePropertyValue 'PICOVOICE_ACCESS_KEY'}
+if(!$wake.PSObject.Properties['keywordPath']){$wake | Add-Member -NotePropertyName keywordPath -NotePropertyValue ''}
+if(!$wake.PSObject.Properties['sensitivity']){$wake | Add-Member -NotePropertyName sensitivity -NotePropertyValue 0.65}
 if(!$wake.PSObject.Properties['speechThreshold']){$wake | Add-Member -NotePropertyName speechThreshold -NotePropertyValue 450}
 if(!$wake.PSObject.Properties['preRollMs']){$wake | Add-Member -NotePropertyName preRollMs -NotePropertyValue 600}
 if(!$wake.PSObject.Properties['silenceMs']){$wake | Add-Member -NotePropertyName silenceMs -NotePropertyValue 1100}
 if(!$wake.PSObject.Properties['maxSegmentMs']){$wake | Add-Member -NotePropertyName maxSegmentMs -NotePropertyValue 8000}
-foreach($obsolete in @('accessKeyEnv','keywordPath','modelPath','sensitivity','confidence')){
+foreach($obsolete in @('modelPath','confidence')){
   if($wake.PSObject.Properties[$obsolete]){$wake.PSObject.Properties.Remove($obsolete)}
 }
 if(!$voiceConfig.PSObject.Properties['stt']){
@@ -147,6 +151,17 @@ if(!$python){throw 'Python 3 was not found. Install Python, then run Install-Voi
 & $python.Path @($python.Prefix) -m pip install --disable-pip-version-check --quiet -r (Join-Path $source 'requirements-v2.txt')
 if($LASTEXITCODE -ne 0){throw 'Emma Voice v2 dependencies could not be installed.'}
 
+# Picovoice's native Python DLL currently fails under native Windows ARM64
+# Python. Install a tiny x64 Node sidecar when an x64 Node runtime is already
+# available; other machines continue to use the direct Python binding.
+$nodeArch=if($localNodePath -and (Test-Path -LiteralPath $localNodePath)){(& $localNodePath -p 'process.arch' 2>$null)}else{''}
+$npmPath=[string](Get-Command 'npm.cmd' -CommandType Application -ErrorAction SilentlyContinue|Select-Object -ExpandProperty Source -First 1)
+if($nodeArch -eq 'x64' -and $npmPath){
+  $picovoiceNodeRoot=Join-Path (Split-Path -Parent $target) 'picovoice-node'
+  & $npmPath install --prefix $picovoiceNodeRoot --no-audit --no-fund --save-exact '@picovoice/porcupine-node@4.0.2' '@picovoice/pvrecorder-node@1.2.9' *> $null
+  if($LASTEXITCODE -ne 0){Write-Warning 'Picovoice Node sidecar dependencies could not be installed; Deepgram fallback remains available.'}
+}
+
 $shell=New-Object -ComObject WScript.Shell
 $desktopShortcut=$shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'VCUBF Secretary.lnk'))
 $desktopShortcut.TargetPath="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
@@ -157,7 +172,7 @@ $desktopShortcut.Save()
 
 Write-Host "VCUBF Secretary installed in $target"
 Write-Host "The single desktop icon opens Secretary and Emma Voice v2 together. Closing that browser window stops Emma Voice v2."
-Write-Host "Deepgram VAD wake-word is configured. It sends audio only after local speech detection; no audio files are created."
+Write-Host "Picovoice support is installed. Import a Windows Emma .ppn model with Configure-PicovoiceWake.ps1; Deepgram remains the automatic fallback."
 if($StartNow){
   Start-Process -FilePath $desktopShortcut.TargetPath -ArgumentList $desktopShortcut.Arguments -WindowStyle Hidden
 }

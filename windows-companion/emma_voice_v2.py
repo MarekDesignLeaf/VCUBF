@@ -1,9 +1,9 @@
 """Emma Voice v2 — provider-based Windows voice runtime for VCUF Secretary.
 
-Voice v2 is the only installed Windows listener. When configured, it uses a local VAD
-gate plus Deepgram Nova-3 verification for the wake word, Deepgram streaming
-STT and ElevenLabs PCM streaming TTS, while every business operation still goes
-through the authenticated,
+Voice v2 is the only installed Windows listener. When configured, it uses local
+Picovoice Porcupine detection for the wake word (with a Deepgram VAD fallback),
+Deepgram streaming STT and ElevenLabs PCM streaming TTS, while every business
+operation still goes through the authenticated,
 permission-checked and audited Secretary API.
 
 No microphone audio is written to disk.  Only final transcript text is sent to
@@ -25,6 +25,7 @@ import os
 from pathlib import Path
 import queue
 import re
+import subprocess
 import threading
 import time
 from typing import Any
@@ -35,6 +36,11 @@ import urllib.request
 from aec_audio_processing import AudioProcessor
 import pyaudio
 import websockets
+
+try:
+    import pvporcupine
+except ImportError:  # Reported by diagnostics; Deepgram remains available.
+    pvporcupine = None
 
 from emma_common import (
     APP_DIR,
@@ -81,6 +87,9 @@ def default_v2_config() -> dict[str, Any]:
         "wake": {
             "provider": "deepgram_vad",
             "word": "Emma",
+            "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
+            "keywordPath": "",
+            "sensitivity": 0.65,
             "speechThreshold": 450,
             "preRollMs": 600,
             "silenceMs": 1_100,
@@ -141,6 +150,18 @@ def configured_value(value: object) -> bool:
     """Reject the explicit placeholders in the checked-in V2 example file."""
     text = str(value or "").strip()
     return bool(text) and not text.upper().startswith("SET_")
+
+
+def node_picovoice_available() -> bool:
+    node_path = Path(os.environ.get("PICOVOICE_NODE_PATH", "").strip())
+    modules_path = Path(os.environ.get("PICOVOICE_NODE_MODULES", "").strip())
+    sidecar_path = Path(__file__).with_name("picovoice_wake.js")
+    return (
+        node_path.is_file()
+        and sidecar_path.is_file()
+        and (modules_path / "@picovoice" / "porcupine-node").is_dir()
+        and (modules_path / "@picovoice" / "pvrecorder-node").is_dir()
+    )
 
 
 def companion_is_running(parent_pid: int = 0, stop_file: Path | None = None) -> bool:
@@ -208,6 +229,22 @@ def wake_vad_settings(config: dict[str, Any]) -> tuple[int, int, int, int]:
     if not 80 <= threshold <= 12_000 or not 100 <= pre_roll_ms <= 2_000 or not 300 <= silence_ms <= 4_000 or not 1_000 <= max_segment_ms <= 15_000:
         raise RuntimeError("DEEPGRAM_WAKE_SETTINGS_INVALID")
     return threshold, pre_roll_ms, silence_ms, max_segment_ms
+
+
+def picovoice_wake_settings(config: dict[str, Any]) -> tuple[str, str, float]:
+    wake = config["wake"]
+    access_key_env = str(wake.get("accessKeyEnv") or "PICOVOICE_ACCESS_KEY").strip()
+    raw_keyword_path = os.path.expandvars(str(wake.get("keywordPath") or "").strip())
+    keyword_path = Path(raw_keyword_path).expanduser() if raw_keyword_path else Path()
+    try:
+        sensitivity = float(wake.get("sensitivity", 0.65))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("PICOVOICE_SENSITIVITY_INVALID") from exc
+    if not access_key_env:
+        raise RuntimeError("PICOVOICE_ACCESS_KEY_ENV_INVALID")
+    if not 0.0 <= sensitivity <= 1.0:
+        raise RuntimeError("PICOVOICE_SENSITIVITY_INVALID")
+    return access_key_env, str(keyword_path) if raw_keyword_path else "", sensitivity
 
 
 def stream_timing_settings(config: dict[str, Any]) -> tuple[int, int]:
@@ -317,14 +354,50 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
         timing_error = ""
     except RuntimeError as exc:
         timing_error = str(exc)
+    try:
+        picovoice_key_env, picovoice_keyword_path, _ = picovoice_wake_settings(config)
+        picovoice_error = ""
+    except RuntimeError as exc:
+        picovoice_key_env, picovoice_keyword_path, picovoice_error = "", "", str(exc)
+    requested_wake_provider = str(config["wake"].get("provider") or "deepgram_vad")
+    deepgram_wake_ready = bool(wake_word) and not profile_error and not vad_error
+    picovoice_wake_ready = (
+        bool(wake_word)
+        and not profile_error
+        and not picovoice_error
+        and (pvporcupine is not None or node_picovoice_available())
+        and bool(picovoice_key_env and environment_value(picovoice_key_env))
+        and bool(picovoice_keyword_path and Path(picovoice_keyword_path).is_file())
+    )
+    if requested_wake_provider == "picovoice_porcupine" and picovoice_wake_ready:
+        effective_wake_provider = "picovoice_porcupine"
+        wake_fallback_reason = ""
+    elif requested_wake_provider == "picovoice_porcupine" and deepgram_wake_ready:
+        effective_wake_provider = "deepgram_vad"
+        wake_fallback_reason = profile_error or picovoice_error or "PICOVOICE_MODEL_OR_KEY_UNAVAILABLE"
+    elif requested_wake_provider == "deepgram_vad" and deepgram_wake_ready:
+        effective_wake_provider = "deepgram_vad"
+        wake_fallback_reason = ""
+    else:
+        effective_wake_provider = ""
+        wake_fallback_reason = "WAKE_PROVIDER_NOT_READY"
     configured = {
-        "deepgramWake": {
-            "provider": str(config["wake"].get("provider") or ""),
-            "providerConfigured": str(config["wake"].get("provider") or "") == "deepgram_vad",
+        "wake": {
+            "requestedProvider": requested_wake_provider,
+            "effectiveProvider": effective_wake_provider,
+            "providerConfigured": bool(effective_wake_provider),
             "language": language,
             "wakeWordPresent": bool(wake_word),
             "vadSettingsValid": not vad_error,
-            "configurationError": profile_error or vad_error,
+            "packageInstalled": pvporcupine is not None,
+            "nodeSidecarInstalled": node_picovoice_available(),
+            "picovoiceAccessKeyPresent": bool(picovoice_key_env and environment_value(picovoice_key_env)),
+            "keywordModelConfigured": bool(picovoice_keyword_path),
+            "keywordModelPresent": bool(picovoice_keyword_path and Path(picovoice_keyword_path).is_file()),
+            "picovoiceSettingsValid": not picovoice_error,
+            "fallbackActive": bool(wake_fallback_reason and effective_wake_provider),
+            "fallbackReason": wake_fallback_reason,
+            "configurationError": profile_error or vad_error or picovoice_error,
         },
         "deepgram": {
             "provider": stt["provider"],
@@ -342,9 +415,8 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
         },
     }
     ready = (
-        configured["deepgramWake"]["providerConfigured"]
-        and configured["deepgramWake"]["wakeWordPresent"]
-        and configured["deepgramWake"]["vadSettingsValid"]
+        configured["wake"]["providerConfigured"]
+        and configured["wake"]["wakeWordPresent"]
         and configured["deepgram"]["apiKeyPresent"]
         and configured["deepgram"]["streamTimingValid"]
         and configured["elevenlabs"]["apiKeyPresent"]
@@ -648,6 +720,137 @@ class DeepgramWakeWord:
                 except Exception:
                     pass
             audio.terminate()
+
+
+class PicovoiceWakeWord:
+    """Fully local, low-latency wake-word detection using a custom .ppn file."""
+
+    def __init__(self, config: dict[str, Any], parent_pid: int = 0, stop_file: Path | None = None):
+        self.config = config
+        self.parent_pid = parent_pid
+        self.stop_file = stop_file
+
+    async def publish_listening_state(self) -> None:
+        try:
+            await asyncio.to_thread(
+                backend_json,
+                "PUT",
+                "/command/voice-state",
+                {"status": "listening", "mode": "wake_word", "listening": True},
+            )
+        except Exception as exc:
+            log(f"v2 wake state error: {type(exc).__name__}")
+
+    async def listening_heartbeat(self) -> None:
+        while companion_is_running(self.parent_pid, self.stop_file):
+            await self.publish_listening_state()
+            await asyncio.sleep(5)
+
+    async def wait_with_node(self, keyword_path: str, sensitivity: float) -> str | None:
+        node_path = os.environ["PICOVOICE_NODE_PATH"]
+        modules_path = os.environ["PICOVOICE_NODE_MODULES"]
+        sidecar_path = str(Path(__file__).with_name("picovoice_wake.js"))
+        environment = os.environ.copy()
+        environment["NODE_PATH"] = modules_path
+        creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        process = await asyncio.create_subprocess_exec(
+            node_path,
+            sidecar_path,
+            keyword_path,
+            str(sensitivity),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=environment,
+            creationflags=creation_flags,
+        )
+        try:
+            while companion_is_running(self.parent_pid, self.stop_file):
+                if process.stdout is None:
+                    raise RuntimeError("PICOVOICE_NODE_STDOUT_UNAVAILABLE")
+                try:
+                    raw_line = await asyncio.wait_for(process.stdout.readline(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    if process.returncode is not None:
+                        raise RuntimeError("PICOVOICE_NODE_EXITED")
+                    continue
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if line == "DETECTED":
+                    log("v2 Picovoice Node wake word detected")
+                    return ""
+                if not line and process.returncode is not None:
+                    error_name = ""
+                    if process.stderr is not None:
+                        error_name = (await process.stderr.read()).decode("utf-8", errors="replace").strip()[:160]
+                    raise RuntimeError(error_name or "PICOVOICE_NODE_EXITED")
+            return None
+        finally:
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+
+    async def wait(self) -> str | None:
+        language, wake_word = current_wake_profile(self.config)
+        access_key_env, keyword_path, sensitivity = picovoice_wake_settings(self.config)
+        access_key = environment_value(access_key_env)
+        if not access_key:
+            raise RuntimeError("PICOVOICE_ACCESS_KEY_NOT_CONFIGURED")
+        if not keyword_path or not Path(keyword_path).is_file():
+            raise RuntimeError("PICOVOICE_KEYWORD_MODEL_NOT_FOUND")
+
+        heartbeat: asyncio.Task[None] | None = asyncio.create_task(self.listening_heartbeat())
+        write_live_preview(status=f"Emma Voice v2 is waiting for {wake_word}")
+        if node_picovoice_available():
+            try:
+                log(f"v2 Picovoice Node wake listener started ({language}, {wake_word})")
+                return await self.wait_with_node(keyword_path, sensitivity)
+            finally:
+                heartbeat.cancel()
+                await asyncio.gather(heartbeat, return_exceptions=True)
+
+        if pvporcupine is None:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
+            raise RuntimeError("PICOVOICE_PACKAGE_NOT_INSTALLED")
+
+        porcupine = pvporcupine.create(
+            access_key=access_key,
+            keyword_paths=[keyword_path],
+            sensitivities=[sensitivity],
+        )
+        audio = pyaudio.PyAudio()
+        stream = None
+        try:
+            stream = audio.open(
+                format=pyaudio.paInt16,
+                channels=CHANNELS,
+                rate=porcupine.sample_rate,
+                input=True,
+                frames_per_buffer=porcupine.frame_length,
+            )
+            log(f"v2 Picovoice wake listener started ({language}, {wake_word})")
+            while companion_is_running(self.parent_pid, self.stop_file):
+                raw = await asyncio.to_thread(stream.read, porcupine.frame_length, False)
+                samples = array("h")
+                samples.frombytes(raw)
+                if porcupine.process(samples) >= 0:
+                    log("v2 Picovoice wake word detected")
+                    return ""
+            return None
+        finally:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
+            if stream:
+                try:
+                    stream.stop_stream()
+                    stream.close()
+                except Exception:
+                    pass
+            audio.terminate()
+            porcupine.delete()
 
 
 @dataclass
@@ -1008,18 +1211,34 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
     config = load_v2_config()
     status = provider_status(config)
     if not status["ready"]:
-        missing = []
-        for name, details in status["providers"].items():
-            for field, value in details.items():
-                if field.endswith("Present") or field == "packageInstalled":
-                    if value is False:
-                        missing.append(f"{name}.{field}")
+        missing = [
+            f"{name}.{field}"
+            for name, details in status["providers"].items()
+            for field, value in details.items()
+            if field in {"apiKeyPresent", "voiceIdPresent", "wakeWordPresent"} and value is False
+        ]
+        if not status["providers"]["wake"]["providerConfigured"]:
+            missing.append("wake.providerConfigured")
         raise RuntimeError("VOICE_V2_NOT_CONFIGURED: " + ", ".join(missing))
     sentinel = Path(stop_file).resolve() if stop_file.strip() else None
-    wake = DeepgramWakeWord(config, parent_pid, sentinel)
+    effective_provider = str(status["providers"]["wake"]["effectiveProvider"])
+    wake = (
+        PicovoiceWakeWord(config, parent_pid, sentinel)
+        if effective_provider == "picovoice_porcupine"
+        else DeepgramWakeWord(config, parent_pid, sentinel)
+    )
     try:
         while companion_is_running(parent_pid, sentinel):
-            activation_command = await wake.wait()
+            try:
+                activation_command = await wake.wait()
+            except Exception as exc:
+                if isinstance(wake, PicovoiceWakeWord):
+                    # A malformed/incompatible model or a transient licence
+                    # check must not leave the desktop assistant deaf.
+                    log(f"v2 Picovoice wake failure; using Deepgram fallback: {type(exc).__name__}")
+                    wake = DeepgramWakeWord(config, parent_pid, sentinel)
+                    continue
+                raise
             if activation_command is None:
                 break
             try:
