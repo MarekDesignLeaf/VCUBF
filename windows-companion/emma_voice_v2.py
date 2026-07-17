@@ -827,7 +827,7 @@ class VoiceSessionV2:
             self.language = selected_language
             save_config_language(selected_language)
             log(f"v2 language changed to {selected_language}")
-        message = str((result or {}).get("message") or self.localized_error_message()).strip()
+        message = self.result_message(result)
         if not message or generation != self.generation:
             return
         self.last_assistant_text = message
@@ -865,6 +865,41 @@ class VoiceSessionV2:
             "en": "I could not reach the Secretary service just now. Please try again.",
         }
         return messages.get(self.language.split("-", 1)[0].lower(), messages["en"])
+
+    def result_message(self, result: object) -> str:
+        """Never describe a successful Secretary command as a connection failure."""
+        if not isinstance(result, dict):
+            return self.localized_error_message()
+        explicit = str(result.get("message") or "").strip()
+        if explicit:
+            return explicit
+        if not result.get("ok"):
+            return self.localized_error_message()
+        action = result.get("uiAction")
+        if isinstance(action, dict) and action.get("kind") == "navigate":
+            label = str(action.get("label") or "").strip()
+            if label:
+                prefixes = {
+                    "cs": "Otevírám",
+                    "pl": "Otwieram",
+                    "fr": "J’ouvre",
+                    "de": "Ich öffne",
+                    "es": "Abriendo",
+                    "it": "Apro",
+                    "en": "Opening",
+                }
+                prefix = prefixes.get(self.language.split("-", 1)[0].lower(), prefixes["en"])
+                return f"{prefix}: {label}."
+        completed = {
+            "cs": "Požadavek byl úspěšně dokončen.",
+            "pl": "Polecenie zostało wykonane.",
+            "fr": "La demande a été exécutée.",
+            "de": "Die Anfrage wurde ausgeführt.",
+            "es": "La solicitud se completó correctamente.",
+            "it": "La richiesta è stata completata.",
+            "en": "The request completed successfully.",
+        }
+        return completed.get(self.language.split("-", 1)[0].lower(), completed["en"])
 
     async def deepgram_receiver(self, ws: websockets.ClientConnection) -> None:
         async for raw in ws:

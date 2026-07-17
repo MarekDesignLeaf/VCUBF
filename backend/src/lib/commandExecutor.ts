@@ -23,7 +23,7 @@ import * as voiceWhatsAppService from "../services/voiceWhatsAppService.js";
 import * as voiceNotificationService from "../services/voiceNotificationService.js";
 import * as voicePreferenceService from "../services/voicePreferenceService.js";
 import * as googleCalendarConnectorService from "../services/googleCalendarConnectorService.js";
-import { buildCommandUiAction, openingVoicePageMessage, type CommandUiAction } from "./voiceNavigation.js";
+import { buildCommandUiAction, completedVoiceCommandMessage, openingVoiceLabelMessage, openingVoicePageMessage, type CommandUiAction } from "./voiceNavigation.js";
 import { getNavigationCatalogue } from "./navigationCatalogue.js";
 import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction } from "../services/emmaExecutableActionService.js";
 
@@ -58,7 +58,9 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
             ok: true,
             httpStatus: result.httpStatus,
             data: result.data,
-            message: `Completed ${command.entities.action.replaceAll("_", " ")}.`,
+            message: typeof (result.data as { message?: unknown })?.message === "string"
+              ? (result.data as { message: string }).message
+              : `Completed ${command.entities.action.replaceAll("_", " ")}.`,
           }
         : {
             intent: command.intent,
@@ -1115,6 +1117,13 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
   }
 
 
-  if (response.ok) response.uiAction = buildCommandUiAction(response.intent, response.data, response.interpreted, user.voiceLanguage);
+  if (response.ok) {
+    response.uiAction = buildCommandUiAction(response.intent, response.data, response.interpreted, user.voiceLanguage);
+    if (!response.message) {
+      response.message = response.uiAction?.kind === "navigate"
+        ? openingVoiceLabelMessage(response.uiAction.label, user.voiceLanguage)
+        : completedVoiceCommandMessage(user.voiceLanguage);
+    }
+  }
   return response;
 }

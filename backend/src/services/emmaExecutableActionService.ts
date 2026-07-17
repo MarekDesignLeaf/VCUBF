@@ -1,7 +1,9 @@
 import type { AuthedUser } from "../middleware/auth.js";
 import { EMMA_EXECUTABLE_ACTIONS, type EmmaExecutableActionName, type EmmaExecutableActionRequest } from "../lib/emmaExecutableActionCatalogue.js";
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "../db.js";
+import { isValidPhoneNumberFormat } from "../lib/contactNormalization.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 import * as clientService from "./clientService.js";
 import * as jobService from "./jobService.js";
@@ -71,6 +73,21 @@ function lookup<T extends Row>(items: T[], query: string | undefined, fields: Ar
 
 async function clientByName(user: AuthedUser, name: string | undefined) {
   return lookup(await clientService.listClients(user), name, ["displayName"], "client");
+}
+
+function invoicePreparationMessage(user: AuthedUser, client: Row, issues: string[]) {
+  const name = String(client.displayName);
+  const issueLabels: Record<string, Record<string, string>> = {
+    cs: { email: "e-mail chybí nebo není platný", phone: "telefonní číslo chybí nebo není platné", address: "fakturační adresa chybí" },
+    pl: { email: "brakuje prawidłowego adresu e-mail", phone: "brakuje prawidłowego numeru telefonu", address: "brakuje adresu rozliczeniowego" },
+    en: { email: "the email address is missing or invalid", phone: "the phone number is missing or invalid", address: "the billing address is missing" },
+  };
+  const locale = user.voiceLanguage.slice(0, 2).toLocaleLowerCase("en");
+  const labels = issueLabels[locale] ?? issueLabels.en;
+  const warning = issues.length ? ` ${locale === "cs" ? "Upozornění" : locale === "pl" ? "Uwaga" : "Warning"}: ${issues.map((issue) => labels[issue]).join(", ")}.` : "";
+  if (locale === "cs") return `Našel jsem klienta ${name} a otevírám novou fakturu s jeho uloženými údaji.${warning}`;
+  if (locale === "pl") return `Znalazłam klienta ${name} i otwieram nową fakturę z jego zapisanymi danymi.${warning}`;
+  return `I found ${name} and am opening a new invoice with the saved client details.${warning}`;
 }
 
 async function jobByTitle(user: AuthedUser, title: string | undefined) {
@@ -174,6 +191,20 @@ async function executeEmmaActionDirect(
     case "export_quote_pdf": {
       const item = lookup(await quoteService.listQuotes(user), stringValue(p, "quote_title"), ["title"], "quote");
       return item.ok ? ok(200, { downloadPath: `/quotes/${item.data.id}/pdf`, filename: `quote-${item.data.id}.pdf` }) : item;
+    }
+    case "prepare_invoice_for_client": {
+      const client = await clientByName(user, stringValue(p, "client_name"));
+      if (!client.ok) return client;
+      const emailValid = typeof client.data.emailPrimary === "string" && z.string().trim().email().safeParse(client.data.emailPrimary).success;
+      const phoneValid = isValidPhoneNumberFormat(client.data.phonePrimary);
+      const addressPresent = Boolean(client.data.billingLine1?.trim() && client.data.billingCity?.trim() && client.data.billingPostcode?.trim());
+      const issues = [!emailValid ? "email" : "", !phoneValid ? "phone" : "", !addressPresent ? "address" : ""].filter(Boolean);
+      return ok(200, {
+        clientId: client.data.id,
+        clientName: client.data.displayName,
+        issues,
+        message: invoicePreparationMessage(user, client.data, issues),
+      });
     }
     case "create_invoice": {
       const client = await clientByName(user, stringValue(p, "client_name"));

@@ -547,6 +547,20 @@ h2 { font-size: 1.1rem; margin-top: 24px; }
   .voice-transcript-message { overflow-wrap: anywhere; }
 }
 
+.info-banner {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.info-banner span { color: var(--muted); }
+
 /* DesignLeaf-aligned interface: dark technical surfaces, electric green and
    signal yellow. The background geometry is an abstract wire field only; it
    deliberately contains no logo, leaves or other brand illustration. */

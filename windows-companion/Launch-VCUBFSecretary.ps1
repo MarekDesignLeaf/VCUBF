@@ -45,6 +45,7 @@ $tokenPath = Join-Path $appDir 'token.bin'
 $stopFile = Join-Path $appDir 'voice-v2.stop'
 $v2Runtime = Join-Path $app 'emma_voice_v2.py'
 $v2Runner = Join-Path $app 'Run-VoiceV2.ps1'
+$localProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
 $legacyScripts = @(
   (Join-Path $app 'VCUBF-Emma.ps1'),
   (Join-Path $app 'emma_realtime.py'),
@@ -114,6 +115,104 @@ function Stop-VoiceV2 {
   } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
+function Test-TcpPort([string]$HostName, [int]$Port) {
+  $client = New-Object Net.Sockets.TcpClient
+  try {
+    $connection = $client.BeginConnect($HostName, $Port, $null, $null)
+    if(!$connection.AsyncWaitHandle.WaitOne(1200)) { return $false }
+    $client.EndConnect($connection)
+    return $true
+  } catch {
+    return $false
+  } finally {
+    $client.Dispose()
+  }
+}
+
+function Wait-HttpEndpoint([string]$Url, [string]$Name, [int]$Seconds = 45) {
+  $deadline = [datetime]::UtcNow.AddSeconds($Seconds)
+  do {
+    try {
+      $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 3
+      if([int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500) { return }
+    } catch {}
+    Start-Sleep -Milliseconds 500
+  } while([datetime]::UtcNow -lt $deadline)
+  throw "$Name se nepodařilo spustit. Podrobnosti jsou v $appDir."
+}
+
+function Start-LocalPostgres {
+  if(Test-TcpPort 'localhost' 5432) { return }
+  $pgCtl = Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'PostgreSQL') -Filter 'pg_ctl.exe' -Recurse -ErrorAction SilentlyContinue |
+    Sort-Object FullName -Descending | Select-Object -First 1
+  if(!$pgCtl) { throw 'Lokální PostgreSQL nebyl nalezen.' }
+  $dataDir = Join-Path (Split-Path -Parent (Split-Path -Parent $pgCtl.FullName)) 'data'
+  $logPath = Join-Path $appDir 'postgresql.log'
+  & $pgCtl.FullName start -D $dataDir -l $logPath -w *> $null
+  if($LASTEXITCODE -ne 0 -or !(Test-TcpPort 'localhost' 5432)) {
+    throw "Lokální PostgreSQL se nepodařilo spustit. Podrobnosti jsou v $logPath."
+  }
+}
+
+function Resolve-LocalNode {
+  $config = Get-Config
+  $candidates = @(
+    [string]$config.LocalNodePath,
+    (Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'),
+    [string](Get-Command 'node.exe' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
+  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+  foreach($candidate in $candidates) {
+    try {
+      $architecture = (& $candidate -p 'process.arch' 2>$null).Trim()
+      if($architecture -eq 'x64') { return $candidate }
+    } catch {}
+  }
+  throw 'Pro lokální backend nebyl nalezen x64 Node.js kompatibilní s databázovým ovladačem Prisma.'
+}
+
+function Start-LocalNodeProcess([string]$Name, [string]$WorkingDirectory, [string[]]$Arguments, [bool]$RequireX64 = $false) {
+  if($RequireX64) {
+    $node = Resolve-LocalNode
+  } else {
+    $node = [string](Get-Command 'node.exe' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
+    if(!$node) { throw 'Node.js nebyl nalezen.' }
+  }
+  $stdout = Join-Path $appDir "$Name-local.log"
+  $stderr = Join-Path $appDir "$Name-local-error.log"
+  Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue
+  $process = Start-Process -FilePath $node -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+  $localProcesses.Add($process)
+}
+
+function Stop-ProcessTree([int]$RootProcessId) {
+  $children = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ParentProcessId -eq $RootProcessId })
+  foreach($child in $children) { Stop-ProcessTree ([int]$child.ProcessId) }
+  Stop-Process -Id $RootProcessId -Force -ErrorAction SilentlyContinue
+}
+
+function Start-LocalRuntime([string]$ProjectRoot) {
+  if(!(Test-Path -LiteralPath (Join-Path $ProjectRoot 'backend\package.json')) -or !(Test-Path -LiteralPath (Join-Path $ProjectRoot 'frontend\package.json'))) {
+    throw "Lokální zdrojový projekt VCUBF nebyl nalezen v $ProjectRoot."
+  }
+  Start-LocalPostgres
+  if(!(Test-TcpPort 'localhost' 4000)) {
+    $env:PRISMA_CLIENT_ENGINE_TYPE = 'library'
+    Start-LocalNodeProcess 'backend' (Join-Path $ProjectRoot 'backend') @('node_modules\tsx\dist\cli.mjs','watch','src/server.ts') $true
+  }
+  Wait-HttpEndpoint 'http://localhost:4000/health' 'Lokální backend'
+  if(!(Test-TcpPort 'localhost' 5173)) {
+    Start-LocalNodeProcess 'frontend' (Join-Path $ProjectRoot 'frontend') @('node_modules\vite\bin\vite.js','--host','localhost')
+  }
+  Wait-HttpEndpoint 'http://localhost:5173/' 'Lokální frontend'
+}
+
+function Stop-LocalRuntime {
+  foreach($process in @($localProcesses)) {
+    if($process -and !$process.HasExited) { Stop-ProcessTree $process.Id }
+  }
+  $localProcesses.Clear()
+}
+
 function Start-VoiceV2 {
   if(!(Test-Path -LiteralPath $v2Runner) -or !(Test-Path -LiteralPath $v2Runtime)) {
     throw 'Emma Voice v2 is not installed. Run Install-VoiceV2.ps1 again.'
@@ -181,8 +280,16 @@ try {
   Stop-VoiceV2
 
   $config = Get-Config
-  $server = if($config.ServerUrl) { ([string]$config.ServerUrl).TrimEnd('/') } else { 'https://backend-production-7952.up.railway.app' }
-  $frontend = if($config.FrontendUrl) { ([string]$config.FrontendUrl).TrimEnd('/') } else { 'https://frontend-production-ee13.up.railway.app' }
+  $localMode = $config.LocalMode -eq $true
+  if($localMode) {
+    $projectRoot = [string]$config.LocalProjectRoot
+    Start-LocalRuntime $projectRoot
+    $server = 'http://localhost:4000'
+    $frontend = 'http://localhost:5173'
+  } else {
+    $server = if($config.ServerUrl) { ([string]$config.ServerUrl).TrimEnd('/') } else { 'https://backend-production-7952.up.railway.app' }
+    $frontend = if($config.FrontendUrl) { ([string]$config.FrontendUrl).TrimEnd('/') } else { 'https://frontend-production-ee13.up.railway.app' }
+  }
   $profile = Get-ExistingDeviceProfile $server
   $pairing = $null
   if(!$profile) {
@@ -216,6 +323,7 @@ try {
   [Windows.Forms.MessageBox]::Show($_.Exception.Message, 'VCUBF Secretary', 'OK', 'Error') | Out-Null
 } finally {
   Stop-VoiceV2
+  Stop-LocalRuntime
   $mutex.ReleaseMutex() | Out-Null
   $mutex.Dispose()
 }

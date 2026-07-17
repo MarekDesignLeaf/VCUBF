@@ -1,0 +1,3 @@
+-- No additional schema change is required.
+-- Emma function permissions are stored in companies.emma_disabled_capabilities,
+-- which was created by 20260714180000_add_emma_company_policy.

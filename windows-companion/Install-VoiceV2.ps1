@@ -2,6 +2,7 @@ param([switch]$StartNow)
 
 $ErrorActionPreference='Stop'
 $source=Split-Path -Parent $PSCommandPath
+$projectRoot=Split-Path -Parent $source
 $target=Join-Path $env:LOCALAPPDATA 'VCUBF\Emma\app'
 $legacyV1Script=Join-Path $target 'VCUBF-Emma.ps1'
 $legacyV1Runtime=Join-Path $target 'emma_realtime.py'
@@ -10,6 +11,13 @@ $v2Runtime=Join-Path $target 'emma_voice_v2.py'
 $unifiedLauncher=Join-Path $target 'Launch-VCUBFSecretary.ps1'
 $legacyBrowserProfile=Join-Path (Split-Path -Parent $target) 'SecretaryBrowser'
 New-Item -ItemType Directory -Path $target -Force|Out-Null
+
+function Stop-InstallerProcessTree([int]$ProcessId){
+  foreach($child in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue|Where-Object{$_.ParentProcessId -eq $ProcessId})){
+    Stop-InstallerProcessTree ([int]$child.ProcessId)
+  }
+  Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+}
 
 foreach($file in @('emma_voice_v2.py','emma_common.py','Run-VoiceV2.ps1','Launch-VCUBFSecretary.ps1','voice-v2.example.json','requirements.txt','requirements-v2.txt')){
   Copy-Item -LiteralPath (Join-Path $source $file) -Destination $target -Force
@@ -30,6 +38,12 @@ Get-CimInstance Win32_Process | Where-Object {
     $_.CommandLine.IndexOf($v2Runner,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
     ($_.CommandLine.IndexOf($v2Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -like '*--run*')
   )
+} | ForEach-Object { Stop-InstallerProcessTree ([int]$_.ProcessId) }
+# Remove only stale local development runtimes from this VCUBF checkout. They
+# otherwise keep ports 4000/5173 occupied after an older launcher was replaced.
+Get-CimInstance Win32_Process | Where-Object {
+  $_.CommandLine -and $_.CommandLine.IndexOf($projectRoot,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+  $_.CommandLine -match '(tsx.*src[\\/]server\.ts|vite.*--host)'
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Get-CimInstance Win32_Process | Where-Object {
   $_.CommandLine -and $_.CommandLine.IndexOf($legacyBrowserProfile,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and
@@ -83,6 +97,39 @@ if(!$stt.PSObject.Properties['utteranceEndMs']){
   if($utteranceEndMs -lt 1000 -or $utteranceEndMs -gt 5000){$stt.utteranceEndMs=1000}
 }
 $voiceConfig | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $activeConfig -Encoding UTF8
+
+# The desktop test build runs the browser UI, API and Emma from this checkout.
+# Keep all three on the same local origin pair so no test command can silently
+# fall through to an older Railway deployment.
+$desktopConfigPath=Join-Path (Split-Path -Parent $target) 'config.json'
+$codexNode=Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
+$localNodePath=if(Test-Path -LiteralPath $codexNode){$codexNode}else{[string](Get-Command 'node.exe' -CommandType Application -ErrorAction SilentlyContinue|Select-Object -ExpandProperty Source -First 1)}
+if(Test-Path -LiteralPath $desktopConfigPath){
+  try{$desktopConfig=Get-Content -LiteralPath $desktopConfigPath -Raw|ConvertFrom-Json}catch{$desktopConfig=[pscustomobject]@{}}
+}else{$desktopConfig=[pscustomobject]@{}}
+foreach($pair in @(
+  @('LocalMode',$true),
+  @('LocalProjectRoot',$projectRoot),
+  @('ServerUrl','http://localhost:4000'),
+  @('FrontendUrl','http://localhost:5173'),
+  @('LocalNodePath',$localNodePath)
+)){
+  if($desktopConfig.PSObject.Properties[$pair[0]]){$desktopConfig.($pair[0])=$pair[1]}
+  else{$desktopConfig|Add-Member -NotePropertyName $pair[0] -NotePropertyValue $pair[1]}
+}
+$desktopConfig|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $desktopConfigPath -Encoding UTF8
+
+$prismaCli=Join-Path $projectRoot 'backend\node_modules\prisma\build\index.js'
+if($localNodePath -and (Test-Path -LiteralPath $prismaCli)){
+  $previousEngineType=$env:PRISMA_CLIENT_ENGINE_TYPE
+  try{
+    $env:PRISMA_CLIENT_ENGINE_TYPE='library'
+    & $localNodePath $prismaCli generate --schema (Join-Path $projectRoot 'backend\prisma\schema.prisma') *> $null
+    if($LASTEXITCODE -ne 0){throw 'Lokální databázový klient Prisma se nepodařilo připravit.'}
+  }finally{
+    if($null -eq $previousEngineType){Remove-Item Env:PRISMA_CLIENT_ENGINE_TYPE -ErrorAction SilentlyContinue}else{$env:PRISMA_CLIENT_ENGINE_TYPE=$previousEngineType}
+  }
+}
 
 $python=$null
 foreach($candidate in @('python.exe','py.exe')) {

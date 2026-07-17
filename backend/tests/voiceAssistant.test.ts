@@ -32,6 +32,8 @@ describe("voice assistant interpretation", () => {
       assert.doesNotMatch(body.instructions, /\/communication-intake/);
       assert.match(body.instructions, /show calendar today\|tomorrow\|next 7 days/);
       assert.match(body.instructions, /send WhatsApp to INTERNATIONAL_PHONE/);
+      assert.match(body.instructions, /prepare_invoice_for_client/);
+      assert.match(body.instructions, /Never use list clients for this request/);
       return new Response(
         JSON.stringify({
           output: [

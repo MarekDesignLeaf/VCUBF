@@ -104,7 +104,10 @@ export function voicePageLabel(page: VoicePage, language?: string) {
 }
 
 export function openingVoicePageMessage(page: VoicePage, language?: string) {
-  const label = voicePageLabel(page, language);
+  return openingVoiceLabelMessage(voicePageLabel(page, language), language);
+}
+
+export function openingVoiceLabelMessage(label: string, language?: string) {
   if (language === "pl-PL") return `Otwieram: ${label}.`;
   if (language === "cs-CZ") return `Otevírám: ${label}.`;
   if (language === "fr-FR") return `J’ouvre : ${label}.`;
@@ -112,6 +115,16 @@ export function openingVoicePageMessage(page: VoicePage, language?: string) {
   if (language === "es-ES") return `Abriendo: ${label}.`;
   if (language === "it-IT") return `Apro: ${label}.`;
   return `Opening ${label}.`;
+}
+
+export function completedVoiceCommandMessage(language?: string) {
+  if (language === "pl-PL") return "Polecenie zostało wykonane.";
+  if (language === "cs-CZ") return "Požadavek byl úspěšně dokončen.";
+  if (language === "fr-FR") return "La demande a été exécutée.";
+  if (language === "de-DE") return "Die Anfrage wurde ausgeführt.";
+  if (language === "es-ES") return "La solicitud se completó correctamente.";
+  if (language === "it-IT") return "La richiesta è stata completata.";
+  return "The request completed successfully.";
 }
 
 const PAGE_ALIASES: Record<string, VoicePage> = {
@@ -263,6 +276,9 @@ export function buildCommandUiAction(intent: string, data: unknown, interpreted:
     case "execute_action": {
       const action = typeof entities.action === "string" ? entities.action : "";
       if (isEmmaExecutableActionName(action)) {
+        if (action === "prepare_invoice_for_client" && typeof payload.clientId === "string") {
+          return navigate("invoices", `/invoices?client=${encodeURIComponent(payload.clientId)}`);
+        }
         if (typeof payload.downloadPath === "string" && typeof payload.filename === "string" && payload.downloadPath.startsWith("/")) {
           return { kind: "download", path: payload.downloadPath, filename: payload.filename, label: "PDF" };
         }

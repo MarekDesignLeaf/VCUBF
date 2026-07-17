@@ -1,2 +1,109 @@
-import {useEffect,useState} from "react";import{api,ApiError,type Invoice}from"../api/client";
-export function Invoices(){const[rows,setRows]=useState<Invoice[]>([]),[clients,setClients]=useState<{id:string;displayName:string}[]>([]),[error,setError]=useState(""),[client,setClient]=useState(""),[num,setNum]=useState(""),[title,setTitle]=useState(""),[amount,setAmount]=useState("");const load=()=>api.invoices.list().then(setRows).catch(()=>setError("Could not load invoices."));useEffect(()=>{load();api.clients.list().then(setClients)},[]);async function create(e:React.FormEvent){e.preventDefault();try{await api.invoices.create({client_id:client,invoice_number:num,title,items:[{description:title,quantity:1,unit_price:Number(amount)}]});setNum("");setTitle("");setAmount("");load()}catch(x){setError(x instanceof ApiError?x.message:"Could not create invoice.")}}async function issue(id:string){await api.invoices.status(id,"issued");load()}async function pay(x:Invoice){const raw=window.prompt(`Payment amount (balance £${x.totals.balance.toFixed(2)})`);if(!raw)return;const data={amount:Number(raw),paid_at:new Date().toISOString()};try{await api.invoices.payment(x.id,data)}catch(e){if(!(e instanceof ApiError)||e.code!=="CONFIRMATION_REQUIRED")throw e;const p=e.details?.preview as Record<string,unknown>|undefined;if(!window.confirm(`Confirm payment £${p?.amount} for ${p?.client}? Balance after: £${p?.balanceAfter}`))return;await api.invoices.payment(x.id,data,true)}load()}async function pdf(x:Invoice){const b=await api.invoices.downloadPdf(x.id),u=URL.createObjectURL(b),a=document.createElement("a");a.href=u;a.download=`invoice-${x.invoiceNumber}.pdf`;a.click();URL.revokeObjectURL(u)}return <div><h1>Invoices</h1>{error&&<div className="error-banner">{error}</div>}<form className="inline-form" onSubmit={create}><select value={client} onChange={e=>setClient(e.target.value)} required><option value="">Client</option>{clients.map(c=><option key={c.id} value={c.id}>{c.displayName}</option>)}</select><input placeholder="Invoice number" value={num} onChange={e=>setNum(e.target.value)} required/><input placeholder="Description" value={title} onChange={e=>setTitle(e.target.value)} required/><input type="number" min="0" step="0.01" placeholder="Amount" value={amount} onChange={e=>setAmount(e.target.value)} required/><button>Create draft</button></form><table><thead><tr><th>Number</th><th>Client</th><th>Status</th><th>Total</th><th>Paid</th><th>Balance</th><th>Actions</th></tr></thead><tbody>{rows.map(x=><tr key={x.id}><td>{x.invoiceNumber}</td><td>{x.client.displayName}</td><td>{x.isOverdue?"overdue":x.invoiceStatus}</td><td>£{x.totals.total.toFixed(2)}</td><td>£{x.totals.paid.toFixed(2)}</td><td>£{x.totals.balance.toFixed(2)}</td><td>{x.invoiceStatus==="draft"&&<button onClick={()=>issue(x.id)}>Issue</button>} {x.invoiceStatus==="issued"&&x.totals.balance>0&&<button onClick={()=>pay(x)}>Record payment</button>} <button onClick={()=>pdf(x)}>PDF</button></td></tr>)}</tbody></table></div>}
+import { useEffect, useMemo, useState } from "react";
+import { api, ApiError, type Client, type Invoice } from "../api/client";
+
+export function Invoices() {
+  const requestedClientId = useMemo(() => new URLSearchParams(window.location.search).get("client") ?? "", []);
+  const [rows, setRows] = useState<Invoice[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [error, setError] = useState("");
+  const [client, setClient] = useState(requestedClientId);
+  const [num, setNum] = useState("");
+  const [title, setTitle] = useState("");
+  const [amount, setAmount] = useState("");
+
+  const selectedClient = clients.find((candidate) => candidate.id === client);
+  const load = () => api.invoices.list().then(setRows).catch(() => setError("Could not load invoices."));
+
+  useEffect(() => {
+    load();
+    api.clients.list()
+      .then((items) => {
+        setClients(items);
+        if (requestedClientId && items.some((item) => item.id === requestedClientId)) setClient(requestedClientId);
+      })
+      .catch(() => setError("Could not load clients."));
+  }, [requestedClientId]);
+
+  async function create(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    try {
+      await api.invoices.create({
+        client_id: client,
+        invoice_number: num,
+        title,
+        items: [{ description: title, quantity: 1, unit_price: Number(amount) }],
+      });
+      setNum("");
+      setTitle("");
+      setAmount("");
+      load();
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : "Could not create invoice.");
+    }
+  }
+
+  async function issue(id: string) {
+    await api.invoices.status(id, "issued");
+    load();
+  }
+
+  async function pay(invoice: Invoice) {
+    const raw = window.prompt(`Payment amount (balance £${invoice.totals.balance.toFixed(2)})`);
+    if (!raw) return;
+    const data = { amount: Number(raw), paid_at: new Date().toISOString() };
+    try {
+      await api.invoices.payment(invoice.id, data);
+    } catch (cause) {
+      if (!(cause instanceof ApiError) || cause.code !== "CONFIRMATION_REQUIRED") throw cause;
+      const preview = cause.details?.preview as Record<string, unknown> | undefined;
+      if (!window.confirm(`Confirm payment £${preview?.amount} for ${preview?.client}? Balance after: £${preview?.balanceAfter}`)) return;
+      await api.invoices.payment(invoice.id, data, true);
+    }
+    load();
+  }
+
+  async function pdf(invoice: Invoice) {
+    const blob = await api.invoices.downloadPdf(invoice.id);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `invoice-${invoice.invoiceNumber}.pdf`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div>
+      <h1>Invoices</h1>
+      {error && <div className="error-banner">{error}</div>}
+      {selectedClient && (
+        <div className="info-banner" role="status">
+          <strong>Invoice customer: {selectedClient.displayName}</strong>
+          <span>{[selectedClient.billingLine1, selectedClient.billingCity, selectedClient.billingPostcode].filter(Boolean).join(", ") || "Billing address missing"}</span>
+          <span>{selectedClient.emailPrimary || "Email missing"} · {selectedClient.phonePrimary || "Phone missing"}</span>
+        </div>
+      )}
+      <form className="inline-form" onSubmit={create}>
+        <select value={client} onChange={(event) => setClient(event.target.value)} required>
+          <option value="">Client</option>
+          {clients.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}
+        </select>
+        <input placeholder="Invoice number" value={num} onChange={(event) => setNum(event.target.value)} required />
+        <input placeholder="Description" value={title} onChange={(event) => setTitle(event.target.value)} required />
+        <input type="number" min="0" step="0.01" placeholder="Amount" value={amount} onChange={(event) => setAmount(event.target.value)} required />
+        <button>Create draft</button>
+      </form>
+      <table>
+        <thead><tr><th>Number</th><th>Client</th><th>Status</th><th>Total</th><th>Paid</th><th>Balance</th><th>Actions</th></tr></thead>
+        <tbody>{rows.map((invoice) => (
+          <tr key={invoice.id}>
+            <td>{invoice.invoiceNumber}</td><td>{invoice.client.displayName}</td><td>{invoice.isOverdue ? "overdue" : invoice.invoiceStatus}</td>
+            <td>£{invoice.totals.total.toFixed(2)}</td><td>£{invoice.totals.paid.toFixed(2)}</td><td>£{invoice.totals.balance.toFixed(2)}</td>
+            <td>{invoice.invoiceStatus === "draft" && <button onClick={() => issue(invoice.id)}>Issue</button>} {invoice.invoiceStatus === "issued" && invoice.totals.balance > 0 && <button onClick={() => pay(invoice)}>Record payment</button>} <button onClick={() => pdf(invoice)}>PDF</button></td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
+}

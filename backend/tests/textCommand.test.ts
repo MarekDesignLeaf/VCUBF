@@ -74,6 +74,7 @@ describe("command/text", () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.intent, "list_clients");
     assert.equal(res.body.ok, true);
+    assert.equal(res.body.message, "Opening Clients.");
     assert.equal(res.body.uiAction.path, "/clients");
 
     const state = await request(app)
@@ -99,6 +100,7 @@ describe("command/text", () => {
     assert.equal(res.body.kind, "action");
     assert.equal(res.body.intent, "list_clients");
     assert.equal(res.body.ok, true);
+    assert.equal(res.body.message, "Opening Clients.");
   });
 
   it("navigates the signed-in application without changing business data", async () => {
@@ -110,6 +112,33 @@ describe("command/text", () => {
     assert.equal(res.body.intent, "navigate");
     assert.equal(res.body.message, "Opening Invoices.");
     assert.equal(res.body.uiAction.path, "/invoices");
+  });
+
+  it("finds a client, reports data quality and preselects the invoice customer without creating an invoice", async () => {
+    const admin = await prisma.user.findUniqueOrThrow({ where: { email: "admin@test.local" } });
+    const client = await prisma.client.create({
+      data: {
+        companyId: admin.companyId,
+        displayName: "Invoice Prefill Client",
+        emailPrimary: "prefill@example.com",
+        phonePrimary: "+447700900123",
+        billingLine1: "1 Garden Road",
+        billingCity: "London",
+        billingPostcode: "SW1A 1AA",
+      },
+    });
+    const before = await prisma.invoice.count();
+    const res = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: 'voice action prepare_invoice_for_client {"client_name":"Invoice Prefill Client"}', input_method: "voice_transcript" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.data.clientId, client.id);
+    assert.deepEqual(res.body.data.issues, []);
+    assert.match(res.body.message, /found Invoice Prefill Client/i);
+    assert.equal(res.body.uiAction.path, `/invoices?client=${client.id}`);
+    assert.equal(await prisma.invoice.count(), before);
   });
 
   it("changes Emma and Secretary menu language through a voice command", async () => {
