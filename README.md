@@ -17,8 +17,8 @@ The authoritative target architecture and staged migration path for the web,
 mobile and Emma voice platform live in
 [`docs/PRODUCTION_ARCHITECTURE.md`](docs/PRODUCTION_ARCHITECTURE.md).
 
-The parallel high-quality Windows voice runtime based on Porcupine, Deepgram
-and ElevenLabs is documented in [`docs/VOICE_V2_SETUP.md`](docs/VOICE_V2_SETUP.md).
+The Windows voice runtime based on Porcupine, Qualcomm NPU Whisper, Deepgram
+fallback and ElevenLabs is documented in [`docs/VOICE_V2_SETUP.md`](docs/VOICE_V2_SETUP.md).
 
 ## Structure
 

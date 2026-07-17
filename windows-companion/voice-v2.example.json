@@ -13,11 +13,22 @@
   },
   "stt": {
     "provider": "deepgram",
+    "fallbackProvider": "deepgram",
     "apiKeyEnv": "DEEPGRAM_API_KEY",
     "model": "nova-3",
     "languageMode": "selected",
     "endpointingMs": 250,
-    "utteranceEndMs": 1000
+    "utteranceEndMs": 1000,
+    "npu": {
+      "pythonPath": "",
+      "appPath": "",
+      "modelSize": "base",
+      "speechThreshold": 300,
+      "preRollMs": 320,
+      "silenceMs": 700,
+      "minSpeechMs": 180,
+      "maxSegmentMs": 15000
+    }
   },
   "tts": {
     "provider": "elevenlabs",

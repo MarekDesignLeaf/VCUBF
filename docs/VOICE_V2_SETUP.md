@@ -4,7 +4,8 @@ Voice v2 is the single Windows Emma runtime. It uses:
 
 - **Picovoice Porcupine** for fully local, low-latency detection of the `Emma`
   wake word, with the former local-VAD/Deepgram path as an automatic fallback;
-- **Deepgram Nova-3** over WebSocket for real-time PCM transcription;
+- **Qualcomm Whisper Base through ONNX Runtime QNN** for local transcription on
+  the Snapdragon Hexagon NPU, with Deepgram Nova-3 as an automatic fallback;
 - **ElevenLabs** PCM streaming for low-latency spoken output;
 - the existing authenticated Secretary `/command/assistant` endpoint for every
   tool, permission check, validation, confirmation and audit record.
@@ -33,11 +34,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-VoiceV2.ps1
 
 This removes the legacy Emma runtime, its automatic startup entry and the old
 Voice v2 shortcut. It creates exactly one desktop shortcut named **VCUBF
-Secretary**. That shortcut opens one dedicated Secretary browser window using
-your normal default browser profile, then starts Voice v2 for that window only.
-The browser's own password manager can therefore fill its saved credentials;
-VCUBF never reads, copies or stores the password. Closing the Secretary window
-always stops Voice v2, including an active conversation.
+Secretary**. That shortcut opens one dedicated Secretary browser window and
+starts Voice v2 for that window only. Closing the Secretary window always stops
+Voice v2, its NPU worker and any active conversation.
 
 When Voice v2 is running, it has a visible icon in the Windows notification
 area. Right-click it and choose **Ukončit Emmu Voice v2** to stop the wake
@@ -51,6 +50,19 @@ The installer creates this non-secret configuration file if it does not exist:
 ```text
 %LOCALAPPDATA%\VCUBF\Emma\voice-v2.json
 ```
+
+On a Snapdragon X PC, install and verify the local NPU transcription runtime
+once from `windows-companion`:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-NpuWhisper.ps1
+```
+
+The installer requires a working Qualcomm Hexagon NPU driver, installs the
+official Qualcomm Whisper Windows runtime and selects `stt.provider` =
+`npu_whisper`. The model remains loaded in one child process while Emma runs;
+utterance audio stays in memory and is not written to disk. If QNN cannot start,
+Emma records the failure and uses Deepgram instead.
 
 Keep API secrets out of JSON. Set Picovoice, Deepgram and ElevenLabs credentials
 as user environment variables, then open a new PowerShell session:
@@ -94,6 +106,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Run-VoiceV2.ps1 -Diagn
 does not expose keys or open the microphone. Check
 `providers.wake.effectiveProvider`: `picovoice_porcupine` means local wake-word
 detection is active, while `deepgram_vad` means the safe fallback is active.
+Check `providers.npuWhisper.effectiveProvider`: `npu_whisper` together with
+`executionProvider: QNNExecutionProvider` confirms NPU transcription is active.
 Voice v2 starts only when the diagnostic reports `"ready": true`.
 
 ## Product boundaries

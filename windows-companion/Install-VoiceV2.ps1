@@ -20,7 +20,7 @@ function Stop-InstallerProcessTree([int]$ProcessId){
   Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
 }
 
-foreach($file in @('emma_voice_v2.py','emma_common.py','picovoice_wake.js','Run-VoiceV2.ps1','Configure-PicovoiceWake.ps1','Launch-VCUBFSecretary.ps1','voice-v2.example.json','requirements.txt','requirements-v2.txt')){
+foreach($file in @('emma_voice_v2.py','emma_common.py','npu_whisper_sidecar.py','picovoice_wake.js','Run-VoiceV2.ps1','Configure-PicovoiceWake.ps1','Install-NpuWhisper.ps1','Launch-VCUBFSecretary.ps1','voice-v2.example.json','requirements.txt','requirements-v2.txt')){
   Copy-Item -LiteralPath (Join-Path $source $file) -Destination $target -Force
 }
 
@@ -37,7 +37,8 @@ Get-CimInstance Win32_Process | Where-Object {
     $_.CommandLine.IndexOf($legacyV1Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
     $_.CommandLine.IndexOf($unifiedLauncher,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
     $_.CommandLine.IndexOf($v2Runner,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
-    ($_.CommandLine.IndexOf($v2Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -like '*--run*')
+    ($_.CommandLine.IndexOf($v2Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -like '*--run*') -or
+    $_.CommandLine.IndexOf('npu_whisper_sidecar.py',[StringComparison]::OrdinalIgnoreCase) -ge 0
   )
 } | ForEach-Object { Stop-InstallerProcessTree ([int]$_.ProcessId) }
 # Remove only stale local development runtimes from this VCUBF checkout. They
@@ -96,6 +97,9 @@ if(!$voiceConfig.PSObject.Properties['stt']){
   $voiceConfig | Add-Member -NotePropertyName stt -NotePropertyValue ([pscustomobject]@{})
 }
 $stt=$voiceConfig.stt
+if(!$stt.PSObject.Properties['provider']){$stt|Add-Member -NotePropertyName provider -NotePropertyValue 'deepgram'}
+elseif($stt.provider -notin @('deepgram','npu_whisper')){$stt.provider='deepgram'}
+if(!$stt.PSObject.Properties['fallbackProvider']){$stt|Add-Member -NotePropertyName fallbackProvider -NotePropertyValue 'deepgram'}
 if(!$stt.PSObject.Properties['endpointingMs']){$stt | Add-Member -NotePropertyName endpointingMs -NotePropertyValue 250}
 if(!$stt.PSObject.Properties['utteranceEndMs']){
   $stt | Add-Member -NotePropertyName utteranceEndMs -NotePropertyValue 1000
@@ -103,6 +107,14 @@ if(!$stt.PSObject.Properties['utteranceEndMs']){
   $utteranceEndMs=0
   try{$utteranceEndMs=[int]$stt.utteranceEndMs}catch{}
   if($utteranceEndMs -lt 1000 -or $utteranceEndMs -gt 5000){$stt.utteranceEndMs=1000}
+}
+if(!$stt.PSObject.Properties['npu']){$stt|Add-Member -NotePropertyName npu -NotePropertyValue ([pscustomobject]@{})}
+$npu=$stt.npu
+foreach($pair in @(
+  @('pythonPath',''),@('appPath',''),@('modelSize','base'),@('speechThreshold',300),
+  @('preRollMs',320),@('silenceMs',700),@('minSpeechMs',180),@('maxSegmentMs',15000)
+)){
+  if(!$npu.PSObject.Properties[$pair[0]]){$npu|Add-Member -NotePropertyName $pair[0] -NotePropertyValue $pair[1]}
 }
 $voiceConfig | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $activeConfig -Encoding UTF8
 
@@ -177,6 +189,9 @@ $desktopShortcut.Save()
 Write-Host "VCUBF Secretary installed in $target"
 Write-Host "The single desktop icon opens Secretary and Emma Voice v2 together. Closing that browser window stops Emma Voice v2."
 Write-Host "Picovoice support is installed. Import a Windows Emma .ppn model with Configure-PicovoiceWake.ps1; Deepgram remains the automatic fallback."
+if($voiceConfig.stt.provider -eq 'npu_whisper'){
+  Write-Host "Qualcomm NPU Whisper is selected for transcription; Deepgram remains the automatic fallback."
+}
 if($StartNow){
   Start-Process -FilePath $desktopShortcut.TargetPath -ArgumentList $desktopShortcut.Arguments -WindowStyle Hidden
 }
