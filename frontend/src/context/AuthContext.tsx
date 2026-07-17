@@ -7,14 +7,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!getToken()) {
-      setLoading(false);
-      return;
-    }
     let active = true;
     let retryTimer: number | undefined;
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const desktopBootstrap = hash.get("desktop_token");
+    if (desktopBootstrap) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
     const loadSession = async (attempt = 0) => {
       try {
+        if (desktopBootstrap && attempt === 0) {
+          const session = await api.desktopLogin(desktopBootstrap);
+          setToken(session.token);
+          if (active) setUser(session.user);
+          if (active) setLoading(false);
+          return;
+        }
+        if (!getToken()) {
+          if (active) setLoading(false);
+          return;
+        }
         const profile = await api.me();
         if (active) setUser(profile);
       } catch (error) {

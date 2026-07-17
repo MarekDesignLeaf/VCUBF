@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import { ipKeyGenerator, rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../../db.js";
-import { requireAuth, signToken } from "../../middleware/auth.js";
+import { requireAuth, signDesktopBootstrapToken, signToken, verifyDesktopBootstrapToken } from "../../middleware/auth.js";
 import { recordAudit } from "../../lib/audit.js";
 import { CHANGE_OWN_PASSWORD_ACTION, KNOWN_PERMISSIONS } from "../../lib/actionContracts.js";
 import { frontendUrl } from "../../lib/frontendUrl.js";
@@ -17,6 +17,7 @@ const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
 });
+const desktopLoginSchema = z.object({ bootstrap_token: z.string().min(40).max(2_000) });
 
 const strongPassword = z.string().min(12).regex(/[a-z]/, "new password must contain a lowercase letter").regex(/[A-Z]/, "new password must contain an uppercase letter").regex(/[0-9]/, "new password must contain a number");
 const changePasswordSchema = z.object({ current_password: z.string().min(1), new_password: strongPassword });
@@ -178,6 +179,25 @@ authRouter.post("/login", loginRateLimiter, async (req, res) => {
       voiceLanguage: user.voiceLanguage,
     },
   });
+});
+
+// The Windows launcher already holds a DPAPI-protected, revocable device
+// token. Exchange it for a 30-second purpose-restricted browser bootstrap so
+// the local app can sign in without copying or exposing the account password.
+authRouter.post("/desktop-bootstrap", requireAuth, async (req, res) => {
+  const record = await prisma.user.findUniqueOrThrow({ where: { id: req.user!.id }, select: { authVersion: true } });
+  return res.json({ bootstrap_token: signDesktopBootstrapToken(req.user!, record.authVersion), expires_in: 30 });
+});
+
+authRouter.post("/desktop-login", loginRateLimiter, async (req, res) => {
+  const parsed = desktopLoginSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED" });
+  try {
+    const { user, authVersion } = await verifyDesktopBootstrapToken(parsed.data.bootstrap_token);
+    return res.json({ token: signToken(user, authVersion), user: publicUser(user) });
+  } catch {
+    return res.status(401).json({ error: "DESKTOP_BOOTSTRAP_INVALID", message: "Desktop sign-in expired. Open Secretary again." });
+  }
 });
 
 // Requests deliberately return the same response for every account state to

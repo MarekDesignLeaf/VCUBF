@@ -80,11 +80,18 @@ function Save-PairedProfile($Result, [string]$Server) {
   $config | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8
 }
 
-function Get-ExistingDeviceProfile([string]$Server) {
+function Get-DeviceToken {
   if(!(Test-Path -LiteralPath $tokenPath)) { return $null }
   try {
     $protected = [IO.File]::ReadAllBytes($tokenPath)
-    $token = [Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect($protected, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser))
+    return [Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect($protected, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser))
+  } catch { return $null }
+}
+
+function Get-ExistingDeviceProfile([string]$Server) {
+  $token = Get-DeviceToken
+  if(!$token) { return $null }
+  try {
     return Invoke-RestMethod -Method GET -Uri "$Server/auth/me" -Headers @{ Authorization = "Bearer $token" } -TimeoutSec 15
   } catch {
     if($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401) {
@@ -92,6 +99,17 @@ function Get-ExistingDeviceProfile([string]$Server) {
     }
     return $null
   }
+}
+
+function Get-DesktopLoginUrl([string]$Server, [string]$Frontend, [string]$Email) {
+  $url = Get-SecretaryUrl "$Frontend/login" $Email
+  $token = Get-DeviceToken
+  if(!$token) { return $url }
+  try {
+    $bootstrap = Invoke-RestMethod -Method POST -Uri "$Server/auth/desktop-bootstrap" -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -Body '{}' -TimeoutSec 15
+    if($bootstrap.bootstrap_token) { return "$url#desktop_token=$([uri]::EscapeDataString([string]$bootstrap.bootstrap_token))" }
+  } catch {}
+  return $url
 }
 
 function Stop-LegacyEmma {
@@ -300,7 +318,7 @@ try {
   if(!$profile) {
     try { $pairing = Invoke-RestMethod -Method POST -Uri "$server/auth/device/start" -ContentType 'application/json' -Body '{}' -TimeoutSec 15 } catch {}
   }
-  $browserUrl = if($pairing -and $pairing.verification_url) { [string]$pairing.verification_url } else { Get-SecretaryUrl "$frontend/login" ([string]$config.Email) }
+  $browserUrl = if($pairing -and $pairing.verification_url) { [string]$pairing.verification_url } else { Get-DesktopLoginUrl $server $frontend ([string]$config.Email) }
   $browser = Find-AppBrowser
   if(!$browser) { throw 'Microsoft Edge or Google Chrome is required to open VCUBF Secretary.' }
   # Use the person's normal browser profile. That preserves the browser's

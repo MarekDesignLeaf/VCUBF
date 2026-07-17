@@ -137,6 +137,19 @@ describe("auth", () => {
     const audit=await prisma.auditLog.findFirst({where:{actionName:"approve_device_pairing"}});assert.equal(audit?.confirmed,true);
   });
 
+  it("exchanges a purpose-restricted desktop bootstrap without exposing the password", async () => {
+    const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
+    const bootstrap = await request(app).post("/auth/desktop-bootstrap").set("Authorization", `Bearer ${login.body.token}`).send({});
+    assert.equal(bootstrap.status, 200);
+    assert.ok(bootstrap.body.bootstrap_token);
+    const restricted = await request(app).get("/auth/me").set("Authorization", `Bearer ${bootstrap.body.bootstrap_token}`);
+    assert.equal(restricted.status, 401);
+    const exchanged = await request(app).post("/auth/desktop-login").send({ bootstrap_token: bootstrap.body.bootstrap_token });
+    assert.equal(exchanged.status, 200);
+    assert.equal(exchanged.body.user.email, "admin@test.local");
+    assert.ok(exchanged.body.token);
+  });
+
   it("rejects a weak new password without storing password values in audit", async () => {
     const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
     const res = await request(app).post("/auth/change-password").set("Authorization", `Bearer ${login.body.token}`).send({ current_password: "Password123!", new_password: "short" });

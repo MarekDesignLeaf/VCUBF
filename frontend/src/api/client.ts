@@ -1541,6 +1541,8 @@ export const api = {
   },
   login: (email: string, password: string) =>
     request<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  desktopLogin: (bootstrapToken: string) =>
+    request<LoginResponse>("/auth/desktop-login", { method: "POST", body: JSON.stringify({ bootstrap_token: bootstrapToken }) }),
   setupStatus: () => request<SetupStatus>("/auth/setup-status"),
   setup: (data: { company_name: string; administrator_name: string; administrator_email: string; administrator_password: string }) =>
     request<LoginResponse>("/auth/setup", { method: "POST", body: JSON.stringify(data) }),

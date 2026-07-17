@@ -5,7 +5,7 @@ import { api, ApiError } from "../api/client";
 import { DesignLeafCredit } from "../components/DesignLeafCredit";
 
 export function Login() {
-  const { login } = useAuth();
+  const { login, user, loading } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [email, setEmail] = useState(() => params.get("email") ?? localStorage.getItem("vcuf_last_email") ?? "");
@@ -39,6 +39,7 @@ export function Login() {
     }
   }
 
+  if (!loading && user) return <Navigate to="/" replace />;
   if (setupRequired) return <Navigate to="/setup" replace />;
 
   return (
