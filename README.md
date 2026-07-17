@@ -13,6 +13,10 @@ learning/playbooks, recruitment decision support and the shared text/reviewed-vo
 For day-to-day operation and current safety limitations, see
 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md).
 
+The authoritative target architecture and staged migration path for the web,
+mobile and Emma voice platform live in
+[`docs/PRODUCTION_ARCHITECTURE.md`](docs/PRODUCTION_ARCHITECTURE.md).
+
 ## Structure
 
 ```
