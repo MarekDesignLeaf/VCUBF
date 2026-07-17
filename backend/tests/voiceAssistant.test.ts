@@ -63,6 +63,24 @@ describe("voice assistant interpretation", () => {
     assert.equal(result.canonical_command, "list clients");
   });
 
+  it("accepts an empty model message for a canonical command because the backend supplies the spoken result", async () => {
+    process.env.OPENAI_API_KEY = "test-only-key";
+    globalThis.fetch = async () => Response.json({
+      output: [{ content: [{ text: JSON.stringify({
+        kind: "command",
+        canonical_command: 'voice action prepare_invoice_for_client {"client_name":"John"}',
+        message: "",
+      }) }] }],
+    });
+    const result = await interpretVoiceRequest({
+      text: "Find John and add his details to the invoice.",
+      userName: "Test",
+      language: "en-GB",
+    });
+    assert.equal(result.kind, "command");
+    assert.equal(result.message, "");
+  });
+
   it("loads the administrator behavior scenario as subordinate instructions", async () => {
     process.env.OPENAI_API_KEY = "test-only-key";
     globalThis.fetch = async (_url, init) => {

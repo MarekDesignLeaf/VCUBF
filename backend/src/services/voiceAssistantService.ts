@@ -11,7 +11,15 @@ const assistantResultSchema = z.object({
   // A deliberate request to read the complete menu can be longer than an
   // ordinary spoken answer. The caller still asks Emma to keep normal turns
   // concise, but must not truncate an authoritative subtree catalogue.
-  message: z.string().min(1).max(12_000),
+  message: z.string().max(12_000),
+}).superRefine((result,context) => {
+  // The authenticated backend, not the language model, owns the spoken
+  // success/failure result for commands. OpenAI may therefore correctly emit
+  // an empty message alongside a canonical command. Conversational responses
+  // still need actual text to speak.
+  if (result.kind !== "command" && !result.message.trim()) {
+    context.addIssue({ code: z.ZodIssueCode.too_small, minimum: 1, type: "string", inclusive: true, path: ["message"], message: "message is required" });
+  }
 });
 
 export type VoiceAssistantResult = z.infer<typeof assistantResultSchema>;
