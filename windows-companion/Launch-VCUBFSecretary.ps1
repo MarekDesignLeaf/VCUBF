@@ -194,6 +194,11 @@ function Start-LocalRuntime([string]$ProjectRoot) {
   if(!(Test-Path -LiteralPath (Join-Path $ProjectRoot 'backend\package.json')) -or !(Test-Path -LiteralPath (Join-Path $ProjectRoot 'frontend\package.json'))) {
     throw "Lokální zdrojový projekt VCUBF nebyl nalezen v $ProjectRoot."
   }
+  # Desktop shortcuts inherit the environment of Explorer, which can be older
+  # than a newly saved user secret. Reload the local language-service key on
+  # every launch without putting it in the repository or config JSON.
+  $openAiKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY','User')
+  if($openAiKey) { $env:OPENAI_API_KEY = $openAiKey }
   Start-LocalPostgres
   if(!(Test-TcpPort 'localhost' 4000)) {
     $env:PRISMA_CLIENT_ENGINE_TYPE = 'library'
