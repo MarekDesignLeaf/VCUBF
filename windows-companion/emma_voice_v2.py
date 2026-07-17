@@ -817,7 +817,12 @@ class VoiceSessionV2:
         except Exception as exc:
             log(f"v2 business request error: {type(exc).__name__}")
             result = {"ok": False, "message": self.localized_error_message()}
-        selected_language = (result.get("data") or {}).get("voiceLanguage") if isinstance(result, dict) else None
+        # Command responses can carry a record, a list or no data at all.
+        # Only a record is allowed to request a language transition; treating
+        # a list (for example from "show clients") as a record used to abort
+        # the entire voice turn with AttributeError before Emma could speak.
+        result_data = result.get("data") if isinstance(result, dict) else None
+        selected_language = result_data.get("voiceLanguage") if isinstance(result_data, dict) else None
         if selected_language in LANGUAGE_NAMES and selected_language != self.language:
             self.language = selected_language
             save_config_language(selected_language)
