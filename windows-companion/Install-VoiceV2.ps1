@@ -10,6 +10,7 @@ $v2Runner=Join-Path $target 'Run-VoiceV2.ps1'
 $v2Runtime=Join-Path $target 'emma_voice_v2.py'
 $unifiedLauncher=Join-Path $target 'Launch-VCUBFSecretary.ps1'
 $legacyBrowserProfile=Join-Path (Split-Path -Parent $target) 'SecretaryBrowser'
+$secretaryBrowserProfile=Join-Path (Split-Path -Parent $target) 'SecretaryBrowserV2'
 New-Item -ItemType Directory -Path $target -Force|Out-Null
 
 function Stop-InstallerProcessTree([int]$ProcessId){
@@ -46,7 +47,10 @@ Get-CimInstance Win32_Process | Where-Object {
   $_.CommandLine -match '(tsx.*src[\\/]server\.ts|vite.*--host)'
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Get-CimInstance Win32_Process | Where-Object {
-  $_.CommandLine -and $_.CommandLine.IndexOf($legacyBrowserProfile,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+  $_.CommandLine -and (
+    $_.CommandLine.IndexOf($legacyBrowserProfile,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+    $_.CommandLine.IndexOf($secretaryBrowserProfile,[StringComparison]::OrdinalIgnoreCase) -ge 0
+  ) -and
   ($_.Name -ieq 'msedge.exe' -or $_.Name -ieq 'chrome.exe')
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 

@@ -162,7 +162,7 @@ export async function interpretVoiceRequest(input: {
       ...(model.startsWith("gpt-5") ? { reasoning: { effort: model.startsWith("gpt-5.4") ? "none" : "minimal" } } : {}),
       max_output_tokens: 500,
       instructions: `You are Emma, the concise voice interface for a business operating system.
-Reply in the user's language (${input.language}). Address the user naturally when useful; their name is ${input.userName}.
+Reply exclusively in the user's current language (${input.language}). Do not mix in words, number readings, sentence fragments or grammar from any other language. Previous conversation excerpts may be in an older language; never copy their language after the current language has changed. Address the user naturally when useful; their name is ${input.userName}.
 Never claim an action happened unless kind is command and the backend later confirms it.
 Never claim that you will now perform, proceed with, or complete a business change in a reply, clarification, or plan. Only a canonical command can request a change, and only the later backend result can confirm it.
 Never invent company data. Any action marked preview only may be prepared, but it must not be described as completed and the reviewed confirmation flow remains mandatory. Sending, deletion, disconnecting, merging, payment, publication and other confirmation-required operations must never bypass their owning service's preview. The supported Gmail and notification-deletion commands use short-lived reviews, and nothing is sent or hidden until a separate confirmation succeeds. Deleting notifications hides only the reviewed attention-feed items and never deletes their source business records.

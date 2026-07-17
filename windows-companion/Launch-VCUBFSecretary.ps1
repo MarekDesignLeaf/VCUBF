@@ -208,6 +208,26 @@ function Stop-ProcessTree([int]$RootProcessId) {
   Stop-Process -Id $RootProcessId -Force -ErrorAction SilentlyContinue
 }
 
+function Stop-StaleLocalWebRuntime {
+  # Local test mode owns these two ports. Reusing an orphaned Vite/tsx process
+  # leaves the browser on an older source version and also means closing the
+  # Secretary window cannot stop it. Take ownership on every unified launch.
+  foreach($port in @(4000,5173)) {
+    $connections = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
+    foreach($connection in $connections) {
+      $ownerId = [int]$connection.OwningProcess
+      $owner = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerId" -ErrorAction SilentlyContinue
+      if(!$owner -or $owner.Name -ne 'node.exe') { continue }
+      $rootId = $ownerId
+      $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($owner.ParentProcessId)" -ErrorAction SilentlyContinue
+      if($parent -and $parent.Name -eq 'node.exe' -and [string]$parent.CommandLine -match '(tsx|vite)') {
+        $rootId = [int]$parent.ProcessId
+      }
+      Stop-ProcessTree $rootId
+    }
+  }
+}
+
 function Start-LocalRuntime([string]$ProjectRoot) {
   if(!(Test-Path -LiteralPath (Join-Path $ProjectRoot 'backend\package.json')) -or !(Test-Path -LiteralPath (Join-Path $ProjectRoot 'frontend\package.json'))) {
     throw "Lokální zdrojový projekt VCUBF nebyl nalezen v $ProjectRoot."
@@ -217,15 +237,13 @@ function Start-LocalRuntime([string]$ProjectRoot) {
   # every launch without putting it in the repository or config JSON.
   $openAiKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY','User')
   if($openAiKey) { $env:OPENAI_API_KEY = $openAiKey }
+  $env:VCUBF_LOCAL_TEST_LOGIN = '1'
+  Stop-StaleLocalWebRuntime
   Start-LocalPostgres
-  if(!(Test-TcpPort 'localhost' 4000)) {
-    $env:PRISMA_CLIENT_ENGINE_TYPE = 'library'
-    Start-LocalNodeProcess 'backend' (Join-Path $ProjectRoot 'backend') @('node_modules\tsx\dist\cli.mjs','watch','src/server.ts') $true
-  }
+  $env:PRISMA_CLIENT_ENGINE_TYPE = 'library'
+  Start-LocalNodeProcess 'backend' (Join-Path $ProjectRoot 'backend') @('node_modules\tsx\dist\cli.mjs','watch','src/server.ts') $true
   Wait-HttpEndpoint 'http://localhost:4000/health' 'Lokální backend'
-  if(!(Test-TcpPort 'localhost' 5173)) {
-    Start-LocalNodeProcess 'frontend' (Join-Path $ProjectRoot 'frontend') @('node_modules\vite\bin\vite.js','--host','localhost')
-  }
+  Start-LocalNodeProcess 'frontend' (Join-Path $ProjectRoot 'frontend') @('node_modules\vite\bin\vite.js','--host','localhost')
   Wait-HttpEndpoint 'http://localhost:5173/' 'Lokální frontend'
 }
 
@@ -287,7 +305,18 @@ function Get-BrowserWindowHandles([string]$BrowserPath) {
 
 function Open-SecretaryWindow([string]$BrowserPath, [string]$Url) {
   $before = @(Get-BrowserWindowHandles $BrowserPath)
-  Start-Process -FilePath $BrowserPath -ArgumentList @("--app=$Url", '--no-first-run') | Out-Null
+  # Chrome's GPU compositor can produce an entirely black app surface on
+  # Windows 11 ARM64 while the page itself is healthy. Software composition is
+  # stable for this business UI and does not affect the separate voice runtime.
+  # Use a dedicated process so Chrome cannot silently reuse an already-running
+  # GPU process and ignore --disable-gpu. Authentication still comes from the
+  # DPAPI-protected device token, so this profile never needs the user's saved
+  # browser password.
+  $browserProfile = Join-Path $appDir 'SecretaryBrowserV2'
+  New-Item -ItemType Directory -Path $browserProfile -Force | Out-Null
+  Start-Process -FilePath $BrowserPath -ArgumentList @(
+    "--app=$Url", '--no-first-run', '--disable-gpu', "--user-data-dir=$browserProfile"
+  ) | Out-Null
   $deadline = [datetime]::UtcNow.AddSeconds(20)
   do {
     $created = @(Get-BrowserWindowHandles $BrowserPath | Where-Object { $before -notcontains $_ })
@@ -318,12 +347,17 @@ try {
   if(!$profile) {
     try { $pairing = Invoke-RestMethod -Method POST -Uri "$server/auth/device/start" -ContentType 'application/json' -Body '{}' -TimeoutSec 15 } catch {}
   }
-  $browserUrl = if($pairing -and $pairing.verification_url) { [string]$pairing.verification_url } else { Get-DesktopLoginUrl $server $frontend ([string]$config.Email) }
+  $browserUrl = if($localMode -and $profile) {
+    "$frontend/login?desktop=1&localTest=1"
+  } elseif($pairing -and $pairing.verification_url) {
+    [string]$pairing.verification_url
+  } else {
+    Get-DesktopLoginUrl $server $frontend ([string]$config.Email)
+  }
   $browser = Find-AppBrowser
   if(!$browser) { throw 'Microsoft Edge or Google Chrome is required to open VCUBF Secretary.' }
-  # Use the person's normal browser profile. That preserves the browser's
-  # encrypted password manager and its built-in autofill; no password is read,
-  # copied or stored by VCUBF. The newly created app window itself is tracked.
+  # The local test URL presents one passwordless tile per active user. Remote
+  # deployments still use the authenticated desktop bootstrap flow.
   $secretaryWindow = Open-SecretaryWindow $browser $browserUrl
 
   if($profile) { Start-VoiceV2 }

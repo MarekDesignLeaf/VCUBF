@@ -850,6 +850,12 @@ table,
 .login-card input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(114 255 50 / 11%); }
 .password-visibility-button { color: var(--accent); }
 .password-visibility-button:hover, .password-visibility-button:focus-visible { background: rgb(114 255 50 / 11%); color: var(--signal); }
+.local-test-user-grid { display: grid; gap: 12px; margin-top: 6px; }
+.local-test-user-tile { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px; border-color: #3a403f; color: var(--text); text-align: left; background: #0c0f0f; }
+.local-test-user-tile:hover { border-color: var(--signal); color: white; background: #171b18; }
+.local-test-user-tile > span:last-child { display: grid; gap: 2px; }
+.local-test-user-tile small { color: var(--muted); font-size: .76rem; text-transform: capitalize; }
+.local-test-user-avatar { display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 auto; border: 1px solid var(--accent); border-radius: 12px; color: #071006; background: var(--accent); font-size: 1.05rem; font-weight: 850; }
 
 @media (max-width: 760px) {
   .sidebar { border-right: 0; border-bottom: 1px solid #2e3432; background: linear-gradient(160deg, #0b0e0e, #151919); box-shadow: 0 8px 28px rgb(0 0 0 / 35%); }

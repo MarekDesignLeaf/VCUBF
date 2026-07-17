@@ -137,7 +137,10 @@ export function Layout() {
                 className={`nav-group ${groupIsCurrent ? "is-current" : ""}`}
                 key={group.id}
                 open={groupIsOpen}
-                onToggle={(event) => setExpandedGroups((current) => ({ ...current, [group.id]: event.currentTarget.open }))}
+                onToggle={(event) => {
+                  const open = event.currentTarget.open;
+                  setExpandedGroups((current) => ({ ...current, [group.id]: open }));
+                }}
               >
                 <summary>{group.label}<span aria-hidden="true" /></summary>
                 <div className="nav-group-items">

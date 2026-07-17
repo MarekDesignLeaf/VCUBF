@@ -24,6 +24,19 @@ export function languageLabel(value: string | null | undefined, native = false) 
   return native ? language.nativeLabel : language.label;
 }
 
+export function roleLabel(role: string | null | undefined, language: string | null | undefined) {
+  const administrator: Record<AppLanguage, string> = {
+    "en-GB": "Administrator", "en-US": "Administrator", "cs-CZ": "Administrátor", "pl-PL": "Administrator",
+    "fr-FR": "Administrateur", "de-DE": "Administrator", "es-ES": "Administrador", "it-IT": "Amministratore",
+  };
+  const member: Record<AppLanguage, string> = {
+    "en-GB": "Member", "en-US": "Member", "cs-CZ": "Uživatel", "pl-PL": "Użytkownik",
+    "fr-FR": "Utilisateur", "de-DE": "Benutzer", "es-ES": "Usuario", "it-IT": "Utente",
+  };
+  const resolved = appLanguage(language);
+  return role === "administrator" || role === "admin" ? administrator[resolved] : member[resolved];
+}
+
 export const MENU_KEYS = [
   "dashboard", "account", "notifications", "dataQuality", "metrics", "leads", "clients", "contacts", "documents", "jobs",
   "tasks", "enquiries", "communicationIntake", "communications", "photos", "photoSelection", "businessContext", "industries",

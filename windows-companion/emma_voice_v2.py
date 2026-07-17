@@ -266,6 +266,21 @@ def language_code(language: str, mode: str) -> str:
     return language.split("-", 1)[0].lower() or "en"
 
 
+def localized_runtime_status(language: str, state: str, wake_word: str = "Emma") -> str:
+    """Text shown in the private live monitor must follow the active language."""
+    locale = language.split("-", 1)[0].lower()
+    messages = {
+        "cs": {"waiting": f"Emma Voice v2 čeká na oslovení {wake_word}", "active": "Emma Voice v2 je aktivní — nyní mluvte", "thinking": "Emma Voice v2 přemýšlí", "speaking": "Emma Voice v2 mluví", "ended": "Relace Emma Voice v2 skončila", "stopped": "Emma Voice v2 byla zastavena"},
+        "pl": {"waiting": f"Emma Voice v2 czeka na słowo {wake_word}", "active": "Emma Voice v2 jest aktywna — mów teraz", "thinking": "Emma Voice v2 myśli", "speaking": "Emma Voice v2 mówi", "ended": "Sesja Emma Voice v2 zakończona", "stopped": "Emma Voice v2 została zatrzymana"},
+        "fr": {"waiting": f"Emma Voice v2 attend le mot {wake_word}", "active": "Emma Voice v2 est active — parlez maintenant", "thinking": "Emma Voice v2 réfléchit", "speaking": "Emma Voice v2 parle", "ended": "La session Emma Voice v2 est terminée", "stopped": "Emma Voice v2 est arrêtée"},
+        "de": {"waiting": f"Emma Voice v2 wartet auf {wake_word}", "active": "Emma Voice v2 ist aktiv — sprechen Sie jetzt", "thinking": "Emma Voice v2 denkt nach", "speaking": "Emma Voice v2 spricht", "ended": "Die Emma-Voice-v2-Sitzung ist beendet", "stopped": "Emma Voice v2 wurde beendet"},
+        "es": {"waiting": f"Emma Voice v2 espera la palabra {wake_word}", "active": "Emma Voice v2 está activa — hable ahora", "thinking": "Emma Voice v2 está pensando", "speaking": "Emma Voice v2 está hablando", "ended": "La sesión de Emma Voice v2 ha terminado", "stopped": "Emma Voice v2 se ha detenido"},
+        "it": {"waiting": f"Emma Voice v2 attende la parola {wake_word}", "active": "Emma Voice v2 è attiva — parli ora", "thinking": "Emma Voice v2 sta pensando", "speaking": "Emma Voice v2 sta parlando", "ended": "La sessione Emma Voice v2 è terminata", "stopped": "Emma Voice v2 è stata arrestata"},
+        "en": {"waiting": f"Emma Voice v2 is waiting for {wake_word}", "active": "Emma Voice v2 active — speak now", "thinking": "Emma Voice v2 is thinking", "speaking": "Emma Voice v2 is speaking", "ended": "Emma Voice v2 session ended", "stopped": "Emma Voice v2 stopped"},
+    }
+    return messages.get(locale, messages["en"]).get(state, messages["en"].get(state, RUNTIME_NAME))
+
+
 def normalized_text(value: str) -> str:
     return " ".join("".join(character.lower() if character.isalnum() else " " for character in value).split())
 
@@ -685,7 +700,7 @@ class DeepgramWakeWord:
                 frames_per_buffer=INPUT_FRAME_BYTES // SAMPLE_WIDTH,
             )
             heartbeat = asyncio.create_task(self.listening_heartbeat())
-            write_live_preview(status=f"Emma Voice v2 is waiting for {wake_word}")
+            write_live_preview(status=localized_runtime_status(language, "waiting", wake_word))
             log(f"v2 Deepgram VAD wake listener started ({language}, {wake_word})")
             pre_roll_frames = max(1, (pre_roll_ms + INPUT_FRAME_MS - 1) // INPUT_FRAME_MS)
             pre_roll: deque[bytes] = deque(maxlen=pre_roll_frames)
@@ -708,7 +723,7 @@ class DeepgramWakeWord:
                 if activation_command is not None:
                     log("v2 Deepgram wake word detected")
                     return activation_command
-                write_live_preview(status=f"Emma Voice v2 is waiting for {wake_word}")
+                write_live_preview(status=localized_runtime_status(language, "waiting", wake_word))
         finally:
             if heartbeat:
                 heartbeat.cancel()
@@ -802,7 +817,7 @@ class PicovoiceWakeWord:
             raise RuntimeError("PICOVOICE_KEYWORD_MODEL_NOT_FOUND")
 
         heartbeat: asyncio.Task[None] | None = asyncio.create_task(self.listening_heartbeat())
-        write_live_preview(status=f"Emma Voice v2 is waiting for {wake_word}")
+        write_live_preview(status=localized_runtime_status(language, "waiting", wake_word))
         if node_picovoice_available():
             try:
                 log(f"v2 Picovoice Node wake listener started ({language}, {wake_word})")
@@ -1002,7 +1017,7 @@ class VoiceSessionV2:
             raise
         except Exception as exc:
             log(f"v2 local transcript error: {type(exc).__name__}")
-        write_live_preview("user", heard, "Emma Voice v2 is thinking")
+        write_live_preview("user", heard, localized_runtime_status(self.language, "thinking"))
         try:
             result = await asyncio.to_thread(
                 backend_command_json,
@@ -1029,6 +1044,9 @@ class VoiceSessionV2:
         if selected_language in LANGUAGE_NAMES and selected_language != self.language:
             self.language = selected_language
             save_config_language(selected_language)
+            # The persisted transcript remains available, but old-language
+            # turns must not bias the next response after a language switch.
+            self.transcript.history.clear()
             log(f"v2 language changed to {selected_language}")
         message = self.result_message(result)
         if not message or generation != self.generation:
@@ -1040,7 +1058,7 @@ class VoiceSessionV2:
             raise
         except Exception as exc:
             log(f"v2 local transcript error: {type(exc).__name__}")
-        write_live_preview("assistant", message, "Emma Voice v2 is speaking")
+        write_live_preview("assistant", message, localized_runtime_status(self.language, "speaking"))
         await self.update_state("speaking", True, response=message)
         self.speaker.active.set()
         try:
@@ -1065,6 +1083,10 @@ class VoiceSessionV2:
         messages = {
             "cs": "Teď se mi nepodařilo spojit se službou Secretary. Zkuste to prosím znovu.",
             "pl": "Nie udało mi się teraz połączyć z usługą Secretary. Spróbuj ponownie.",
+            "fr": "Je n’ai pas pu joindre le service Secretary. Veuillez réessayer.",
+            "de": "Ich konnte den Secretary-Dienst gerade nicht erreichen. Bitte versuchen Sie es erneut.",
+            "es": "No he podido conectar con el servicio Secretary. Inténtelo de nuevo.",
+            "it": "Non sono riuscita a contattare il servizio Secretary. Riprovi.",
             "en": "I could not reach the Secretary service just now. Please try again.",
         }
         return messages.get(self.language.split("-", 1)[0].lower(), messages["en"])
@@ -1163,7 +1185,7 @@ class VoiceSessionV2:
         try:
             await self.transcript.start()
             await self.update_state("listening", True)
-            write_live_preview(status="Emma Voice v2 active — speak now")
+            write_live_preview(status=localized_runtime_status(self.language, "active"))
             started = time.monotonic()
             log(f"v2 session started with language {self.language}")
             async with websockets.connect(
@@ -1203,12 +1225,13 @@ class VoiceSessionV2:
                 except Exception:
                     pass
             self.audio.terminate()
-            write_live_preview(status="Emma Voice v2 session ended")
+            write_live_preview(status=localized_runtime_status(self.language, "ended"))
             log("v2 session ended")
 
 
 async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
     config = load_v2_config()
+    language, _ = current_wake_profile(config)
     status = provider_status(config)
     if not status["ready"]:
         missing = [
@@ -1258,7 +1281,8 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
             )
         except Exception as exc:
             log(f"v2 shutdown state error: {type(exc).__name__}")
-        write_live_preview(status="Emma Voice v2 stopped")
+        current_language, _ = current_wake_profile(config)
+        write_live_preview(status=localized_runtime_status(current_language, "stopped"))
         log("v2 runtime stopped")
 
 

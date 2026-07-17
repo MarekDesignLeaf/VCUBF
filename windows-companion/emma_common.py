@@ -140,6 +140,27 @@ def load_token() -> str:
     return unprotect_dpapi(TOKEN_PATH.read_bytes()).decode("utf-8")
 
 
+def request_token(config: dict) -> str:
+    """Use the same account selected by the local passwordless test screen."""
+    if config.get("LocalMode") is True:
+        try:
+            request = urllib.request.Request(
+                config.get("ServerUrl", "http://localhost:4000").rstrip("/") + "/auth/local-test-active-session",
+                method="GET",
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request, timeout=2) as response:
+                session = json.loads(response.read().decode("utf-8"))
+            selected_language = str((session.get("user") or {}).get("voiceLanguage") or "")
+            if selected_language in LANGUAGE_NAMES and selected_language != config.get("Language"):
+                save_config_language(selected_language)
+            if session.get("token"):
+                return str(session["token"])
+        except (OSError, urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+            pass
+    return load_token()
+
+
 def backend_json(method: str, path: str, body: dict | None = None) -> dict:
     config = load_config()
     data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -147,7 +168,7 @@ def backend_json(method: str, path: str, body: dict | None = None) -> dict:
         config.get("ServerUrl", "https://backend-production-7952.up.railway.app").rstrip("/") + path,
         data=data,
         method=method,
-        headers={"Authorization": f"Bearer {load_token()}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {request_token(config)}", "Content-Type": "application/json"},
     )
     with urllib.request.urlopen(request, timeout=30) as response:
         payload = response.read().decode("utf-8").strip()

@@ -5,6 +5,7 @@ export interface AuthState {
   user: LoginResponse["user"] | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<LoginResponse["user"]>;
+  localTestLogin: (userId: string) => Promise<LoginResponse["user"]>;
   logout: () => void;
   updateUser: (patch: Partial<LoginResponse["user"]>) => void;
 }

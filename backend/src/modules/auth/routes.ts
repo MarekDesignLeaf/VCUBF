@@ -12,12 +12,14 @@ import { deliverGmailSecurityMessage } from "../../services/gmailConnectorServic
 import { updateVoicePreferences, voicePreferencesSchema } from "../../services/voicePreferenceService.js";
 
 export const authRouter = Router();
+let selectedLocalTestUserId: string | null = null;
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
 });
 const desktopLoginSchema = z.object({ bootstrap_token: z.string().min(40).max(2_000) });
+const localTestLoginSchema = z.object({ user_id: z.string().uuid() });
 
 const strongPassword = z.string().min(12).regex(/[a-z]/, "new password must contain a lowercase letter").regex(/[A-Z]/, "new password must contain an uppercase letter").regex(/[0-9]/, "new password must contain a number");
 const changePasswordSchema = z.object({ current_password: z.string().min(1), new_password: strongPassword });
@@ -44,6 +46,16 @@ function publicUser(user: { id: string; email: string; displayName: string; role
     voiceContinuous: user.voiceContinuous,
     voiceLanguage: user.voiceLanguage,
   };
+}
+
+function localTestRequestAllowed(req: import("express").Request) {
+  if (process.env.VCUBF_LOCAL_TEST_LOGIN !== "1") return false;
+  const address = req.socket.remoteAddress ?? "";
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+function localTestNotFound(res: import("express").Response) {
+  return res.status(404).json({ error: "NOT_FOUND" });
 }
 
 function passwordResetUrl(token: string) {
@@ -198,6 +210,47 @@ authRouter.post("/desktop-login", loginRateLimiter, async (req, res) => {
   } catch {
     return res.status(401).json({ error: "DESKTOP_BOOTSTRAP_INVALID", message: "Desktop sign-in expired. Open Secretary again." });
   }
+});
+
+// Passwordless account tiles exist only in the explicitly enabled localhost
+// development runtime. Railway and every non-loopback request receive 404.
+authRouter.get("/local-test-users", async (req, res) => {
+  if (!localTestRequestAllowed(req)) return localTestNotFound(res);
+  const users = await prisma.user.findMany({
+    where: { isActive: true },
+    orderBy: [{ displayName: "asc" }, { email: "asc" }],
+    select: { id: true, displayName: true, role: true, voiceLanguage: true },
+  });
+  res.json(users);
+});
+
+authRouter.post("/local-test-login", async (req, res) => {
+  if (!localTestRequestAllowed(req)) return localTestNotFound(res);
+  const parsed = localTestLoginSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED" });
+  const user = await prisma.user.findUnique({ where: { id: parsed.data.user_id } });
+  if (!user?.isActive) return res.status(404).json({ error: "USER_NOT_FOUND" });
+  selectedLocalTestUserId = user.id;
+  res.json({ token: signToken({
+    id: user.id, companyId: user.companyId, email: user.email, displayName: user.displayName,
+    role: user.role, permissions: user.permissions, mustChangePassword: user.mustChangePassword,
+    voiceWakeWord: user.voiceWakeWord, voiceContinuous: user.voiceContinuous, voiceLanguage: user.voiceLanguage,
+  }, user.authVersion), user: publicUser(user) });
+});
+
+authRouter.get("/local-test-active-session", async (req, res) => {
+  if (!localTestRequestAllowed(req)) return localTestNotFound(res);
+  if (!selectedLocalTestUserId) return res.status(404).json({ error: "LOCAL_TEST_USER_NOT_SELECTED" });
+  const user = await prisma.user.findUnique({ where: { id: selectedLocalTestUserId } });
+  if (!user?.isActive) {
+    selectedLocalTestUserId = null;
+    return res.status(404).json({ error: "USER_NOT_FOUND" });
+  }
+  res.json({ token: signToken({
+    id: user.id, companyId: user.companyId, email: user.email, displayName: user.displayName,
+    role: user.role, permissions: user.permissions, mustChangePassword: user.mustChangePassword,
+    voiceWakeWord: user.voiceWakeWord, voiceContinuous: user.voiceContinuous, voiceLanguage: user.voiceLanguage,
+  }, user.authVersion), user: publicUser(user) });
 });
 
 // Requests deliberately return the same response for every account state to

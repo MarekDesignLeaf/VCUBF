@@ -35,14 +35,25 @@ export async function updateVoicePreferences(user: AuthedUser, input: VoicePrefe
   });
   if (!before) return fail(404, "USER_NOT_FOUND");
 
-  const updated = await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      voiceWakeWord: input.wake_word,
-      voiceContinuous: input.continuous_listening,
-      voiceLanguage: input.language,
-    },
-  });
+  const [updated] = await prisma.$transaction([
+    prisma.user.update({
+      where: { id: user.id },
+      data: {
+        voiceWakeWord: input.wake_word,
+        voiceContinuous: input.continuous_listening,
+        voiceLanguage: input.language,
+      },
+    }),
+    // Keep the saved transcript history intact, but remove the live preview
+    // from the previous language. Otherwise the Czech interface can continue
+    // showing the last English answer until the next voice turn.
+    ...(before.voiceLanguage !== input.language
+      ? [prisma.voiceDeviceState.updateMany({
+          where: { userId: user.id, companyId: user.companyId },
+          data: { lastTranscript: null, lastResponse: null },
+        })]
+      : []),
+  ]);
   const data = preferences(updated);
   await recordAudit({
     companyId: user.companyId,

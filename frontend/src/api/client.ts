@@ -64,6 +64,7 @@ export interface LoginResponse {
 }
 
 export interface SetupStatus { setupRequired: boolean; }
+export interface LocalTestUser { id: string; displayName: string; role: string; voiceLanguage: AppLanguage; }
 export interface CompanyProfile {
   id: string;
   name: string;
@@ -1543,6 +1544,9 @@ export const api = {
     request<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   desktopLogin: (bootstrapToken: string) =>
     request<LoginResponse>("/auth/desktop-login", { method: "POST", body: JSON.stringify({ bootstrap_token: bootstrapToken }) }),
+  localTestUsers: () => request<LocalTestUser[]>("/auth/local-test-users"),
+  localTestLogin: (userId: string) =>
+    request<LoginResponse>("/auth/local-test-login", { method: "POST", body: JSON.stringify({ user_id: userId }) }),
   setupStatus: () => request<SetupStatus>("/auth/setup-status"),
   setup: (data: { company_name: string; administrator_name: string; administrator_email: string; administrator_password: string }) =>
     request<LoginResponse>("/auth/setup", { method: "POST", body: JSON.stringify(data) }),

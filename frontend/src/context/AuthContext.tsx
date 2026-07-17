@@ -11,7 +11,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let retryTimer: number | undefined;
     const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     const desktopBootstrap = hash.get("desktop_token");
+    const localTestChooser = new URLSearchParams(window.location.search).get("localTest") === "1";
     if (desktopBootstrap) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    if (localTestChooser) setToken(null);
     const loadSession = async (attempt = 0) => {
       try {
         if (desktopBootstrap && attempt === 0) {
@@ -21,7 +23,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (active) setLoading(false);
           return;
         }
-        if (!getToken()) {
+        if (localTestChooser || !getToken()) {
           if (active) setLoading(false);
           return;
         }
@@ -51,6 +53,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return res.user;
   }
 
+  async function localTestLogin(userId: string) {
+    const res = await api.localTestLogin(userId);
+    setToken(res.token);
+    setUser(res.user);
+    return res.user;
+  }
+
   function logout() {
     setToken(null);
     setUser(null);
@@ -60,5 +69,5 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser((current) => current ? { ...current, ...patch } : current);
   }
 
-  return <AuthContext.Provider value={{ user, loading, login, logout, updateUser }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, loading, login, localTestLogin, logout, updateUser }}>{children}</AuthContext.Provider>;
 }

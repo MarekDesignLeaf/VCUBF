@@ -135,6 +135,41 @@ function nonActionSafetyMessage(language: string) {
   return messages[language.slice(0, 2).toLocaleLowerCase("en")] ?? messages.en;
 }
 
+function assistantServiceMessage(language: string, kind: "unavailable" | "unsupported") {
+  const locale = language.slice(0, 2).toLocaleLowerCase("en");
+  const messages: Record<string, Record<typeof kind, string>> = {
+    cs: {
+      unavailable: "Teď se nemohu spojit s jazykovou službou. Zkuste prosím přímý příkaz.",
+      unsupported: "Požadavku jsem porozuměla, ale tato operace zatím není podporovaná. Zkuste ji prosím říct jako jednu přímou akci.",
+    },
+    pl: {
+      unavailable: "Nie mogę teraz połączyć się z usługą językową. Spróbuj wydać bezpośrednie polecenie.",
+      unsupported: "Rozumiem żądaniu, ale ta operacja nie jest jeszcze obsługiwana. Sformułuj ją jako jedną bezpośrednią czynność.",
+    },
+    fr: {
+      unavailable: "Je ne peux pas joindre le service linguistique pour le moment. Essayez une commande directe.",
+      unsupported: "J’ai compris la demande, mais cette opération n’est pas encore prise en charge. Reformulez-la comme une seule action directe.",
+    },
+    de: {
+      unavailable: "Ich kann den Sprachdienst derzeit nicht erreichen. Versuchen Sie bitte einen direkten Befehl.",
+      unsupported: "Ich habe die Anfrage verstanden, aber dieser Vorgang wird noch nicht unterstützt. Formulieren Sie ihn bitte als eine direkte Aktion.",
+    },
+    es: {
+      unavailable: "Ahora mismo no puedo conectar con el servicio de idioma. Pruebe con una orden directa.",
+      unsupported: "He entendido la solicitud, pero esta operación aún no está disponible. Exprésela como una sola acción directa.",
+    },
+    it: {
+      unavailable: "Al momento non riesco a contattare il servizio linguistico. Prova con un comando diretto.",
+      unsupported: "Ho compreso la richiesta, ma questa operazione non è ancora supportata. Formulala come un’unica azione diretta.",
+    },
+    en: {
+      unavailable: "I cannot reach the language service right now. Please try a direct command.",
+      unsupported: "I understood the request, but this action is not supported yet. Please rephrase it as one direct action.",
+    },
+  };
+  return (messages[locale] ?? messages.en)[kind];
+}
+
 function safeNonActionAssistantMessage(message: string, language: string) {
   return NON_ACTION_MUTATION_CLAIM.test(message) ? nonActionSafetyMessage(language) : message;
 }
@@ -227,12 +262,13 @@ commandRouter.post(
     const isWave = audio.length >= 44 && audio.subarray(0, 4).toString("ascii") === "RIFF" && audio.subarray(8, 12).toString("ascii") === "WAVE";
     if (!isWave) return res.status(400).json({ error: "INVALID_AUDIO", message: "A valid WAV command recording is required." });
     try {
-      const transcription = await transcribeVoiceAudio(audio, query.data.language, query.data.wake_word);
+      const language = req.user!.voiceLanguage;
+      const transcription = await transcribeVoiceAudio(audio, language, query.data.wake_word);
       await recordAudit({
         companyId: req.user!.companyId,
         userId: req.user!.id,
         actionName: "transcribe_voice_command",
-        inputPayload: { audioBytes: audio.length, language: query.data.language, model: transcription.model },
+        inputPayload: { audioBytes: audio.length, language, model: transcription.model },
         dataAfter: { transcriptCharacters: transcription.text.length },
         riskLevel: 0,
         confirmationRequired: false,
@@ -276,8 +312,12 @@ commandRouter.post("/realtime/session", requirePermission(EXECUTE_TEXT_COMMAND_A
 commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission), async (req, res) => {
   const parsedBody = assistantSchema.safeParse(req.body);
   if (!parsedBody.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsedBody.error.message });
-  const { text, input_method, language, history } = parsedBody.data;
+  const { text, input_method, history } = parsedBody.data;
   const user = req.user!;
+  // The authenticated user preference is the single language authority.
+  // A stale desktop/browser payload must never switch one response back to
+  // English while the menu and the rest of Emma are using another language.
+  const language = user.voiceLanguage;
   const alias = await resolveLearningAliases(user, text);
   let command = await resolveUserCommand(user, alias.resolvedText);
   let assistant: Awaited<ReturnType<typeof interpretVoiceRequest>> | undefined;
@@ -302,7 +342,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
         ok: false,
         kind: "error",
         error: "ASSISTANT_UNAVAILABLE",
-        message: "I cannot reach the language service right now. Please try a direct command.",
+        message: assistantServiceMessage(language, "unavailable"),
       });
     }
     if (assistant.kind !== "command" || !assistant.canonical_command) {
@@ -326,7 +366,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     }
     command = await resolveUserCommand(user, assistant.canonical_command);
     if (command.intent === "unrecognized") {
-      return res.json({ ok: true, kind: "clarification", message: "I understood the request, but this action is not supported yet. Please rephrase it as one direct action." });
+      return res.json({ ok: true, kind: "clarification", message: assistantServiceMessage(language, "unsupported") });
     }
     if (command.intent === "set_voice_language" && !isExplicitVoiceLanguageChange(alias.resolvedText, command.entities.language)) {
       await recordAudit({
