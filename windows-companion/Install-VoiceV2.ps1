@@ -7,6 +7,7 @@ $legacyV1Script=Join-Path $target 'VCUBF-Emma.ps1'
 $legacyV1Runtime=Join-Path $target 'emma_realtime.py'
 $v2Runner=Join-Path $target 'Run-VoiceV2.ps1'
 $v2Runtime=Join-Path $target 'emma_voice_v2.py'
+$legacyBrowserProfile=Join-Path (Split-Path -Parent $target) 'SecretaryBrowser'
 New-Item -ItemType Directory -Path $target -Force|Out-Null
 
 foreach($file in @('emma_voice_v2.py','emma_common.py','Run-VoiceV2.ps1','Launch-VCUBFSecretary.ps1','voice-v2.example.json','requirements.txt','requirements-v2.txt')){
@@ -27,6 +28,10 @@ Get-CimInstance Win32_Process | Where-Object {
     $_.CommandLine.IndexOf($v2Runner,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
     ($_.CommandLine.IndexOf($v2Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -like '*--run*')
   )
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Get-CimInstance Win32_Process | Where-Object {
+  $_.CommandLine -and $_.CommandLine.IndexOf($legacyBrowserProfile,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+  ($_.Name -ieq 'msedge.exe' -or $_.Name -ieq 'chrome.exe')
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 $activeConfig=Join-Path (Split-Path -Parent $target) 'voice-v2.json'

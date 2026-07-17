@@ -178,6 +178,10 @@ body {
 .login-inline-reset:hover, .login-inline-reset:focus-visible { text-decoration: underline; }
 .login-card input { min-height: 45px; border-radius: 9px; background: #fbfdfb; transition: border-color .15s ease, box-shadow .15s ease; }
 .login-card input:focus { outline: none; border-color: #4da071; box-shadow: 0 0 0 3px rgb(77 160 113 / 14%); }
+.password-input-wrap { position: relative; display: block; }
+.password-input-wrap input { width: 100%; padding-right: 66px; box-sizing: border-box; }
+.password-visibility-button { position: absolute; top: 50%; right: 6px; min-height: 32px; padding: 0 10px; transform: translateY(-50%); border-radius: 7px; background: transparent; color: #277451; font-size: .76rem; font-weight: 800; }
+.password-visibility-button:hover, .password-visibility-button:focus-visible { background: rgb(77 160 113 / 13%); color: #1d5e3f; }
 .login-submit { min-height: 47px; margin-top: 3px; border-radius: 9px; font-weight: 750; }
 .login-reset-hint { margin: -2px 0 0; color: var(--muted); font-size: .82rem; text-align: center; }
 .login-reset-hint a { color: #277451; font-weight: 750; }
@@ -830,6 +834,8 @@ table,
 .login-card label { color: #d4d9d6; }
 .login-card input { border-color: #3a403f; color: white; background: #0c0f0f; }
 .login-card input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(114 255 50 / 11%); }
+.password-visibility-button { color: var(--accent); }
+.password-visibility-button:hover, .password-visibility-button:focus-visible { background: rgb(114 255 50 / 11%); color: var(--signal); }
 
 @media (max-width: 760px) {
   .sidebar { border-right: 0; border-bottom: 1px solid #2e3432; background: linear-gradient(160deg, #0b0e0e, #151919); box-shadow: 0 8px 28px rgb(0 0 0 / 35%); }

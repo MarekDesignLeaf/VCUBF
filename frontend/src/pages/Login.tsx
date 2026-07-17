@@ -10,6 +10,7 @@ export function Login() {
   const [params] = useSearchParams();
   const [email, setEmail] = useState(() => params.get("email") ?? localStorage.getItem("vcuf_last_email") ?? "");
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
@@ -79,7 +80,18 @@ export function Login() {
               Password
               <Link className="login-inline-reset" to="/forgot-password">Reset password</Link>
             </span>
-            <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <span className="password-input-wrap">
+              <input type={passwordVisible ? "text" : "password"} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <button
+                className="password-visibility-button"
+                type="button"
+                aria-label={passwordVisible ? "Hide password" : "Show password"}
+                aria-pressed={passwordVisible}
+                onClick={() => setPasswordVisible((visible) => !visible)}
+              >
+                {passwordVisible ? "Hide" : "Show"}
+              </button>
+            </span>
           </label>
           {error && <div className="error-banner" role="alert">{error}</div>}
           <button className="login-submit" type="submit" disabled={submitting}>

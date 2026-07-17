@@ -33,8 +33,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-VoiceV2.ps1
 
 This removes the legacy Emma runtime, its automatic startup entry and the old
 Voice v2 shortcut. It creates exactly one desktop shortcut named **VCUBF
-Secretary**. That shortcut opens one dedicated Secretary browser window and
-starts Voice v2 for that window only. Closing the dedicated browser window
+Secretary**. That shortcut opens one dedicated Secretary browser window using
+your normal default browser profile, then starts Voice v2 for that window only.
+The browser's own password manager can therefore fill its saved credentials;
+VCUBF never reads, copies or stores the password. Closing the Secretary window
 always stops Voice v2, including an active conversation.
 
 When Voice v2 is running, it has a visible icon in the Windows notification

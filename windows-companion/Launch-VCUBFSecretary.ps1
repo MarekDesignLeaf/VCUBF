@@ -3,6 +3,40 @@ param()
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Security
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+public static class VcubfWindowApi {
+  private delegate bool EnumWindowsDelegate(IntPtr handle, IntPtr parameter);
+
+  [DllImport("user32.dll")]
+  private static extern bool EnumWindows(EnumWindowsDelegate callback, IntPtr parameter);
+
+  [DllImport("user32.dll")]
+  private static extern bool IsWindowVisible(IntPtr handle);
+
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
+
+  [DllImport("user32.dll")]
+  private static extern bool IsWindow(IntPtr handle);
+
+  public static IntPtr[] TopLevelWindows() {
+    var result = new List<IntPtr>();
+    EnumWindows((handle, parameter) => {
+      if (IsWindowVisible(handle)) result.Add(handle);
+      return true;
+    }, IntPtr.Zero);
+    return result.ToArray();
+  }
+
+  public static bool WindowExists(long handle) {
+    return IsWindow(new IntPtr(handle));
+  }
+}
+'@
 
 $app = Split-Path -Parent $PSCommandPath
 $appDir = Split-Path -Parent $app
@@ -92,14 +126,20 @@ function Start-VoiceV2 {
 }
 
 function Find-AppBrowser {
-  $candidates = @(
-    (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
-    (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
-    (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\Application\msedge.exe'),
+  $chrome = @(
     (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application\chrome.exe'),
     (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'),
     (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe')
-  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+  )
+  $edge = @(
+    (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
+    (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
+    (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\Application\msedge.exe')
+  )
+  $defaultBrowser = ''
+  try { $defaultBrowser = [string](Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice').ProgId } catch {}
+  $candidates = if($defaultBrowser -like '*Chrome*') { @($chrome + $edge) } elseif($defaultBrowser -like '*Edge*') { @($edge + $chrome) } else { @($chrome + $edge) }
+  $candidates = $candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
   return $candidates | Select-Object -First 1
 }
 
@@ -110,12 +150,29 @@ function Get-SecretaryUrl([string]$BaseUrl, [string]$Email) {
   return $url
 }
 
-function Get-AppBrowserProcesses([string]$ProfileDirectory) {
-  return @(Get-CimInstance Win32_Process | Where-Object {
-    $_.CommandLine -and $_.CommandLine -like "*$ProfileDirectory*" -and
-    ($_.Name -ieq 'msedge.exe' -or $_.Name -ieq 'chrome.exe') -and
-    $_.CommandLine -like '*--app=*' -and $_.CommandLine -notlike '* --type=*'
-  })
+function Get-BrowserWindowHandles([string]$BrowserPath) {
+  $browserName = [IO.Path]::GetFileNameWithoutExtension($BrowserPath)
+  foreach($handle in [VcubfWindowApi]::TopLevelWindows()) {
+    [uint32]$windowProcessId = 0
+    [void][VcubfWindowApi]::GetWindowThreadProcessId($handle, [ref]$windowProcessId)
+    try {
+      if((Get-Process -Id $windowProcessId -ErrorAction Stop).ProcessName -ieq $browserName) {
+        $handle.ToInt64()
+      }
+    } catch {}
+  }
+}
+
+function Open-SecretaryWindow([string]$BrowserPath, [string]$Url) {
+  $before = @(Get-BrowserWindowHandles $BrowserPath)
+  Start-Process -FilePath $BrowserPath -ArgumentList @("--app=$Url", '--no-first-run') | Out-Null
+  $deadline = [datetime]::UtcNow.AddSeconds(20)
+  do {
+    $created = @(Get-BrowserWindowHandles $BrowserPath | Where-Object { $before -notcontains $_ })
+    if($created.Count -gt 0) { return [int64]$created[0] }
+    Start-Sleep -Milliseconds 200
+  } while([datetime]::UtcNow -lt $deadline)
+  throw 'Secretary browser window did not open.'
 }
 
 try {
@@ -134,20 +191,14 @@ try {
   $browserUrl = if($pairing -and $pairing.verification_url) { [string]$pairing.verification_url } else { Get-SecretaryUrl "$frontend/login" ([string]$config.Email) }
   $browser = Find-AppBrowser
   if(!$browser) { throw 'Microsoft Edge or Google Chrome is required to open VCUBF Secretary.' }
-  $browserProfile = Join-Path $appDir 'SecretaryBrowser'
-  New-Item -ItemType Directory -Path $browserProfile -Force | Out-Null
-  $browserProcess = Start-Process -FilePath $browser -ArgumentList @(
-    "--app=$browserUrl", "--user-data-dir=$browserProfile", '--no-first-run', '--disable-background-mode', '--disable-component-update'
-  ) -PassThru
+  # Use the person's normal browser profile. That preserves the browser's
+  # encrypted password manager and its built-in autofill; no password is read,
+  # copied or stored by VCUBF. The newly created app window itself is tracked.
+  $secretaryWindow = Open-SecretaryWindow $browser $browserUrl
 
   if($profile) { Start-VoiceV2 }
-  $seenBrowser = $false
-  $browserStartDeadline = [datetime]::UtcNow.AddSeconds(15)
   $pairingDeadline = if($pairing) { [datetime]::UtcNow.AddMinutes(10) } else { [datetime]::MinValue }
-  while($true) {
-    $browserProcesses = Get-AppBrowserProcesses $browserProfile
-    if($browserProcesses.Count -gt 0) { $seenBrowser = $true }
-    elseif($seenBrowser -or ([datetime]::UtcNow -gt $browserStartDeadline -and $browserProcess.HasExited)) { break }
+  while([VcubfWindowApi]::WindowExists($secretaryWindow)) {
 
     if($pairing -and !$profile -and [datetime]::UtcNow -lt $pairingDeadline) {
       try {
