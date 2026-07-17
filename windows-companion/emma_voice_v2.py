@@ -483,6 +483,24 @@ class DeepgramWakeWord:
             query["keyterm"] = wake_word
         return "wss://api.deepgram.com/v1/listen?" + urlencode(query)
 
+    async def publish_listening_state(self) -> None:
+        """Keep the Secretary UI truthful while V2 waits for the wake word."""
+        try:
+            await asyncio.to_thread(
+                backend_json,
+                "PUT",
+                "/command/voice-state",
+                {"status": "listening", "mode": "wake_word", "listening": True},
+            )
+        except Exception as exc:
+            log(f"v2 wake state error: {type(exc).__name__}")
+
+    async def listening_heartbeat(self) -> None:
+        """Refresh the 15-second backend presence lease without blocking audio."""
+        while companion_is_running(self.parent_pid, self.stop_file):
+            await self.publish_listening_state()
+            await asyncio.sleep(5)
+
     async def transcribe_segment(
         self,
         stream: Any,
@@ -558,6 +576,7 @@ class DeepgramWakeWord:
             raise RuntimeError("DEEPGRAM_NOT_CONFIGURED")
         audio = pyaudio.PyAudio()
         stream = None
+        heartbeat: asyncio.Task[None] | None = None
         try:
             stream = audio.open(
                 format=pyaudio.paInt16,
@@ -566,15 +585,7 @@ class DeepgramWakeWord:
                 input=True,
                 frames_per_buffer=INPUT_FRAME_BYTES // SAMPLE_WIDTH,
             )
-            try:
-                await asyncio.to_thread(
-                    backend_json,
-                    "PUT",
-                    "/command/voice-state",
-                    {"status": "listening", "mode": "wake_word", "listening": True},
-                )
-            except Exception as exc:
-                log(f"v2 wake state error: {type(exc).__name__}")
+            heartbeat = asyncio.create_task(self.listening_heartbeat())
             write_live_preview(status=f"Emma Voice v2 is waiting for {wake_word}")
             log(f"v2 Deepgram VAD wake listener started ({language}, {wake_word})")
             pre_roll_frames = max(1, (pre_roll_ms + INPUT_FRAME_MS - 1) // INPUT_FRAME_MS)
@@ -600,6 +611,9 @@ class DeepgramWakeWord:
                     return activation_command
                 write_live_preview(status=f"Emma Voice v2 is waiting for {wake_word}")
         finally:
+            if heartbeat:
+                heartbeat.cancel()
+                await asyncio.gather(heartbeat, return_exceptions=True)
             if stream:
                 try:
                     stream.stop_stream()
