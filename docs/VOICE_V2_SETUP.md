@@ -1,9 +1,9 @@
 # Emma Voice v2 for Windows
 
-Voice v2 is a parallel production-grade voice runtime. It leaves the current
-Windows Emma untouched until its own provider diagnostics are ready. It uses:
+Voice v2 is the single Windows Emma runtime. It uses:
 
-- **Porcupine** for an entirely local `Emma` wake word;
+- **local VAD plus Deepgram Nova-3** to verify the `Emma` wake word in the
+  currently selected Secretary language;
 - **Deepgram Nova-3** over WebSocket for real-time PCM transcription;
 - **ElevenLabs** PCM streaming for low-latency spoken output;
 - the existing authenticated Secretary `/command/assistant` endpoint for every
@@ -15,7 +15,15 @@ transcript matching Emma's own reply is ignored; a distinct final user
 transcript interrupts the playback and becomes the next tool request. Audio is
 never written to disk.
 
-## Install without replacing V1
+While waiting for `Emma`, a local amplitude gate keeps silence on the PC. When
+it detects speech, it keeps a short in-memory pre-roll and sends that speech
+segment to Deepgram only to verify the wake word; it then closes that stream.
+This is required for Czech and other languages without a compatible local
+Windows recognizer. The request opts out of the Deepgram Model Improvement
+Program; provider-side handling remains governed by the configured Deepgram
+account and its data policy.
+
+## Install the unified Secretary application
 
 From `windows-companion` run:
 
@@ -23,10 +31,16 @@ From `windows-companion` run:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-VoiceV2.ps1
 ```
 
-This installs a separate desktop shortcut named **VCUBF Secretary — Voice v2**.
-It does not change the existing startup task, desktop shortcut, configuration or
-runtime of Voice v1. Voice v2 refuses to start while v1 is active, so exactly
-one companion can own the microphone.
+This removes the legacy Emma runtime, its automatic startup entry and the old
+Voice v2 shortcut. It creates exactly one desktop shortcut named **VCUBF
+Secretary**. That shortcut opens one dedicated Secretary browser window and
+starts Voice v2 for that window only. Closing the dedicated browser window
+always stops Voice v2, including an active conversation.
+
+When Voice v2 is running, it has a visible icon in the Windows notification
+area. Right-click it and choose **Ukončit Emmu Voice v2** to stop the wake
+listener and any active conversation. The launcher owns the Python runtime; if
+the Secretary window or its launcher closes, the child runtime stops too.
 
 ## Configure providers
 
@@ -36,20 +50,19 @@ The installer creates this non-secret configuration file if it does not exist:
 %LOCALAPPDATA%\VCUBF\Emma\voice-v2.json
 ```
 
-Copy the real Porcupine `.ppn` model path and the ElevenLabs voice ID into that
-file. Keep API secrets out of JSON. Set them as user environment variables, then
-open a new PowerShell session:
+The installer configures the Deepgram VAD wake word automatically. Keep API
+secrets out of JSON. Set only the Deepgram and ElevenLabs credentials as user
+environment variables, then open a new PowerShell session:
 
 ```powershell
-setx PICOVOICE_ACCESS_KEY "your Picovoice access key"
 setx DEEPGRAM_API_KEY "your Deepgram API key"
 setx ELEVENLABS_API_KEY "your ElevenLabs API key"
 ```
 
-Create the custom `Emma` Windows wake-word model in Picovoice Console, download
-the `.ppn` file, and set `wake.keywordPath` to its full path. Set
-`tts.voiceId` to a voice from your ElevenLabs account. The runtime uses the
-selected Secretary language for Deepgram and ElevenLabs; set
+Set `tts.voiceId` in `voice-v2.json` to a voice from your ElevenLabs account.
+The runtime uses the selected Secretary language for wake verification,
+Deepgram transcription and ElevenLabs output. It does not depend on a Windows
+Speech Recognition language pack and never falls back to English. Set
 `stt.languageMode` to `auto` only for a deliberately multilingual session.
 
 ## Verify before first microphone use
@@ -59,7 +72,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Run-VoiceV2.ps1 -SelfT
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Run-VoiceV2.ps1 -Diagnostic
 ```
 
-`Diagnostic` reports only whether providers and local models are available; it
+`Diagnostic` reports only whether providers and configuration are available; it
 does not expose keys or open the microphone. Voice v2 starts only when the
 diagnostic reports `"ready": true`.
 

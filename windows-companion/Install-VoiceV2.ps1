@@ -3,16 +3,67 @@ param([switch]$StartNow)
 $ErrorActionPreference='Stop'
 $source=Split-Path -Parent $PSCommandPath
 $target=Join-Path $env:LOCALAPPDATA 'VCUBF\Emma\app'
+$legacyV1Script=Join-Path $target 'VCUBF-Emma.ps1'
+$legacyV1Runtime=Join-Path $target 'emma_realtime.py'
+$v2Runner=Join-Path $target 'Run-VoiceV2.ps1'
+$v2Runtime=Join-Path $target 'emma_voice_v2.py'
 New-Item -ItemType Directory -Path $target -Force|Out-Null
 
-foreach($file in @('emma_voice_v2.py','emma_realtime.py','Run-VoiceV2.ps1','voice-v2.example.json','requirements.txt','requirements-v2.txt')){
+foreach($file in @('emma_voice_v2.py','emma_common.py','Run-VoiceV2.ps1','Launch-VCUBFSecretary.ps1','voice-v2.example.json','requirements.txt','requirements-v2.txt')){
   Copy-Item -LiteralPath (Join-Path $source $file) -Destination $target -Force
 }
+
+# Voice v2 is now the only companion. Remove every legacy executable path,
+# startup entry and duplicate shortcut before publishing the unified launcher.
+foreach($legacy in @('WindowsSpeechWake.ps1','VCUBF-Emma.ps1','emma_realtime.py','Open-VCUBF.ps1')){
+  Remove-Item -LiteralPath (Join-Path $target $legacy) -Force -ErrorAction SilentlyContinue
+}
+Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('Startup')) 'VCUBF Emma.lnk') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'VCUBF Secretary — Voice v2.lnk') -Force -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process | Where-Object {
+  $_.CommandLine -and (
+    $_.CommandLine.IndexOf($legacyV1Script,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+    $_.CommandLine.IndexOf($legacyV1Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+    $_.CommandLine.IndexOf($v2Runner,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+    ($_.CommandLine.IndexOf($v2Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -like '*--run*')
+  )
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 $activeConfig=Join-Path (Split-Path -Parent $target) 'voice-v2.json'
 if(!(Test-Path -LiteralPath $activeConfig)){
   Copy-Item -LiteralPath (Join-Path $source 'voice-v2.example.json') -Destination $activeConfig
 }
+
+# V2 formerly used a local wake provider. Migrate the non-secret configuration
+# to the Deepgram VAD-gated wake listener while preserving the already entered
+# Deepgram and ElevenLabs settings.
+$rawConfig=Get-Content -LiteralPath $activeConfig -Raw
+try {
+  $voiceConfig=$rawConfig | ConvertFrom-Json
+} catch {
+  # Keep an invalid user file for inspection, then create a known-safe config.
+  # The V2 config contains no API keys, so replacing only this malformed file
+  # cannot discard credentials.
+  $backup="$activeConfig.invalid-$(Get-Date -Format 'yyyyMMddHHmmss').bak"
+  Copy-Item -LiteralPath $activeConfig -Destination $backup -Force
+  Copy-Item -LiteralPath (Join-Path $source 'voice-v2.example.json') -Destination $activeConfig -Force
+  $voiceConfig=Get-Content -LiteralPath $activeConfig -Raw | ConvertFrom-Json
+  Write-Host "Replaced invalid Voice v2 configuration. Backup: $backup"
+}
+if(!$voiceConfig.PSObject.Properties['wake']){
+  $voiceConfig | Add-Member -NotePropertyName wake -NotePropertyValue ([pscustomobject]@{})
+}
+$wake=$voiceConfig.wake
+if(!$wake.PSObject.Properties['provider']){$wake | Add-Member -NotePropertyName provider -NotePropertyValue 'deepgram_vad'}else{$wake.provider='deepgram_vad'}
+if(!$wake.PSObject.Properties['word']){$wake | Add-Member -NotePropertyName word -NotePropertyValue 'Emma'}elseif([string]::IsNullOrWhiteSpace([string]$wake.word)){$wake.word='Emma'}
+if(!$wake.PSObject.Properties['speechThreshold']){$wake | Add-Member -NotePropertyName speechThreshold -NotePropertyValue 450}
+if(!$wake.PSObject.Properties['preRollMs']){$wake | Add-Member -NotePropertyName preRollMs -NotePropertyValue 600}
+if(!$wake.PSObject.Properties['silenceMs']){$wake | Add-Member -NotePropertyName silenceMs -NotePropertyValue 1100}
+if(!$wake.PSObject.Properties['maxSegmentMs']){$wake | Add-Member -NotePropertyName maxSegmentMs -NotePropertyValue 8000}
+foreach($obsolete in @('accessKeyEnv','keywordPath','modelPath','sensitivity','confidence')){
+  if($wake.PSObject.Properties[$obsolete]){$wake.PSObject.Properties.Remove($obsolete)}
+}
+$voiceConfig | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $activeConfig -Encoding UTF8
 
 $python=$null
 foreach($candidate in @('python.exe','py.exe')) {
@@ -31,15 +82,16 @@ if(!$python){throw 'Python 3 was not found. Install Python, then run Install-Voi
 if($LASTEXITCODE -ne 0){throw 'Emma Voice v2 dependencies could not be installed.'}
 
 $shell=New-Object -ComObject WScript.Shell
-$desktopShortcut=$shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'VCUBF Secretary — Voice v2.lnk'))
+$desktopShortcut=$shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'VCUBF Secretary.lnk'))
 $desktopShortcut.TargetPath="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-$desktopShortcut.Arguments="-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $target 'Run-VoiceV2.ps1')`""
+$desktopShortcut.Arguments="-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $target 'Launch-VCUBFSecretary.ps1')`""
 $desktopShortcut.WorkingDirectory=$target
 $desktopShortcut.IconLocation="$env:SystemRoot\System32\imageres.dll,15"
 $desktopShortcut.Save()
 
-Write-Host "Emma Voice v2 installed in $target"
-Write-Host "Configure $activeConfig and the named user environment variables before starting Voice v2."
+Write-Host "VCUBF Secretary installed in $target"
+Write-Host "The single desktop icon opens Secretary and Emma Voice v2 together. Closing that browser window stops Emma Voice v2."
+Write-Host "Deepgram VAD wake-word is configured. It sends audio only after local speech detection; no audio files are created."
 if($StartNow){
   Start-Process -FilePath $desktopShortcut.TargetPath -ArgumentList $desktopShortcut.Arguments -WindowStyle Hidden
 }

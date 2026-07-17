@@ -1,9 +1,9 @@
 """Emma Voice v2 — provider-based Windows voice runtime for VCUF Secretary.
 
-Voice v2 deliberately runs beside ``emma_realtime.py``.  It never changes the
-legacy desktop listener or its shortcut.  When configured, it uses a local
-Porcupine wake word, Deepgram Nova-3 streaming STT and ElevenLabs PCM streaming
-TTS, while every business operation still goes through the authenticated,
+Voice v2 is the only installed Windows listener. When configured, it uses a local VAD
+gate plus Deepgram Nova-3 verification for the wake word, Deepgram streaming
+STT and ElevenLabs PCM streaming TTS, while every business operation still goes
+through the authenticated,
 permission-checked and audited Secretary API.
 
 No microphone audio is written to disk.  Only final transcript text is sent to
@@ -17,13 +17,14 @@ import argparse
 import asyncio
 from array import array
 from collections import deque
+import ctypes
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-import importlib.util
 import json
 import os
 from pathlib import Path
 import queue
+import re
 import threading
 import time
 from typing import Any
@@ -35,7 +36,7 @@ from aec_audio_processing import AudioProcessor
 import pyaudio
 import websockets
 
-from emma_realtime import (
+from emma_common import (
     APP_DIR,
     LANGUAGE_NAMES,
     PcmPlaybackBuffer,
@@ -74,11 +75,12 @@ def default_v2_config() -> dict[str, Any]:
     return {
         "version": 2,
         "wake": {
-            "provider": "porcupine",
-            "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
-            "keywordPath": "",
-            "modelPath": "",
-            "sensitivity": 0.62,
+            "provider": "deepgram_vad",
+            "word": "Emma",
+            "speechThreshold": 450,
+            "preRollMs": 600,
+            "silenceMs": 1_100,
+            "maxSegmentMs": 8_000,
         },
         "stt": {
             "provider": "deepgram",
@@ -136,6 +138,73 @@ def configured_value(value: object) -> bool:
     return bool(text) and not text.upper().startswith("SET_")
 
 
+def companion_is_running(parent_pid: int = 0, stop_file: Path | None = None) -> bool:
+    """Treat the visible tray wrapper as the owner of this one V2 session."""
+    if stop_file and stop_file.exists():
+        return False
+    if parent_pid <= 0:
+        return True
+    if os.name == "nt":
+        # ``os.kill(pid, 0)`` is not a POSIX-style probe on Windows: it can
+        # terminate the target process. Query the process exit code instead.
+        process_query_limited_information = 0x1000
+        still_active = 259
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_bool, ctypes.c_ulong)
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong))
+        kernel32.GetExitCodeProcess.restype = ctypes.c_bool
+        kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+        kernel32.CloseHandle.restype = ctypes.c_bool
+        handle = kernel32.OpenProcess(process_query_limited_information, False, parent_pid)
+        if not handle:
+            return False
+        exit_code = ctypes.c_ulong()
+        try:
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return False
+            return exit_code.value == still_active
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(parent_pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def current_wake_profile(config: dict[str, Any]) -> tuple[str, str]:
+    """Load the persisted Secretary language before every wake-word wait."""
+    common = load_config()
+    language = str(common.get("Language") or "").strip()
+    if language not in LANGUAGE_NAMES:
+        # Never silently fall back to English after the application language
+        # was changed. Deepgram receives the exact selected BCP-47 language.
+        raise RuntimeError("WAKE_LANGUAGE_INVALID")
+    word = str(common.get("WakeWord") or config["wake"].get("word") or "Emma").strip()
+    if not word or len(word) > 64:
+        raise RuntimeError("WAKE_WORD_INVALID")
+    return language, word
+
+
+def wake_vad_settings(config: dict[str, Any]) -> tuple[int, int, int, int]:
+    wake = config["wake"]
+    try:
+        threshold = int(wake.get("speechThreshold", 450))
+        pre_roll_ms = int(wake.get("preRollMs", 600))
+        silence_ms = int(wake.get("silenceMs", 1_100))
+        max_segment_ms = int(wake.get("maxSegmentMs", 8_000))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("DEEPGRAM_WAKE_SETTINGS_INVALID") from exc
+    if not 80 <= threshold <= 12_000 or not 100 <= pre_roll_ms <= 2_000 or not 300 <= silence_ms <= 4_000 or not 1_000 <= max_segment_ms <= 15_000:
+        raise RuntimeError("DEEPGRAM_WAKE_SETTINGS_INVALID")
+    return threshold, pre_roll_ms, silence_ms, max_segment_ms
+
+
 def language_code(language: str, mode: str) -> str:
     if mode == "auto":
         return "multi"
@@ -144,6 +213,38 @@ def language_code(language: str, mode: str) -> str:
 
 def normalized_text(value: str) -> str:
     return " ".join("".join(character.lower() if character.isalnum() else " " for character in value).split())
+
+
+def contains_wake_word(transcript: str, wake_word: str) -> bool:
+    phrase = normalized_text(wake_word)
+    heard = normalized_text(transcript)
+    if not phrase or not heard:
+        return False
+    accepted = {phrase}
+    # Czech address of the default name is naturally "Emmo". It is still the
+    # same configured wake word, not a language fallback or a second assistant.
+    if phrase == "emma":
+        accepted.add("emmo")
+    return any(f" {candidate} " in f" {heard} " for candidate in accepted)
+
+
+def wake_command_tail(transcript: str, wake_word: str) -> str:
+    """Keep a command spoken directly after the wake word, if there is one."""
+    candidates = [wake_word]
+    if normalized_text(wake_word) == "emma":
+        candidates.append("Emmo")
+    pattern = "|".join(re.escape(candidate) for candidate in candidates if candidate.strip())
+    match = re.search(rf"(?i)(?<!\w)(?:{pattern})(?!\w)", transcript)
+    return transcript[match.end():].lstrip(" ,.:;!?-–—") if match else ""
+
+
+def pcm_mean_amplitude(raw: bytes) -> int:
+    """Return a cheap local VAD signal for signed 16-bit PCM audio."""
+    samples = array("h")
+    samples.frombytes(raw[: len(raw) - (len(raw) % SAMPLE_WIDTH)])
+    if not samples:
+        return 0
+    return sum(abs(sample) for sample in samples) // len(samples)
 
 
 def looks_like_self_echo(heard: str, assistant: str) -> bool:
@@ -168,23 +269,38 @@ def self_test() -> bool:
         and merged["tts"]["outputFormat"] == "pcm_24000"
         and language_code("cs-CZ", "selected") == "cs"
         and language_code("cs-CZ", "auto") == "multi"
+        and contains_wake_word("Emmo, otevři kontakty", "Emma")
+        and wake_command_tail("Emma, otevři kontakty", "Emma") == "otevři kontakty"
+        and contains_wake_word("Emma, otevři kontakty", "Emma")
+        and pcm_mean_amplitude(b"\x00\x00\x00\x00") == 0
+        and pcm_mean_amplitude(b"\x10\x00\xf0\xff") == 16
+        and companion_is_running(os.getpid())
         and looks_like_self_echo("hello there", "Hello there, how can I help?")
         and not looks_like_self_echo("stop now", "Hello there, how can I help?")
     )
 
 
 def provider_status(config: dict[str, Any]) -> dict[str, Any]:
-    wake = config["wake"]
     stt = config["stt"]
     tts = config["tts"]
-    porcupine_installed = importlib.util.find_spec("pvporcupine") is not None
-    keyword_path = Path(str(wake.get("keywordPath") or "")) if wake.get("keywordPath") else None
+    try:
+        language, wake_word = current_wake_profile(config)
+        profile_error = ""
+    except RuntimeError as exc:
+        language, wake_word, profile_error = "", "", str(exc)
+    try:
+        wake_vad_settings(config)
+        vad_error = ""
+    except RuntimeError as exc:
+        vad_error = str(exc)
     configured = {
-        "porcupine": {
-            "provider": wake["provider"],
-            "packageInstalled": porcupine_installed,
-            "accessKeyPresent": bool(environment_value(str(wake["accessKeyEnv"]))),
-            "keywordModelPresent": bool(keyword_path and keyword_path.is_file()),
+        "deepgramWake": {
+            "provider": str(config["wake"].get("provider") or ""),
+            "providerConfigured": str(config["wake"].get("provider") or "") == "deepgram_vad",
+            "language": language,
+            "wakeWordPresent": bool(wake_word),
+            "vadSettingsValid": not vad_error,
+            "configurationError": profile_error or vad_error,
         },
         "deepgram": {
             "provider": stt["provider"],
@@ -200,9 +316,9 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
         },
     }
     ready = (
-        configured["porcupine"]["packageInstalled"]
-        and configured["porcupine"]["accessKeyPresent"]
-        and configured["porcupine"]["keywordModelPresent"]
+        configured["deepgramWake"]["providerConfigured"]
+        and configured["deepgramWake"]["wakeWordPresent"]
+        and configured["deepgramWake"]["vadSettingsValid"]
         and configured["deepgram"]["apiKeyPresent"]
         and configured["elevenlabs"]["apiKeyPresent"]
         and configured["elevenlabs"]["voiceIdPresent"]
@@ -338,51 +454,159 @@ class ElevenLabsPcmTts:
             speaker.finish()
 
 
-class PorcupineWakeWord:
-    def __init__(self, config: dict[str, Any]):
-        self.config = config
+class DeepgramWakeWord:
+    """Privacy-gated cloud wake detection for languages Windows cannot recognise."""
 
-    def wait(self) -> None:
-        try:
-            import pvporcupine  # type: ignore[import-not-found]
-        except ModuleNotFoundError as exc:
-            raise RuntimeError("PORCUPINE_PACKAGE_MISSING") from exc
-        access_key = environment_value(str(self.config["accessKeyEnv"]))
-        keyword_path = Path(str(self.config["keywordPath"])).expanduser()
-        if not access_key or not keyword_path.is_file():
-            raise RuntimeError("PORCUPINE_NOT_CONFIGURED")
-        options: dict[str, Any] = {
-            "access_key": access_key,
-            "keyword_paths": [str(keyword_path)],
-            "sensitivities": [float(self.config["sensitivity"])],
+    def __init__(self, config: dict[str, Any], parent_pid: int = 0, stop_file: Path | None = None):
+        self.config = config
+        self.parent_pid = parent_pid
+        self.stop_file = stop_file
+
+    def url(self, language: str, wake_word: str) -> str:
+        stt = self.config["stt"]
+        query = {
+            "model": str(stt["model"]),
+            "language": language_code(language, str(stt["languageMode"])),
+            "encoding": "linear16",
+            "sample_rate": str(RATE),
+            "channels": str(CHANNELS),
+            "interim_results": "true",
+            "punctuate": "true",
+            "smart_format": "true",
+            "endpointing": "300",
+            "vad_events": "true",
+            # Wake verification is transient. Do not opt the VAD-triggered
+            # snippets into the provider's model-improvement programme.
+            "mip_opt_out": "true",
         }
-        model_path = str(self.config.get("modelPath") or "").strip()
-        if model_path:
-            options["model_path"] = str(Path(model_path).expanduser())
-        detector = pvporcupine.create(**options)
+        if "nova-3" in str(stt["model"]).lower():
+            query["keyterm"] = wake_word
+        return "wss://api.deepgram.com/v1/listen?" + urlencode(query)
+
+    async def transcribe_segment(
+        self,
+        stream: Any,
+        pre_roll: list[bytes],
+        language: str,
+        wake_word: str,
+        threshold: int,
+        silence_ms: int,
+        max_segment_ms: int,
+    ) -> str | None:
+        api_key = environment_value(str(self.config["stt"]["apiKeyEnv"]))
+        detected = asyncio.Event()
+        command_tail = ""
+
+        async with websockets.connect(
+            self.url(language, wake_word),
+            additional_headers={"Authorization": f"Token {api_key}"},
+            max_size=2 * 1024 * 1024,
+        ) as websocket:
+            async def receive_results() -> None:
+                nonlocal command_tail
+                async for raw in websocket:
+                    if isinstance(raw, bytes):
+                        continue
+                    try:
+                        event = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("type") != "Results" or not event.get("is_final"):
+                        continue
+                    alternatives = ((event.get("channel") or {}).get("alternatives") or [])
+                    transcript = str((alternatives[0] if alternatives else {}).get("transcript") or "")
+                    if contains_wake_word(transcript, wake_word):
+                        command_tail = wake_command_tail(transcript, wake_word)
+                        detected.set()
+                        return
+
+            receiver = asyncio.create_task(receive_results())
+            try:
+                for payload in pre_roll:
+                    await websocket.send(payload)
+                silence_frames = 0
+                max_silence_frames = max(1, (silence_ms + INPUT_FRAME_MS - 1) // INPUT_FRAME_MS)
+                started = time.monotonic()
+                while not detected.is_set() and time.monotonic() - started < max_segment_ms / 1_000:
+                    if not companion_is_running(self.parent_pid, self.stop_file):
+                        return None
+                    raw = await asyncio.to_thread(stream.read, INPUT_FRAME_BYTES // SAMPLE_WIDTH, False)
+                    await websocket.send(raw)
+                    if pcm_mean_amplitude(raw) >= threshold:
+                        silence_frames = 0
+                    else:
+                        silence_frames += 1
+                    if silence_frames >= max_silence_frames:
+                        break
+                if not detected.is_set():
+                    await websocket.send(json.dumps({"type": "Finalize"}))
+                    try:
+                        await asyncio.wait_for(receiver, timeout=1.2)
+                    except asyncio.TimeoutError:
+                        pass
+                return command_tail if detected.is_set() else None
+            finally:
+                if not receiver.done():
+                    receiver.cancel()
+                await asyncio.gather(receiver, return_exceptions=True)
+
+    async def wait(self) -> str:
+        language, wake_word = current_wake_profile(self.config)
+        threshold, pre_roll_ms, silence_ms, max_segment_ms = wake_vad_settings(self.config)
+        api_key = environment_value(str(self.config["stt"]["apiKeyEnv"]))
+        if not api_key:
+            raise RuntimeError("DEEPGRAM_NOT_CONFIGURED")
         audio = pyaudio.PyAudio()
         stream = None
         try:
             stream = audio.open(
                 format=pyaudio.paInt16,
-                channels=1,
-                rate=detector.sample_rate,
+                channels=CHANNELS,
+                rate=RATE,
                 input=True,
-                frames_per_buffer=detector.frame_length,
+                frames_per_buffer=INPUT_FRAME_BYTES // SAMPLE_WIDTH,
             )
-            log("v2 local Porcupine wake listener started")
+            try:
+                await asyncio.to_thread(
+                    backend_json,
+                    "PUT",
+                    "/command/voice-state",
+                    {"status": "listening", "mode": "wake_word", "listening": True},
+                )
+            except Exception as exc:
+                log(f"v2 wake state error: {type(exc).__name__}")
+            write_live_preview(status=f"Emma Voice v2 is waiting for {wake_word}")
+            log(f"v2 Deepgram VAD wake listener started ({language}, {wake_word})")
+            pre_roll_frames = max(1, (pre_roll_ms + INPUT_FRAME_MS - 1) // INPUT_FRAME_MS)
+            pre_roll: deque[bytes] = deque(maxlen=pre_roll_frames)
             while True:
-                samples = array("h")
-                samples.frombytes(stream.read(detector.frame_length, exception_on_overflow=False))
-                if detector.process(samples) >= 0:
-                    log("v2 local wake word detected")
-                    return
+                if not companion_is_running(self.parent_pid, self.stop_file):
+                    return None
+                raw = await asyncio.to_thread(stream.read, INPUT_FRAME_BYTES // SAMPLE_WIDTH, False)
+                pre_roll.append(raw)
+                if pcm_mean_amplitude(raw) < threshold:
+                    continue
+                activation_command = await self.transcribe_segment(
+                    stream,
+                    list(pre_roll),
+                    language,
+                    wake_word,
+                    threshold,
+                    silence_ms,
+                    max_segment_ms,
+                )
+                if activation_command is not None:
+                    log("v2 Deepgram wake word detected")
+                    return activation_command
+                write_live_preview(status=f"Emma Voice v2 is waiting for {wake_word}")
         finally:
             if stream:
-                stream.stop_stream()
-                stream.close()
+                try:
+                    stream.stop_stream()
+                    stream.close()
+                except Exception:
+                    pass
             audio.terminate()
-            detector.delete()
 
 
 @dataclass
@@ -421,12 +645,14 @@ class TranscriptStore:
 
 
 class VoiceSessionV2:
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], parent_pid: int = 0, stop_file: Path | None = None):
         self.config = config
+        self.parent_pid = parent_pid
+        self.stop_file = stop_file
         self.common_config = load_config()
         self.language = str(self.common_config.get("Language", "en-GB"))
         if self.language not in LANGUAGE_NAMES:
-            self.language = "en-GB"
+            raise RuntimeError("VOICE_SESSION_LANGUAGE_INVALID")
         self.audio = pyaudio.PyAudio()
         self.aec_lock = threading.Lock()
         self.aec = AudioProcessor(enable_aec=True, enable_ns=True, ns_level=2, enable_agc=False, enable_vad=False)
@@ -597,6 +823,9 @@ class VoiceSessionV2:
     async def heartbeat(self) -> None:
         while not self.stop.is_set():
             await asyncio.sleep(2)
+            if not companion_is_running(self.parent_pid, self.stop_file):
+                self.stop.set()
+                continue
             if self.turn_task and self.turn_task.done():
                 try:
                     self.turn_task.result()
@@ -618,7 +847,7 @@ class VoiceSessionV2:
                 continue
             await self.update_state("speaking" if self.speaker.active.is_set() else "listening", not self.speaker.active.is_set())
 
-    async def run(self) -> None:
+    async def run(self, initial_transcript: str = "") -> None:
         api_key = environment_value(str(self.config["stt"]["apiKeyEnv"]))
         if not api_key:
             raise RuntimeError("DEEPGRAM_NOT_CONFIGURED")
@@ -637,6 +866,8 @@ class VoiceSessionV2:
                 sender = asyncio.create_task(self.microphone_sender(ws))
                 receiver = asyncio.create_task(self.deepgram_receiver(ws))
                 heartbeat = asyncio.create_task(self.heartbeat())
+                if initial_transcript.strip():
+                    await self.handle_transcript(initial_transcript)
                 while not self.stop.is_set() and time.monotonic() - started < int(self.config["session"]["maxSeconds"]):
                     await asyncio.sleep(0.1)
                 for task in (sender, receiver, heartbeat):
@@ -668,7 +899,7 @@ class VoiceSessionV2:
             log("v2 session ended")
 
 
-async def run_voice_v2() -> None:
+async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
     config = load_v2_config()
     status = provider_status(config)
     if not status["ready"]:
@@ -679,17 +910,32 @@ async def run_voice_v2() -> None:
                     if value is False:
                         missing.append(f"{name}.{field}")
         raise RuntimeError("VOICE_V2_NOT_CONFIGURED: " + ", ".join(missing))
-    wake = PorcupineWakeWord(config["wake"])
-    while True:
-        await asyncio.to_thread(wake.wait)
+    sentinel = Path(stop_file).resolve() if stop_file.strip() else None
+    wake = DeepgramWakeWord(config, parent_pid, sentinel)
+    try:
+        while companion_is_running(parent_pid, sentinel):
+            activation_command = await wake.wait()
+            if activation_command is None:
+                break
+            try:
+                await VoiceSessionV2(config, parent_pid, sentinel).run(activation_command)
+            except Exception as exc:
+                # A transient network/provider failure returns to the wake
+                # listener rather than creating a second process or session.
+                log(f"v2 session failure: {type(exc).__name__}")
+                await asyncio.sleep(1)
+    finally:
         try:
-            await VoiceSessionV2(config).run()
+            await asyncio.to_thread(
+                backend_json,
+                "PUT",
+                "/command/voice-state",
+                {"status": "offline", "mode": "wake_word", "listening": False},
+            )
         except Exception as exc:
-            # A transient network/provider failure must return to the local wake
-            # listener rather than leave a half-open session or require a new
-            # desktop launch. The error is visible in the local v2 log only.
-            log(f"v2 session failure: {type(exc).__name__}")
-            await asyncio.sleep(1)
+            log(f"v2 shutdown state error: {type(exc).__name__}")
+        write_live_preview(status="Emma Voice v2 stopped")
+        log("v2 runtime stopped")
 
 
 def run_text_request(text: str) -> dict[str, Any]:
@@ -707,6 +953,8 @@ def main() -> int:
     parser.add_argument("--diagnostic", action="store_true")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--run", action="store_true")
+    parser.add_argument("--parent-pid", type=int, default=0)
+    parser.add_argument("--stop-file", default="")
     parser.add_argument("--text", help="Send one text turn through the authenticated Secretary tool layer.")
     args = parser.parse_args()
     if args.self_test:
@@ -720,7 +968,7 @@ def main() -> int:
         print(json.dumps(run_text_request(args.text), ensure_ascii=False))
         return 0
     if args.run:
-        asyncio.run(run_voice_v2())
+        asyncio.run(run_voice_v2(args.parent_pid, str(args.stop_file)))
         return 0
     parser.print_help()
     return 2

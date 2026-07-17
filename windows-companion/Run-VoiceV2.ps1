@@ -1,4 +1,9 @@
-param([switch]$Diagnostic,[switch]$SelfTest)
+param(
+  [switch]$Diagnostic,
+  [switch]$SelfTest,
+  [int]$OwnerProcessId = 0,
+  [string]$StopFile = ''
+)
 
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -37,15 +42,21 @@ $v2Diagnostic=$diagnosticJson|ConvertFrom-Json
 if($Diagnostic){$diagnosticJson;exit 0}
 
 $v1Script=Join-Path $app 'VCUBF-Emma.ps1'
+$v1Runtime=Join-Path $app 'emma_realtime.py'
 $legacy=@(Get-CimInstance Win32_Process|Where-Object{
-  $_.CommandLine -and ($_.CommandLine -like "*$v1Script*" -or $_.CommandLine -like "*emma_realtime.py*")
+  $_.CommandLine -and (
+    $_.CommandLine.IndexOf($v1Script,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+    $_.CommandLine.IndexOf($v1Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0
+  )
 })
 if($legacy){
   [Windows.Forms.MessageBox]::Show('Emma Voice v1 is active. Stop it from the VCUF Emma tray menu before starting Voice v2. This prevents two microphones or two conversations running at once.','VCUBF Emma Voice v2','OK','Warning')|Out-Null
   exit 2
 }
 
-$alreadyRunning=@(Get-CimInstance Win32_Process|Where-Object{$_.CommandLine -and $_.CommandLine -like '*emma_voice_v2.py*--run*'})
+$alreadyRunning=@(Get-CimInstance Win32_Process|Where-Object{
+  $_.CommandLine -and $_.CommandLine.IndexOf($runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -like '*--run*'
+})
 if($alreadyRunning){
   [Windows.Forms.MessageBox]::Show('Emma Voice v2 is already running.','VCUBF Emma Voice v2','OK','Information')|Out-Null
   exit 0
@@ -53,9 +64,9 @@ if($alreadyRunning){
 
 if(!$v2Diagnostic.ready){
   $missing=@()
-  if(!$v2Diagnostic.providers.porcupine.packageInstalled){$missing+='Porcupine Python package'}
-  if(!$v2Diagnostic.providers.porcupine.accessKeyPresent){$missing+='PICOVOICE_ACCESS_KEY'}
-  if(!$v2Diagnostic.providers.porcupine.keywordModelPresent){$missing+='Emma .ppn wake-word model'}
+  if(!$v2Diagnostic.providers.deepgramWake.providerConfigured){$missing+='Deepgram VAD wake-word configuration'}
+  if(!$v2Diagnostic.providers.deepgramWake.wakeWordPresent){$missing+='Emma wake word'}
+  if(!$v2Diagnostic.providers.deepgramWake.vadSettingsValid){$missing+='Deepgram VAD wake-word settings'}
   if(!$v2Diagnostic.providers.deepgram.apiKeyPresent){$missing+='DEEPGRAM_API_KEY'}
   if(!$v2Diagnostic.providers.elevenlabs.apiKeyPresent){$missing+='ELEVENLABS_API_KEY'}
   if(!$v2Diagnostic.providers.elevenlabs.voiceIdPresent){$missing+='ElevenLabs voice ID'}
@@ -63,5 +74,42 @@ if(!$v2Diagnostic.ready){
   exit 2
 }
 
-& $python.Path @($python.Prefix) $runtime --run
-exit $LASTEXITCODE
+$stopFile=if($StopFile){$StopFile}else{Join-Path (Split-Path -Parent $app) 'voice-v2.stop'}
+$ownerPid=if($OwnerProcessId -gt 0){$OwnerProcessId}else{$PID}
+Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
+$arguments=@($python.Prefix) + @("`"$runtime`"",'--run','--parent-pid',$ownerPid,'--stop-file',"`"$stopFile`"")
+$process=Start-Process -FilePath $python.Path -ArgumentList $arguments -WindowStyle Hidden -PassThru
+
+$menu=New-Object Windows.Forms.ContextMenuStrip
+$exit=$menu.Items.Add('Ukončit Emmu Voice v2')
+$context=New-Object Windows.Forms.ApplicationContext
+$notify=New-Object Windows.Forms.NotifyIcon -Property @{
+  Icon=[Drawing.SystemIcons]::Information
+  Visible=$true
+  Text='Emma Voice v2 — čeká na Emma'
+  ContextMenuStrip=$menu
+}
+$exit.Add_Click({ $context.ExitThread() })
+$timer=New-Object Windows.Forms.Timer -Property @{Interval=1000}
+$timer.Add_Tick({
+  if($process.HasExited){
+    $notify.ShowBalloonTip(3000,'Emma Voice v2','Hlasová relace skončila.','Info')
+    $context.ExitThread()
+  }
+})
+
+try {
+  $timer.Start()
+  $notify.ShowBalloonTip(3000,'Emma Voice v2','Naslouchá na oslovení Emma. Ikona zde umožňuje bezpečné ukončení.','Info')
+  [Windows.Forms.Application]::Run($context)
+} finally {
+  $timer.Stop();$timer.Dispose()
+  Set-Content -LiteralPath $stopFile -Value 'stop' -Encoding ASCII
+  if(!$process.HasExited){
+    $deadline=[datetime]::UtcNow.AddSeconds(4)
+    while(!$process.HasExited -and [datetime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 100}
+    if(!$process.HasExited){Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue}
+  }
+  $notify.Visible=$false;$notify.Dispose()
+}
+exit $(if($process.HasExited){$process.ExitCode}else{0})

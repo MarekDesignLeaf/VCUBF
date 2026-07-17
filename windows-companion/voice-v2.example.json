@@ -1,11 +1,12 @@
 {
   "version": 2,
   "wake": {
-    "provider": "porcupine",
-    "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
-    "keywordPath": "C:\\VCUBF\\voice-models\\Emma_en_windows_v3_0_0.ppn",
-    "modelPath": "",
-    "sensitivity": 0.62
+    "provider": "deepgram_vad",
+    "word": "Emma",
+    "speechThreshold": 450,
+    "preRollMs": 600,
+    "silenceMs": 1100,
+    "maxSegmentMs": 8000
   },
   "stt": {
     "provider": "deepgram",
