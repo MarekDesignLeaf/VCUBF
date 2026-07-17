@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "wake": {
+    "provider": "porcupine",
+    "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
+    "keywordPath": "C:\\VCUBF\\voice-models\\Emma_en_windows_v3_0_0.ppn",
+    "modelPath": "",
+    "sensitivity": 0.62
+  },
+  "stt": {
+    "provider": "deepgram",
+    "apiKeyEnv": "DEEPGRAM_API_KEY",
+    "model": "nova-3",
+    "languageMode": "selected",
+    "endpointingMs": 250,
+    "utteranceEndMs": 900
+  },
+  "tts": {
+    "provider": "elevenlabs",
+    "apiKeyEnv": "ELEVENLABS_API_KEY",
+    "voiceId": "SET_YOUR_ELEVENLABS_VOICE_ID",
+    "model": "eleven_flash_v2_5",
+    "outputFormat": "pcm_24000"
+  },
+  "session": {
+    "followUpSeconds": 25,
+    "maxSeconds": 180
+  }
+}

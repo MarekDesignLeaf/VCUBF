@@ -1,0 +1,2 @@
+-r requirements.txt
+pvporcupine>=3,<4
