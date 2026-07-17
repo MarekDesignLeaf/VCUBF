@@ -68,6 +68,7 @@ if(!$v2Diagnostic.ready){
   if(!$v2Diagnostic.providers.deepgramWake.wakeWordPresent){$missing+='Emma wake word'}
   if(!$v2Diagnostic.providers.deepgramWake.vadSettingsValid){$missing+='Deepgram VAD wake-word settings'}
   if(!$v2Diagnostic.providers.deepgram.apiKeyPresent){$missing+='DEEPGRAM_API_KEY'}
+  if(!$v2Diagnostic.providers.deepgram.streamTimingValid){$missing+='Deepgram streaming timing (utterance end must be 1000–5000 ms)'}
   if(!$v2Diagnostic.providers.elevenlabs.apiKeyPresent){$missing+='ELEVENLABS_API_KEY'}
   if(!$v2Diagnostic.providers.elevenlabs.voiceIdPresent){$missing+='ElevenLabs voice ID'}
   [Windows.Forms.MessageBox]::Show("Voice v2 is installed but not configured. Missing: $($missing -join ', ').`n`nSee docs\\VOICE_V2_SETUP.md in the VCUF project. No microphone session was started.",'VCUBF Emma Voice v2','OK','Information')|Out-Null

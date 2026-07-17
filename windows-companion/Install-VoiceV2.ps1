@@ -7,6 +7,7 @@ $legacyV1Script=Join-Path $target 'VCUBF-Emma.ps1'
 $legacyV1Runtime=Join-Path $target 'emma_realtime.py'
 $v2Runner=Join-Path $target 'Run-VoiceV2.ps1'
 $v2Runtime=Join-Path $target 'emma_voice_v2.py'
+$unifiedLauncher=Join-Path $target 'Launch-VCUBFSecretary.ps1'
 $legacyBrowserProfile=Join-Path (Split-Path -Parent $target) 'SecretaryBrowser'
 New-Item -ItemType Directory -Path $target -Force|Out-Null
 
@@ -25,6 +26,7 @@ Get-CimInstance Win32_Process | Where-Object {
   $_.CommandLine -and (
     $_.CommandLine.IndexOf($legacyV1Script,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
     $_.CommandLine.IndexOf($legacyV1Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+    $_.CommandLine.IndexOf($unifiedLauncher,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
     $_.CommandLine.IndexOf($v2Runner,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
     ($_.CommandLine.IndexOf($v2Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -like '*--run*')
   )
@@ -67,6 +69,18 @@ if(!$wake.PSObject.Properties['silenceMs']){$wake | Add-Member -NotePropertyName
 if(!$wake.PSObject.Properties['maxSegmentMs']){$wake | Add-Member -NotePropertyName maxSegmentMs -NotePropertyValue 8000}
 foreach($obsolete in @('accessKeyEnv','keywordPath','modelPath','sensitivity','confidence')){
   if($wake.PSObject.Properties[$obsolete]){$wake.PSObject.Properties.Remove($obsolete)}
+}
+if(!$voiceConfig.PSObject.Properties['stt']){
+  $voiceConfig | Add-Member -NotePropertyName stt -NotePropertyValue ([pscustomobject]@{})
+}
+$stt=$voiceConfig.stt
+if(!$stt.PSObject.Properties['endpointingMs']){$stt | Add-Member -NotePropertyName endpointingMs -NotePropertyValue 250}
+if(!$stt.PSObject.Properties['utteranceEndMs']){
+  $stt | Add-Member -NotePropertyName utteranceEndMs -NotePropertyValue 1000
+} else {
+  $utteranceEndMs=0
+  try{$utteranceEndMs=[int]$stt.utteranceEndMs}catch{}
+  if($utteranceEndMs -lt 1000 -or $utteranceEndMs -gt 5000){$stt.utteranceEndMs=1000}
 }
 $voiceConfig | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $activeConfig -Encoding UTF8
 

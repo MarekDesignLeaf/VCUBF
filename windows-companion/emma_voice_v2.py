@@ -88,7 +88,8 @@ def default_v2_config() -> dict[str, Any]:
             "model": "nova-3",
             "languageMode": "selected",
             "endpointingMs": 250,
-            "utteranceEndMs": 900,
+            # Deepgram accepts utterance_end_ms from 1000 to 5000 ms.
+            "utteranceEndMs": 1_000,
         },
         "tts": {
             "provider": "elevenlabs",
@@ -205,6 +206,19 @@ def wake_vad_settings(config: dict[str, Any]) -> tuple[int, int, int, int]:
     return threshold, pre_roll_ms, silence_ms, max_segment_ms
 
 
+def stream_timing_settings(config: dict[str, Any]) -> tuple[int, int]:
+    """Validate the timing values accepted by Deepgram's streaming endpoint."""
+    stt = config["stt"]
+    try:
+        endpointing_ms = int(stt["endpointingMs"])
+        utterance_end_ms = int(stt["utteranceEndMs"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("DEEPGRAM_STREAM_TIMING_INVALID") from exc
+    if not 10 <= endpointing_ms <= 5_000 or not 1_000 <= utterance_end_ms <= 5_000:
+        raise RuntimeError("DEEPGRAM_STREAM_TIMING_INVALID")
+    return endpointing_ms, utterance_end_ms
+
+
 def language_code(language: str, mode: str) -> str:
     if mode == "auto":
         return "multi"
@@ -274,6 +288,7 @@ def self_test() -> bool:
         and contains_wake_word("Emma, otevři kontakty", "Emma")
         and pcm_mean_amplitude(b"\x00\x00\x00\x00") == 0
         and pcm_mean_amplitude(b"\x10\x00\xf0\xff") == 16
+        and stream_timing_settings(defaults) == (250, 1_000)
         and companion_is_running(os.getpid())
         and looks_like_self_echo("hello there", "Hello there, how can I help?")
         and not looks_like_self_echo("stop now", "Hello there, how can I help?")
@@ -293,6 +308,11 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
         vad_error = ""
     except RuntimeError as exc:
         vad_error = str(exc)
+    try:
+        stream_timing_settings(config)
+        timing_error = ""
+    except RuntimeError as exc:
+        timing_error = str(exc)
     configured = {
         "deepgramWake": {
             "provider": str(config["wake"].get("provider") or ""),
@@ -306,6 +326,8 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
             "provider": stt["provider"],
             "apiKeyPresent": bool(environment_value(str(stt["apiKeyEnv"]))),
             "model": stt["model"],
+            "streamTimingValid": not timing_error,
+            "configurationError": timing_error,
         },
         "elevenlabs": {
             "provider": tts["provider"],
@@ -320,6 +342,7 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
         and configured["deepgramWake"]["wakeWordPresent"]
         and configured["deepgramWake"]["vadSettingsValid"]
         and configured["deepgram"]["apiKeyPresent"]
+        and configured["deepgram"]["streamTimingValid"]
         and configured["elevenlabs"]["apiKeyPresent"]
         and configured["elevenlabs"]["voiceIdPresent"]
     )
@@ -688,6 +711,7 @@ class VoiceSessionV2:
 
     def deepgram_url(self) -> str:
         stt = self.config["stt"]
+        endpointing_ms, utterance_end_ms = stream_timing_settings(self.config)
         query = {
             "model": str(stt["model"]),
             "language": language_code(self.language, str(stt["languageMode"])),
@@ -698,8 +722,8 @@ class VoiceSessionV2:
             "punctuate": "true",
             "smart_format": "true",
             "vad_events": "true",
-            "endpointing": str(stt["endpointingMs"]),
-            "utterance_end_ms": str(stt["utteranceEndMs"]),
+            "endpointing": str(endpointing_ms),
+            "utterance_end_ms": str(utterance_end_ms),
         }
         return "wss://api.deepgram.com/v1/listen?" + urlencode(query)
 
@@ -936,7 +960,7 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
             except Exception as exc:
                 # A transient network/provider failure returns to the wake
                 # listener rather than creating a second process or session.
-                log(f"v2 session failure: {type(exc).__name__}")
+                log(f"v2 session failure: {type(exc).__name__}: {str(exc)[:300]}")
                 await asyncio.sleep(1)
     finally:
         try:

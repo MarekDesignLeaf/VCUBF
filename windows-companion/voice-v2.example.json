@@ -14,7 +14,7 @@
     "model": "nova-3",
     "languageMode": "selected",
     "endpointingMs": 250,
-    "utteranceEndMs": 900
+    "utteranceEndMs": 1000
   },
   "tts": {
     "provider": "elevenlabs",
