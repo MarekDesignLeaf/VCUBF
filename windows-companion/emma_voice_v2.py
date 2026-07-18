@@ -90,7 +90,7 @@ def default_v2_config() -> dict[str, Any]:
             "word": "Emma",
             "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
             "keywordPath": "",
-            "sensitivity": 0.65,
+            "sensitivity": 0.45,
             "speechThreshold": 450,
             "preRollMs": 600,
             "silenceMs": 1_100,
@@ -358,7 +358,7 @@ def contains_wake_word(transcript: str, wake_word: str) -> bool:
     # Czech address of the default name is naturally "Emmo". It is still the
     # same configured wake word, not a language fallback or a second assistant.
     if phrase == "emma":
-        accepted.add("emmo")
+        accepted.update({"emmo", "ema"})
     return any(f" {candidate} " in f" {heard} " for candidate in accepted)
 
 
@@ -948,10 +948,39 @@ class DeepgramWakeWord:
 class PicovoiceWakeWord:
     """Fully local, low-latency wake-word detection using a custom .ppn file."""
 
-    def __init__(self, config: dict[str, Any], parent_pid: int = 0, stop_file: Path | None = None):
+    def __init__(
+        self,
+        config: dict[str, Any],
+        parent_pid: int = 0,
+        stop_file: Path | None = None,
+        npu_whisper: NpuWhisperClient | None = None,
+    ):
         self.config = config
         self.parent_pid = parent_pid
         self.stop_file = stop_file
+        self.npu_whisper = npu_whisper
+
+    async def verify_detection(self, pcm16: bytes, sample_rate: int, wake_word: str) -> str | None:
+        """Reject Porcupine false positives using a second, fully local model."""
+        if not self.npu_whisper:
+            return ""
+        if not pcm16:
+            log("v2 Picovoice wake rejected: verification audio missing")
+            return None
+        try:
+            transcript, elapsed_ms = await asyncio.to_thread(
+                self.npu_whisper.transcribe,
+                pcm16,
+                sample_rate,
+            )
+        except Exception as exc:
+            log(f"v2 Picovoice wake verification failed closed: {type(exc).__name__}")
+            return None
+        if not contains_wake_word(transcript, wake_word):
+            log(f"v2 Picovoice false activation rejected by NPU in {elapsed_ms}ms")
+            return None
+        log(f"v2 Picovoice wake confirmed by NPU in {elapsed_ms}ms")
+        return wake_command_tail(transcript, wake_word)
 
     async def publish_listening_state(self) -> None:
         try:
@@ -969,7 +998,7 @@ class PicovoiceWakeWord:
             await self.publish_listening_state()
             await asyncio.sleep(5)
 
-    async def wait_with_node(self, keyword_path: str, sensitivity: float) -> str | None:
+    async def wait_with_node(self, keyword_path: str, sensitivity: float, wake_word: str) -> tuple[str, str]:
         node_path = os.environ["PICOVOICE_NODE_PATH"]
         modules_path = os.environ["PICOVOICE_NODE_MODULES"]
         sidecar_path = str(Path(__file__).with_name("picovoice_wake.js"))
@@ -985,6 +1014,7 @@ class PicovoiceWakeWord:
             stderr=asyncio.subprocess.PIPE,
             env=environment,
             creationflags=creation_flags,
+            limit=256 * 1024,
         )
         try:
             while companion_is_running(self.parent_pid, self.stop_file):
@@ -997,15 +1027,23 @@ class PicovoiceWakeWord:
                         raise RuntimeError("PICOVOICE_NODE_EXITED")
                     continue
                 line = raw_line.decode("utf-8", errors="replace").strip()
-                if line == "DETECTED":
-                    log("v2 Picovoice Node wake word detected")
-                    return ""
+                if line.startswith("DETECTED"):
+                    encoded_audio = line.partition(" ")[2].strip()
+                    try:
+                        verification_audio = base64.b64decode(encoded_audio, validate=True) if encoded_audio else b""
+                    except ValueError:
+                        verification_audio = b""
+                    command = await self.verify_detection(verification_audio, 16_000, wake_word)
+                    if command is not None:
+                        log("v2 Picovoice Node wake word detected and confirmed")
+                        return "accepted", command
+                    return "rejected", ""
                 if not line and process.returncode is not None:
                     error_name = ""
                     if process.stderr is not None:
                         error_name = (await process.stderr.read()).decode("utf-8", errors="replace").strip()[:160]
                     raise RuntimeError(error_name or "PICOVOICE_NODE_EXITED")
-            return None
+            return "stopped", ""
         finally:
             if process.returncode is None:
                 process.terminate()
@@ -1028,8 +1066,16 @@ class PicovoiceWakeWord:
         write_live_preview(status=localized_runtime_status(language, "waiting", wake_word))
         if node_picovoice_available():
             try:
-                log(f"v2 Picovoice Node wake listener started ({language}, {wake_word})")
-                return await self.wait_with_node(keyword_path, sensitivity)
+                while companion_is_running(self.parent_pid, self.stop_file):
+                    log(f"v2 Picovoice Node wake listener started ({language}, {wake_word})")
+                    result, command = await self.wait_with_node(keyword_path, sensitivity, wake_word)
+                    if result == "accepted":
+                        return command
+                    if result == "stopped":
+                        return None
+                    write_live_preview(status=localized_runtime_status(language, "waiting", wake_word))
+                    await asyncio.sleep(0.1)
+                return None
             finally:
                 heartbeat.cancel()
                 await asyncio.gather(heartbeat, return_exceptions=True)
@@ -1046,6 +1092,9 @@ class PicovoiceWakeWord:
         )
         audio = pyaudio.PyAudio()
         stream = None
+        buffered_frames: deque[bytes] = deque(
+            maxlen=max(1, int((porcupine.sample_rate * 2.2) / porcupine.frame_length))
+        )
         try:
             stream = audio.open(
                 format=pyaudio.paInt16,
@@ -1057,11 +1106,17 @@ class PicovoiceWakeWord:
             log(f"v2 Picovoice wake listener started ({language}, {wake_word})")
             while companion_is_running(self.parent_pid, self.stop_file):
                 raw = await asyncio.to_thread(stream.read, porcupine.frame_length, False)
+                buffered_frames.append(raw)
                 samples = array("h")
                 samples.frombytes(raw)
                 if porcupine.process(samples) >= 0:
-                    log("v2 Picovoice wake word detected")
-                    return ""
+                    command = await self.verify_detection(
+                        b"".join(buffered_frames), porcupine.sample_rate, wake_word
+                    )
+                    if command is not None:
+                        log("v2 Picovoice wake word detected and confirmed")
+                        return command
+                    write_live_preview(status=localized_runtime_status(language, "waiting", wake_word))
             return None
         finally:
             heartbeat.cancel()
@@ -1557,12 +1612,6 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
             missing.append("wake.providerConfigured")
         raise RuntimeError("VOICE_V2_NOT_CONFIGURED: " + ", ".join(missing))
     sentinel = Path(stop_file).resolve() if stop_file.strip() else None
-    effective_provider = str(status["providers"]["wake"]["effectiveProvider"])
-    wake = (
-        PicovoiceWakeWord(config, parent_pid, sentinel)
-        if effective_provider == "picovoice_porcupine"
-        else DeepgramWakeWord(config, parent_pid, sentinel)
-    )
     npu_whisper: NpuWhisperClient | None = None
     if status["providers"]["npuWhisper"]["effectiveProvider"] == "npu_whisper":
         candidate = NpuWhisperClient(config)
@@ -1574,6 +1623,12 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
             if not status["providers"]["deepgram"]["apiKeyPresent"]:
                 raise
             log(f"v2 NPU Whisper startup failed; using Deepgram fallback: {type(exc).__name__}: {str(exc)[:200]}")
+    effective_provider = str(status["providers"]["wake"]["effectiveProvider"])
+    wake = (
+        PicovoiceWakeWord(config, parent_pid, sentinel, npu_whisper)
+        if effective_provider == "picovoice_porcupine"
+        else DeepgramWakeWord(config, parent_pid, sentinel)
+    )
     try:
         while companion_is_running(parent_pid, sentinel):
             try:
