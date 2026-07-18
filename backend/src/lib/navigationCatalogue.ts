@@ -1,4 +1,5 @@
 import { VOICE_PAGE_ROUTES, voicePageLabel, type VoicePage } from "./voiceNavigation.js";
+import { NAVIGATION_TRANSLATIONS } from "./navigationTranslations.js";
 
 // This is the backend-certified map of every signed-in Secretary screen. It
 // deliberately includes page subtrees that do not have their own sidebar row
@@ -303,6 +304,19 @@ function localizedSection(section: NavigationSection, language?: string) {
   return SECTION_COPY[language ?? ""]?.[section.id] ?? { label: section.label, description: section.description };
 }
 
+function localizedText(text: string, language?: string) {
+  return NAVIGATION_TRANSLATIONS[language ?? ""]?.[text] ?? text;
+}
+
+const READOUT_COPY: Readonly<Record<string, { controls: string; subtree: string; permission: string }>> = {
+  "cs-CZ": { controls: "Ovládací prvky", subtree: "Podstrom", permission: "Tato položka vyžaduje další oprávnění." },
+  "pl-PL": { controls: "Elementy sterujące", subtree: "Poddrzewo", permission: "Ta pozycja wymaga dodatkowego uprawnienia." },
+  "fr-FR": { controls: "Contrôles", subtree: "Sous-arborescence", permission: "Cet élément exige une autorisation supplémentaire." },
+  "de-DE": { controls: "Steuerelemente", subtree: "Unterstruktur", permission: "Dieses Element erfordert eine zusätzliche Berechtigung." },
+  "es-ES": { controls: "Controles", subtree: "Subárbol", permission: "Este elemento requiere un permiso adicional." },
+  "it-IT": { controls: "Controlli", subtree: "Sottoalbero", permission: "Questo elemento richiede un’autorizzazione aggiuntiva." },
+};
+
 function hasAccess(rule: PermissionRule | undefined, permissions: readonly string[]) {
   if (!rule) return true;
   if (rule.all?.some((permission) => !permissions.includes(permission))) return false;
@@ -310,8 +324,9 @@ function hasAccess(rule: PermissionRule | undefined, permissions: readonly strin
   return true;
 }
 
-function accessNote(rule: PermissionRule | undefined) {
+function accessNote(rule: PermissionRule | undefined, language?: string) {
   if (!rule) return undefined;
+  if (READOUT_COPY[language ?? ""]) return READOUT_COPY[language ?? ""].permission;
   const all = rule.all?.join(", ");
   const any = rule.any?.join(" or ");
   if (all && any) return `Requires ${all} and (${any}).`;
@@ -348,24 +363,31 @@ function toView(section: NavigationSection, permissions: readonly string[], lang
         id: entry.page,
         label: voicePageLabel(entry.page, language),
         path: page.path,
-        description: entry.description,
-        controls: [...entry.controls],
+        description: localizedText(entry.description, language),
+        controls: entry.controls.map((control) => localizedText(control, language)),
         available: hasAccess(entry.access, permissions),
-        accessNote: accessNote(entry.access),
-        children: (entry.children ?? []).map((subtree) => ({ ...subtree, controls: [...subtree.controls] })),
+        accessNote: accessNote(entry.access, language),
+        children: (entry.children ?? []).map((subtree) => ({
+          ...subtree,
+          label: localizedText(subtree.label, language),
+          description: localizedText(subtree.description, language),
+          controls: subtree.controls.map((control) => localizedText(control, language)),
+        })),
       };
     }),
   };
 }
 
-function readItem(item: NavigationItemView) {
-  const controls = item.controls.length ? ` Controls: ${item.controls.join(", ")}.` : "";
-  const children = item.children.length
-    ? ` Subtree: ${item.children
-        .map((subtree) => `${subtree.label}${subtree.path ? ` (${subtree.path})` : ""} — ${subtree.description}${subtree.controls.length ? ` Controls: ${subtree.controls.join(", ")}` : ""}`)
-        .join("; ")}.`
+function readItem(item: NavigationItemView, language?: string) {
+  const copy = READOUT_COPY[language ?? ""] ?? { controls: "Controls", subtree: "Subtree", permission: "This item requires additional permission." };
+  const controls = item.controls.length ? ` ${copy.controls}: ${item.controls.join(", ")}.` : "";
+  const childReadout = item.children
+    .map((subtree) => `${subtree.label}${subtree.path ? ` (${subtree.path})` : ""} — ${subtree.description}${subtree.controls.length ? ` ${copy.controls}: ${subtree.controls.join(", ")}` : ""}`)
+    .join("; ");
+  const children = childReadout
+    ? ` ${copy.subtree}: ${childReadout}${/[.!?]$/u.test(childReadout) ? "" : "."}`
     : "";
-  const availability = item.available ? "" : ` ${item.accessNote ?? "This item requires additional permission."}`;
+  const availability = item.available ? "" : ` ${item.accessNote ?? copy.permission}`;
   return `${item.label} (${item.path}) — ${item.description}${controls}${children}${availability}`;
 }
 
@@ -383,7 +405,7 @@ export function getNavigationCatalogue(permissions: readonly string[], sectionId
   const title = sectionId ? sections[0]?.label ?? "Secretary" : completeTitle;
   const readout = [
     `${title}.`,
-    ...sections.map((section) => `${section.label}: ${section.description}\n${section.items.map((entry) => `- ${readItem(entry)}`).join("\n")}`),
+    ...sections.map((section) => `${section.label}: ${section.description}\n${section.items.map((entry) => `- ${readItem(entry, language)}`).join("\n")}`),
   ].join("\n\n");
   return { title, sections, readout };
 }
