@@ -142,13 +142,20 @@ $desktopConfig|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $desktopConfigPa
 $prismaCli=Join-Path $projectRoot 'backend\node_modules\prisma\build\index.js'
 if($localNodePath -and (Test-Path -LiteralPath $prismaCli)){
   $previousEngineType=$env:PRISMA_CLIENT_ENGINE_TYPE
+  $previousErrorAction=$ErrorActionPreference
   try{
     $env:PRISMA_CLIENT_ENGINE_TYPE='library'
+    # Prisma writes informational banners to stderr. Windows PowerShell must
+    # not turn those successful native-process messages into terminating
+    # errors before we can inspect the real exit code.
+    $ErrorActionPreference='Continue'
     & $localNodePath $prismaCli generate --schema (Join-Path $projectRoot 'backend\prisma\schema.prisma') *> $null
-    if($LASTEXITCODE -ne 0){throw 'Lokální databázový klient Prisma se nepodařilo připravit.'}
+    $prismaExitCode=$LASTEXITCODE
   }finally{
+    $ErrorActionPreference=$previousErrorAction
     if($null -eq $previousEngineType){Remove-Item Env:PRISMA_CLIENT_ENGINE_TYPE -ErrorAction SilentlyContinue}else{$env:PRISMA_CLIENT_ENGINE_TYPE=$previousEngineType}
   }
+  if($prismaExitCode -ne 0){throw 'Lokální databázový klient Prisma se nepodařilo připravit.'}
 }
 
 $python=$null

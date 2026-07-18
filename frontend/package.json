@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run i18n:audit && tsc -b && vite build",
+    "i18n:audit": "node scripts/verify-i18n.mjs",
     "lint": "oxlint src",
     "preview": "vite preview",
     "android:sync": "npm run build && cap sync android",

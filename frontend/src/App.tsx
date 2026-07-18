@@ -45,10 +45,17 @@ import { Account } from "./pages/Account";
 import { Invoices } from "./pages/Invoices";
 import { EmmaPermissions } from "./pages/EmmaPermissions";
 import { BuildRefresh } from "./components/BuildRefresh";
+import { LocalizedSurface } from "./components/LocalizedSurface";
+import { useAuth } from "./context/useAuth";
+import { appLanguage } from "./i18n";
 
-export default function App() {
+function ApplicationRoutes() {
+  const { user } = useAuth();
+  const language = appLanguage(user?.voiceLanguage ?? window.localStorage.getItem("vcubf_last_language"));
+
   return (
-    <AuthProvider>
+    <>
+      <LocalizedSurface language={language} />
       <BrowserRouter>
         <BuildRefresh />
         <Routes>
@@ -107,6 +114,14 @@ export default function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <ApplicationRoutes />
     </AuthProvider>
   );
 }

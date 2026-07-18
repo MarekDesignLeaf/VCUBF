@@ -3,4 +3,5 @@ dist/
 dist_old*/
 .env
 *.log
+frontend/scripts/.ui-translation-cache.json
 .DS_Store
