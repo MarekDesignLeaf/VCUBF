@@ -15,8 +15,9 @@ import { fail, ok, type ServiceResult } from "./result.js";
 import { listFollowUpsDue, listUnresolvedIntakeEnquiries } from "./communicationService.js";
 import { detectUpcomingOverload } from "./calendarService.js";
 import { buildDataQualityItems } from "./dataQualityService.js";
+import { getNotificationThresholds, type NotificationThresholds } from "./notificationThresholdService.js";
 
-// Notification and Escalation Module — see VCUF master documentation and the
+// Notification and Escalation Module — see VCUBF master documentation and the
 // vcubf-programmer-skill module list. This module stores no duplicate
 // business facts: every item in the feed is computed fresh, on read, from
 // real data already owned by other modules —
@@ -41,11 +42,11 @@ import { buildDataQualityItems } from "./dataQualityService.js";
 //     job that already has at least one photo logged.
 //   - Lead Intake Module: leads still open (leadStatus not "converted" and
 //     not "lost") whose Lead.createdAt is older than
-//     STALE_LEAD_THRESHOLD_DAYS — a real, count-of-days signal that a lead
+//     the company's stale-lead threshold (default 14 days) — a real, count-of-days signal that a lead
 //     has not been progressed, never a guess about why.
 //   - Job Allocation and Capacity Management Module: jobs not in a terminal
 //     status ("dokonceno"/"zruseno") whose status has not changed in more
-//     than STUCK_JOB_THRESHOLD_DAYS. This deliberately queries the AuditLog
+//     than the company's stuck-job threshold (default 10 days). This deliberately queries the AuditLog
 //     for the job's most recent "change_job_status" entry rather than using
 //     Job.updatedAt, because updatedAt is a generic Prisma @updatedAt
 //     timestamp bumped by any field write (e.g. assign_job re-assigning the
@@ -77,20 +78,20 @@ export interface AttentionItem extends AttentionItemBase {
   acknowledgedAt: string | null;
 }
 
-const QUOTE_EXPIRY_WARNING_WINDOW_DAYS = 7;
+// Default day thresholds live in notificationThresholdService (per-company
+// overrides are possible there); the builders below receive the effective
+// values for the calling company.
 
 // Lead Intake Module — a lead still open (not converted, not lost) this many
 // days after creation is considered stale and surfaced for attention. A
 // fixed, documented constant, matching the convention already used for
-// QUOTE_EXPIRY_WARNING_WINDOW_DAYS and PATTERN_DETECTION_WINDOW_DAYS.
-const STALE_LEAD_THRESHOLD_DAYS = 14;
+// the quote-expiry warning window (default 7 days) and PATTERN_DETECTION_WINDOW_DAYS.
 const OPEN_LEAD_STATUSES = ["new", "contacted", "qualified"] as const;
 
 // Job Allocation and Capacity Management Module — a non-terminal job whose
 // status has not changed in this many days is considered stuck. See the
 // module-level comment above for why this is measured from the AuditLog
 // change_job_status trail rather than Job.updatedAt.
-const STUCK_JOB_THRESHOLD_DAYS = 10;
 const TERMINAL_JOB_STATUSES = ["dokonceno", "zruseno"] as const;
 
 function daysBetween(a: Date, b: Date): number {
@@ -150,9 +151,9 @@ async function buildOverloadItems(user: AuthedUser): Promise<AttentionItemBase[]
   });
 }
 
-async function buildQuoteExpiryItems(user: AuthedUser): Promise<AttentionItemBase[]> {
+async function buildQuoteExpiryItems(user: AuthedUser, thresholds: NotificationThresholds): Promise<AttentionItemBase[]> {
   const now = new Date();
-  const windowEnd = new Date(now.getTime() + QUOTE_EXPIRY_WARNING_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const windowEnd = new Date(now.getTime() + thresholds.quoteExpiryWarningDays * 24 * 60 * 60 * 1000);
   const quotes = await prisma.quote.findMany({
     where: {
       companyId: user.companyId,
@@ -180,7 +181,7 @@ async function buildOverdueInvoiceItems(user: AuthedUser): Promise<AttentionItem
   const now=new Date(); const rows=await prisma.invoice.findMany({where:{companyId:user.companyId,invoiceStatus:"issued",dueDate:{lt:now}},include:{client:{select:{displayName:true}},items:true,payments:true}});
   return rows.flatMap(x=>{const total=x.items.reduce((s,i)=>s+i.quantity*Number(i.unitPrice),0),paid=x.payments.reduce((s,p)=>s+Number(p.amount),0),balance=Math.max(0,total-paid);if(balance===0)return [];return [{key:`invoice_overdue:${x.id}`,type:"invoice_overdue" as const,severity:"urgent" as const,title:`Invoice ${x.invoiceNumber} is overdue`,message:`${x.client.displayName} has an outstanding balance of £${balance.toFixed(2)}. Due ${x.dueDate!.toISOString().slice(0,10)}.`,dueAt:x.dueDate!.toISOString(),entity:{type:"invoice",id:x.id,label:x.invoiceNumber}}];});
 }
-async function buildResourceReadinessItems(user:AuthedUser):Promise<AttentionItemBase[]>{const now=new Date(),end=new Date(now.getTime()+3*86400000);const jobs=await prisma.job.findMany({where:{companyId:user.companyId,plannedStartAt:{gte:now,lte:end},resourceRequirements:{some:{requirementStatus:{not:"ready"}}}},include:{resourceRequirements:true}});return jobs.map(j=>{const n=j.resourceRequirements.filter(x=>x.requirementStatus!=="ready").length;return{key:`resource_not_ready:${j.id}`,type:"resource_not_ready" as const,severity:"urgent" as const,title:`Resources not ready for ${j.jobTitle}`,message:`${n} recorded requirement(s) are not ready before the planned start.`,dueAt:j.plannedStartAt!.toISOString(),entity:{type:"job",id:j.id,label:j.jobTitle}}})}
+async function buildResourceReadinessItems(user:AuthedUser, thresholds: NotificationThresholds):Promise<AttentionItemBase[]>{const now=new Date(),end=new Date(now.getTime()+thresholds.resourceReadinessDays*86400000);const jobs=await prisma.job.findMany({where:{companyId:user.companyId,plannedStartAt:{gte:now,lte:end},resourceRequirements:{some:{requirementStatus:{not:"ready"}}}},include:{resourceRequirements:true}});return jobs.map(j=>{const n=j.resourceRequirements.filter(x=>x.requirementStatus!=="ready").length;return{key:`resource_not_ready:${j.id}`,type:"resource_not_ready" as const,severity:"urgent" as const,title:`Resources not ready for ${j.jobTitle}`,message:`${n} recorded requirement(s) are not ready before the planned start.`,dueAt:j.plannedStartAt!.toISOString(),entity:{type:"job",id:j.id,label:j.jobTitle}}})}
 
 // Portfolio marketing-readiness gap — completed jobs (Job.jobStatus ===
 // JOB_STATUS_COMPLETED, i.e. "dokonceno") that have zero linked
@@ -212,13 +213,13 @@ async function buildPortfolioGapItems(user: AuthedUser): Promise<AttentionItemBa
 }
 
 // Stale lead — a lead still open (leadStatus not "converted" and not
-// "lost") whose Lead.createdAt is older than STALE_LEAD_THRESHOLD_DAYS.
+// "lost") whose Lead.createdAt is older than the company's stale-lead threshold (default 14 days).
 // Matches the "buildXItems" source-function pattern used by every other
 // feed source in this module. Real data only: no invented "reason it went
 // stale", just the real elapsed days since creation.
-async function buildStaleLeadItems(user: AuthedUser): Promise<AttentionItemBase[]> {
+async function buildStaleLeadItems(user: AuthedUser, thresholds: NotificationThresholds): Promise<AttentionItemBase[]> {
   const now = new Date();
-  const threshold = new Date(now.getTime() - STALE_LEAD_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
+  const threshold = new Date(now.getTime() - thresholds.staleLeadDays * 24 * 60 * 60 * 1000);
 
   const staleLeads = await prisma.lead.findMany({
     where: {
@@ -230,7 +231,7 @@ async function buildStaleLeadItems(user: AuthedUser): Promise<AttentionItemBase[
 
   return staleLeads.map((l) => {
     const ageDays = Math.floor(daysBetween(now, l.createdAt));
-    const severity: NotificationSeverity = ageDays >= STALE_LEAD_THRESHOLD_DAYS * 2 ? "urgent" : "warning";
+    const severity: NotificationSeverity = ageDays >= thresholds.staleLeadDays * 2 ? "urgent" : "warning";
     return {
       key: `stale_lead:${l.id}`,
       type: "stale_lead",
@@ -244,14 +245,14 @@ async function buildStaleLeadItems(user: AuthedUser): Promise<AttentionItemBase[
 }
 
 // Stuck job — a job not in a terminal status whose status has not changed in
-// more than STUCK_JOB_THRESHOLD_DAYS, using the AuditLog change_job_status
+// more than the company's stuck-job threshold (default 10 days), using the AuditLog change_job_status
 // trail (see module-level comment for why, not Job.updatedAt). The AuditLog
 // does not have a jobId column — the job id lives inside the JSON
 // inputPayload written by jobService.changeJobStatus — so this reads every
 // successful change_job_status entry for the company once and reduces it to
 // "latest status-change timestamp per job id" in memory, which is cheap at
 // this data scale and avoids a second, duplicated business-fact store.
-async function buildStuckJobItems(user: AuthedUser): Promise<AttentionItemBase[]> {
+async function buildStuckJobItems(user: AuthedUser, thresholds: NotificationThresholds): Promise<AttentionItemBase[]> {
   const now = new Date();
 
   const activeJobs = await prisma.job.findMany({
@@ -287,10 +288,10 @@ async function buildStuckJobItems(user: AuthedUser): Promise<AttentionItemBase[]
   for (const j of activeJobs) {
     const lastChangeAt = lastStatusChangeByJobId.get(j.id) ?? j.createdAt;
     const daysSinceChange = daysBetween(now, lastChangeAt);
-    if (daysSinceChange < STUCK_JOB_THRESHOLD_DAYS) continue;
+    if (daysSinceChange < thresholds.stuckJobDays) continue;
 
     const roundedDays = Math.floor(daysSinceChange);
-    const severity: NotificationSeverity = daysSinceChange >= STUCK_JOB_THRESHOLD_DAYS * 2 ? "urgent" : "warning";
+    const severity: NotificationSeverity = daysSinceChange >= thresholds.stuckJobDays * 2 ? "urgent" : "warning";
     stuckJobs.push({
       key: `stuck_job:${j.id}`,
       type: "stuck_job",
@@ -341,19 +342,19 @@ export async function getAttentionFeed(
   options: { includeAcknowledged?: boolean } = {}
 ): Promise<AttentionItem[]> {
   const [unresolvedEnquiries, followUps, overloads, expiringQuotes, overdueInvoices, resourceReadiness, dataQualityItems, portfolioGapItems, staleLeads, stuckJobs, overdueTasks] =
-    await Promise.all([
+    await getNotificationThresholds(user.companyId).then((thresholds) => Promise.all([
       buildUnresolvedEnquiryItems(user),
       buildFollowUpItems(user),
       buildOverloadItems(user),
-      buildQuoteExpiryItems(user),
+      buildQuoteExpiryItems(user, thresholds),
       buildOverdueInvoiceItems(user),
-      buildResourceReadinessItems(user),
+      buildResourceReadinessItems(user, thresholds),
       buildDataQualityItems(user),
       buildPortfolioGapItems(user),
-      buildStaleLeadItems(user),
-      buildStuckJobItems(user),
+      buildStaleLeadItems(user, thresholds),
+      buildStuckJobItems(user, thresholds),
       buildOverdueTaskItems(user),
-    ]);
+    ]));
 
   const items: AttentionItemBase[] = [
     ...unresolvedEnquiries,

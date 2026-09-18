@@ -5,6 +5,7 @@ import { recordAudit } from "../../lib/audit.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { getEmmaPolicy, isAdministrator, updateEmmaPolicy, updateEmmaPolicySchema } from "../../services/emmaPolicyService.js";
+import { getNotificationThresholds, thresholdsView, updateNotificationThresholds } from "../../services/notificationThresholdService.js";
 
 export const companyRouter = Router();
 const companySchema = z.object({ name: z.string().trim().min(2).max(160) });
@@ -58,4 +59,18 @@ companyRouter.put("/emma-policy", requirePermission("company.manage"), async (re
   if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
   const policy = await updateEmmaPolicy(req.user!, parsed.data.disabled_capabilities);
   return res.json(policy);
+});
+
+// Notification thresholds — per-company overrides of the fixed defaults used
+// by the computed attention feed. Read shows the effective values next to the
+// defaults; write validates bounded integers and audits before/after.
+companyRouter.get("/notification-thresholds", requirePermission("company.manage"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(thresholdsView(await getNotificationThresholds(req.user!.companyId)));
+});
+
+companyRouter.put("/notification-thresholds", requirePermission("company.manage"), async (req, res) => {
+  const result = await updateNotificationThresholds(req.user!, req.body);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message });
+  res.json(result.data);
 });

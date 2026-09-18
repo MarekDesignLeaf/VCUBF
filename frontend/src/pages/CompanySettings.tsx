@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, type CompanyProfile } from "../api/client";
+import { NotificationThresholdsForm } from "../components/NotificationThresholdsForm";
 
 export function CompanySettings() {
   const [company, setCompany] = useState<CompanyProfile | null>(null);
@@ -37,5 +38,6 @@ export function CompanySettings() {
       {message && <div className="success-banner">{message}</div>}
       <button type="submit" disabled={saving}>{saving ? "Saving…" : "Save company profile"}</button>
     </form>
+    <NotificationThresholdsForm />
   </div>;
 }
