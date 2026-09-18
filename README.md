@@ -27,6 +27,36 @@ backend/    Node.js + TypeScript + Express + Prisma + PostgreSQL (Secretary back
 frontend/   React + TypeScript + Vite (web client — desktop and Android via PWA)
 ```
 
+## Committed voice reliability baseline
+
+The Windows Voice v2 companion uses a configurable acoustic wake provider and
+NPU or Deepgram transcription paths. The NPU sidecar rejects segments marked
+`NO_SPEECH`, bounds decoding by audio duration and returns token confidence.
+Only allowlisted short responses with confidence at least 0.45 may use the
+local transcript directly. Longer commands and uncertain responses use the
+authenticated `/command/transcribe` endpoint. Recognised local noise artefacts
+are discarded before that fallback, and transcript filters run before command
+interpretation. These guards reduce false commands; they do not guarantee that
+every background sound is rejected.
+
+In this committed baseline, `/command/transcribe` uses the configured OpenAI
+transcription model, defaulting to `gpt-4o-mini-transcribe`. It does not yet
+include the working-copy local transcription service, expanded vocabulary
+hints or explicit temperature setting. The companion also does not include
+the working-copy heartbeat, additional TTS fallback and expanded interruption
+changes. A deployed working copy can therefore differ from a clean checkout.
+
+The focused voice baseline has 21 Python gate/receiver tests and 14 mocked
+backend transcription tests. Their successful execution does not establish
+live microphone, acoustic-wake, cloud-provider, mobile or business-action
+acceptance. See [Voice v2 setup](docs/VOICE_V2_SETUP.md) and the
+[verification note](claude/hlasove-ovladani-2026-09-18.md) for evidence limits.
+
+Invoice-derived KPI analytics are not included in this committed baseline;
+their implementation and documentation remain part of separate working-copy
+changes. Invoice management existing elsewhere in the application does not
+by itself establish invoice analytics in `/metrics/overview`.
+
 ## Why web-first
 
 Per the architecture, the frontend must contain no business logic — it only displays
@@ -842,7 +872,16 @@ configurable similarity threshold (the Levenshtein cutoff and phone-normalizatio
 are fixed in code, not a per-company setting). There is also no text-command intent for
 `merge_clients` — the same judgment already applied to `prepare_quote` (real, multi-field
 actions with material consequences stay a dedicated form/API flow, never a one-line
-command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, serving or visual AI review (a `filename` is just a typed-in reference, not a stored file), no image-content recognition or auto-tagging, and no website/social publishing. Metadata-backed candidates and confirmed internal service selections now exist, but they rely only on explicit job/service links, exact tags and human-entered review states; flipping `usableForMarketing` or confirming a service selection never publishes anything anywhere. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. Browser voice input supports push-to-talk and optional user-activated wake-word listening across the signed-in app. The default wake word is `Emma`, each user can change it in Account settings, and recognition always pauses for transcript review before execution. Native/offline recognition, background listening after the browser page closes, broader command languages and audio storage remain unavailable. The KPI module is a real-data Phase 11 foundation, but trend comparison, service-level revenue/profitability, reputation, invoice and external analytics remain unavailable until their source records or connectors exist.
+command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, serving or visual AI review (a `filename` is just a typed-in reference, not a stored file), no image-content recognition or auto-tagging, and no website/social publishing. Metadata-backed candidates and confirmed internal service selections now exist, but they rely only on explicit job/service links, exact tags and human-entered review states; flipping `usableForMarketing` or confirming a service selection never publishes anything anywhere. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. The Windows Voice v2 companion supports acoustic wake and NPU/cloud
+transcription through the authenticated Secretary API; its operation is not
+limited to a browser tab. The Capacitor Android client has its own native
+speech interface. Provider selection and transcript handling depend on the
+configured runtime; see the committed voice baseline above rather than
+assuming that every channel pauses for transcript review. A fully offline
+natural-language assistant and persistent microphone-audio storage are not
+established by this baseline. The KPI module includes real-data workload and
+quote-oriented metrics; invoice-derived analytics, reputation and external
+analytics are not established by the committed metrics service.
 Build order should follow the roadmap in the master documentation (Phase 1 → Phase 2 →
 …), not be improvised per-feature.
 
