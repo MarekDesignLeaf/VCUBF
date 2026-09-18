@@ -4,6 +4,7 @@ import { requirePermission } from "../../middleware/permissions.js";
 import { CREATE_QUOTE_ACTION, UPDATE_QUOTE_ACTION, CHANGE_QUOTE_STATUS_ACTION, EXPORT_QUOTE_PDF_ACTION } from "../../lib/actionContracts.js";
 import * as quoteService from "../../services/quoteService.js";
 import { exportQuotePdf } from "../../services/quotePdfService.js";
+import { sendQuoteByEmail } from "../../services/documentDeliveryService.js";
 
 export const quotesRouter = Router();
 
@@ -59,5 +60,16 @@ quotesRouter.put("/:id/status", requirePermission(CHANGE_QUOTE_STATUS_ACTION.req
   if (!result.ok) {
     return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   }
+  res.status(result.httpStatus).json(result.data);
+});
+
+// send_quote_pdf — confirmation-gated (risk 3). Without confirmed:true this
+// returns a 409 preview of the exact recipients, subject, body and PDF
+// attachment and sends nothing; with confirmed:true it sends through the
+// company's authorised Gmail source, marks a draft quote sent and records
+// the delivery as an outbound communication.
+quotesRouter.post("/:id/send-email", requirePermission("crm.manage"), async (req, res) => {
+  const result = await sendQuoteByEmail(req.user!, req.params.id, req.body);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   res.status(result.httpStatus).json(result.data);
 });

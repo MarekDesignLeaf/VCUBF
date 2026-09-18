@@ -11,6 +11,7 @@ import {
   type QuoteItemInput,
   type ServiceCatalogueItem,
 } from "../api/client";
+import { SendDocumentDialog } from "../components/SendDocumentDialog";
 
 interface LineItemDraft {
   service_catalogue_item_id: string;
@@ -61,6 +62,8 @@ export function QuoteEdit() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sentNotice, setSentNotice] = useState<string | null>(null);
 
   useEffect(() => {
     api.clients.list().then(setClients).catch(() => undefined);
@@ -179,6 +182,15 @@ export function QuoteEdit() {
     }
   }
 
+  async function reload() {
+    if (!id) return;
+    try {
+      setQuote(await api.quotes.get(id));
+    } catch {
+      // The send already succeeded; a failed refresh must not report an error.
+    }
+  }
+
   async function handlePdfDownload() {
     if (!id) return;
     setDownloading(true);
@@ -219,8 +231,18 @@ export function QuoteEdit() {
           — changing status only updates the internal record; nothing is sent to the client
           automatically.
           {" "}<button type="button" onClick={handlePdfDownload} disabled={downloading}>{downloading ? "Preparing PDF…" : "Download PDF"}</button>
+          {" "}<button type="button" onClick={() => setSending(true)} disabled={sending}>Send by email</button>
         </div>
       )}
+
+      {!isNew && id && sending && (
+        <SendDocumentDialog kind="quote" id={id} onClose={() => setSending(false)} onSent={(result) => {
+          setSending(false);
+          setSentNotice(`Sent to ${result.to.join(", ")} and logged on the client record.`);
+          void reload();
+        }} />
+      )}
+      {sentNotice && <div className="success-banner">{sentNotice}</div>}
 
       <form onSubmit={handleSubmit}>
         {isNew && (

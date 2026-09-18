@@ -11,6 +11,25 @@ const item = z.object({ description: z.string().min(1), quantity: z.number().pos
 const createSchema = z.object({ client_id: z.string().uuid(), invoice_number: z.string().min(1), title: z.string().min(1), issue_date: z.string().datetime().optional(), due_date: z.string().datetime().optional(), notes: z.string().optional(), items: z.array(item).min(1) }).refine(d=>moneyLinesFit(d.items.map(i=>({quantity:i.quantity,unitAmount:i.unit_price}))),{message:"invoice total exceeds the supported money range",path:["items"]});
 const paymentSchema = z.object({ amount: positiveMoney, paid_at: z.string().datetime(), method: z.string().optional(), reference: z.string().optional(), confirmed:z.boolean().optional() });
 const statusSchema = z.object({ invoice_status: z.enum(["draft", "issued", "void"]) });
+/**
+ * What may be corrected on a draft.
+ *
+ * `items` replaces the whole list rather than patching individual lines: an invoice
+ * is one document, and a half-applied line edit is a worse state than either the
+ * old or the new version. `client_id` is absent — an invoice addressed to the wrong
+ * client is a different invoice, not a corrected one.
+ */
+const updateSchema = z.object({
+  invoice_number: z.string().min(1).optional(),
+  title: z.string().min(1).optional(),
+  issue_date: z.string().datetime().nullable().optional(),
+  due_date: z.string().datetime().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  items: z.array(item).min(1).optional(),
+}).refine(
+  (d) => !d.items || moneyLinesFit(d.items.map((i) => ({ quantity: i.quantity, unitAmount: i.unit_price }))),
+  { message: "invoice total exceeds the supported money range", path: ["items"] },
+).refine((d) => Object.keys(d).length > 0, "At least one field is required");
 const include = { client: { select: { id: true, displayName: true } }, items: { orderBy: { sortOrder: "asc" as const } }, payments: { orderBy: { paidAt: "asc" as const } } };
 type MoneyValue=number|{toNumber():number};const n=(v:MoneyValue)=>typeof v==="number"?v:v.toNumber();
 const moneyRound=(v:number)=>Math.round((v+Number.EPSILON)*100)/100;
@@ -18,6 +37,47 @@ function totals<T extends { items: { quantity:number;unitPrice:MoneyValue }[];pa
 export async function listInvoices(u:AuthedUser){return (await prisma.invoice.findMany({where:{companyId:u.companyId},include,orderBy:{createdAt:"desc"}})).map(totals);}
 export async function getInvoice(u:AuthedUser,id:string){const x=await prisma.invoice.findFirst({where:{id,companyId:u.companyId},include});return x?totals(x):null;}
 export async function createInvoice(u:AuthedUser,raw:unknown):Promise<ServiceResult<unknown>>{const p=createSchema.safeParse(raw);if(!p.success)return fail(400,"VALIDATION_FAILED",p.error.message);const d=p.data;if(!await prisma.client.findFirst({where:{id:d.client_id,companyId:u.companyId}}))return fail(404,"CLIENT_NOT_FOUND");if(await prisma.invoice.findUnique({where:{companyId_invoiceNumber:{companyId:u.companyId,invoiceNumber:d.invoice_number}}}))return fail(409,"INVOICE_NUMBER_EXISTS");const x=await prisma.invoice.create({data:{companyId:u.companyId,clientId:d.client_id,invoiceNumber:d.invoice_number,title:d.title,issueDate:d.issue_date?new Date(d.issue_date):undefined,dueDate:d.due_date?new Date(d.due_date):undefined,notes:d.notes,createdBy:u.id,items:{create:d.items.map((i,n)=>({description:i.description,quantity:i.quantity,unitPrice:i.unit_price,sortOrder:n}))}},include});await recordAudit({companyId:u.companyId,userId:u.id,actionName:"create_invoice",inputPayload:d,dataAfter:x,riskLevel:2,confirmationRequired:false,result:"success"});return ok(201,totals(x));}
+/**
+ * Correcting a draft invoice.
+ *
+ * Only a draft can be changed. Once an invoice is issued, the client has a copy of
+ * it; editing the amount behind that copy would leave two documents sharing one
+ * invoice number, and the wrong one in someone else's records. The way to correct
+ * an issued invoice is to void it and issue another, which changeInvoiceStatus
+ * already allows.
+ */
+export async function updateInvoice(u:AuthedUser,id:string,raw:unknown):Promise<ServiceResult<unknown>>{
+  const p=updateSchema.safeParse(raw);
+  if(!p.success)return fail(400,"VALIDATION_FAILED",p.error.message);
+  const d=p.data;
+  const old=await prisma.invoice.findFirst({where:{id,companyId:u.companyId},include});
+  if(!old)return fail(404,"INVOICE_NOT_FOUND");
+  if(old.invoiceStatus!=="draft"){
+    await recordAudit({companyId:u.companyId,userId:u.id,actionName:"update_invoice",inputPayload:{id,...d},dataBefore:old,riskLevel:2,confirmationRequired:false,result:"error",errorMessage:"INVOICE_NOT_EDITABLE"});
+    return fail(409,"INVOICE_NOT_EDITABLE","Only a draft invoice can be edited. Void this one and issue a replacement.");
+  }
+  if(d.invoice_number&&d.invoice_number!==old.invoiceNumber){
+    const clash=await prisma.invoice.findUnique({where:{companyId_invoiceNumber:{companyId:u.companyId,invoiceNumber:d.invoice_number}}});
+    if(clash)return fail(409,"INVOICE_NUMBER_EXISTS");
+  }
+  const x=await prisma.$transaction(async(tx)=>{
+    if(d.items){
+      // Replaced wholesale so the stored order matches what was submitted; leaving
+      // old lines behind would silently add them to the total.
+      await tx.invoiceItem.deleteMany({where:{invoiceId:id}});
+      await tx.invoiceItem.createMany({data:d.items.map((i,n)=>({invoiceId:id,description:i.description,quantity:i.quantity,unitPrice:i.unit_price,sortOrder:n}))});
+    }
+    return tx.invoice.update({where:{id},data:{
+      ...(d.invoice_number!==undefined?{invoiceNumber:d.invoice_number}:{}),
+      ...(d.title!==undefined?{title:d.title}:{}),
+      ...(d.issue_date!==undefined?{issueDate:d.issue_date?new Date(d.issue_date):null}:{}),
+      ...(d.due_date!==undefined?{dueDate:d.due_date?new Date(d.due_date):null}:{}),
+      ...(d.notes!==undefined?{notes:d.notes}:{}),
+    },include});
+  });
+  await recordAudit({companyId:u.companyId,userId:u.id,actionName:"update_invoice",inputPayload:{id,...d},dataBefore:totals(old),dataAfter:totals(x),riskLevel:2,confirmationRequired:false,result:"success"});
+  return ok(200,totals(x));
+}
 export async function changeInvoiceStatus(u:AuthedUser,id:string,raw:unknown):Promise<ServiceResult<unknown>>{
   const p=statusSchema.safeParse(raw);if(!p.success)return fail(400,"VALIDATION_FAILED");
   const old=await prisma.invoice.findFirst({where:{id,companyId:u.companyId}});if(!old)return fail(404,"INVOICE_NOT_FOUND");
