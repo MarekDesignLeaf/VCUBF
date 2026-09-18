@@ -21,6 +21,7 @@ from collections import deque
 import ctypes
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+import io
 import json
 import os
 from pathlib import Path
@@ -29,6 +30,8 @@ import re
 import subprocess
 import threading
 import time
+import unicodedata
+import wave
 from typing import Any
 from urllib.parse import urlencode
 import urllib.error
@@ -51,6 +54,7 @@ from emma_common import (
     backend_json,
     build_backend_history,
     load_config,
+    request_token,
     save_config_language,
     write_live_preview,
 )
@@ -156,6 +160,33 @@ def load_v2_config() -> dict[str, Any]:
 
 def environment_value(name: str) -> str:
     return os.environ.get(name.strip(), "").strip()
+
+
+def backend_transcribe_pcm(pcm16: bytes, sample_rate: int, wake_word: str = "") -> str:
+    """Use Secretary's authenticated STT fallback without writing audio to disk."""
+    memory = io.BytesIO()
+    with wave.open(memory, "wb") as output:
+        output.setnchannels(CHANNELS)
+        output.setsampwidth(SAMPLE_WIDTH)
+        output.setframerate(sample_rate)
+        output.writeframes(pcm16)
+    config = load_config()
+    query = urlencode({"wake_word": wake_word}) if wake_word else ""
+    url = config.get("ServerUrl", "http://localhost:4000").rstrip("/") + "/command/transcribe"
+    if query:
+        url += "?" + query
+    request = urllib.request.Request(
+        url,
+        data=memory.getvalue(),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {request_token(config)}",
+            "Content-Type": "audio/wav",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=18) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    return str(payload.get("text") or "").strip()
 
 
 def configured_value(value: object) -> bool:
@@ -362,6 +393,53 @@ def contains_wake_word(transcript: str, wake_word: str) -> bool:
     return any(f" {candidate} " in f" {heard} " for candidate in accepted)
 
 
+def consonant_skeleton(word: str) -> str:
+    """The word without vowels: what survives a small model mishearing it."""
+    return "".join(character for character in word if character.isalpha() and character not in "aeiouy")
+
+
+def similar_wake_token(heard: str, expected: str) -> bool:
+    if not heard or not expected:
+        return False
+    if heard == expected:
+        return True
+    if heard.startswith(expected[:2]) or expected.startswith(heard[:2]):
+        return True
+    # One edit apart: "ema" for "emma", "emo" for "emma".
+    if abs(len(heard) - len(expected)) <= 1:
+        shorter, longer = sorted((heard, expected), key=len)
+        if any(longer[:index] + longer[index + 1:] == shorter for index in range(len(longer))):
+            return True
+    # Same consonants in the same order: "mmo" for "emma", measured on this
+    # hardware. Vowels are what a small model loses first.
+    skeleton = consonant_skeleton(expected)
+    return bool(skeleton) and consonant_skeleton(heard) == skeleton
+
+
+def wake_word_plausible(transcript: str, wake_word: str) -> bool:
+    """Could this local transcript be the wake word, allowing for a small model?
+
+    Whisper-base writes "Emma" as "MMO", "Ema" or "Emo" — measured on this
+    hardware. Porcupine has already matched the acoustic keyword; the local
+    verifier exists only to catch a transcript that is clearly *other* speech,
+    so it compares loosely and gives the benefit of the doubt.
+    """
+    phrase = folded_text(wake_word)
+    heard = folded_text(transcript)
+    if not phrase or not heard:
+        return True
+    if contains_wake_word(transcript, wake_word):
+        return True
+    # Only the opening of the utterance can be the wake word; a similar sound
+    # later in a sentence is ordinary speech.
+    opening = heard.split()[:2]
+    return any(
+        similar_wake_token(spoken, expected)
+        for spoken in opening
+        for expected in phrase.split()
+    )
+
+
 def wake_command_tail(transcript: str, wake_word: str) -> str:
     """Keep a command spoken directly after the wake word, if there is one."""
     candidates = [wake_word]
@@ -379,6 +457,94 @@ def pcm_mean_amplitude(raw: bytes) -> int:
     if not samples:
         return 0
     return sum(abs(sample) for sample in samples) // len(samples)
+
+
+IMPLAUSIBLE_TRANSCRIPTS = {
+    "titulky vytvoril johnyx",
+    "titulky vytvoril jirka kovac",
+    "titulky vytvorila komunita amara org",
+    "preklad a titulky",
+    "dekuji za pozornost",
+    "konec",
+    "pokracovani priste",
+    "subtitles by the amara org community",
+    "thanks for watching",
+    "thank you for watching",
+    "you",
+    "bye",
+}
+
+# A bracketed tag is Whisper describing a sound, never a spoken command:
+# [hudba], (music), *cough*, [MUZIĘ].
+BRACKETED_SOUND_TAG = re.compile(r"^[\[\(\*][^\]\)\*]{0,40}[\]\)\*][\s.!?]*$")
+
+#: Confirmations and interruptions: short, fixed words in every supported
+#: language. The local model transcribes these reliably even when it garbles a
+#: full sentence, and they are the words that dominate a conversation, so
+#: handling them on the NPU is what makes Emma feel instant.
+LOCAL_DECISION_WORDS = {
+    "ano", "ne", "jo", "potvrd", "potvrzuji", "zrus", "zrusit", "stop", "prestan", "konec",
+    "yes", "no", "confirm", "confirmed", "cancel", "stop", "abort",
+    "tak", "nie", "potwierdzam", "anuluj", "przestan",
+    "oui", "non", "confirme", "annule", "arrete",
+    "ja", "nein", "bestatige", "abbrechen", "halt",
+    "si", "confirmo", "cancela", "para",
+    "conferma", "annulla", "ferma",
+}
+
+#: Local Whisper below this mean token probability is not trusted on its own.
+#: Measured on this hardware: real speech scores 0.64-0.73, keyboard noise 0.28.
+LOCAL_CONFIDENCE_FLOOR = 0.45
+
+
+def local_result_is_actionable(text: str, confidence: float) -> bool:
+    """May this local transcript be acted on without the accurate model?
+
+    Only for a short confirmation or interruption, and only when the model was
+    sure. Whisper-base transcribes "ano" and "stop" dependably; it garbles a
+    full Czech sentence ("ukaž klienty" came back as "ukáš klienty"), and a
+    garbled command is worse than a slightly slower accurate one.
+    """
+    if confidence < LOCAL_CONFIDENCE_FLOOR:
+        return False
+    words = folded_text(text).split()
+    if not words or len(words) > 2:
+        return False
+    return all(word in LOCAL_DECISION_WORDS for word in words)
+
+
+def folded_text(value: str) -> str:
+    """Lower-case, punctuation-free and without diacritics, for fixed matching."""
+    normalized = normalized_text(value)
+    return "".join(
+        character
+        for character in unicodedata.normalize("NFKD", normalized)
+        if not unicodedata.combining(character)
+    )
+
+
+def implausible_transcript(text: str) -> str:
+    """Return the reason this text cannot be a spoken command, or ""."""
+    stripped = text.strip()
+    if not stripped:
+        return "EMPTY"
+    if BRACKETED_SOUND_TAG.match(stripped):
+        return "SOUND_TAG"
+    normalized = normalized_text(stripped)
+    if not normalized:
+        return "PUNCTUATION_ONLY"
+    # Compared without diacritics, because the same invented credit comes back
+    # as "vytvořil" or "vytvoril" depending on the recogniser and the language.
+    if folded_text(stripped) in IMPLAUSIBLE_TRANSCRIPTS:
+        return "KNOWN_HALLUCINATION"
+    words = normalized.split()
+    # A single letter or syllable is what the decoder emits when it has nothing.
+    if len(normalized) < 3 and len(words) <= 1:
+        return "TOO_SHORT"
+    # "ano ano ano ano ano" is a decode loop, not a person speaking.
+    if len(words) >= 4 and len(set(words)) == 1:
+        return "REPETITION_LOOP"
+    return ""
 
 
 def looks_like_self_echo(heard: str, assistant: str) -> bool:
@@ -731,7 +897,16 @@ class NpuWhisperClient:
                 raise RuntimeError(str(response.get("error") or "NPU_WHISPER_START_FAILED"))
         raise RuntimeError("NPU_WHISPER_START_TIMEOUT")
 
-    def transcribe(self, pcm16: bytes, sample_rate: int = RATE) -> tuple[str, int]:
+    def transcribe(
+        self, pcm16: bytes, sample_rate: int = RATE, language: str = ""
+    ) -> tuple[str, int, float, str]:
+        """Return (text, elapsed_ms, confidence, reason).
+
+        ``reason`` is ``NO_SPEECH`` when the sidecar's voice gate answered
+        without running the model; ``confidence`` is the mean probability of
+        the tokens Whisper chose, so a weak result can be re-checked by the
+        accurate provider instead of being executed or silently dropped.
+        """
         with self.lock:
             self.start()
             if not self.process or not self.process.stdin or self.process.poll() is not None:
@@ -743,6 +918,8 @@ class NpuWhisperClient:
                 "sample_rate": sample_rate,
                 "pcm16": base64.b64encode(pcm16).decode("ascii"),
             }
+            if language:
+                request["language"] = language.split("-", 1)[0].lower()
             self.process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
             self.process.stdin.flush()
             deadline = time.monotonic() + 25
@@ -755,7 +932,12 @@ class NpuWhisperClient:
                 if response.get("type") == "error":
                     raise RuntimeError(str(response.get("error") or "NPU_WHISPER_TRANSCRIPTION_FAILED"))
                 if response.get("type") == "transcription":
-                    return str(response.get("text") or "").strip(), int(response.get("elapsed_ms") or 0)
+                    return (
+                        str(response.get("text") or "").strip(),
+                        int(response.get("elapsed_ms") or 0),
+                        float(response.get("confidence") or 0.0),
+                        str(response.get("reason") or ""),
+                    )
             raise RuntimeError("NPU_WHISPER_TRANSCRIPTION_TIMEOUT")
 
     def close(self) -> None:
@@ -961,26 +1143,45 @@ class PicovoiceWakeWord:
         self.npu_whisper = npu_whisper
 
     async def verify_detection(self, pcm16: bytes, sample_rate: int, wake_word: str) -> str | None:
-        """Reject Porcupine false positives using a second, fully local model."""
+        """Reject an acoustically detected false wake when local STT disproves it.
+
+        Empty verification remains accepted because a short isolated wake word
+        may be omitted by Whisper. A non-empty, clearly different transcript is
+        rejected so ordinary room speech cannot silently start a conversation.
+        """
         if not self.npu_whisper:
             return ""
         if not pcm16:
-            log("v2 Picovoice wake rejected: verification audio missing")
-            return None
+            log("v2 Picovoice wake accepted without verification audio")
+            return ""
         try:
-            transcript, elapsed_ms = await asyncio.to_thread(
+            transcript, elapsed_ms, _confidence, reason = await asyncio.to_thread(
                 self.npu_whisper.transcribe,
                 pcm16,
                 sample_rate,
             )
+            if reason == "NO_SPEECH":
+                # The wake detector fired on something the voice gate does not
+                # consider speech at all; treat it as unverified rather than
+                # confirmed, exactly as an empty transcript is treated below.
+                log("v2 Picovoice wake accepted without speech in verification audio")
+                return ""
         except Exception as exc:
-            log(f"v2 Picovoice wake verification failed closed: {type(exc).__name__}")
-            return None
-        if not contains_wake_word(transcript, wake_word):
-            log(f"v2 Picovoice false activation rejected by NPU in {elapsed_ms}ms")
-            return None
-        log(f"v2 Picovoice wake confirmed by NPU in {elapsed_ms}ms")
-        return wake_command_tail(transcript, wake_word)
+            log(f"v2 Picovoice wake accepted after verifier error: {type(exc).__name__}: {str(exc)[:160]}")
+            return ""
+        if not transcript.strip():
+            log(f"v2 Picovoice wake accepted after empty verifier result ({elapsed_ms}ms)")
+            return ""
+        if wake_word_plausible(transcript, wake_word):
+            log(f"v2 Picovoice wake confirmed by NPU in {elapsed_ms}ms")
+            return wake_command_tail(transcript, wake_word)
+        if _confidence < LOCAL_CONFIDENCE_FLOOR:
+            # The local model was unsure about what it heard, so it is in no
+            # position to overrule the acoustic detector.
+            log(f"v2 Picovoice wake accepted; verifier unsure (confidence {_confidence:.2f})")
+            return ""
+        log(f"v2 Picovoice false wake rejected by local verifier ({elapsed_ms}ms)")
+        return None
 
     async def publish_listening_state(self) -> None:
         try:
@@ -1322,19 +1523,65 @@ class VoiceSessionV2:
         while not self.stop.is_set():
             segment = await segments.get()
             try:
-                text, elapsed_ms = await asyncio.to_thread(self.npu_whisper.transcribe, segment, RATE)
-                log(f"v2 NPU transcription completed in {elapsed_ms}ms")
-                if text:
+                text, elapsed_ms, confidence, reason = await asyncio.to_thread(
+                    self.npu_whisper.transcribe,
+                    segment,
+                    RATE,
+                    self.language,
+                )
+                if reason == "NO_SPEECH":
+                    # The voice gate answered without waking the model: the
+                    # segment was a door, a fan or a breath.
+                    continue
+                log(
+                    f"v2 NPU transcription completed in {elapsed_ms}ms "
+                    f"(confidence {confidence:.2f})"
+                )
+                rejection = implausible_transcript(text) if text else ""
+                if rejection:
+                    # A recognised noise artefact must not get a second chance
+                    # to become a command through cloud transcription.
+                    log(f"v2 local transcript ignored ({rejection})")
+                    continue
+                if text and local_result_is_actionable(text, confidence):
+                    # A confident "ano" or "stop": answer straight from the NPU.
                     await self.handle_transcript(text)
+                    continue
+                # Anything longer is a real instruction, and the small local
+                # model garbles those. The accurate model decides, so the user
+                # neither loses the command nor gets a misheard one executed.
+                log(f"v2 local transcript verified by accurate STT (confidence {confidence:.2f})")
+                verified = await asyncio.to_thread(backend_transcribe_pcm, segment, RATE)
+                if verified:
+                    await self.handle_transcript(verified)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 log(f"v2 NPU transcription error: {type(exc).__name__}: {str(exc)[:300]}")
-                self.stop.set()
+                try:
+                    fallback_text = await asyncio.to_thread(
+                        backend_transcribe_pcm,
+                        segment,
+                        RATE,
+                    )
+                    log("v2 authenticated STT fallback completed")
+                    if fallback_text:
+                        await self.handle_transcript(fallback_text)
+                except Exception as fallback_exc:
+                    # One malformed/noisy segment must not end the entire
+                    # conversation. Keep listening for the next utterance.
+                    log(
+                        "v2 STT fallback error: "
+                        f"{type(fallback_exc).__name__}: {str(fallback_exc)[:240]}"
+                    )
 
     async def handle_transcript(self, text: str) -> None:
         heard = text.strip()
         if not heard:
+            return
+        reason = implausible_transcript(heard)
+        if reason:
+            log(f"v2 transcript ignored ({reason}): {heard[:60]}")
             return
         self.last_activity = time.monotonic()
         if self.speaker.active.is_set() and looks_like_self_echo(heard, self.last_assistant_text):

@@ -110,6 +110,101 @@ Check `providers.npuWhisper.effectiveProvider`: `npu_whisper` together with
 `executionProvider: QNNExecutionProvider` confirms NPU transcription is active.
 Voice v2 starts only when the diagnostic reports `"ready": true`.
 
+## Reliability: what Emma refuses to hear
+
+The following guards reduce false commands from silence and recognised noise
+artefacts. They do not prove that every room sound or passing conversation is
+rejected; acoustic wake and real-device acceptance still require separate tests.
+
+**Voice gate** (`npu_whisper_sidecar.py`). Every segment is split into 20 ms
+frames. The noise floor is the tenth percentile of the frame RMS values and the
+speech threshold is `max(0.004, noise_floor × 3)`. A segment with less than
+200 ms above that threshold is answered with `reason: "NO_SPEECH"` and Whisper
+is never started for it, so silence and steady room noise cost about one
+millisecond and no NPU work at all.
+
+**Decode budget.** The decoder is capped at
+`max(8, min(hard_limit, seconds × 10 + 8))` tokens, so a repetition loop ends
+instead of consuming the whole context.
+
+**Confidence.** The sidecar returns the mean probability of the tokens it
+emitted. Measured on a Snapdragon X Elite with `whisper-base` on QNN, real
+Czech speech scores 0.64-0.73 and keyboard noise scores 0.28, so the runtime's
+floor is `LOCAL_CONFIDENCE_FLOOR = 0.45` in `emma_voice_v2.py`.
+
+**Transcript filter.** Every provider — NPU, Deepgram and the authenticated
+fallback — reaches the parser through `handle_transcript`, which is the single
+place `implausible_transcript` is applied. It drops the text and logs the
+reason: `EMPTY`, `SOUND_TAG` (`[MUZIĘ]`, `[Skřící]`), `PUNCTUATION_ONLY`,
+`KNOWN_HALLUCINATION` (the subtitle-credit family Whisper invents on silence,
+such as "Titulky vytvořil JohnyX" or "Thanks for watching"), `TOO_SHORT` and
+`REPETITION_LOOP`. Matching folds diacritics, because the same invented credit
+comes back accented or not depending on the recogniser. The backend holds the
+same rule in `voiceAssistantService.isLikelyHallucination`, covered by
+`backend/tests/hallucinationShapes.test.ts`, so the Android app and the browser
+fallback are protected by it too.
+
+## Two-tier transcription
+
+`whisper-base` is the only local model Qualcomm publishes for this runtime. It
+is dependable for one or two words and unreliable for a whole sentence: "ukaž
+klienty" came back as "ukáš klienty". Voice v2 therefore splits the work when
+`stt.provider` is `npu_whisper`.
+
+A confident short answer from a fixed list — `ano`, `ne`, `potvrď`, `zruš`,
+`stop`, `yes`, `no`, `confirm`, `cancel` and their siblings — is executed
+straight from the NPU result, so confirmations stay instant. Anything longer is
+a real instruction: the same audio goes to the accurate model through the
+authenticated `POST /command/transcribe`, and that transcript becomes the
+command. A misheard command is worse than a slightly slower correct one.
+
+Wake verification is deliberately tolerant and runs even when Deepgram owns
+command transcription. Porcupine remains the detector and
+the NPU only looks for an obvious false positive: the first two spoken tokens
+are compared with the wake word by equality, two-character prefix, single edit
+and consonant skeleton, so "MMO, ukáš klienty" still counts as "Emma". A
+low-confidence local transcript never overrules Porcupine; only a confident and
+clearly different one rejects the wake.
+
+## Measured behaviour
+
+Snapdragon X Elite, `whisper-base` on `QNNExecutionProvider`, model loaded once
+at start (2-7 s), then per segment:
+
+| Input | Local decode | Local transcript | Outcome |
+| --- | --- | --- | --- |
+| "Emma, ukaž klienty" | 250 ms | `MMO, ukáš klienty.` | wake accepted (0.72), sent to accurate STT |
+| "Emma, vytvoř novou zakázku…" | 361 ms | `MMO, vytvoš novou zakásku…` | wake accepted (0.64), sent to accurate STT |
+| "Emma, kolik mám nezaplacených faktur" | 311 ms | `MMO, kolik mám nezapracených faktur.` | wake accepted (0.73), sent to accurate STT |
+| "Emma, ukaž dnešní úkoly" | 263 ms | `MMO, ukáždnéšní úkolé.` | wake accepted (0.66), sent to accurate STT |
+| White noise | 1 ms | — | ignored by the voice gate |
+| Low rumble | 1 ms | — | ignored by the voice gate |
+| Keyboard clicks | 198 ms | `[MUZIĘ]` | ignored, `SOUND_TAG` |
+| Short burst | 195 ms | `[Skřící]` | ignored, `SOUND_TAG` |
+
+The four Czech samples are why the split exists: the wake word survives the
+local model, the command does not.
+
+Run the offline unit tests for these guards from `windows-companion`:
+
+```powershell
+python .\test_voice_gate.py
+```
+
+The 21 tests cover the transcript filter, the local-execution rule, wake
+plausibility and the actual NPU receiver decision path. Six receiver tests
+verify that recognised noise never calls accurate STT or the command handler,
+while full commands and uncertain short responses still use accurate STT.
+They stub the audio/provider boundaries; passing them is not microphone,
+cloud-transcription or complete business-action acceptance.
+
+A receiver regression was corrected on 18 September 2026: a local transcript
+classified as noise previously fell through to accurate STT. The receiver now
+ignores non-empty rejected transcripts before any cloud call. An empty decode
+without NO_SPEECH may still use accurate STT to recover genuine speech.
+The new regression failed for four noise fixtures against the previous
+installed file, and all 21 tests passed against the updated installed file.
+
 ## Product boundaries
 
 Voice v2 is the provider layer from the production architecture. It deliberately

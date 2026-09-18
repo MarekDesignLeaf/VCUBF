@@ -105,6 +105,53 @@ function outputText(payload: any): string | undefined {
   return undefined;
 }
 
+function isLikelyHallucination(text: string): boolean {
+  const value = text.trim();
+  if (!value) return true;
+  const lower = value.toLowerCase();
+  if (/^(https?:\/\/|www\.)/.test(lower)) return true;
+  if (/^[a-z0-9.-]+\.(cz|com|sk|pl|net|org|eu|de|co\.uk)[.!?]?$/.test(lower)) return true;
+  // Compared without diacritics: the same invented credit comes back as
+  // "vytvořil" or "vytvoril" depending on the recogniser and the language, and
+  // the Windows NPU model drops diacritics more often than the cloud one.
+  const folded = lower.normalize("NFKD").replace(/\p{M}+/gu, "");
+  const stock = [
+    "titulky vytvoril", "titulky pro vas", "preklad:", "preklad a titulky",
+    "dekuji za pozornost", "pokracovani priste",
+    "thanks for watching", "thank you for watching", "subtitles by",
+    "amara.org", "napisy:", "untertitel", "sous-titres",
+  ];
+  if (stock.some((phrase) => folded.includes(phrase))) return true;
+  // Whisper labels non-speech audio in brackets: "(Titulky)", "[Hudba]",
+  // "(hudba hraje)". Nothing spoken as a command looks like this, and left
+  // in it became a command that woke Emma from room noise.
+  const bracketed = /^[([{][^)\]}]*[)\]}][.!?]?$/.test(value);
+  if (bracketed) return true;
+  if (looksRepetitive(value)) return true;
+  // A single stray token is far more often a decoder artefact than a command.
+  if (value.replace(/[^\p{L}\p{N}]/gu, "").length <= 1) return true;
+  return false;
+}
+
+/**
+ * Whisper loops on empty audio, emitting one token repeatedly
+ * ("a zároveň zároveň zároveň …"). Real spoken commands never look like this.
+ */
+function looksRepetitive(text: string): boolean {
+  const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length < 4) return false;
+  let run = 1;
+  for (let i = 1; i < words.length; i += 1) {
+    run = words[i] === words[i - 1] ? run + 1 : 1;
+    if (run >= 3) return true;
+  }
+  const counts = new Map<string, number>();
+  for (const word of words) counts.set(word, (counts.get(word) ?? 0) + 1);
+  const commonest = Math.max(...counts.values());
+  // Over half the utterance being one word means a decoding loop, not speech.
+  return commonest / words.length > 0.5;
+}
+
 export async function transcribeVoiceAudio(
   audio: Buffer,
   language: string,
@@ -130,7 +177,7 @@ export async function transcribeVoiceAudio(
   if (!response.ok) throw new Error(`OPENAI_TRANSCRIPTION_FAILED_${response.status}`);
   const payload = z.object({ text: z.string() }).parse(await response.json());
   const text = payload.text.trim();
-  if (!text) throw new Error("OPENAI_EMPTY_TRANSCRIPTION");
+  if (isLikelyHallucination(text)) return { text: "", model };
   return { text, model };
 }
 
