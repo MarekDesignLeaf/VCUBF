@@ -1,5 +1,5 @@
 /**
- * Action Contracts — every executable action in VCUF must declare one.
+ * Action Contracts — every executable action in VCUBF must declare one.
  * See vcubf-programmer-skill "Action Contract rule".
  * This is structured data, not a prompt — business rules live here, not in an LLM.
  */
@@ -74,7 +74,7 @@ export const ARCHIVE_CLIENT_ACTION: ActionContract = {
 };
 
 // Canonical job statuses — must stay in sync with prisma/schema.prisma and the
-// VCUF master documentation section 25 (Calendar and Scheduling Intelligence
+// VCUBF master documentation section 25 (Calendar and Scheduling Intelligence
 // Module statuses). Technical ASCII codes; Czech/English display labels belong
 // in a translation layer, not hardcoded here (language rule).
 export const JOB_STATUSES = [
@@ -120,7 +120,7 @@ export const CHANGE_JOB_STATUS_ACTION: ActionContract = {
 };
 
 // Lead Intake Module — statuses for the lead lifecycle before conversion to a
-// real CRM client. See VCUF master documentation section 24 (Lead Intake Module).
+// real CRM client. See VCUBF master documentation section 24 (Lead Intake Module).
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "lost"] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -132,6 +132,16 @@ export const CREATE_LEAD_ACTION: ActionContract = {
   confirmationRequired: false,
   dataSources: ["user_input"],
   possibleErrors: ["MISSING_PERMISSION", "MISSING_DATA", "VALIDATION_FAILED"],
+};
+
+export const UPDATE_LEAD_ACTION: ActionContract = {
+  actionName: "update_lead",
+  purpose: "Correct the details of an existing lead without changing where it came from or inventing a conversion.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.leads"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "LEAD_NOT_FOUND", "UNSUPPORTED_ACTION"],
 };
 
 // Converting a lead creates a real CRM client record. This is still an internal
@@ -184,7 +194,7 @@ export const UPDATE_EMMA_BEHAVIOR_SCENARIO_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
 };
 
-// Job Allocation and Capacity Management Module — see VCUF master
+// Job Allocation and Capacity Management Module — see VCUBF master
 // documentation section 24A / 26. Assignment is capacity-aware: it computes
 // real workload from existing jobs (estimated_duration_hours, planned dates)
 // against the employee's declared weekly capacity, and it reports skill
@@ -231,7 +241,7 @@ export const CHECK_CAPACITY_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "EMPLOYEE_NOT_FOUND"],
 };
 
-// Calendar and Scheduling Intelligence Module — see VCUF master documentation
+// Calendar and Scheduling Intelligence Module — see VCUBF master documentation
 // section 25/26. Both actions here are read-only decision support: they
 // compute recommendations from real job/employee data, they never invent
 // business facts, and they never publish or change anything by themselves.
@@ -671,7 +681,7 @@ export const DISCONNECT_GOOGLE_PHOTOS_SOURCE_ACTION: ActionContract = {
   dataSources: ["connector_sources", "connector_credentials", "google_oauth"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONFIRMATION_REQUIRED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
 };
 
-// Service Catalogue Module — see VCUF master documentation section 24C.
+// Service Catalogue Module — see VCUBF master documentation section 24C.
 // Entries here are entered by the user, never invented ("no fake facts"
 // rule). Later modules (quoting, website content) must read from this
 // catalogue rather than re-typing or guessing service names/prices.
@@ -1619,18 +1629,78 @@ export const ANALYZE_DATA_QUALITY_ACTION: ActionContract = {
 export const MERGE_CLIENTS_ACTION: ActionContract = {
   actionName: "merge_clients",
   purpose:
-    "Re-link a duplicate client's Job, Quote, CommunicationRecord, CommunicationIntake, and PortfolioPhoto records onto a primary client, then archive (never delete) the duplicate — always previewed before anything changes.",
+    "Re-link a duplicate client's Job, Quote, Invoice, CommunicationRecord, CommunicationIntake, PortfolioPhoto, Contact, DocumentRecord and Task records onto a primary client, then archive (never delete) the duplicate — always previewed before anything changes, and recorded so unmerge_clients can reverse exactly this merge.",
   requiredPermission: "crm.manage",
   riskLevel: 3,
   confirmationRequired: true,
-  dataSources: ["user_input", "crm.clients", "crm.jobs", "crm.quotes", "crm.communication_records", "crm.communication_intakes", "crm.portfolio_photos"],
-  possibleErrors: [
-    "MISSING_PERMISSION",
-    "VALIDATION_FAILED",
-    "CLIENT_NOT_FOUND",
-    "SAME_CLIENT",
-    "CONFIRMATION_REQUIRED",
-  ],
+  dataSources: ["user_input", "crm.clients", "crm.jobs", "crm.quotes", "crm.invoices", "crm.communication_records", "crm.communication_intakes", "crm.portfolio_photos", "crm.contacts", "crm.documents", "crm.tasks"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "SAME_CLIENT", "CLIENT_NOT_FOUND", "CONFIRMATION_REQUIRED"],
+};
+
+export const UPDATE_NOTIFICATION_DIGEST_PREFERENCES_ACTION: ActionContract = {
+  actionName: "update_notification_digest_preferences",
+  purpose:
+    "Turn the daily notification digest on or off for the signed-in user and choose the hour it is sent; the digest is only ever delivered to that user's own account email.",
+  requiredPermission: "crm.read",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["user_input", "users"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
+};
+
+export const SEND_NOTIFICATION_DIGEST_ACTION: ActionContract = {
+  actionName: "send_notification_digest",
+  purpose:
+    "Email the signed-in user their own computed attention feed as a plain-text digest through the company's authorised Gmail source, after showing the exact message; scheduled sending runs only for users who explicitly enabled it and never reaches a client.",
+  requiredPermission: "crm.read",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["notifications.feed", "users", "connector_sources", "connector_credentials", "gmail.messages"],
+  possibleErrors: ["MISSING_PERMISSION", "DIGEST_DISABLED", "DIGEST_EMPTY", "GMAIL_NOT_CONFIGURED", "CONNECTOR_NOT_ENABLED", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_AUTHORIZATION_REQUIRED", "AMBIGUOUS_GMAIL_SOURCE", "CONFIRMATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
+
+export const SEND_QUOTE_PDF_ACTION: ActionContract = {
+  actionName: "send_quote_pdf",
+  purpose:
+    "Email the client-facing PDF of a quote through the company's authorised Gmail connector after the user reviews the exact recipients, subject, body and attachment; on provider acknowledgement a draft quote becomes sent and an outbound communication record is written.",
+  requiredPermission: "crm.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.quotes", "crm.clients", "connector_sources", "connector_credentials", "gmail.messages", "crm.communication_records"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "RECIPIENT_REQUIRED", "GMAIL_NOT_CONFIGURED", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_AUTHORIZATION_REQUIRED", "AMBIGUOUS_GMAIL_SOURCE", "CONFIRMATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "QUOTE_NOT_FOUND"],
+};
+
+export const SEND_INVOICE_PDF_ACTION: ActionContract = {
+  actionName: "send_invoice_pdf",
+  purpose:
+    "Email the client-facing PDF of an issued invoice through the company's authorised Gmail connector after the user reviews the exact recipients, subject, body and attachment; the invoice status is unchanged and an outbound communication record is written.",
+  requiredPermission: "crm.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.invoices", "crm.payments", "crm.clients", "connector_sources", "connector_credentials", "gmail.messages", "crm.communication_records"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "RECIPIENT_REQUIRED", "GMAIL_NOT_CONFIGURED", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_AUTHORIZATION_REQUIRED", "AMBIGUOUS_GMAIL_SOURCE", "CONFIRMATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "INVOICE_NOT_FOUND", "INVOICE_NOT_ISSUED"],
+};
+
+export const UPDATE_NOTIFICATION_THRESHOLDS_ACTION: ActionContract = {
+  actionName: "update_notification_thresholds",
+  purpose:
+    "Change the company's day thresholds for computed attention items (quote expiry warning window, stale lead age, stuck job age, resource readiness lead time) within bounded ranges; defaults stay the fixed documented values and every change is audited with before/after values.",
+  requiredPermission: "company.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "company.settings"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
+};
+
+export const UNMERGE_CLIENTS_ACTION: ActionContract = {
+  actionName: "unmerge_clients",
+  purpose:
+    "Reverse one recorded client merge: move back only the records that merge re-pointed and that still belong to the primary client, restore the duplicate's previous active state, and report anything that could not be restored — always previewed before anything changes.",
+  requiredPermission: "crm.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.client_merge_records", "crm.clients", "crm.jobs", "crm.quotes", "crm.invoices", "crm.communication_records", "crm.communication_intakes", "crm.portfolio_photos", "crm.contacts", "crm.documents", "crm.tasks"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "MERGE_RECORD_NOT_FOUND", "MERGE_ALREADY_REVERSED", "CLIENT_NOT_FOUND", "CONFIRMATION_REQUIRED"],
 };
 
 // Portfolio and Photo Intelligence Module — the manual-entry foundation of a

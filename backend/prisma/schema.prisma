@@ -1,4 +1,4 @@
-// Secretary Core data model — VCUF backend
+// Secretary Core data model — VCUBF backend
 // Every table belongs to a company (multi-tenant from day one).
 
 generator client {
@@ -19,6 +19,9 @@ model Company {
   emmaBehaviorScenario String? @map("emma_behavior_scenario")
   emmaBehaviorEnabled Boolean @default(false) @map("emma_behavior_enabled")
   emmaBehaviorUpdatedAt DateTime? @map("emma_behavior_updated_at")
+  // Notification and Escalation Module — per-company overrides of the fixed
+  // default thresholds (see notificationThresholdService). null = defaults.
+  notificationThresholds Json? @map("notification_thresholds")
   createdAt          DateTime  @default(now()) @map("created_at")
 
   primaryAdministrator User? @relation("CompanyPrimaryAdministrator", fields: [primaryAdminUserId], references: [id], onDelete: SetNull)
@@ -52,6 +55,7 @@ model Company {
   communicationRecords         CommunicationRecord[]
   communicationIntakes         CommunicationIntake[]
   notificationAcknowledgements NotificationAcknowledgement[]
+  clientMergeRecords           ClientMergeRecord[]
   portfolioPhotos              PortfolioPhoto[]
   photoServiceSelections       PhotoServiceSelection[]
   businessContextItems         BusinessContextItem[]
@@ -66,6 +70,8 @@ model Company {
   voicePendingActions          VoicePendingAction[]
   assistantMemories            AssistantMemory[]
   passwordResetTokens          PasswordResetToken[]
+  voiceMacros                  VoiceMacro[]
+  voiceMacroNames              VoiceMacroName[]
 
   @@map("companies")
 }
@@ -162,7 +168,13 @@ model User {
   displayName         String   @map("display_name")
   role                String   @default("worker")
   permissions         String[]
-  voiceWakeWord       String   @default("Emma") @map("voice_wake_word")
+  // What she is called, shown throughout the interface. Separate from the
+  // hotword: she can be named Petra and answer to "hej sekretarko".
+  assistantName       String   @default("Emma") @map("assistant_name")
+  // How fast she speaks, as a multiplier of the voice's natural pace.
+  // 1.15 by default: at 1.0 short confirmations come across as sleepy.
+  voiceSpeechRate     Float    @default(1.15) @map("voice_speech_rate")
+  voiceWakeWord       String   @default("Hej Emma") @map("voice_wake_word")
   voiceContinuous     Boolean  @default(false) @map("voice_continuous")
   voiceLanguage       String   @default("en-GB") @map("voice_language")
   // Job Allocation and Capacity Management Module — real capacity inputs.
@@ -171,6 +183,12 @@ model User {
   skills              String[] @default([])
   weeklyCapacityHours Int      @default(40) @map("weekly_capacity_hours")
   isActive            Boolean  @default(true) @map("is_active")
+  // Notification digest — opt-in per user. The digest is only ever sent to
+  // this user's own account email, never to a typed-in address, and only
+  // when the company has an authorised Gmail source that may send.
+  digestEnabled       Boolean  @default(false) @map("digest_enabled")
+  digestHourUtc       Int      @default(7) @map("digest_hour_utc")
+  digestLastSentAt    DateTime? @map("digest_last_sent_at")
   createdAt           DateTime @default(now()) @map("created_at")
 
   company       Company    @relation(fields: [companyId], references: [id])
@@ -958,6 +976,11 @@ model LearningRule {
   aliasFor  String?  @map("alias_for")
   category  String?
   status    String   @default("active")
+  // Voice learning: a spoken phrase is only trusted once it has been heard
+  // this many times identically, so a single misrecognition never becomes a
+  // permanent alias. Rules created by hand start already confirmed.
+  confirmations Int   @default(0)
+  lastHeardAt DateTime? @map("last_heard_at")
   createdBy String?  @map("created_by")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -969,7 +992,7 @@ model LearningRule {
 }
 
 // Communication Log Module — the manual-entry foundation of the
-// Communication Intelligence Module. See VCUF master documentation and the
+// Communication Intelligence Module. See VCUBF master documentation and the
 // vcubf-programmer-skill CRM rule: a communication must never live only in
 // an external inbox/chat app — it belongs on the CRM record it relates to.
 // Automated extraction from email/WhatsApp/SMS connectors is out of scope
@@ -1116,8 +1139,36 @@ model NotificationAcknowledgement {
   @@map("notification_acknowledgements")
 }
 
+// Data Quality Engine — one row per confirmed merge_clients execution. It
+// stores the exact record ids that were re-pointed from the duplicate to the
+// primary, so unmerge_clients can reverse precisely that merge and nothing
+// else: records linked to the primary later, or moved elsewhere since, are
+// never touched. The archived duplicate's previous isActive value is kept so
+// un-merging restores it faithfully instead of assuming "active".
+model ClientMergeRecord {
+  id                 String    @id @default(uuid())
+  companyId          String    @map("company_id")
+  primaryClientId    String    @map("primary_client_id")
+  duplicateClientId  String    @map("duplicate_client_id")
+  relinkedRecordIds  Json      @map("relinked_record_ids")
+  duplicateWasActive Boolean   @map("duplicate_was_active")
+  mergeStatus        String    @default("merged") @map("merge_status")
+  mergedBy           String?   @map("merged_by")
+  mergedAt           DateTime  @default(now()) @map("merged_at")
+  unmergedBy         String?   @map("unmerged_by")
+  unmergedAt         DateTime? @map("unmerged_at")
+  unmergeSummary     Json?     @map("unmerge_summary")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+  @@index([companyId, primaryClientId])
+  @@index([companyId, duplicateClientId])
+  @@map("client_merge_records")
+}
+
 // Portfolio and Photo Intelligence Module — the manual-entry foundation of a
-// future automated photo-selection/website-publishing workflow. See VCUF
+// future automated photo-selection/website-publishing workflow. See VCUBF
 // master documentation and the vcubf-programmer-skill "Photo and portfolio
 // rule": every selected photograph must have a source, an optional link to
 // the client/job it relates to, and an explicit public-use status. This
@@ -1368,4 +1419,53 @@ model AuditLog {
 
   @@index([companyId, createdAt])
   @@map("audit_log")
+}
+
+/// A command the user taught by doing it: the recorded clicks and typing,
+/// with the words they say to run it again.
+model VoiceMacro {
+  id          String   @id @default(uuid())
+  companyId   String   @map("company_id")
+  createdBy   String   @map("created_by")
+  /// Hash of the sequence of steps, ignoring typed values. Two recordings of
+  /// the same flow with different text are the same command, and must not
+  /// become two macros with different names.
+  fingerprint String
+  /// The steps themselves, in order, with their targets and any typed value.
+  steps       Json
+  /// How many steps: kept out of the JSON so a list can be shown without
+  /// parsing every recording.
+  stepCount   Int      @map("step_count")
+  status      String   @default("active")
+  lastRunAt   DateTime? @map("last_run_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  names   VoiceMacroName[]
+
+  @@unique([companyId, fingerprint])
+  @@index([companyId, status])
+  @@map("voice_macros")
+}
+
+/// Something the user says to run a learned command. A command may have
+/// several; a phrase belongs to exactly one command.
+model VoiceMacroName {
+  id        String   @id @default(uuid())
+  companyId String   @map("company_id")
+  macroId   String   @map("macro_id")
+  /// Diacritics- and punctuation-insensitive, so "Nová zakázka" and "nova
+  /// zakazka" are the same phrase.
+  term      String
+  /// As it was actually said, for reading back to the user.
+  spoken    String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  macro   VoiceMacro @relation(fields: [macroId], references: [id], onDelete: Cascade)
+  company Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, term])
+  @@index([macroId])
+  @@map("voice_macro_names")
 }

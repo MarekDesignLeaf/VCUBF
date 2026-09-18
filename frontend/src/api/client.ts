@@ -58,6 +58,10 @@ export interface LoginResponse {
     permissions: string[];
     mustChangePassword: boolean;
     voiceWakeWord: string;
+    /** What the secretary is called; the hotword is a separate setting. */
+    assistantName: string;
+    /** Speaking speed as a multiplier of the voice's natural pace. */
+    voiceSpeechRate: number;
     voiceContinuous: boolean;
     voiceLanguage: AppLanguage;
   };
@@ -65,6 +69,23 @@ export interface LoginResponse {
 
 export interface SetupStatus { setupRequired: boolean; }
 export interface LocalTestUser { id: string; displayName: string; role: string; voiceLanguage: AppLanguage; }
+// Notification thresholds — per-company overrides of the fixed day
+// thresholds behind the computed attention feed. See
+// backend/src/services/notificationThresholdService.ts.
+export interface NotificationThresholds {
+  quoteExpiryWarningDays: number;
+  staleLeadDays: number;
+  stuckJobDays: number;
+  resourceReadinessDays: number;
+}
+
+export interface NotificationThresholdsView {
+  thresholds: NotificationThresholds;
+  defaults: NotificationThresholds;
+  isDefault: boolean;
+  limits: Record<keyof NotificationThresholds, { min: number; max: number }>;
+}
+
 export interface CompanyProfile {
   id: string;
   name: string;
@@ -89,13 +110,15 @@ export interface EmmaCapabilityPolicyItem {
   voiceActions?: string[];
   executionClass?: "voice" | "interactive" | "system" | "superseded";
   executionNote?: string;
+  availableToEmma?: boolean;
   enabled: boolean;
 }
 export interface EmmaPolicy {
-  summary: { pages: number; actions: number; commands: number };
+  summary: { pages: number; actions: number; commands: number; available: number; unavailable: number };
   capabilities: EmmaCapabilityPolicyItem[];
 }
-export interface Invoice { id:string; invoiceNumber:string; title:string; invoiceStatus:string; dueDate?:string|null; isOverdue:boolean; client:{id:string;displayName:string}; totals:{total:number;paid:number;balance:number}; }
+export interface InvoiceItem { id?:string; description:string; quantity:number; unitPrice:number; }
+export interface Invoice { id:string; invoiceNumber:string; title:string; invoiceStatus:string; issueDate?:string|null; dueDate?:string|null; notes?:string|null; isOverdue:boolean; client:{id:string;displayName:string}; items?:InvoiceItem[]; totals:{total:number;paid:number;balance:number}; }
 
 export interface Client {
   id: string;
@@ -336,6 +359,7 @@ export interface ConnectorSyncResult {
   fallbackFromExpiredHistory: boolean;
   fallbackFromExpiredSyncToken?: boolean;
   importedCount: number;
+  removedCount?: number;
   skippedCount: number;
   importedIntakeIds: string[];
   upsertedCount?: number;
@@ -627,6 +651,43 @@ export interface Quote {
   job?: { id: string; jobTitle: string } | null;
 }
 
+// Document delivery — send_quote_pdf / send_invoice_pdf (risk 3,
+// confirmation-gated). A call without confirmed:true throws ApiError
+// CONFIRMATION_REQUIRED carrying this preview; confirmed:true sends.
+export interface SendDocumentInput {
+  source_id?: string;
+  to?: string[];
+  cc?: string[];
+  subject?: string;
+  body?: string;
+  follow_up_due_at?: string;
+  confirmed?: boolean;
+}
+
+export interface SendDocumentPreview {
+  document: { kind: "quote" | "invoice"; id: string; reference: string; client: { id: string; label: string } };
+  source: { id: string; displayName: string };
+  to: string[];
+  cc: string[];
+  subject: string;
+  body: string;
+  attachment: { filename: string; contentType: string; bytes: number };
+  statusChange: { from: string; to: string } | null;
+  communicationRecordWillBeCreated: boolean;
+  followUpDueAt: string | null;
+}
+
+export interface SendDocumentResult {
+  sourceId: string;
+  messageId: string;
+  threadId: string | null;
+  sentAt: string;
+  document: SendDocumentPreview["document"];
+  to: string[];
+  statusChange: { from: string; to: string } | null;
+  communicationRecordId: string;
+}
+
 export interface MetricsOverview {
   period: { from: string; to: string; days: number };
   comparisonPeriod: { from: string; to: string };
@@ -644,6 +705,14 @@ export interface MetricsOverview {
   jobs: { acceptedCount: number; completedCount: number; cancelledCount: number; lostDueToAvailability: { available: false; value: null; reason: string } };
   revenueByService: { rows: { serviceId: string; serviceName: string; acceptedValueGbp: number; lineCount: number; linesWithKnownCost: number; costKnown: boolean; marginGbp: number | null; marginPct: number | null }[]; unlinkedAcceptedValueGbp: number; basis: string };
   capacity: { available: true; weekStart: string | null; weekEnd: string | null; loadHours: number; capacityHours: number; utilizationPct: number | null; overloadedEmployees: number; missingEstimates: number } | { available: false; value: null; reason: string };
+  invoicing: {
+    issued: { count: { current: number; previous: number; delta: number }; valueGbp: { current: number; previous: number } };
+    paymentsReceived: { count: { current: number; previous: number; delta: number }; valueGbp: { current: number; previous: number } };
+    outstanding: { asOf: string; count: number; balanceGbp: number; overdueCount: number; overdueBalanceGbp: number; withoutDueDateCount: number };
+    averageDaysToSettle: number | null;
+    settledInvoiceCount: number;
+    basis: string;
+  };
   unavailableMetrics: Record<string, string>;
   recommendations: { severity: "info" | "warning"; title: string; evidence: string; action: string }[];
 }
@@ -1027,6 +1096,33 @@ export interface MissingContactIssue {
   detail: string;
 }
 
+// Daily notification digest — opt-in per user; the digest is only ever sent
+// to that user's own account email. See
+// backend/src/services/notificationDigestService.ts.
+export interface DigestPreferences {
+  enabled: boolean;
+  hourUtc: number;
+  recipient: string;
+  lastSentAt: string | null;
+}
+
+export interface DigestPreview {
+  to: string[];
+  source: { id: string; displayName: string };
+  subject: string;
+  body: string;
+  itemCount: number;
+  urgentCount: number;
+}
+
+export interface DigestSendResult {
+  messageId: string;
+  sentAt: string;
+  itemCount: number;
+  urgentCount: number;
+  to: string[];
+}
+
 export interface DataQualityReport {
   duplicateClientGroups: DuplicateClientGroup[];
   missingContactIssues: MissingContactIssue[];
@@ -1041,33 +1137,55 @@ export interface MergeClientsPreview {
   primaryClientLabel: string;
   duplicateClientId: string;
   duplicateClientLabel: string;
-  recordsToRelink: {
-    jobs: number;
-    quotes: number;
-    communicationRecords: number;
-    communicationIntakes: number;
-    portfolioPhotos: number;
-    contacts: number;
-    documentRecords: number;
-    tasks: number;
-  };
+  recordsToRelink: ClientLinkedRecordCounts;
   duplicateWillBeArchived: boolean;
+  reversible: boolean;
 }
 
+export type ClientLinkedRecordCounts = Record<"jobs" | "quotes" | "invoices" | "communicationRecords" | "communicationIntakes" | "portfolioPhotos" | "contacts" | "documentRecords" | "tasks", number>;
+
 export interface MergeClientsResult {
+  mergeRecordId: string;
   primaryClientId: string;
   duplicateClientId: string;
-  relinked: {
-    jobs: number;
-    quotes: number;
-    communicationRecords: number;
-    communicationIntakes: number;
-    portfolioPhotos: number;
-    contacts: number;
-    documentRecords: number;
-    tasks: number;
-  };
+  relinked: ClientLinkedRecordCounts;
   duplicateClient: { id: string; isActive: boolean };
+}
+
+// Merge history and unmerge_clients (confirmation-gated, risk 3) — see
+// backend/src/services/dataQualityService.ts. Reversal moves back only the
+// records the recorded merge re-pointed and that still belong to the primary.
+export interface ClientMergeRecordSummary {
+  id: string;
+  mergeStatus: "merged" | "unmerged";
+  mergedAt: string;
+  unmergedAt: string | null;
+  primaryClient: { id: string; label: string | null; isActive: boolean | null };
+  duplicateClient: { id: string; label: string | null; isActive: boolean | null };
+  relinkedCounts: ClientLinkedRecordCounts;
+  duplicateWasActive: boolean;
+  unmergeSummary: { restored: ClientLinkedRecordCounts; skipped: ClientLinkedRecordCounts; duplicateIsActive: boolean } | null;
+}
+
+export interface UnmergeClientsPreview {
+  mergeRecordId: string;
+  mergedAt: string;
+  primaryClientId: string;
+  primaryClientLabel: string;
+  duplicateClientId: string;
+  duplicateClientLabel: string;
+  recordsToRestore: ClientLinkedRecordCounts;
+  recordsNoLongerLinked: ClientLinkedRecordCounts;
+  duplicateWillBeReactivated: boolean;
+}
+
+export interface UnmergeClientsResult {
+  mergeRecordId: string;
+  primaryClientId: string;
+  duplicateClientId: string;
+  restored: ClientLinkedRecordCounts;
+  skipped: ClientLinkedRecordCounts;
+  duplicateIsActive: boolean;
 }
 
 // Memory Model — Pattern Detection (read-only). See
@@ -1530,8 +1648,55 @@ export interface SecretaryNavigationCatalogue {
   sections: SecretaryNavigationSection[];
 }
 
+export type VoiceAliasCategory = "wake_word" | "voice_command";
+
+/** A phrase the recogniser produces, mapped onto what the user actually meant. */
+export interface VoiceAlias {
+  id: string;
+  term: string;
+  aliasFor: string | null;
+  category: string | null;
+  status: string;
+  confirmations: number;
+  lastHeardAt: string | null;
+}
+
+export interface MacroStepPayload {
+  kind: "click" | "type" | "select" | "check" | "navigate" | "submit";
+  target: string;
+  label?: string;
+  value?: string;
+  path?: string;
+}
+
+/** A command the user taught by performing it. */
+export interface LearnedCommand {
+  id: string;
+  stepCount: number;
+  status: string;
+  lastRunAt: string | null;
+  createdAt: string;
+  names: { spoken: string }[];
+}
+
+export interface MatchedMacro {
+  id: string;
+  steps: MacroStepPayload[];
+  matchedName: string;
+  names: string[];
+}
+
+export interface SaveMacroOutcome {
+  macroId: string;
+  /** True when this recording existed already and the names were added to it. */
+  alreadyKnown: boolean;
+  existingNames: string[];
+  addedNames: string[];
+  takenNames: { name: string; usedBy: string }[];
+}
+
 export const api = {
-  invoices: { list:()=>request<Invoice[]>("/invoices"), create:(data:Record<string,unknown>)=>request<Invoice>("/invoices",{method:"POST",body:JSON.stringify(data)}), status:(id:string,invoice_status:string)=>request<Invoice>(`/invoices/${id}/status`,{method:"PUT",body:JSON.stringify({invoice_status})}), payment:(id:string,data:Record<string,unknown>,confirmed=false)=>request<Invoice>(`/invoices/${id}/payments`,{method:"POST",body:JSON.stringify({...data,confirmed})}), downloadPdf:(id:string)=>download(`/invoices/${id}/pdf`) },
+  invoices: { list:()=>request<Invoice[]>("/invoices"), create:(data:Record<string,unknown>)=>request<Invoice>("/invoices",{method:"POST",body:JSON.stringify(data)}), update:(id:string,data:Record<string,unknown>)=>request<Invoice>(`/invoices/${id}`,{method:"PUT",body:JSON.stringify(data)}), status:(id:string,invoice_status:string)=>request<Invoice>(`/invoices/${id}/status`,{method:"PUT",body:JSON.stringify({invoice_status})}), payment:(id:string,data:Record<string,unknown>,confirmed=false)=>request<Invoice>(`/invoices/${id}/payments`,{method:"POST",body:JSON.stringify({...data,confirmed})}), downloadPdf:(id:string)=>download(`/invoices/${id}/pdf`), sendEmail:(id:string,input:SendDocumentInput)=>request<SendDocumentResult>(`/invoices/${id}/send-email`,{method:"POST",body:JSON.stringify(input)}) },
   metrics: {
     overview: (params?: { from?: string; to?: string }) => {
       const qs = new URLSearchParams();
@@ -1544,6 +1709,8 @@ export const api = {
     request<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   desktopLogin: (bootstrapToken: string) =>
     request<LoginResponse>("/auth/desktop-login", { method: "POST", body: JSON.stringify({ bootstrap_token: bootstrapToken }) }),
+  /** Local development only; the backend serves this to 127.0.0.1 alone. */
+  localTestActiveSession: () => request<LoginResponse>("/auth/local-test-active-session"),
   localTestUsers: () => request<LocalTestUser[]>("/auth/local-test-users"),
   localTestLogin: (userId: string) =>
     request<LoginResponse>("/auth/local-test-login", { method: "POST", body: JSON.stringify({ user_id: userId }) }),
@@ -1559,6 +1726,16 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ disabled_capabilities: disabledCapabilities }),
     }),
+    notificationThresholds: () => request<NotificationThresholdsView>("/company/notification-thresholds"),
+    updateNotificationThresholds: (thresholds: NotificationThresholds) => request<NotificationThresholdsView>("/company/notification-thresholds", {
+      method: "PUT",
+      body: JSON.stringify({
+        quote_expiry_warning_days: thresholds.quoteExpiryWarningDays,
+        stale_lead_days: thresholds.staleLeadDays,
+        stuck_job_days: thresholds.stuckJobDays,
+        resource_readiness_days: thresholds.resourceReadinessDays,
+      }),
+    }),
   },
   changePassword: (currentPassword: string, newPassword: string) =>
     request<void>("/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
@@ -1566,8 +1743,10 @@ export const api = {
     request<{ message: string }>("/auth/request-password-reset", { method: "POST", body: JSON.stringify({ email }) }),
   resetPassword: (token: string, newPassword: string) =>
     request<void>("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, new_password: newPassword }) }),
-  updateVoicePreferences: (wakeWord: string, continuousListening: boolean, language: AppLanguage) =>
-    request<Pick<LoginResponse["user"], "voiceWakeWord" | "voiceContinuous" | "voiceLanguage">>("/auth/voice-preferences", { method: "PUT", body: JSON.stringify({ wake_word: wakeWord, continuous_listening: continuousListening, language }) }),
+  // The name and the speaking speed are optional: a caller that only changes
+  // the hotword must not reset them.
+  updateVoicePreferences: (wakeWord: string, continuousListening: boolean, language: AppLanguage, assistantName?: string, speechRate?: number) =>
+    request<Pick<LoginResponse["user"], "voiceWakeWord" | "voiceContinuous" | "voiceLanguage" | "assistantName" | "voiceSpeechRate">>("/auth/voice-preferences", { method: "PUT", body: JSON.stringify({ wake_word: wakeWord, continuous_listening: continuousListening, language, assistant_name: assistantName, speech_rate: speechRate }) }),
   approveDevicePairing: (code: string) => request<{status:string;expires_at:string}>("/auth/device/approve", { method: "POST", body: JSON.stringify({ code }) }),
   clients: {
     list: () => request<Client[]>("/crm/clients"),
@@ -1823,6 +2002,8 @@ export const api = {
     ) => request<Quote>(`/quotes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     changeStatus: (id: string, quoteStatus: QuoteStatus) =>
       request<Quote>(`/quotes/${id}/status`, { method: "PUT", body: JSON.stringify({ quote_status: quoteStatus }) }),
+    sendEmail: (id: string, input: SendDocumentInput) =>
+      request<SendDocumentResult>(`/quotes/${id}/send-email`, { method: "POST", body: JSON.stringify(input) }),
   },
   recruitment: {
     capacityRecommendation: (weeksAhead = 6, minimumRepeatedWeeks = 2) =>
@@ -1881,6 +2062,8 @@ export const api = {
     get: (id: string) => request<Lead>(`/crm/leads/${id}`),
     create: (data: Record<string, unknown>) =>
       request<Lead>("/crm/leads", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Record<string, unknown>) =>
+      request<Lead>(`/crm/leads/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     convert: (id: string) =>
       request<{ lead: Lead; client: Client }>(`/crm/leads/${id}/convert`, { method: "POST" }),
   },
@@ -1963,6 +2146,11 @@ export const api = {
       ),
     unacknowledge: (notificationKey: string) =>
       request<unknown>(`/notifications/${encodeURIComponent(notificationKey)}/unacknowledge`, { method: "POST" }),
+    digestPreferences: () => request<DigestPreferences>("/notifications/digest/preferences"),
+    updateDigestPreferences: (enabled: boolean, hourUtc: number) =>
+      request<DigestPreferences>("/notifications/digest/preferences", { method: "PUT", body: JSON.stringify({ enabled, hour_utc: hourUtc }) }),
+    sendDigest: (confirmed: boolean) =>
+      request<DigestSendResult>("/notifications/digest/send", { method: "POST", body: JSON.stringify({ confirmed }) }),
   },
   dataQuality: {
     report: () => request<DataQualityReport>("/data-quality"),
@@ -1978,6 +2166,12 @@ export const api = {
           duplicate_client_id: duplicateClientId,
           confirmed,
         }),
+      }),
+    merges: () => request<{ merges: ClientMergeRecordSummary[] }>("/data-quality/merges"),
+    unmergeClients: (mergeRecordId: string, confirmed: boolean) =>
+      request<UnmergeClientsResult>("/data-quality/unmerge-clients", {
+        method: "POST",
+        body: JSON.stringify({ merge_record_id: mergeRecordId, confirmed }),
       }),
   },
   memoryModel: {
@@ -2069,6 +2263,36 @@ export const api = {
       }),
   },
   command: {
+    macros: {
+      list: () => request<{ macros: LearnedCommand[] }>("/command/macros"),
+      /** Saves a recording; reports whether it was already known. */
+      save: (steps: MacroStepPayload[], names: string[]) =>
+        request<SaveMacroOutcome>("/command/macros", {
+          method: "POST",
+          body: JSON.stringify({ steps, names }),
+        }),
+      match: (phrase: string) =>
+        request<{ macro: MatchedMacro | null }>(`/command/macros/match?phrase=${encodeURIComponent(phrase)}`),
+      ran: (id: string) => request<{ ok: boolean }>(`/command/macros/${id}/ran`, { method: "POST" }),
+      remove: (id: string) => request<{ ok: boolean }>(`/command/macros/${id}`, { method: "DELETE" }),
+    },
+    aliases: {
+      list: () =>
+        request<{ aliases: VoiceAlias[]; required: number }>("/command/aliases"),
+      add: (heard: string, means: string, category: VoiceAliasCategory) =>
+        request<{ alias: VoiceAlias }>("/command/aliases", {
+          method: "POST",
+          body: JSON.stringify({ heard, means, category, immediate: true }),
+        }),
+      /** One hearing of a phrase. Three identical ones activate it. */
+      learn: (heard: string, means: string, category: VoiceAliasCategory) =>
+        request<{ status: "learning" | "active"; confirmations: number; required: number }>(
+          "/command/aliases/learn",
+          { method: "POST", body: JSON.stringify({ heard, means, category }) },
+        ),
+      remove: (id: string) =>
+        request<{ ok: boolean }>(`/command/aliases/${id}`, { method: "DELETE" }),
+    },
     text: (text: string, inputMethod: "text" | "voice_transcript" = "text") =>
       request<{
         intent: string;
