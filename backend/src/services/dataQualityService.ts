@@ -1,7 +1,8 @@
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
-import { MERGE_CLIENTS_ACTION } from "../lib/actionContracts.js";
+import { MERGE_CLIENTS_ACTION, UNMERGE_CLIENTS_ACTION } from "../lib/actionContracts.js";
 import { normalizeEmail, normalizeName, normalizePhone } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
@@ -236,29 +237,56 @@ export const mergeClientsSchema = z.object({
   confirmed: z.boolean().optional(),
 });
 
-interface MergeCounts {
-  jobs: number;
-  quotes: number;
-  communicationRecords: number;
-  communicationIntakes: number;
-  portfolioPhotos: number;
-  contacts: number;
-  documentRecords: number;
-  tasks: number;
+// Every client-linked record type the merge re-points. Adding a type here is
+// the only change needed for both merge and un-merge to cover it: the
+// snapshot, the preview counts and the reversal all iterate this list.
+const CLIENT_LINKED_RECORDS = {
+  jobs: "job",
+  quotes: "quote",
+  invoices: "invoice",
+  communicationRecords: "communicationRecord",
+  communicationIntakes: "communicationIntake",
+  portfolioPhotos: "portfolioPhoto",
+  contacts: "contact",
+  documentRecords: "documentRecord",
+  tasks: "task",
+} as const;
+const CLIENT_LINKED_RECORD_TYPES = Object.keys(CLIENT_LINKED_RECORDS) as ClientLinkedRecordType[];
+type ClientLinkedRecordType = keyof typeof CLIENT_LINKED_RECORDS;
+type MergeCounts = Record<ClientLinkedRecordType, number>;
+type RelinkedRecordIds = Record<ClientLinkedRecordType, string[]>;
+
+type ClientLinkedWhere = { companyId: string; clientId: string; id?: { in: string[] } };
+type ClientLinkedDelegate = {
+  findMany(args: { where: ClientLinkedWhere; select: { id: true } }): Promise<{ id: string }[]>;
+  updateMany(args: { where: ClientLinkedWhere; data: { clientId: string } }): Promise<{ count: number }>;
+};
+type ClientLinkedClient = Prisma.TransactionClient | typeof prisma;
+
+function delegateFor(client: ClientLinkedClient, type: ClientLinkedRecordType): ClientLinkedDelegate {
+  // Every listed model exposes companyId + clientId, so the same narrow
+  // findMany/updateMany shape applies to each one.
+  return (client as unknown as Record<string, ClientLinkedDelegate>)[CLIENT_LINKED_RECORDS[type]];
 }
 
 async function countDuplicateLinkedRecords(companyId: string, duplicateClientId: string): Promise<MergeCounts> {
-  const [jobs, quotes, communicationRecords, communicationIntakes, portfolioPhotos, contacts, documentRecords, tasks] = await Promise.all([
-    prisma.job.count({ where: { companyId, clientId: duplicateClientId } }),
-    prisma.quote.count({ where: { companyId, clientId: duplicateClientId } }),
-    prisma.communicationRecord.count({ where: { companyId, clientId: duplicateClientId } }),
-    prisma.communicationIntake.count({ where: { companyId, clientId: duplicateClientId } }),
-    prisma.portfolioPhoto.count({ where: { companyId, clientId: duplicateClientId } }),
-    prisma.contact.count({ where: { companyId, clientId: duplicateClientId } }),
-    prisma.documentRecord.count({ where: { companyId, clientId: duplicateClientId } }),
-    prisma.task.count({ where: { companyId, clientId: duplicateClientId } }),
-  ]);
-  return { jobs, quotes, communicationRecords, communicationIntakes, portfolioPhotos, contacts, documentRecords, tasks };
+  const entries = await Promise.all(CLIENT_LINKED_RECORD_TYPES.map(async (type) => {
+    const rows = await delegateFor(prisma, type).findMany({ where: { companyId, clientId: duplicateClientId }, select: { id: true } });
+    return [type, rows.length] as const;
+  }));
+  return Object.fromEntries(entries) as MergeCounts;
+}
+
+function emptyCounts(): MergeCounts {
+  return Object.fromEntries(CLIENT_LINKED_RECORD_TYPES.map((type) => [type, 0])) as MergeCounts;
+}
+
+function parseRelinkedIds(value: unknown): RelinkedRecordIds {
+  const source = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  return Object.fromEntries(CLIENT_LINKED_RECORD_TYPES.map((type) => {
+    const ids = Array.isArray(source[type]) ? (source[type] as unknown[]).filter((id): id is string => typeof id === "string") : [];
+    return [type, ids];
+  })) as RelinkedRecordIds;
 }
 
 export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
@@ -323,6 +351,7 @@ export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise
     duplicateClientLabel: duplicate.displayName,
     recordsToRelink: counts,
     duplicateWillBeArchived: true,
+    reversible: true,
   };
 
   if (!confirmed) {
@@ -340,65 +369,39 @@ export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise
     return fail(409, "CONFIRMATION_REQUIRED", "Review the preview and resubmit with confirmed: true.", { preview });
   }
 
-  // Single Prisma $transaction — every updateMany plus the duplicate's
-  // isActive flip either all succeed or all roll back together. There is no
-  // partial-merge state: a job either still points at the duplicate, or the
-  // whole merge (all supported client-linked record types + archive) has completed.
-  const [jobsRelinked, quotesRelinked, communicationRecordsRelinked, communicationIntakesRelinked, portfolioPhotosRelinked, contactsRelinked, documentRecordsRelinked, tasksRelinked, archivedDuplicate] =
-    await prisma.$transaction([
-      prisma.job.updateMany({
-        where: { companyId: user.companyId, clientId: duplicate.id },
-        data: { clientId: primary.id },
-      }),
-      prisma.quote.updateMany({
-        where: { companyId: user.companyId, clientId: duplicate.id },
-        data: { clientId: primary.id },
-      }),
-      prisma.communicationRecord.updateMany({
-        where: { companyId: user.companyId, clientId: duplicate.id },
-        data: { clientId: primary.id },
-      }),
-      prisma.communicationIntake.updateMany({
-        where: { companyId: user.companyId, clientId: duplicate.id },
-        data: { clientId: primary.id },
-      }),
-      prisma.portfolioPhoto.updateMany({
-        where: { companyId: user.companyId, clientId: duplicate.id },
-        data: { clientId: primary.id },
-      }),
-      prisma.contact.updateMany({
-        where: { companyId: user.companyId, clientId: duplicate.id },
-        data: { clientId: primary.id },
-      }),
-      prisma.documentRecord.updateMany({
-        where: { companyId: user.companyId, clientId: duplicate.id },
-        data: { clientId: primary.id },
-      }),
-      prisma.task.updateMany({
-        where: { companyId: user.companyId, clientId: duplicate.id },
-        data: { clientId: primary.id },
-      }),
-      prisma.client.update({
-        where: { id: duplicate.id },
-        data: { isActive: false },
-      }),
-    ]);
-
-  const result = {
-    primaryClientId: primary.id,
-    duplicateClientId: duplicate.id,
-    relinked: {
-      jobs: jobsRelinked.count,
-      quotes: quotesRelinked.count,
-      communicationRecords: communicationRecordsRelinked.count,
-      communicationIntakes: communicationIntakesRelinked.count,
-      portfolioPhotos: portfolioPhotosRelinked.count,
-      contacts: contactsRelinked.count,
-      documentRecords: documentRecordsRelinked.count,
-      tasks: tasksRelinked.count,
-    },
-    duplicateClient: { id: archivedDuplicate.id, isActive: archivedDuplicate.isActive },
-  };
+  // One interactive transaction: snapshot the exact ids that still point at
+  // the duplicate, re-point them, archive the duplicate and write the merge
+  // record. Either everything commits or nothing does — there is no
+  // partial-merge state and no merge without its reversal record.
+  const result = await prisma.$transaction(async (tx) => {
+    const relinkedIds = {} as RelinkedRecordIds;
+    const relinked = emptyCounts();
+    for (const type of CLIENT_LINKED_RECORD_TYPES) {
+      const rows = await delegateFor(tx, type).findMany({ where: { companyId: user.companyId, clientId: duplicate.id }, select: { id: true } });
+      relinkedIds[type] = rows.map((row) => row.id);
+      if (rows.length === 0) continue;
+      const updated = await delegateFor(tx, type).updateMany({ where: { id: { in: relinkedIds[type] }, companyId: user.companyId, clientId: duplicate.id }, data: { clientId: primary.id } });
+      relinked[type] = updated.count;
+    }
+    const archivedDuplicate = await tx.client.update({ where: { id: duplicate.id }, data: { isActive: false } });
+    const mergeRecord = await tx.clientMergeRecord.create({
+      data: {
+        companyId: user.companyId,
+        primaryClientId: primary.id,
+        duplicateClientId: duplicate.id,
+        relinkedRecordIds: relinkedIds,
+        duplicateWasActive: duplicate.isActive,
+        mergedBy: user.id,
+      },
+    });
+    return {
+      mergeRecordId: mergeRecord.id,
+      primaryClientId: primary.id,
+      duplicateClientId: duplicate.id,
+      relinked,
+      duplicateClient: { id: archivedDuplicate.id, isActive: archivedDuplicate.isActive },
+    };
+  });
 
   await recordAudit({
     companyId: user.companyId,
@@ -413,5 +416,133 @@ export async function mergeClients(user: AuthedUser, rawInput: unknown): Promise
     result: "success",
   });
 
+  return ok(200, result);
+}
+
+// ---------------------------------------------------------------------------
+// unmerge_clients — reverses exactly one recorded merge.
+// ---------------------------------------------------------------------------
+
+export const unmergeClientsSchema = z.object({
+  merge_record_id: z.string().min(1, "merge_record_id is required"),
+  confirmed: z.boolean().optional(),
+});
+
+/**
+ * Per record type: how many snapshotted ids still point at the primary (and
+ * will be moved back), and how many no longer do (deleted since, or moved to
+ * a third client) — those are reported and deliberately left alone.
+ */
+async function assessUnmerge(client: ClientLinkedClient, companyId: string, primaryClientId: string, relinkedIds: RelinkedRecordIds) {
+  const restorable = emptyCounts();
+  const noLongerLinked = emptyCounts();
+  for (const type of CLIENT_LINKED_RECORD_TYPES) {
+    const ids = relinkedIds[type];
+    if (ids.length === 0) continue;
+    const rows = await delegateFor(client, type).findMany({ where: { id: { in: ids }, companyId, clientId: primaryClientId }, select: { id: true } });
+    restorable[type] = rows.length;
+    noLongerLinked[type] = ids.length - rows.length;
+  }
+  return { restorable, noLongerLinked };
+}
+
+export async function listClientMerges(user: AuthedUser) {
+  const records = await prisma.clientMergeRecord.findMany({ where: { companyId: user.companyId }, orderBy: { mergedAt: "desc" } });
+  const clientIds = [...new Set(records.flatMap((record) => [record.primaryClientId, record.duplicateClientId]))];
+  const clients = clientIds.length
+    ? await prisma.client.findMany({ where: { companyId: user.companyId, id: { in: clientIds } }, select: { id: true, displayName: true, isActive: true } })
+    : [];
+  const byId = new Map(clients.map((client) => [client.id, client]));
+  return records.map((record) => {
+    const relinkedIds = parseRelinkedIds(record.relinkedRecordIds);
+    return {
+      id: record.id,
+      mergeStatus: record.mergeStatus,
+      mergedAt: record.mergedAt.toISOString(),
+      unmergedAt: record.unmergedAt?.toISOString() ?? null,
+      primaryClient: { id: record.primaryClientId, label: byId.get(record.primaryClientId)?.displayName ?? null, isActive: byId.get(record.primaryClientId)?.isActive ?? null },
+      duplicateClient: { id: record.duplicateClientId, label: byId.get(record.duplicateClientId)?.displayName ?? null, isActive: byId.get(record.duplicateClientId)?.isActive ?? null },
+      relinkedCounts: Object.fromEntries(CLIENT_LINKED_RECORD_TYPES.map((type) => [type, relinkedIds[type].length])) as MergeCounts,
+      duplicateWasActive: record.duplicateWasActive,
+      unmergeSummary: record.unmergeSummary,
+    };
+  });
+}
+
+export async function unmergeClients(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
+  const audit = (extra: Parameters<typeof recordAudit>[0] extends infer T ? Partial<T> : never) => recordAudit({
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: UNMERGE_CLIENTS_ACTION.actionName,
+    riskLevel: UNMERGE_CLIENTS_ACTION.riskLevel,
+    confirmationRequired: UNMERGE_CLIENTS_ACTION.confirmationRequired,
+    result: "error",
+    ...extra,
+  } as Parameters<typeof recordAudit>[0]);
+
+  const parsed = unmergeClientsSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    await audit({ inputPayload: rawInput, errorMessage: "VALIDATION_FAILED" });
+    return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  }
+  const { merge_record_id, confirmed } = parsed.data;
+
+  const record = await prisma.clientMergeRecord.findFirst({ where: { id: merge_record_id, companyId: user.companyId } });
+  if (!record) {
+    await audit({ inputPayload: parsed.data, errorMessage: "MERGE_RECORD_NOT_FOUND" });
+    return fail(404, "MERGE_RECORD_NOT_FOUND", "No merge with this id exists for your company.");
+  }
+  if (record.mergeStatus !== "merged") {
+    await audit({ inputPayload: parsed.data, errorMessage: "MERGE_ALREADY_REVERSED" });
+    return fail(409, "MERGE_ALREADY_REVERSED", "This merge has already been reversed.");
+  }
+
+  const [primary, duplicate] = await Promise.all([
+    prisma.client.findFirst({ where: { id: record.primaryClientId, companyId: user.companyId } }),
+    prisma.client.findFirst({ where: { id: record.duplicateClientId, companyId: user.companyId } }),
+  ]);
+  if (!primary || !duplicate) {
+    await audit({ inputPayload: parsed.data, errorMessage: "CLIENT_NOT_FOUND" });
+    return fail(404, "CLIENT_NOT_FOUND", "One of the merged clients no longer exists, so the merge cannot be reversed automatically.");
+  }
+
+  const relinkedIds = parseRelinkedIds(record.relinkedRecordIds);
+  const assessment = await assessUnmerge(prisma, user.companyId, primary.id, relinkedIds);
+  const preview = {
+    mergeRecordId: record.id,
+    mergedAt: record.mergedAt.toISOString(),
+    primaryClientId: primary.id,
+    primaryClientLabel: primary.displayName,
+    duplicateClientId: duplicate.id,
+    duplicateClientLabel: duplicate.displayName,
+    recordsToRestore: assessment.restorable,
+    recordsNoLongerLinked: assessment.noLongerLinked,
+    duplicateWillBeReactivated: record.duplicateWasActive,
+  };
+
+  if (!confirmed) {
+    await audit({ inputPayload: parsed.data, dataBefore: preview, errorMessage: "CONFIRMATION_REQUIRED" });
+    return fail(409, "CONFIRMATION_REQUIRED", "Review the preview and resubmit with confirmed: true.", { preview });
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const restored = emptyCounts();
+    const skipped = emptyCounts();
+    for (const type of CLIENT_LINKED_RECORD_TYPES) {
+      const ids = relinkedIds[type];
+      if (ids.length === 0) continue;
+      // Only ids from this merge's snapshot that still point at the primary
+      // move back. Anything linked to the primary independently is untouched.
+      const updated = await delegateFor(tx, type).updateMany({ where: { id: { in: ids }, companyId: user.companyId, clientId: primary.id }, data: { clientId: duplicate.id } });
+      restored[type] = updated.count;
+      skipped[type] = ids.length - updated.count;
+    }
+    const reactivated = await tx.client.update({ where: { id: duplicate.id }, data: { isActive: record.duplicateWasActive } });
+    const summary = { restored, skipped, duplicateIsActive: reactivated.isActive };
+    await tx.clientMergeRecord.update({ where: { id: record.id }, data: { mergeStatus: "unmerged", unmergedBy: user.id, unmergedAt: new Date(), unmergeSummary: summary } });
+    return { mergeRecordId: record.id, primaryClientId: primary.id, duplicateClientId: duplicate.id, ...summary };
+  });
+
+  await audit({ inputPayload: parsed.data, dataBefore: preview, dataAfter: result, confirmed: true, result: "success", errorMessage: undefined });
   return ok(200, result);
 }

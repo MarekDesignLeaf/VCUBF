@@ -182,6 +182,8 @@ describe("Data Quality Engine", () => {
     let contactId: string;
     let documentId: string;
     let taskId: string;
+    let invoiceId: string;
+    let mergeRecordId: string;
 
     let pairCounter = 0;
     async function createFreshPair() {
@@ -257,6 +259,10 @@ describe("Data Quality Engine", () => {
         data: { companyId: duplicate.companyId, clientId: duplicateId, title: "Duplicate client task" },
       });
       taskId = task.id;
+      const invoice = await prisma.invoice.create({
+        data: { companyId: duplicate.companyId, clientId: duplicateId, invoiceNumber: "MERGE-INV-1", title: "Invoice on duplicate", items: { create: [{ description: "Work", quantity: 1, unitPrice: 120 }] } },
+      });
+      invoiceId = invoice.id;
     });
 
     it("rejects merging without crm.manage permission (403)", async () => {
@@ -325,7 +331,10 @@ describe("Data Quality Engine", () => {
       assert.equal(res.body.preview.recordsToRelink.contacts, 1);
       assert.equal(res.body.preview.recordsToRelink.documentRecords, 1);
       assert.equal(res.body.preview.recordsToRelink.tasks, 1);
+      assert.equal(res.body.preview.recordsToRelink.invoices, 1);
       assert.equal(res.body.preview.duplicateWillBeArchived, true);
+      assert.equal(res.body.preview.reversible, true);
+      assert.equal(await prisma.clientMergeRecord.count(), 0, "a preview must not write a merge record");
 
       // Nothing actually changed yet.
       const jobRes = await request(app).get(`/crm/jobs/${jobId}`).set("Authorization", `Bearer ${adminToken}`);
@@ -355,7 +364,11 @@ describe("Data Quality Engine", () => {
       assert.equal(res.body.relinked.contacts, 1);
       assert.equal(res.body.relinked.documentRecords, 1);
       assert.equal(res.body.relinked.tasks, 1);
+      assert.equal(res.body.relinked.invoices, 1);
       assert.equal(res.body.duplicateClient.isActive, false);
+      assert.ok(res.body.mergeRecordId, "a confirmed merge returns its reversal record id");
+      mergeRecordId = res.body.mergeRecordId;
+      assert.equal((await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } })).clientId, primaryId);
 
       const jobRes = await request(app).get(`/crm/jobs/${jobId}`).set("Authorization", `Bearer ${adminToken}`);
       assert.equal(jobRes.body.clientId, primaryId);
@@ -424,6 +437,110 @@ describe("Data Quality Engine", () => {
       assert.equal(jobAfter.body.clientId, pair.duplicateId);
       const duplicateAfter = await prisma.client.findUnique({ where: { id: pair.duplicateId } });
       assert.equal(duplicateAfter!.isActive, true);
+    });
+  });
+
+  describe("unmerge_clients (confirmation-gated reversal)", () => {
+    let pair: { primaryId: string; duplicateId: string };
+    let movedJobId: string;
+    let ownJobId: string;
+    let laterJobId: string;
+    let recordId: string;
+
+    before(async () => {
+      const primaryRes = await request(app).post("/crm/clients").set("Authorization", `Bearer ${adminToken}`).send({ display_name: "Unmerge Primary", email_primary: "unmerge-primary@example.test" });
+      const duplicateRes = await request(app).post("/crm/clients").set("Authorization", `Bearer ${adminToken}`).send({ display_name: "Unmerge Duplicate", email_primary: "unmerge-duplicate@example.test" });
+      pair = { primaryId: primaryRes.body.id, duplicateId: duplicateRes.body.id };
+      movedJobId = (await request(app).post("/crm/jobs").set("Authorization", `Bearer ${adminToken}`).send({ client_id: pair.duplicateId, job_title: "Job that moves with the merge" })).body.id;
+      ownJobId = (await request(app).post("/crm/jobs").set("Authorization", `Bearer ${adminToken}`).send({ client_id: pair.primaryId, job_title: "Job that always belonged to the primary" })).body.id;
+      const merged = await request(app).post("/data-quality/merge-clients").set("Authorization", `Bearer ${adminToken}`).send({ primary_client_id: pair.primaryId, duplicate_client_id: pair.duplicateId, confirmed: true });
+      assert.equal(merged.status, 200);
+      recordId = merged.body.mergeRecordId;
+      // Created on the primary after the merge: must never move to the duplicate.
+      laterJobId = (await request(app).post("/crm/jobs").set("Authorization", `Bearer ${adminToken}`).send({ client_id: pair.primaryId, job_title: "Job created after the merge" })).body.id;
+    });
+
+    it("lists merge history with client labels and re-linked counts", async () => {
+      const res = await request(app).get("/data-quality/merges").set("Authorization", `Bearer ${adminToken}`);
+      assert.equal(res.status, 200);
+      const row = res.body.merges.find((m: any) => m.id === recordId);
+      assert.ok(row);
+      assert.equal(row.mergeStatus, "merged");
+      assert.equal(row.primaryClient.label, "Unmerge Primary");
+      assert.equal(row.duplicateClient.label, "Unmerge Duplicate");
+      assert.equal(row.duplicateClient.isActive, false);
+      assert.equal(row.relinkedCounts.jobs, 1);
+      assert.equal(row.duplicateWasActive, true);
+    });
+
+    it("rejects un-merging without crm.manage (403) and an unknown record (404)", async () => {
+      const forbidden = await request(app).post("/data-quality/unmerge-clients").set("Authorization", `Bearer ${workerToken}`).send({ merge_record_id: recordId, confirmed: true });
+      assert.equal(forbidden.status, 403);
+      const missing = await request(app).post("/data-quality/unmerge-clients").set("Authorization", `Bearer ${adminToken}`).send({ merge_record_id: "00000000-0000-0000-0000-000000000000" });
+      assert.equal(missing.status, 404);
+      assert.equal(missing.body.error, "MERGE_RECORD_NOT_FOUND");
+    });
+
+    it("without confirmed:true returns a preview that counts only this merge's records and changes nothing", async () => {
+      const res = await request(app).post("/data-quality/unmerge-clients").set("Authorization", `Bearer ${adminToken}`).send({ merge_record_id: recordId });
+      assert.equal(res.status, 409);
+      assert.equal(res.body.error, "CONFIRMATION_REQUIRED");
+      assert.equal(res.body.preview.recordsToRestore.jobs, 1, "only the job the merge moved counts, not the primary's own jobs");
+      assert.equal(res.body.preview.recordsNoLongerLinked.jobs, 0);
+      assert.equal(res.body.preview.duplicateWillBeReactivated, true);
+      assert.equal((await prisma.job.findUniqueOrThrow({ where: { id: movedJobId } })).clientId, pair.primaryId);
+      assert.equal((await prisma.client.findUniqueOrThrow({ where: { id: pair.duplicateId } })).isActive, false);
+    });
+
+    it("with confirmed:true moves back exactly the merged records, reactivates the duplicate and audits before/after", async () => {
+      const res = await request(app).post("/data-quality/unmerge-clients").set("Authorization", `Bearer ${adminToken}`).send({ merge_record_id: recordId, confirmed: true });
+      assert.equal(res.status, 200);
+      assert.equal(res.body.restored.jobs, 1);
+      assert.equal(res.body.skipped.jobs, 0);
+      assert.equal(res.body.duplicateIsActive, true);
+      assert.equal((await prisma.job.findUniqueOrThrow({ where: { id: movedJobId } })).clientId, pair.duplicateId, "the merged job returns to the duplicate");
+      assert.equal((await prisma.job.findUniqueOrThrow({ where: { id: ownJobId } })).clientId, pair.primaryId, "the primary's own job stays");
+      assert.equal((await prisma.job.findUniqueOrThrow({ where: { id: laterJobId } })).clientId, pair.primaryId, "a job created after the merge stays on the primary");
+      const record = await prisma.clientMergeRecord.findUniqueOrThrow({ where: { id: recordId } });
+      assert.equal(record.mergeStatus, "unmerged");
+      assert.ok(record.unmergedAt);
+      const audit = await prisma.auditLog.findFirst({ where: { actionName: "unmerge_clients", result: "success" }, orderBy: { createdAt: "desc" } });
+      assert.ok(audit);
+      assert.equal(audit!.confirmed, true);
+      assert.ok(audit!.dataBefore && audit!.dataAfter);
+    });
+
+    it("refuses to reverse the same merge twice", async () => {
+      const res = await request(app).post("/data-quality/unmerge-clients").set("Authorization", `Bearer ${adminToken}`).send({ merge_record_id: recordId, confirmed: true });
+      assert.equal(res.status, 409);
+      assert.equal(res.body.error, "MERGE_ALREADY_REVERSED");
+    });
+
+    it("skips (and reports) a merged record that was moved to a third client after the merge", async () => {
+      const third = (await request(app).post("/crm/clients").set("Authorization", `Bearer ${adminToken}`).send({ display_name: "Unmerge Third", email_primary: "unmerge-third@example.test" })).body.id;
+      const merged = await request(app).post("/data-quality/merge-clients").set("Authorization", `Bearer ${adminToken}`).send({ primary_client_id: pair.primaryId, duplicate_client_id: pair.duplicateId, confirmed: true });
+      assert.equal(merged.status, 200);
+      // Move the merged job on to a third client before reversing.
+      await prisma.job.update({ where: { id: movedJobId }, data: { clientId: third } });
+      const preview = await request(app).post("/data-quality/unmerge-clients").set("Authorization", `Bearer ${adminToken}`).send({ merge_record_id: merged.body.mergeRecordId });
+      assert.equal(preview.body.preview.recordsToRestore.jobs, 0);
+      assert.equal(preview.body.preview.recordsNoLongerLinked.jobs, 1);
+      const res = await request(app).post("/data-quality/unmerge-clients").set("Authorization", `Bearer ${adminToken}`).send({ merge_record_id: merged.body.mergeRecordId, confirmed: true });
+      assert.equal(res.status, 200);
+      assert.equal(res.body.restored.jobs, 0);
+      assert.equal(res.body.skipped.jobs, 1);
+      assert.equal((await prisma.job.findUniqueOrThrow({ where: { id: movedJobId } })).clientId, third, "a record moved elsewhere is never pulled back");
+    });
+
+    it("cross-tenant: company B cannot see or reverse company A's merge", async () => {
+      const companyB = await prisma.company.create({ data: { name: "Unmerge Co B" } });
+      const passwordHash = await bcrypt.hash("Password123!", 10);
+      await prisma.user.create({ data: { companyId: companyB.id, email: "unmerge-b@test.local", passwordHash, displayName: "B Admin", role: "admin", permissions: ["crm.read", "crm.manage"] } });
+      const login = await request(app).post("/auth/login").send({ email: "unmerge-b@test.local", password: "Password123!" });
+      const list = await request(app).get("/data-quality/merges").set("Authorization", `Bearer ${login.body.token}`);
+      assert.equal(list.body.merges.length, 0);
+      const res = await request(app).post("/data-quality/unmerge-clients").set("Authorization", `Bearer ${login.body.token}`).send({ merge_record_id: recordId, confirmed: true });
+      assert.equal(res.status, 404);
     });
   });
 });

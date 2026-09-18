@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
-import { ANALYZE_DATA_QUALITY_ACTION, MERGE_CLIENTS_ACTION } from "../../lib/actionContracts.js";
+import { ANALYZE_DATA_QUALITY_ACTION, MERGE_CLIENTS_ACTION, UNMERGE_CLIENTS_ACTION } from "../../lib/actionContracts.js";
 import * as dataQualityService from "../../services/dataQualityService.js";
 
 // Data Quality Engine — read-only analysis view. Duplicate/missing-contact
@@ -26,6 +26,25 @@ dataQualityRouter.post(
   requirePermission(MERGE_CLIENTS_ACTION.requiredPermission),
   async (req, res) => {
     const result = await dataQualityService.mergeClients(req.user!, req.body);
+    if (!result.ok) {
+      return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    }
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
+// Merge history — one row per confirmed merge_clients execution, with its
+// reversal state. Read-only; the same crm.read gate as the report itself.
+dataQualityRouter.get("/merges", requirePermission(ANALYZE_DATA_QUALITY_ACTION.requiredPermission), async (req, res) => {
+  res.json({ merges: await dataQualityService.listClientMerges(req.user!) });
+});
+
+// unmerge_clients — same 409 CONFIRMATION_REQUIRED preview pattern as merge.
+dataQualityRouter.post(
+  "/unmerge-clients",
+  requirePermission(UNMERGE_CLIENTS_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await dataQualityService.unmergeClients(req.user!, req.body);
     if (!result.ok) {
       return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     }

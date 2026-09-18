@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MergeHistory } from "../components/MergeHistory";
 import { Link } from "react-router-dom";
 import { api, ApiError, type DataQualityReport, type MergeClientsPreview } from "../api/client";
 
@@ -247,6 +248,8 @@ export function DataQuality() {
               </tbody>
             </table>
           )}
+
+          <MergeHistory refreshKey={mergeDone.size} onChanged={loadReport} />
 
           <h2 style={{ marginTop: 24 }}>Clients missing a contact method ({report.missingContactIssues.length})</h2>
           {report.missingContactIssues.length === 0 ? (
