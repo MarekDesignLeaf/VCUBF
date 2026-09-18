@@ -39,10 +39,12 @@ are discarded before that fallback, and transcript filters run before command
 interpretation. These guards reduce false commands; they do not guarantee that
 every background sound is rejected.
 
-In this committed baseline, `/command/transcribe` uses the configured OpenAI
-transcription model, defaulting to `gpt-4o-mini-transcribe`. It does not yet
-include the working-copy local transcription service, expanded vocabulary
-hints or explicit temperature setting. The companion also does not include
+Since commit `2e93974`, the backend transcription service defaults to
+`whisper-1`, requests `temperature: 0`, and supplies language-specific
+vocabulary hints with support for optional additional phrases. A configured
+`WHISPER_SERVER_URL` enables the local transcription adapter. These are
+source-verified settings, not proof of live provider accuracy or guaranteed
+bit-for-bit deterministic transcription. The companion still does not include
 the working-copy heartbeat, additional TTS fallback and expanded interruption
 changes. A deployed working copy can therefore differ from a clean checkout.
 
