@@ -5,6 +5,7 @@ import {
   type AttentionItem,
   NOTIFICATION_TYPE_LABELS,
 } from "../api/client";
+import { NotificationDigestPanel } from "../components/NotificationDigestPanel";
 
 // Notification and Escalation Module — a unified "things needing attention"
 // feed computed from real data already owned by other modules (unresolved
@@ -96,6 +97,8 @@ export function Notifications() {
         signals. Nothing is invented. Deleting an item removes it from this feed only — it
         never changes the underlying record, and deleted items can always be restored.
       </p>
+
+      <NotificationDigestPanel />
 
       <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
         <input

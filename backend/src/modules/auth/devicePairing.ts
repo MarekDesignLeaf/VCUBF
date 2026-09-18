@@ -14,8 +14,8 @@ const secretHash = (secret: string) => createHash("sha256").update(secret).diges
 const codeSchema = z.object({ code: z.string().trim().toUpperCase().regex(/^[A-Z2-9]{8}$/) });
 const tokenSchema = z.object({ pairing_id: z.string().uuid(), secret: z.string().min(40).max(200) });
 
-function publicUser(user: { id:string;companyId:string;email:string;displayName:string;role:string;permissions:string[];mustChangePassword:boolean;voiceWakeWord:string;voiceContinuous:boolean;voiceLanguage:string }) {
-  return { id:user.id,email:user.email,displayName:user.displayName,role:user.role,permissions:user.permissions,mustChangePassword:user.mustChangePassword,voiceWakeWord:user.voiceWakeWord,voiceContinuous:user.voiceContinuous,voiceLanguage:user.voiceLanguage };
+function publicUser(user: { id:string;companyId:string;email:string;displayName:string;role:string;permissions:string[];mustChangePassword:boolean;voiceWakeWord:string;voiceContinuous:boolean;voiceLanguage:string;assistantName:string;voiceSpeechRate:number }) {
+  return { id:user.id,email:user.email,displayName:user.displayName,role:user.role,permissions:user.permissions,mustChangePassword:user.mustChangePassword,voiceWakeWord:user.voiceWakeWord,voiceContinuous:user.voiceContinuous,voiceLanguage:user.voiceLanguage,assistantName:user.assistantName,voiceSpeechRate:user.voiceSpeechRate };
 }
 
 devicePairingRouter.post("/start", limiter, async (_req, res) => {

@@ -7,6 +7,7 @@ import {
   getConnectorBackgroundSyncConfiguration,
   type ConnectorBackgroundSyncConfiguration,
 } from "./connectorBackgroundSyncConfig.js";
+import { runNotificationDigestSweep } from "./notificationDigestService.js";
 
 export interface ConnectorBackgroundSyncSummary {
   started: boolean;
@@ -35,6 +36,8 @@ function toAuthedUser(user: {
   voiceWakeWord: string;
   voiceContinuous: boolean;
   voiceLanguage: string;
+  assistantName: string;
+  voiceSpeechRate: number;
 }): AuthedUser {
   return user;
 }
@@ -107,6 +110,8 @@ export async function runConnectorBackgroundSyncOnce(
         voiceWakeWord: true,
         voiceContinuous: true,
         voiceLanguage: true,
+        assistantName: true,
+        voiceSpeechRate: true,
       },
       orderBy: { createdAt: "asc" },
     });
@@ -185,7 +190,15 @@ export function startConnectorBackgroundSync() {
     return;
   }
 
-  const run = () => requestConfiguredSweep(configuration);
+  // The same timer also delivers the opt-in daily notification digests. A
+  // digest goes only to the account email of a user who enabled it, and the
+  // sweep is skipped entirely when background work is disabled.
+  const run = () => {
+    requestConfiguredSweep(configuration);
+    void runNotificationDigestSweep().catch(() => {
+      // Per-user failures are already audited; never crash the timer.
+    });
+  };
   run();
   scheduler = setInterval(run, configuration.intervalMs);
   console.log(`Connector background sync is enabled every ${Math.round(configuration.intervalMs / 60_000)} minute(s).`);

@@ -13,6 +13,10 @@ export interface AuthedUser {
   voiceWakeWord: string;
   voiceContinuous: boolean;
   voiceLanguage: string;
+  /** What the secretary is called; the hotword is a separate setting. */
+  assistantName: string;
+  /** Speaking speed as a multiplier of the voice's natural pace. */
+  voiceSpeechRate: number;
 }
 
 declare global {
@@ -46,6 +50,7 @@ export async function verifyDesktopBootstrapToken(token: string): Promise<{ user
       id: record.id, companyId: record.companyId, email: record.email, displayName: record.displayName,
       role: record.role, permissions: record.permissions, mustChangePassword: record.mustChangePassword,
       voiceWakeWord: record.voiceWakeWord, voiceContinuous: record.voiceContinuous, voiceLanguage: record.voiceLanguage,
+      assistantName: record.assistantName, voiceSpeechRate: record.voiceSpeechRate,
     },
   };
 }
@@ -74,6 +79,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       voiceWakeWord: user.voiceWakeWord,
       voiceContinuous: user.voiceContinuous,
       voiceLanguage: user.voiceLanguage,
+      assistantName: user.assistantName,
+      voiceSpeechRate: user.voiceSpeechRate,
     };
     next();
   } catch {

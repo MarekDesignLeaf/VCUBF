@@ -34,7 +34,7 @@ const initialSetupSchema = z.object({
 const PASSWORD_RESET_LIFETIME_MS = 30 * 60 * 1000;
 const resetTokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
 
-function publicUser(user: { id: string; email: string; displayName: string; role: string; permissions: string[]; mustChangePassword: boolean; voiceWakeWord: string; voiceContinuous: boolean; voiceLanguage: string }) {
+function publicUser(user: { id: string; email: string; displayName: string; role: string; permissions: string[]; mustChangePassword: boolean; voiceWakeWord: string; voiceContinuous: boolean; voiceLanguage: string; assistantName: string; voiceSpeechRate: number }) {
   return {
     id: user.id,
     email: user.email,
@@ -45,6 +45,8 @@ function publicUser(user: { id: string; email: string; displayName: string; role
     voiceWakeWord: user.voiceWakeWord,
     voiceContinuous: user.voiceContinuous,
     voiceLanguage: user.voiceLanguage,
+    assistantName: user.assistantName,
+    voiceSpeechRate: user.voiceSpeechRate,
   };
 }
 
@@ -175,6 +177,8 @@ authRouter.post("/login", loginRateLimiter, async (req, res) => {
     voiceWakeWord: user.voiceWakeWord,
     voiceContinuous: user.voiceContinuous,
     voiceLanguage: user.voiceLanguage,
+    assistantName: user.assistantName,
+    voiceSpeechRate: user.voiceSpeechRate,
   }, user.authVersion);
 
   res.json({
@@ -189,6 +193,8 @@ authRouter.post("/login", loginRateLimiter, async (req, res) => {
       voiceWakeWord: user.voiceWakeWord,
       voiceContinuous: user.voiceContinuous,
       voiceLanguage: user.voiceLanguage,
+    assistantName: user.assistantName,
+    voiceSpeechRate: user.voiceSpeechRate,
     },
   });
 });
@@ -235,11 +241,21 @@ authRouter.post("/local-test-login", async (req, res) => {
     id: user.id, companyId: user.companyId, email: user.email, displayName: user.displayName,
     role: user.role, permissions: user.permissions, mustChangePassword: user.mustChangePassword,
     voiceWakeWord: user.voiceWakeWord, voiceContinuous: user.voiceContinuous, voiceLanguage: user.voiceLanguage,
+    assistantName: user.assistantName,
+    voiceSpeechRate: user.voiceSpeechRate,
   }, user.authVersion), user: publicUser(user) });
 });
 
 authRouter.get("/local-test-active-session", async (req, res) => {
   if (!localTestRequestAllowed(req)) return localTestNotFound(res);
+  if (!selectedLocalTestUserId) {
+    // A local backend recovery clears only this in-memory selection. If this
+    // PC has exactly one active test account, restore it automatically so the
+    // already signed-in browser and its one Voice V2 process recover together.
+    // With multiple accounts we still require an explicit tile selection.
+    const onlyActiveUsers = await prisma.user.findMany({ where: { isActive: true }, select: { id: true }, take: 2 });
+    if (onlyActiveUsers.length === 1) selectedLocalTestUserId = onlyActiveUsers[0].id;
+  }
   if (!selectedLocalTestUserId) return res.status(404).json({ error: "LOCAL_TEST_USER_NOT_SELECTED" });
   const user = await prisma.user.findUnique({ where: { id: selectedLocalTestUserId } });
   if (!user?.isActive) {
@@ -250,6 +266,8 @@ authRouter.get("/local-test-active-session", async (req, res) => {
     id: user.id, companyId: user.companyId, email: user.email, displayName: user.displayName,
     role: user.role, permissions: user.permissions, mustChangePassword: user.mustChangePassword,
     voiceWakeWord: user.voiceWakeWord, voiceContinuous: user.voiceContinuous, voiceLanguage: user.voiceLanguage,
+    assistantName: user.assistantName,
+    voiceSpeechRate: user.voiceSpeechRate,
   }, user.authVersion), user: publicUser(user) });
 });
 
@@ -276,8 +294,8 @@ authRouter.post("/request-password-reset", passwordResetRateLimiter, async (req,
     // address. Send its recovery link to the Gmail account that owns the
     // configured company connector instead.
     fallbackToConnectedMailbox: user.email.toLowerCase() === "admin@example.com",
-    subject: "Reset your VCUF Secretary password",
-    body: `A password reset was requested for your VCUF Secretary account.\n\nUse this one-time link within 30 minutes:\n${passwordResetUrl(rawToken)}\n\nIf you did not request this, you can ignore this message.`,
+    subject: "Reset your VCUBF Secretary password",
+    body: `A password reset was requested for your VCUBF Secretary account.\n\nUse this one-time link within 30 minutes:\n${passwordResetUrl(rawToken)}\n\nIf you did not request this, you can ignore this message.`,
   });
   if (!delivery.delivered) {
     await prisma.passwordResetToken.delete({ where: { id: reset.id } });
