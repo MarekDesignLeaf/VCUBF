@@ -210,6 +210,12 @@ describe("Connector Engine registry and source lifecycle", () => {
     ]);
     assert.equal(prepared.body.items.length, 6);
     assert.ok(prepared.body.items.every((item: any) => item.source && item.source.isEnabled === false));
+    const gmail = prepared.body.items.find((item: any) => item.connectorKey === "gmail").source;
+    // An existing read-only source must not be silently expanded to write or
+    // deletion access by guided setup; administrators add those scopes
+    // explicitly while the source is disabled and then reauthorize Google.
+    assert.deepEqual(gmail.configuredScopes, ["read:messages"]);
+    assert.ok(!prepared.body.created.includes("gmail"));
     assert.ok(prepared.body.items.every((item: any) => typeof item.source.configurationAvailable === "boolean"));
     assert.ok(prepared.body.items.every((item: any) => !JSON.stringify(item).includes("CLIENT_SECRET")));
 

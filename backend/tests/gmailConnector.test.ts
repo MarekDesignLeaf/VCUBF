@@ -246,18 +246,44 @@ describe("Gmail read-only connector", () => {
     assert.equal(stored.syncCursor, "100");
     assert.ok(stored.lastFullSyncAt);
 
+    await prisma.communicationIntake.createMany({ data: [
+      {
+        companyId: TEST_COMPANY_ID,
+        connectorSourceId: sourceId,
+        externalMessageId: "message-archived",
+        channel: "email",
+        messageText: "Subject: Archived",
+        receivedAt: new Date("2026-01-01T10:00:00.000Z"),
+        sourceReference: `gmail:${sourceId}:message-archived`,
+      },
+      {
+        companyId: TEST_COMPANY_ID,
+        connectorSourceId: sourceId,
+        externalMessageId: "message-deleted",
+        channel: "email",
+        messageText: "Subject: Deleted",
+        receivedAt: new Date("2026-01-01T11:00:00.000Z"),
+        sourceReference: `gmail:${sourceId}:message-deleted`,
+      },
+    ] });
+
     globalThis.fetch = async (input, init) => {
       const url = requestUrl(input);
       assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer access-token-1");
       if (url.pathname.endsWith("/history")) {
         assert.equal(url.searchParams.get("startHistoryId"), "100");
-        assert.equal(url.searchParams.get("historyTypes"), "messageAdded");
-        assert.equal(url.searchParams.get("labelId"), "INBOX");
+        assert.deepEqual(url.searchParams.getAll("historyTypes"), ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"]);
+        assert.equal(url.searchParams.has("labelId"), false);
         return Response.json({
-          history: [{ id: "104", messagesAdded: [
-            { message: { id: "message-2", threadId: "thread-2" } },
-            { message: { id: "message-spam", threadId: "thread-spam" } },
-          ] }],
+          history: [{
+            id: "104",
+            messagesAdded: [
+              { message: { id: "message-2", threadId: "thread-2" } },
+              { message: { id: "message-spam", threadId: "thread-spam" } },
+            ],
+            messagesDeleted: [{ message: { id: "message-deleted", threadId: "thread-deleted" } }],
+            labelsRemoved: [{ message: { id: "message-archived", threadId: "thread-archived" }, labelIds: ["INBOX"] }],
+          }],
           historyId: "105",
         });
       }
@@ -276,12 +302,68 @@ describe("Gmail read-only connector", () => {
     assert.equal(incremental.status, 200);
     assert.equal(incremental.body.mode, "incremental");
     assert.equal(incremental.body.importedCount, 1);
+    assert.equal(incremental.body.removedCount, 2);
     assert.equal(incremental.body.skippedCount, 1);
     assert.equal(incremental.body.cursorAdvanced, true);
     stored = await prisma.connectorSource.findUniqueOrThrow({ where: { id: sourceId } });
     assert.equal(stored.syncCursor, "105");
     assert.equal(await prisma.communicationIntake.count({ where: { externalMessageId: "message-2" } }), 1);
     assert.equal(await prisma.communicationIntake.count({ where: { externalMessageId: "message-spam" } }), 0);
+    assert.equal(await prisma.communicationIntake.count({ where: { externalMessageId: "message-archived" } }), 0);
+    assert.equal(await prisma.communicationIntake.count({ where: { externalMessageId: "message-deleted" } }), 0);
+  });
+
+  it("walks every Inbox page before advancing a full-sync cursor and removes stale local mail", async () => {
+    await prisma.communicationIntake.deleteMany({ where: { connectorSourceId: sourceId } });
+    await prisma.communicationIntake.createMany({ data: [
+      {
+        companyId: TEST_COMPANY_ID,
+        connectorSourceId: sourceId,
+        externalMessageId: "message-kept",
+        channel: "email",
+        messageText: "Subject: Kept",
+        receivedAt: new Date("2026-01-02T10:00:00.000Z"),
+      },
+      {
+        companyId: TEST_COMPANY_ID,
+        connectorSourceId: sourceId,
+        externalMessageId: "message-stale",
+        channel: "email",
+        messageText: "Subject: Stale",
+        receivedAt: new Date("2026-01-02T11:00:00.000Z"),
+      },
+    ] });
+    let listCalls = 0;
+    globalThis.fetch = async (input) => {
+      const url = requestUrl(input);
+      if (url.pathname.endsWith("/profile")) return Response.json({ historyId: "500" });
+      if (url.pathname.endsWith("/messages")) {
+        listCalls += 1;
+        if (!url.searchParams.has("pageToken")) {
+          return Response.json({ messages: [{ id: "message-kept" }], nextPageToken: "page-2", resultSizeEstimate: 2 });
+        }
+        assert.equal(url.searchParams.get("pageToken"), "page-2");
+        return Response.json({ messages: [{ id: "message-new" }], resultSizeEstimate: 2 });
+      }
+      if (url.pathname.endsWith("/messages/message-new")) {
+        return Response.json({ id: "message-new", labelIds: ["INBOX"], snippet: "New page two message" });
+      }
+      throw new Error(`Unexpected full-sync request: ${url}`);
+    };
+    const response = await request(app)
+      .post(`/connectors/sources/${sourceId}/sync`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ max_results: 1, full_sync: true });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.importedCount, 1);
+    assert.equal(response.body.removedCount, 1);
+    assert.equal(response.body.hasMore, false);
+    assert.equal(listCalls, 2);
+    assert.equal(await prisma.communicationIntake.count({ where: { externalMessageId: "message-kept" } }), 1);
+    assert.equal(await prisma.communicationIntake.count({ where: { externalMessageId: "message-new" } }), 1);
+    assert.equal(await prisma.communicationIntake.count({ where: { externalMessageId: "message-stale" } }), 0);
+    const source = await prisma.connectorSource.findUniqueOrThrow({ where: { id: sourceId } });
+    assert.equal(source.syncCursor, "500");
   });
 
   it("refreshes an expired access token without replacing the refresh token", async () => {

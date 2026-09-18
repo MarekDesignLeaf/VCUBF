@@ -28,12 +28,19 @@ interface GmailTokenResponse {
   token_type?: string;
 }
 
+export interface GmailAttachment {
+  filename: string;
+  contentType: string;
+  content: Buffer;
+}
+
 export interface GmailComposeInput {
   to: string[];
   cc?: string[];
   bcc?: string[];
   subject: string;
   body: string;
+  attachments?: GmailAttachment[];
 }
 
 export interface GmailDraftResult {
@@ -63,6 +70,15 @@ export interface GmailHistoryList {
   history?: Array<{
     id?: string;
     messagesAdded?: Array<{ message?: { id?: string; threadId?: string } }>;
+    messagesDeleted?: Array<{ message?: { id?: string; threadId?: string } }>;
+    labelsAdded?: Array<{
+      message?: { id?: string; threadId?: string; labelIds?: string[] };
+      labelIds?: string[];
+    }>;
+    labelsRemoved?: Array<{
+      message?: { id?: string; threadId?: string; labelIds?: string[] };
+      labelIds?: string[];
+    }>;
   }>;
   nextPageToken?: string;
   historyId?: string;
@@ -309,18 +325,41 @@ function mimeHeader(value: string) {
   return /^[\x20-\x7E]*$/.test(safe) ? safe : `=?UTF-8?B?${Buffer.from(safe, "utf8").toString("base64")}?=`;
 }
 
-export function buildGmailRawMessage(input: GmailComposeInput) {
-  const headers = [
+function safeAttachmentFilename(filename: string) {
+  // Header-safe ASCII only: no CR/LF, quotes or path separators can reach the MIME headers.
+  const cleaned = filename.replace(/[\r\n"\\/]+/g, "_").replace(/[^\x20-\x7E]/g, "_").trim();
+  return cleaned || "attachment";
+}
+
+export function buildGmailMimeMessage(input: GmailComposeInput) {
+  const addressHeaders = [
     `To: ${input.to.join(", ")}`,
     ...(input.cc?.length ? [`Cc: ${input.cc.join(", ")}`] : []),
     ...(input.bcc?.length ? [`Bcc: ${input.bcc.join(", ")}`] : []),
     `Subject: ${mimeHeader(input.subject)}`,
     "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=UTF-8",
-    "Content-Transfer-Encoding: 8bit",
   ];
-  const mime = `${headers.join("\r\n")}\r\n\r\n${input.body.replace(/\r?\n/g, "\r\n")}`;
-  return Buffer.from(mime, "utf8").toString("base64url");
+  const body = input.body.replace(/\r?\n/g, "\r\n");
+  if (!input.attachments?.length) {
+    return `${[...addressHeaders, "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: 8bit"].join("\r\n")}\r\n\r\n${body}`;
+  }
+  // multipart/mixed: one text part followed by each attachment, base64 in
+  // 76-column lines as RFC 2045 requires. The boundary is random so no body
+  // text can terminate a part early.
+  const boundary = `vcubf_${Buffer.from(String(Date.now()) + Math.random()).toString("base64url").slice(0, 24)}`;
+  const parts = [
+    `--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${body}`,
+    ...input.attachments.map((attachment) => {
+      const filename = safeAttachmentFilename(attachment.filename);
+      const encoded = attachment.content.toString("base64").replace(/(.{76})/g, "$1\r\n");
+      return `--${boundary}\r\nContent-Type: ${attachment.contentType}; name="${filename}"\r\nContent-Disposition: attachment; filename="${filename}"\r\nContent-Transfer-Encoding: base64\r\n\r\n${encoded}`;
+    }),
+  ];
+  return `${[...addressHeaders, `Content-Type: multipart/mixed; boundary="${boundary}"`].join("\r\n")}\r\n\r\n${parts.join("\r\n")}\r\n--${boundary}--`;
+}
+
+export function buildGmailRawMessage(input: GmailComposeInput) {
+  return Buffer.from(buildGmailMimeMessage(input), "utf8").toString("base64url");
 }
 
 export async function createGmailDraft(accessToken: string, input: GmailComposeInput) {
@@ -373,8 +412,12 @@ export async function listGmailHistory(
   const url = new URL(GMAIL_HISTORY_ENDPOINT);
   url.searchParams.set("startHistoryId", input.startHistoryId);
   url.searchParams.set("maxResults", String(input.maxResults));
-  url.searchParams.append("historyTypes", "messageAdded");
-  url.searchParams.set("labelId", GMAIL_INBOX_LABEL);
+  // Reconcile the whole provider history. Restricting this request to only
+  // messageAdded/INBOX leaves stale local copies when Gmail removes the INBOX
+  // label, moves a message to Spam/Trash, or deletes it permanently.
+  for (const type of ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"]) {
+    url.searchParams.append("historyTypes", type);
+  }
   if (input.pageToken) url.searchParams.set("pageToken", input.pageToken);
   return gmailJson<GmailHistoryList>(url, accessToken, "history");
 }

@@ -27,6 +27,7 @@ import {
   sendGmailMessage,
   trashGmailMessage,
   type StoredGmailCredential,
+  type GmailComposeInput,
 } from "../connectors/gmailAdapter.js";
 import {
   COMPLETE_GMAIL_OAUTH_ACTION,
@@ -357,6 +358,7 @@ interface GmailSyncResult {
   mode: "full" | "incremental";
   fallbackFromExpiredHistory: boolean;
   importedCount: number;
+  removedCount: number;
   skippedCount: number;
   importedIntakeIds: string[];
   nextPageToken: string | null;
@@ -364,6 +366,36 @@ interface GmailSyncResult {
   hasMore: boolean;
   cursorAdvanced: boolean;
   syncedAt: Date;
+}
+
+async function removeImportedMessageReferences(
+  user: AuthedUser,
+  source: GmailSource,
+  externalMessageIds: string[]
+) {
+  if (externalMessageIds.length === 0) return 0;
+  const intakes = await prisma.communicationIntake.findMany({
+    where: {
+      companyId: user.companyId,
+      connectorSourceId: source.id,
+      externalMessageId: { in: [...new Set(externalMessageIds)] },
+    },
+    select: { id: true },
+  });
+  if (intakes.length === 0) return 0;
+  const intakeIds = intakes.map((intake) => intake.id);
+  await prisma.$transaction([
+    prisma.notificationAcknowledgement.deleteMany({
+      where: {
+        companyId: user.companyId,
+        notificationKey: { in: intakeIds.map((id) => `unresolved_enquiry:${id}`) },
+      },
+    }),
+    prisma.communicationIntake.deleteMany({
+      where: { companyId: user.companyId, connectorSourceId: source.id, id: { in: intakeIds } },
+    }),
+  ]);
+  return intakeIds.length;
 }
 
 async function importMessageReferences(
@@ -447,15 +479,51 @@ async function performFullSync(
   if (profile && (!profile.historyId || !/^\d+$/.test(profile.historyId))) {
     throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
   }
-  const listed = await listGmailMessages(accessToken, {
-    maxResults: input.max_results,
-    query: input.query,
-    pageToken: input.page_token,
-  });
-  if (listed.messages !== undefined && !Array.isArray(listed.messages)) {
-    throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+  const importedIntakeIds: string[] = [];
+  const remoteMessageIds = new Set<string>();
+  const seenPageTokens = new Set<string>();
+  let skippedCount = 0;
+  let pageToken = input.page_token;
+  let nextPageToken: string | null = null;
+  let resultSizeEstimate: number | null = null;
+  do {
+    const listed = await listGmailMessages(accessToken, {
+      maxResults: input.max_results,
+      query: input.query,
+      pageToken,
+    });
+    if (listed.messages !== undefined && !Array.isArray(listed.messages)) {
+      throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    }
+    for (const reference of listed.messages ?? []) {
+      if (!reference?.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+      remoteMessageIds.add(reference.id);
+    }
+    const imported = await importMessageReferences(user, source, accessToken, listed.messages ?? []);
+    importedIntakeIds.push(...imported.importedIntakeIds);
+    skippedCount += imported.skippedCount;
+    resultSizeEstimate ??= listed.resultSizeEstimate ?? null;
+    nextPageToken = listed.nextPageToken ?? null;
+    if (!initializesCursor || !nextPageToken) break;
+    if (seenPageTokens.has(nextPageToken)) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    seenPageTokens.add(nextPageToken);
+    pageToken = nextPageToken;
+  } while (true);
+
+  let removedCount = 0;
+  if (initializesCursor) {
+    const localMessages = await prisma.communicationIntake.findMany({
+      where: { companyId: user.companyId, connectorSourceId: source.id, externalMessageId: { not: null } },
+      select: { externalMessageId: true },
+    });
+    removedCount = await removeImportedMessageReferences(
+      user,
+      source,
+      localMessages
+        .map((message) => message.externalMessageId)
+        .filter((id): id is string => typeof id === "string" && !remoteMessageIds.has(id))
+    );
   }
-  const imported = await importMessageReferences(user, source, accessToken, listed.messages ?? []);
   const syncedAt = new Date();
   await prisma.connectorSource.update({
     where: { id: source.id },
@@ -472,12 +540,13 @@ async function performFullSync(
     sourceId: source.id,
     mode: "full",
     fallbackFromExpiredHistory,
-    importedCount: imported.importedIntakeIds.length,
-    skippedCount: imported.skippedCount,
-    importedIntakeIds: imported.importedIntakeIds,
-    nextPageToken: listed.nextPageToken ?? null,
-    resultSizeEstimate: listed.resultSizeEstimate ?? null,
-    hasMore: Boolean(listed.nextPageToken),
+    importedCount: importedIntakeIds.length,
+    removedCount,
+    skippedCount,
+    importedIntakeIds,
+    nextPageToken: initializesCursor ? null : nextPageToken,
+    resultSizeEstimate,
+    hasMore: initializesCursor ? false : Boolean(nextPageToken),
     cursorAdvanced: initializesCursor,
     syncedAt,
   };
@@ -498,6 +567,7 @@ async function performIncrementalSync(
     throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
   }
   const byId = new Map<string, { id: string; threadId?: string }>();
+  const removedIds = new Set<string>();
   for (const record of listed.history ?? []) {
     if (record.messagesAdded !== undefined && !Array.isArray(record.messagesAdded)) {
       throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
@@ -507,7 +577,40 @@ async function performIncrementalSync(
       if (!id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
       byId.set(id, { id, threadId: added.message?.threadId });
     }
+    if (record.messagesDeleted !== undefined && !Array.isArray(record.messagesDeleted)) {
+      throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    }
+    for (const deleted of record.messagesDeleted ?? []) {
+      const id = deleted.message?.id;
+      if (!id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+      removedIds.add(id);
+      byId.delete(id);
+    }
+    if (record.labelsAdded !== undefined && !Array.isArray(record.labelsAdded)) {
+      throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    }
+    for (const changed of record.labelsAdded ?? []) {
+      if (!Array.isArray(changed.labelIds)) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+      const id = changed.message?.id;
+      if (!id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+      if (changed.labelIds.includes(GMAIL_INBOX_LABEL) && !removedIds.has(id)) {
+        byId.set(id, { id, threadId: changed.message?.threadId });
+      }
+    }
+    if (record.labelsRemoved !== undefined && !Array.isArray(record.labelsRemoved)) {
+      throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    }
+    for (const changed of record.labelsRemoved ?? []) {
+      if (!Array.isArray(changed.labelIds)) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+      const id = changed.message?.id;
+      if (!id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+      if (changed.labelIds.includes(GMAIL_INBOX_LABEL)) {
+        removedIds.add(id);
+        byId.delete(id);
+      }
+    }
   }
+  const removedCount = await removeImportedMessageReferences(user, source, [...removedIds]);
   const imported = await importMessageReferences(user, source, accessToken, [...byId.values()]);
   const hasMore = Boolean(listed.nextPageToken);
   if (!hasMore && (!listed.historyId || !/^\d+$/.test(listed.historyId))) {
@@ -529,6 +632,7 @@ async function performIncrementalSync(
     mode: "incremental",
     fallbackFromExpiredHistory: false,
     importedCount: imported.importedIntakeIds.length,
+    removedCount,
     skippedCount: imported.skippedCount,
     importedIntakeIds: imported.importedIntakeIds,
     nextPageToken: null,
@@ -602,6 +706,7 @@ export async function syncGmailMessages(
         mode: result.mode,
         fallbackFromExpiredHistory: result.fallbackFromExpiredHistory,
         importedCount: result.importedCount,
+        removedCount: result.removedCount,
         skippedCount: result.skippedCount,
         importedIntakeIds: result.importedIntakeIds,
         hasMore: result.hasMore,
@@ -749,6 +854,57 @@ export async function sendGmailMessageNow(
     const result = providerErrorResult(error);
     await auditFailure(SEND_GMAIL_MESSAGE_ACTION, user, sourceId, result.ok ? "CONNECTOR_INTERNAL_ERROR" : result.error);
     return result;
+  }
+}
+
+/**
+ * Resolve the Gmail source a business document may be sent from. With an
+ * explicit sourceId the source must be enabled with send:messages and
+ * authorised; without one, exactly one such source must exist (the same
+ * rule Emma applies), otherwise the caller must choose in Connectors.
+ */
+export async function resolveSendableGmailSource(user: AuthedUser, sourceId?: string): Promise<ServiceResult<{ id: string; displayName: string }>> {
+  if (sourceId) {
+    const lookup = await gmailWriteSource(user, sourceId, "send:messages");
+    return lookup.ok ? ok(200, { id: lookup.source.id, displayName: lookup.source.displayName }) : lookup.failure;
+  }
+  const sources = await prisma.connectorSource.findMany({
+    where: { companyId: user.companyId, connectorKey: "gmail", isActive: true },
+    include: { credential: { select: { sourceId: true } } },
+    orderBy: { displayName: "asc" },
+  });
+  if (sources.length === 0) return fail(409, "GMAIL_NOT_CONFIGURED", "Gmail is not connected. Open Connectors first.");
+  const enabled = sources.filter((source) => source.isEnabled);
+  if (enabled.length === 0) return fail(409, "CONNECTOR_NOT_ENABLED", "Gmail is connected but not enabled.");
+  const canSend = enabled.filter((source) => source.configuredScopes.includes("send:messages"));
+  if (canSend.length === 0) return fail(409, "CONNECTOR_SCOPE_REQUIRED", "No enabled Gmail source has permission to send email.");
+  const authorised = canSend.filter((source) => Boolean(source.credential));
+  if (authorised.length === 0) return fail(409, "CONNECTOR_AUTHORIZATION_REQUIRED", "Gmail needs to be authorized again before sending.");
+  if (authorised.length > 1) {
+    return fail(409, "AMBIGUOUS_GMAIL_SOURCE", "More than one Gmail account can send email; choose one.", { sourceNames: authorised.map((source) => source.displayName), sourceIds: authorised.map((source) => source.id) });
+  }
+  return ok(200, { id: authorised[0].id, displayName: authorised[0].displayName });
+}
+
+/**
+ * Send a composed message (optionally with attachments) through an already
+ * resolved, sendable Gmail source. Performs no audit of its own: the calling
+ * business action (send_quote_pdf, send_invoice_pdf, …) owns the audit record,
+ * the confirmation gate and any CRM side effects. Returns provider ids only.
+ */
+export async function sendThroughGmailSource(user: AuthedUser, sourceId: string, message: GmailComposeInput): Promise<ServiceResult<{ sourceId: string; messageId: string; threadId: string | null; sentAt: Date }>> {
+  const lookup = await gmailWriteSource(user, sourceId, "send:messages");
+  if (!lookup.ok) return lookup.failure;
+  try {
+    const credential = await usableCredential({ credential: lookup.source.credential! });
+    if (!credential.scopes.some((scope) => scope === GMAIL_COMPOSE_SCOPE || scope === GMAIL_SEND_SCOPE || scope === GMAIL_MODIFY_SCOPE)) {
+      throw new GmailAdapterError("SCOPE_DENIED");
+    }
+    const sent = await sendGmailMessage(credential.accessToken, message);
+    if (!sent.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    return ok(200, { sourceId, messageId: sent.id, threadId: sent.threadId ?? null, sentAt: new Date() });
+  } catch (error) {
+    return providerErrorResult(error);
   }
 }
 
