@@ -142,9 +142,16 @@ describe("voice assistant interpretation", () => {
       assert.equal(String(url), "https://api.openai.com/v1/audio/transcriptions");
       assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer server-only-test-key");
       const form = init?.body as FormData;
-      assert.equal(form.get("model"), "gpt-4o-mini-transcribe");
+      // whisper-1, not a gpt-4o transcribe model: those treat the prompt as an
+      // instruction and return it as the transcript when the audio has no speech.
+      assert.equal(form.get("model"), "whisper-1");
       assert.equal(form.get("language"), "en");
-      assert.equal(form.get("prompt"), "Emma");
+      // Deterministic decoding, so unclear audio is not guessed through.
+      assert.equal(form.get("temperature"), "0");
+      // The prompt biases the decoder rather than merely naming the wake word.
+      const prompt = String(form.get("prompt"));
+      assert.match(prompt, /Emma/);
+      assert.ok(prompt.length > "Emma".length, "prompt must carry vocabulary, not just the wake word");
       const file = form.get("file") as Blob;
       assert.equal(file.type, "audio/wav");
       assert.equal(file.size, 48);
@@ -154,6 +161,37 @@ describe("voice assistant interpretation", () => {
       });
     };
     const result = await transcribeVoiceAudio(Buffer.alloc(48), "en-GB", "Emma");
-    assert.deepEqual(result, { text: "Emma, show contacts.", model: "gpt-4o-mini-transcribe" });
+    assert.deepEqual(result, { text: "Emma, show contacts.", model: "whisper-1" });
+  });
+
+  it("passes learned vocabulary to the decoder so misheard words improve", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    let seenPrompt = "";
+    globalThis.fetch = async (_url, init) => {
+      seenPrompt = String((init?.body as FormData).get("prompt"));
+      return new Response(JSON.stringify({ text: "Emma, ukaž klienty" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Emma", ["Škoda Auto", "Kvasnička"]);
+    // Correcting a misheard word after the fact is a patch; naming it up front
+    // is what stops it being misheard in the first place.
+    assert.match(seenPrompt, /Škoda Auto/);
+    assert.match(seenPrompt, /Kvasnička/);
+  });
+
+  it("returns empty text for a hallucination instead of executing it", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ text: "www.arkance-systems.cz" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    // Whisper invents plausible sentences from near-silence. Always-on
+    // listening means that happens constantly, and it must never become a
+    // command.
+    const result = await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Emma");
+    assert.equal(result.text, "");
   });
 });

@@ -1,3 +1,4 @@
+import { isLocalTranscriptionConfigured, transcribeLocally } from "./localTranscriptionService.js";
 import { z } from "zod";
 import { PROGRAM_KNOWLEDGE } from "../lib/programKnowledge.js";
 import { VOICE_LANGUAGES } from "../lib/voiceLanguages.js";
@@ -105,6 +106,35 @@ function outputText(payload: any): string | undefined {
   return undefined;
 }
 
+/**
+ * Vocabulary hint for Whisper. Short commands carry little acoustic context, so
+ * telling the decoder which words to expect measurably reduces wrong words.
+ */
+function buildTranscriptionPrompt(isoLanguage: string, wakeWord: string, extraVocabulary: string[] = []): string {
+  const wake = wakeWord.trim().slice(0, 40) || "Hej Emma";
+  const vocabulary: Record<string, string> = {
+    cs: "vytvoř klienta, nový klient, zakázka, nabídka, faktura, úkol, poptávka, " +
+        "ukaž zakázky, ukaž faktury, ukaž úkoly, zaznamenej platbu, schval nabídku, " +
+        "přidej poznámku, naplánuj schůzku, kalendář, zákazník, termín, cena",
+    sk: "vytvor klienta, nový klient, zákazka, ponuka, faktúra, úloha, dopyt, kalendár",
+    pl: "utwórz klienta, nowy klient, zlecenie, oferta, faktura, zadanie, kalendarz",
+    en: "create client, new client, job, quote, invoice, task, lead, show jobs, " +
+        "show invoices, record payment, approve quote, add note, schedule meeting",
+    de: "Kunde anlegen, neuer Kunde, Auftrag, Angebot, Rechnung, Aufgabe, Termin",
+    fr: "créer un client, nouveau client, chantier, devis, facture, tâche, rendez-vous",
+    es: "crear cliente, nuevo cliente, trabajo, presupuesto, factura, tarea, cita",
+    it: "crea cliente, nuovo cliente, lavoro, preventivo, fattura, attività, appuntamento",
+  };
+  const words = vocabulary[isoLanguage] ?? vocabulary.en;
+  const learned = extraVocabulary.filter(Boolean).slice(0, 60).join(", ");
+  return [wake, words, learned].filter(Boolean).join(". ").slice(0, 880);
+}
+
+/**
+ * Whisper fabricates text from silence or noise. These are the shapes it
+ * produces in practice: bare URLs, subtitle credits and stock sign-offs. They
+ * are never real commands here, so treating them as "heard nothing" is safe.
+ */
 function isLikelyHallucination(text: string): boolean {
   const value = text.trim();
   if (!value) return true;
@@ -155,18 +185,48 @@ function looksRepetitive(text: string): boolean {
 export async function transcribeVoiceAudio(
   audio: Buffer,
   language: string,
-  wakeWord: string
+  wakeWord: string,
+  // Phrases this user has taught Emma. Passing them to the decoder is what
+  // stops the same word being misheard again, rather than only repairing it
+  // after the fact.
+  extraVocabulary: string[] = []
 ): Promise<VoiceTranscription> {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
-
-  const model = process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-mini-transcribe";
+  // whisper-1, not gpt-4o-*-transcribe: the 4o transcribe models treat the
+  // prompt as an instruction and echo it back as the transcript when the audio
+  // carries no speech, which surfaced as commands like "context: ### Emma ###".
+  const model = process.env.OPENAI_TRANSCRIPTION_MODEL ?? "whisper-1";
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(audio)], { type: "audio/wav" }), "emma-command.wav");
   form.append("model", model);
   const isoLanguage = language.trim().split("-", 1)[0]?.toLowerCase();
   if (/^[a-z]{2}$/.test(isoLanguage)) form.append("language", isoLanguage);
-  if (wakeWord.trim()) form.append("prompt", wakeWord.trim().slice(0, 80));
+  // Deterministic decoding: Whisper's default temperature lets it guess through
+  // unclear audio, which is exactly where wrong words come from.
+  form.append("temperature", "0");
+  // The prompt biases the decoder vocabulary. Short spoken commands carry little
+  // acoustic context, so naming the words the app expects is the single biggest
+  // accuracy win.
+  const prompt = buildTranscriptionPrompt(isoLanguage, wakeWord, extraVocabulary);
+
+  // Local first: same model family, no per-minute cost, and the recording
+  // never leaves this machine. Falls through to the hosted API when the
+  // local server is not configured or does not answer, so a stopped server
+  // degrades to paid transcription rather than a dead microphone.
+  if (isLocalTranscriptionConfigured()) {
+    const local = await transcribeLocally(audio, isoLanguage, prompt);
+    if (local) {
+      if (isLikelyHallucination(local.text)) return { text: "", model: local.model };
+      return { text: local.text, model: local.model };
+    }
+  }
+
+  // The hosted API is the fallback, so its key is only required here — where it is
+  // used. Checking it first meant a machine with a working local Whisper server and no
+  // OpenAI key could not transcribe at all, which is the opposite of local-first.
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
+
+  form.append("prompt", prompt);
 
   const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
@@ -177,6 +237,10 @@ export async function transcribeVoiceAudio(
   if (!response.ok) throw new Error(`OPENAI_TRANSCRIPTION_FAILED_${response.status}`);
   const payload = z.object({ text: z.string() }).parse(await response.json());
   const text = payload.text.trim();
+  // Silence is a normal outcome of always-on listening, not an error. Whisper
+  // invents plausible sentences from near-silent audio (observed: Czech website
+  // names), so anything shaped like a hallucination becomes empty text and the
+  // caller simply ignores it.
   if (isLikelyHallucination(text)) return { text: "", model };
   return { text, model };
 }
@@ -200,6 +264,10 @@ export async function interpretVoiceRequest(input: {
   const programGuidance = needsProgramKnowledge
     ? `\nUse this implemented application map when the user asks how to do something, where a feature is, what a page means, or how to reach an outcome. Guide step by step and never invent UI:\nTreat its UI details as exact source-of-truth, not as examples. Quote control labels verbatim. Do not infer a conventional New button, editable line-item grid, confirmation, field or workflow that the map does not state. If a requested UI detail is absent, say it is not described instead of guessing.\n${PROGRAM_KNOWLEDGE}`
     : "";
+  const configuredTimeout = Number(process.env.OPENAI_VOICE_TIMEOUT_MS ?? "8000");
+  const interpretationTimeoutMs = Number.isFinite(configuredTimeout)
+    ? Math.max(3_000, Math.min(15_000, Math.trunc(configuredTimeout)))
+    : 8_000;
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -253,7 +321,7 @@ ${supportedCommands}${programGuidance}${behaviorInstructions}`,
         },
       },
     }),
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(interpretationTimeoutMs),
   });
 
   if (!response.ok) throw new Error(`OPENAI_REQUEST_FAILED_${response.status}`);
