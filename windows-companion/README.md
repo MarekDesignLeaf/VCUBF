@@ -1,5 +1,7 @@
 # VCUBF Emma for Windows 11
 
+> **Note (September 2026):** the current Windows runtime is **Emma Voice v2** — install it with `Install-VoiceV2.ps1` and see `../docs/VOICE_V2_SETUP.md`. `Install-VoiceV2.ps1` removes this legacy companion's autostart and shortcut. The description below applies to the legacy `Install.ps1` companion (Windows Speech Recognizer + OpenAI Realtime), which remains only as a fallback where Voice v2 is not installed.
+
 Native Windows tray companion for VCUBF. It uses the locally installed Windows Speech Recognizer for the configurable wake word (`Emma` by default), then starts a hands-free Realtime conversation or falls back to the audited text-assistant path. The editable review dialog remains available when hands-free mode is disabled.
 
 ## Install

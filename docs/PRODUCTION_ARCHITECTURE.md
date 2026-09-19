@@ -4,6 +4,21 @@ Tento dokument je závazný produkční směr od 17. července 2026. Vychází z
 aktualizovaného návrhu produktu a doplňuje stávající implementaci; neruší již
 fungující business logiku, audit ani ověřená pravidla Emmy.
 
+## Stav dodávky k 17. září 2026
+
+Z tohoto dokumentu je již dodáno: lokální wake word Porcupine (s automatickým
+Deepgram fallbackem), lokální přepis na Snapdragon NPU (Qualcomm Whisper přes
+ONNX Runtime QNN, fallback Deepgram Nova-3), streamované TTS ElevenLabs,
+jednotný jazyk rozhraní i Emmy v osmi lokalizacích (en-GB, en-US, cs, pl, fr,
+de, es, it), vynucený stav aktivace wake wordem, katalog menu s automatickým
+testem úplnosti a Windows runtime Voice v2 (`docs/VOICE_V2_SETUP.md`).
+
+Zatím nedodáno: samostatný Emma Voice Orchestrator (FastAPI/LangGraph), Redis
+pro krátkodobý stav relace, pgvector pro dlouhodobou paměť (poznámky Emmy dnes
+ukládá `AssistantMemory` v PostgreSQL bez vektorového vyhledávání), migrace
+webu na Next.js a Flutter mobilní klient. Realtime adaptér zůstává přechodovým
+řešením přesně podle bodu 2 níže.
+
 ## Produktový kontrakt
 
 Emma je hlasový asistent integrovaný do business platformy. Web je plná

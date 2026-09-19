@@ -13,10 +13,10 @@ The Gmail adapter can:
 - fall back to a safe full sync when Gmail reports an expired history cursor;
 - idempotently import messages into `CommunicationIntake` with source, message and thread provenance;
 - create reviewable Gmail drafts without sending;
-- send a final email only through a separate confirmation-gated action;
+- send a final email only through a separate confirmation-gated action, including quote/invoice PDFs and the opt-in daily notification digest, which reuse the same source, scope and credential checks (`resolveSendableGmailSource` / `sendThroughGmailSource`) and add a `multipart/mixed` body when a PDF is attached;
 - explicitly revoke and disconnect Gmail through a confirmation-gated action.
 
-It cannot delete or label Gmail data. No attachment bytes are imported. Draft and send scopes are optional; a source configured only with `read:messages` remains read-only. Recipient, subject and body are shown in the send preview, while audit records retain only counts, lengths and provider result IDs rather than message content. Emma may create a five-minute, user-scoped pending Gmail review when exactly one enabled source has `send:messages`; a separate `yes`/`confirm` sends it once, while cancellation, expiry, failure or transcript deletion removes the temporary message payload.
+Deletion is narrow and confirmation-gated: with the optional `gmail.modify` scope, the reviewed `delete_gmail_intake` action (`DELETE /communications/intakes/:id`, risk 3) moves exactly one imported message to the provider Trash and removes only its linked local Communication Intake copy; Emma's spoken deletion uses the same prepare/confirm pending-action window (`prepare_voice_email_deletion` / `confirm_voice_email_deletion` / `cancel_voice_email_deletion`). The adapter still cannot label Gmail data, bulk-delete, or permanently purge a message. No attachment bytes are imported. Draft and send scopes are optional; a source configured only with `read:messages` remains read-only. Recipient, subject and body are shown in the send preview, while audit records retain only counts, lengths and provider result IDs rather than message content. Emma may create a five-minute, user-scoped pending Gmail review when exactly one enabled source has `send:messages`; a separate `yes`/`confirm` sends it once, while cancellation, expiry, failure or transcript deletion removes the temporary message payload.
 
 The Google Contacts adapter uses only `contacts.readonly`. It stages People API contact previews in `ExternalContact`; synchronisation never creates a CRM contact. A user holding both connector and CRM management permissions must review one staged record and confirm its import. Provider deletions archive only the staged record and never delete or deactivate a previously imported CRM contact. Initial sync requests `nextSyncToken`; later calls retrieve only changes. Google's `EXPIRED_SYNC_TOKEN` response triggers a safe full-sync fallback.
 
@@ -48,7 +48,11 @@ WhatsApp Business uses a direct, deployment-level Cloud API connection for one b
 | `POST` | `/connectors/sources/:id/enable` | `connectors.manage` | Confirmation-gated enable after verified authorization. |
 | `POST` | `/connectors/sources/:id/sync` | `connectors.manage` | Reads up to 50 Gmail messages and imports unseen messages. |
 | `POST` | `/connectors/sources/:id/gmail/drafts` | `connectors.manage` | Creates a Gmail draft without sending it. |
+| `POST` | `/quotes/:id/send-email` | `crm.manage` | Confirmation-gated: emails the saved quote PDF and marks a draft quote sent. |
+| `POST` | `/invoices/:id/send-email` | `crm.manage` | Confirmation-gated: emails an issued invoice PDF; status unchanged. |
+| `POST` | `/notifications/digest/send` | `crm.read` | Confirmation-gated: emails the signed-in user their own notification digest. |
 | `POST` | `/connectors/sources/:id/gmail/messages/send` | `connectors.manage` | Previews, then sends a Gmail message after explicit confirmation. |
+| `DELETE` | `/communications/intakes/:id` | `crm.manage` + `connectors.manage` | Confirmation-gated: moves the imported Gmail message to provider Trash and deletes only the local intake copy (`gmail.modify`). |
 | `GET` | `/connectors/whatsapp/webhook` | Meta verify token | Verifies webhook ownership and returns Meta's challenge. |
 | `POST` | `/connectors/whatsapp/webhook` | Meta signature | Imports signed inbound WhatsApp messages and synchronises sender contacts idempotently. |
 | `POST` | `/connectors/sources/:id/whatsapp/messages/send` | `connectors.manage` | Previews, then sends a WhatsApp text after explicit confirmation. |
