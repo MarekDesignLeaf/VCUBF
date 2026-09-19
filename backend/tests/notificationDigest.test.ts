@@ -12,6 +12,12 @@ const app = createServer();
 const originalFetch = globalThis.fetch;
 const originalKey = process.env.CONNECTOR_ENCRYPTION_KEY;
 const day = 24 * 60 * 60 * 1000;
+// Scheduler tests must not depend on the wall-clock hour of the test runner.
+function sweepTime(hour = 12) {
+  const now = new Date();
+  now.setUTCHours(hour, 0, 0, 0);
+  return now;
+}
 
 describe("Daily notification digest", () => {
   let token: string;
@@ -104,10 +110,16 @@ describe("Daily notification digest", () => {
     assert.ok((await prisma.user.findUniqueOrThrow({ where: { id: adminId } })).digestLastSentAt);
   });
 
+  it("does not consider users before their selected UTC hour", async () => {
+    const summary = await runNotificationDigestSweep(sweepTime(5));
+    assert.equal(summary.considered, 0);
+    assert.equal(summary.sent, 0);
+  });
+
   it("the scheduled sweep skips a user who already received today's digest", async () => {
     let sends = 0;
     globalThis.fetch = async () => { sends += 1; return Response.json({ id: "digest-2" }); };
-    const summary = await runNotificationDigestSweep(new Date());
+    const summary = await runNotificationDigestSweep(sweepTime());
     assert.equal(summary.sent, 0);
     assert.equal(summary.skipped, 1);
     assert.equal(sends, 0);
@@ -117,13 +129,13 @@ describe("Daily notification digest", () => {
     await prisma.user.update({ where: { id: adminId }, data: { digestLastSentAt: new Date(Date.now() - 2 * day) } });
     let sends = 0;
     globalThis.fetch = async () => { sends += 1; return Response.json({ id: "digest-3" }); };
-    const summary = await runNotificationDigestSweep(new Date());
+    const summary = await runNotificationDigestSweep(sweepTime());
     assert.equal(summary.sent, 1);
     assert.equal(sends, 1);
 
     await prisma.user.update({ where: { id: adminId }, data: { digestEnabled: false, digestLastSentAt: null } });
     sends = 0;
-    const afterOptOut = await runNotificationDigestSweep(new Date());
+    const afterOptOut = await runNotificationDigestSweep(sweepTime());
     assert.equal(afterOptOut.considered, 0);
     assert.equal(sends, 0);
   });
@@ -137,7 +149,7 @@ describe("Daily notification digest", () => {
     assert.equal(res.status, 409);
     assert.equal(res.body.error, "DIGEST_EMPTY");
     assert.equal(contacted, false);
-    const sweep = await runNotificationDigestSweep(new Date());
+    const sweep = await runNotificationDigestSweep(sweepTime());
     assert.equal(sweep.sent, 0);
     assert.equal(sweep.skipped, 1);
   });

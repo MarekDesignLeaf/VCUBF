@@ -33,7 +33,7 @@ export function Account() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [wakeWord, setWakeWord] = useState(user?.voiceWakeWord ?? "Emma");
+  const [wakeWord, setWakeWord] = useState(user?.voiceWakeWord ?? "Hej Emma");
   const [continuous, setContinuous] = useState(user?.voiceContinuous ?? false);
   const [voiceLanguage, setVoiceLanguage] = useState<AppLanguage>(appLanguage(user?.voiceLanguage));
   const copy = ACCOUNT_COPY[appLanguage(user?.voiceLanguage)];

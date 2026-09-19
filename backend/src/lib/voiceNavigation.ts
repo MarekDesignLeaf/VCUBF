@@ -36,6 +36,9 @@ export const VOICE_PAGE_ROUTES = {
   recruitment: { path: "/recruitment", label: "Recruitment" },
   playbooks: { path: "/playbooks", label: "Playbooks" },
   learning: { path: "/learning", label: "Learning" },
+  voice_aliases: { path: "/voice-aliases", label: "Voice Aliases" },
+  new_employee: { path: "/employees/new", label: "New Employee" },
+  new_quote: { path: "/quotes/new", label: "New Quote" },
   memory_model: { path: "/memory-model", label: "Memory Model" },
 } as const;
 
@@ -49,7 +52,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     enquiries: "Zapytania", communication_intake: "Przychodząca komunikacja", communications: "Komunikacja", photos: "Zdjęcia",
     photo_selection: "Wybór zdjęć", business_context: "Kontekst firmy", industries: "Branże", connectors: "Integracje", company: "Firma",
     website_audit: "Audyt strony", website_content: "Treść strony", employees: "Pracownicy", calendar: "Kalendarz", services: "Usługi",
-    quotes: "Oferty", invoices: "Faktury", recruitment: "Rekrutacja", playbooks: "Procedury", learning: "Uczenie", memory_model: "Pamięć Emmy",
+    quotes: "Oferty", invoices: "Faktury", recruitment: "Rekrutacja", playbooks: "Procedury", learning: "Uczenie", memory_model: "Pamięć Emmy", voice_aliases: "Aliasy głosowe", new_employee: "Nowy pracownik", new_quote: "Nowa oferta",
   },
   "cs-CZ": {
     dashboard: "Přehled", setup: "První nastavení", forgot_password: "Obnovení hesla", reset_password: "Nastavit nové heslo",
@@ -58,7 +61,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     communication_intake: "Příjem komunikace", communications: "Komunikace", photos: "Fotografie", photo_selection: "Výběr fotografií",
     business_context: "Kontext firmy", industries: "Obory", connectors: "Konektory", company: "Firma", website_audit: "Audit webu",
     website_content: "Obsah webu", employees: "Uživatelé a přístupy", calendar: "Kalendář", services: "Služby", quotes: "Nabídky",
-    invoices: "Faktury", recruitment: "Nábor", playbooks: "Postupy", learning: "Učení", memory_model: "Paměť Emmy",
+    invoices: "Faktury", recruitment: "Nábor", playbooks: "Postupy", learning: "Učení", memory_model: "Paměť Emmy", voice_aliases: "Hlasové aliasy", new_employee: "Nový uživatel", new_quote: "Nová nabídka",
   },
   "fr-FR": {
     dashboard: "Tableau de bord", setup: "Configuration initiale", forgot_password: "Récupération du mot de passe", reset_password: "Définir un nouveau mot de passe",
@@ -67,7 +70,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     enquiries: "Demandes", communication_intake: "Réception des communications", communications: "Communications", photos: "Photos",
     photo_selection: "Sélection de photos", business_context: "Contexte de l’entreprise", industries: "Secteurs", connectors: "Connecteurs", company: "Entreprise",
     website_audit: "Audit du site", website_content: "Contenu du site", employees: "Employés", calendar: "Calendrier", services: "Services",
-    quotes: "Devis", invoices: "Factures", recruitment: "Recrutement", playbooks: "Procédures", learning: "Apprentissage", memory_model: "Mémoire d’Emma",
+    quotes: "Devis", invoices: "Factures", recruitment: "Recrutement", playbooks: "Procédures", learning: "Apprentissage", memory_model: "Mémoire d’Emma", voice_aliases: "Alias vocaux", new_employee: "Nouvel employé", new_quote: "Nouveau devis",
   },
   "de-DE": {
     dashboard: "Übersicht", setup: "Ersteinrichtung", forgot_password: "Passwortwiederherstellung", reset_password: "Neues Passwort festlegen",
@@ -76,7 +79,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     enquiries: "Anfragen", communication_intake: "Kommunikationseingang", communications: "Kommunikation", photos: "Fotos",
     photo_selection: "Fotoauswahl", business_context: "Unternehmenskontext", industries: "Branchen", connectors: "Konnektoren", company: "Unternehmen",
     website_audit: "Website-Audit", website_content: "Website-Inhalte", employees: "Mitarbeiter", calendar: "Kalender", services: "Leistungen",
-    quotes: "Angebote", invoices: "Rechnungen", recruitment: "Personalbeschaffung", playbooks: "Abläufe", learning: "Lernen", memory_model: "Emma-Speicher",
+    quotes: "Angebote", invoices: "Rechnungen", recruitment: "Personalbeschaffung", playbooks: "Abläufe", learning: "Lernen", memory_model: "Emma-Speicher", voice_aliases: "Sprachaliase", new_employee: "Neuer Mitarbeiter", new_quote: "Neues Angebot",
   },
   "es-ES": {
     dashboard: "Panel", setup: "Configuración inicial", forgot_password: "Recuperación de contraseña", reset_password: "Establecer nueva contraseña",
@@ -85,7 +88,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     enquiries: "Consultas", communication_intake: "Entrada de comunicaciones", communications: "Comunicaciones", photos: "Fotos",
     photo_selection: "Selección de fotos", business_context: "Contexto empresarial", industries: "Sectores", connectors: "Conectores", company: "Empresa",
     website_audit: "Auditoría web", website_content: "Contenido web", employees: "Empleados", calendar: "Calendario", services: "Servicios",
-    quotes: "Presupuestos", invoices: "Facturas", recruitment: "Selección de personal", playbooks: "Procedimientos", learning: "Aprendizaje", memory_model: "Memoria de Emma",
+    quotes: "Presupuestos", invoices: "Facturas", recruitment: "Selección de personal", playbooks: "Procedimientos", learning: "Aprendizaje", memory_model: "Memoria de Emma", voice_aliases: "Alias de voz", new_employee: "Nuevo empleado", new_quote: "Nuevo presupuesto",
   },
   "it-IT": {
     dashboard: "Panoramica", setup: "Configurazione iniziale", forgot_password: "Recupero password", reset_password: "Imposta nuova password",
@@ -94,7 +97,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     enquiries: "Richieste", communication_intake: "Ricezione comunicazioni", communications: "Comunicazioni", photos: "Foto",
     photo_selection: "Selezione foto", business_context: "Contesto aziendale", industries: "Settori", connectors: "Connettori", company: "Azienda",
     website_audit: "Audit del sito", website_content: "Contenuto del sito", employees: "Dipendenti", calendar: "Calendario", services: "Servizi",
-    quotes: "Preventivi", invoices: "Fatture", recruitment: "Selezione del personale", playbooks: "Procedure", learning: "Apprendimento", memory_model: "Memoria di Emma",
+    quotes: "Preventivi", invoices: "Fatture", recruitment: "Selezione del personale", playbooks: "Procedure", learning: "Apprendimento", memory_model: "Memoria di Emma", voice_aliases: "Alias vocali", new_employee: "Nuovo dipendente", new_quote: "Nuovo preventivo",
   },
 };
 
@@ -136,7 +139,7 @@ const PAGE_ALIASES: Record<string, VoicePage> = {
   "company setup": "setup",
   "forgot password": "forgot_password",
   "password recovery": "forgot_password",
-  "reset password": "forgot_password",
+  "reset password": "reset_password",
   account: "account",
   "my account": "account",
   notifications: "notifications",
@@ -231,6 +234,13 @@ function normalizePageName(rawPage: string) {
     .replace(/\s+/g, " ");
 }
 
+// The canonical English label becomes a valid spoken destination whenever a
+// page is added. Mirroring a page into administrator permissions can therefore
+// never get ahead of the actual voice navigation catalogue.
+for (const [page, definition] of Object.entries(VOICE_PAGE_ROUTES)) {
+  PAGE_ALIASES[normalizePageName(definition.label)] = page as VoicePage;
+}
+
 // Every label rendered by the localized Secretary menu is also a valid Emma
 // navigation phrase. This keeps visual navigation and speech navigation tied
 // to the same page IDs instead of maintaining two drifting vocabularies.
@@ -301,6 +311,7 @@ export function buildCommandUiAction(intent: string, data: unknown, interpreted:
       return navigate(page);
     }
     case "create_client": return navigate("clients", directId ? `/clients/${directId}` : "/clients");
+    case "confirm_create_client": return navigate("clients", directId ? `/clients/${directId}` : "/clients");
     case "create_lead": return navigate("leads", directId ? `/leads/${directId}` : "/leads");
     case "create_job":
     case "change_job_status": return navigate("jobs", directId ? `/jobs/${directId}` : "/jobs");

@@ -13,8 +13,8 @@ FOUNDATION
 - Set new password (/reset-password): open only from the one-time recovery link, then enter and confirm a strong new password. The link expires after 30 minutes, cannot be reused, invalidates existing sessions and never deletes workspace data.
 - Dashboard (/): overview and starting point.
 - Account (/account): password, wake word, recognition language, continuous listening and Windows pairing.
-- Notifications (/notifications): attention feed built from overdue follow-ups, capacity and quote facts; acknowledgement does not alter source records.
-- Data Quality (/data-quality): duplicate and missing-contact evidence; client merge requires preview and explicit confirmation.
+- Notifications (/notifications): attention feed built from overdue follow-ups, capacity, quote, invoice and resource facts; acknowledgement does not alter source records. Daily digest is an opt-in per user: it emails a text copy of that user's own feed to their own account email through the authorised Gmail source, never to a client, and a manual send shows the exact message before Confirm and send.
+- Data Quality (/data-quality): duplicate and missing-contact evidence; client merge requires preview and explicit confirmation. Merge history lists every confirmed merge and Un-merge reverses exactly one recorded merge after its own preview and confirmation.
 - Business Metrics (/metrics): operational metrics calculated from stored company records.
 
 CUSTOMERS AND WORK
@@ -24,7 +24,7 @@ CUSTOMERS AND WORK
 - Jobs (/jobs, /jobs/:id): work records linked to clients, assigned employees, status, resources, photos and commercial context.
 - Tasks (/tasks): actionable work linked to clients, jobs, communications and employees, including due dates and completion.
 - Calendar (/calendar): scheduled work and capacity; use overload checks before promising dates.
-- Company (/company): company name, primary administrator and the access hierarchy. Only company administrators can maintain it.
+- Company (/company): company name, primary administrator and the access hierarchy. Only company administrators can maintain it. It also holds the company's notification thresholds (quote expiry warning, stale lead, stuck job, resource readiness, in days) with visible defaults, bounded ranges and an audited Save thresholds control.
 - Users & access (/employees, /employees/new, /employees/:id/edit): user accounts, access profiles, optional permissions, skills and capacity. Use New user or Manage; account creation, password reset and material access changes require review. Secretary always retains at least one active administrator.
 
 COMMUNICATION
@@ -36,8 +36,8 @@ COMMUNICATION
 SERVICES, SALES AND FINANCE
 - Industries (/industries): verified company industry taxonomy linked to actual services.
 - Services (/services): company service catalogue and confirmed reference activities. Reference prices never become company prices automatically.
-- Quotes (/quotes, /quotes/new, /quotes/:id): itemised commercial drafts linked to clients; review before issue or external delivery.
-- Invoices (/invoices): create itemised drafts, issue, record real payments and download PDF. Payment recording is confirmation-gated; issuing/exporting does not send automatically.
+- Quotes (/quotes, /quotes/new, /quotes/:id): itemised commercial drafts linked to clients; review before issue or external delivery. Send by email attaches the saved quote PDF and sends it through the authorised Gmail source only after a reviewed confirmation; a draft quote then becomes sent and the delivery is logged as an outbound communication.
+- Invoices (/invoices): create itemised drafts, issue, record real payments, download PDF and send an issued invoice by email. Payment recording and email sending are confirmation-gated; issuing or exporting never sends anything by itself, and a draft invoice cannot be emailed.
 
 DELIVERY EVIDENCE AND GROWTH
 - Photos (/portfolio): internal photo references, provenance, quality, sensitivity and usage permission review; no automatic publication.
@@ -80,8 +80,8 @@ PRIMARY UI CONTROLS AND SAFE WORKFLOWS
 - Industries: Add industry, Link service, Archive link and Archive industry.
 - Connectors: **Register data source**, **Authorize Gmail/Contacts/Calendar/Drive/Google Photos**, **Enable**, **Initial sync** or **Sync changes**, **Select Drive images**, **Select Google Photos**, **Review contacts/events/images**, explicitly **Import/Register** selected records, **Write email**, **Create draft only**, **Review and send email**, **Write WhatsApp**, **Review and send WhatsApp**, or **Disconnect**. Guided setup registers missing sources, opens each available provider flow in sequence, resumes after OAuth, asks for the mandatory Enable confirmation and performs the first supported sync. For Emma email, require one enabled Gmail source with send:messages, collect recipient/subject/body, read the exact preview and only then accept a separate confirmation. Every email/WhatsApp send still shows the final destination and message and requires a separate confirmation.
 - Services: New service; Reference activities/Search and Activate can copy a reviewed reference activity, but not reference pricing.
-- Quotes: New quote; select client/job, maintain Line items, Save, change reviewed status and Download PDF. Download does not send it.
-- Invoices exact UI: on /invoices the creation form is already visible; there is no New invoice button and no add-line control. Select Client, enter Invoice number, Description and Amount, then choose Create draft. A saved row offers Issue while draft, Record payment while issued with a balance, and PDF. Only Record payment is confirmation-gated. Issue and PDF do not send email automatically.
+- Quotes: New quote; select client/job, maintain Line items, Save, change reviewed status, Download PDF and Send by email. Download does not send it; Send by email shows the exact recipients, subject, message and PDF attachment and sends only after Confirm and send.
+- Invoices exact UI: on /invoices the creation form is already visible; there is no New invoice button and no add-line control. Select Client, enter Invoice number, Description and Amount, then choose Create draft. A saved row offers Issue while draft, Record payment while issued with a balance, and PDF. Record payment and Send by email are confirmation-gated; Send by email appears only on an issued invoice. Issue and PDF do not send email automatically.
 - Recruitment: New job opening; open it to Draft advert or Add candidate. Recommendations are advisory.
 - Playbooks: New playbook; open it, fill placeholders, Preview run and Confirm run. Review Run history afterwards.
 - Learning: Teach a rule, then Archive or Reactivate it; rules are visible phrase aliases only.
@@ -90,7 +90,7 @@ PRIMARY UI CONTROLS AND SAFE WORKFLOWS
 - Business Context: Add context or Archive; only active verified facts guide later work.
 - Website Audit: New audit and View findings; it records supplied observations only.
 - Website Content: New proposal, View proposal and Review decision; approval does not publish.
-- Data Quality: inspect duplicate pairs, choose Merge, review the preview and explicitly confirm; missing-contact rows link back to the client.
+- Data Quality: inspect duplicate pairs, choose Merge, review the preview and explicitly confirm; missing-contact rows link back to the client. To reverse a merge, open Merge history, choose Preview un-merge on that row, review which records move back and which no longer can, then Confirm un-merge.
 - Account: Change password; Voice control lets the user change wake word, Emma and Secretary menu language, and continuous-listening preference with Save voice preferences.
 
 UI ACCURACY RULE: primary controls above are exact current labels. Never add a likely/common control or capability from general software knowledge. If a detail is not stated here, say it is not described and direct the user to the named page for inspection.

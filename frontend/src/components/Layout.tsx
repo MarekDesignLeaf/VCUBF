@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
-import { CommandBar } from "./CommandBar";
-import { VoiceControlCenter } from "./VoiceControlCenter";
 import { MobileVoiceControl } from "./MobileVoiceControl";
+import { BrowserVoiceControl } from "./BrowserVoiceControl";
 import { DesignLeafCredit } from "./DesignLeafCredit";
 import { isAndroidNative } from "../lib/platform";
 import { appLanguage, languageLabel, menuText, type MenuKey } from "../i18n";
@@ -88,6 +87,7 @@ export function Layout() {
         { key: "dataQuality", to: "/data-quality" },
         { key: "playbooks", to: "/playbooks" },
         { key: "learning", to: "/learning" },
+        { key: "voiceAliases", to: "/voice-aliases" },
         { key: "emmaMemory", to: "/memory-model", visible: canUseEmmaMemory || canReadAudit },
       ],
     },
@@ -110,9 +110,9 @@ export function Layout() {
     <div className={`app-shell ${mobileMenuOpen ? "menu-open" : ""}`}>
       <aside className="sidebar">
         <div className="sidebar-brand-row">
-          <div className="brand" aria-label="VCUF Secretary">
+          <div className="brand" aria-label="VCUBF Secretary">
             <span className="brand-mark" aria-hidden="true">S</span>
-            <span><strong>VCUF</strong><small>Secretary</small></span>
+            <span><strong>VCUBF</strong><small>Secretary</small></span>
           </div>
           <button
             className="sidebar-menu-button"
@@ -176,8 +176,9 @@ export function Layout() {
           </div>
         </header>
         {user?.permissions?.includes("voice.execute") && <section className="assistant-area" aria-label="Emma assistant controls">
-          {isAndroidNative() ? <MobileVoiceControl /> : <VoiceControlCenter />}
-          <CommandBar />
+          {/* One place to type, not two: the voice panel has its own input, and a second
+              box below it sending to the same endpoint only asked which one to use. */}
+          {isAndroidNative() ? <MobileVoiceControl /> : <BrowserVoiceControl />}
         </section>}
         <div className="page-content">
           <Outlet />

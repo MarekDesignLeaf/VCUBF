@@ -171,15 +171,75 @@ export async function resolveLearningAliases(user: AuthedUser, text: string): Pr
   // over a shorter one it contains ("Oak") without ever re-scanning text
   // that a previous substitution already produced (which could otherwise
   // cause a term to match again inside its own replacement).
+  // Longest term first, so a more specific alias ("Oak Home") wins over a
+  // shorter one it contains ("Oak").
   const sorted = [...rules].sort((a, b) => b.term.length - a.term.length);
-  const combined = new RegExp(`\\b(${sorted.map((r) => escapeRegExp(r.term)).join("|")})\\b`, "gi");
+
+  // Match against a diacritics-folded copy of the text. Learned voice aliases
+  // are stored folded, so without this a phrase could be learned and then never
+  // recognised. The fold preserves length, so indices into the folded text
+  // address the original text directly and untouched words keep their accents.
+  const folded = foldForMatch(text);
+  if (folded.length !== text.length) {
+    return { originalText: text, resolvedText: text, appliedRules: [] };
+  }
+
+  // Spoken input has unpredictable spacing, so a stored "ukaz zakazniky"
+  // must still match "ukaz  zakazniky".
+  const pattern = sorted
+    .map((rule) => escapeRegExp(foldForMatch(rule.term)).replace(/\\?\s+/g, "\\s+"))
+    .join("|");
+  const combined = new RegExp(`(?<![\\p{L}\\p{N}])(${pattern})(?![\\p{L}\\p{N}])`, "gu");
+
   const appliedRules: AppliedAlias[] = [];
-  const resolvedText = text.replace(combined, (match) => {
-    const rule = sorted.find((r) => r.term.toLowerCase() === match.toLowerCase());
-    if (!rule) return match;
+  let resolvedText = "";
+  let cursor = 0;
+  for (const match of folded.matchAll(combined)) {
+    const index = match.index ?? 0;
+    const hit = collapseSpaces(match[0]);
+    const rule = sorted.find((r) => collapseSpaces(foldForMatch(r.term)) === hit);
+    if (!rule) continue;
+    // Single left-to-right pass over the ORIGINAL text: text a previous
+    // substitution produced is never re-scanned, so a term cannot match again
+    // inside its own replacement.
+    resolvedText += text.slice(cursor, index) + rule.aliasFor!;
     appliedRules.push({ term: rule.term, aliasFor: rule.aliasFor! });
-    return rule.aliasFor!;
-  });
+    cursor = index + match[0].length;
+  }
+  resolvedText += text.slice(cursor);
 
   return { originalText: text, resolvedText, appliedRules };
+}
+
+
+/**
+ * Lowercases and strips Czech diacritics for comparison, one character in and
+ * one character out. Length must be preserved: the caller relies on indices
+ * into the folded string pointing at the same place in the original.
+ */
+const DIACRITICS: Record<string, string> = {
+  "á": "a", "ä": "a", "â": "a", "à": "a", "å": "a", "ã": "a",
+  "č": "c", "ć": "c", "ç": "c",
+  "ď": "d", "đ": "d",
+  "é": "e", "ě": "e", "ë": "e", "ê": "e", "è": "e",
+  "í": "i", "ï": "i", "î": "i", "ì": "i",
+  "ĺ": "l", "ľ": "l", "ł": "l",
+  "ň": "n", "ń": "n", "ñ": "n",
+  "ó": "o", "ö": "o", "ô": "o", "ò": "o", "õ": "o", "ø": "o",
+  "ŕ": "r", "ř": "r",
+  "š": "s", "ś": "s", "ş": "s",
+  "ť": "t",
+  "ú": "u", "ů": "u", "ü": "u", "û": "u", "ù": "u",
+  "ý": "y", "ÿ": "y",
+  "ž": "z", "ź": "z", "ż": "z",
+};
+
+export function foldForMatch(value: string): string {
+  let out = "";
+  for (const char of value.toLowerCase()) out += DIACRITICS[char] ?? char;
+  return out;
+}
+
+function collapseSpaces(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }

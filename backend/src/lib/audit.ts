@@ -20,7 +20,7 @@ interface AuditEntryInput {
 /**
  * Audit Engine — every important action must be auditable.
  * Records who, what was requested, what data was used, what changed, and the result.
- * See VCUF Master Documentation section 37 and the Action Contract rule in
+ * See VCUBF Master Documentation section 37 and the Action Contract rule in
  * the vcubf-programmer-skill.
  */
 export async function recordAudit(entry: AuditEntryInput) {

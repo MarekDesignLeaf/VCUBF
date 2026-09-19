@@ -269,7 +269,7 @@ export async function runPlaybook(user: AuthedUser, playbookId: string, rawInput
   let overallOk = true;
   for (const step of resolved) {
     const command = parseTextCommand(step.text);
-    const result: CommandResponse = await dispatchParsedCommand(user, command);
+    const result: CommandResponse = await dispatchParsedCommand(user, command, { confirmedWorkflow: true });
     stepResults.push({
       template: step.template,
       resolvedText: step.text,

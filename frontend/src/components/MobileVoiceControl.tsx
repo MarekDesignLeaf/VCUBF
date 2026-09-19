@@ -76,7 +76,7 @@ export function MobileVoiceControl() {
   const navigate = useNavigate();
   const language = appLanguage(user?.voiceLanguage);
   const copy = mobileVoiceCopy(language);
-  const wakeWord = (user?.voiceWakeWord || "Emma").trim();
+  const wakeWord = (user?.voiceWakeWord || "Hej Emma").trim();
   const [enabled, setEnabled] = useState(() => localStorage.getItem("vcubf.mobile-emma.enabled") !== "false");
   const [listening, setListening] = useState(false);
   const [thinking, setThinking] = useState(false);

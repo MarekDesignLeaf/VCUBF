@@ -867,3 +867,212 @@ table,
   .mobile-voice-control { border-left-color: var(--accent); }
   .login-introduction { border-right: 0; border-bottom: 1px solid #303535; }
 }
+
+/* Live microphone meter. Moving means sound is arriving; flat means it is not, which
+   is the difference between a broken microphone and a misheard command. */
+.voice-meter { margin-top: 12px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); }
+.voice-meter-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.voice-meter-head .voice-observation-label { margin-bottom: 0; }
+.voice-meter-state { color: var(--muted); font-size: .8rem; text-align: right; }
+.voice-meter.is-live .voice-meter-state { color: var(--accent); }
+.voice-meter.is-denied .voice-meter-state { color: var(--error-text); }
+.voice-meter-canvas { display: block; width: 100%; height: 46px; }
+.voice-meter.is-off .voice-meter-canvas, .voice-meter.is-denied .voice-meter-canvas { opacity: .35; }
+
+/* What was heard, in a frame of its own and scrollable. */
+.voice-heard-panel { margin-top: 12px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); }
+.voice-heard-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.voice-heard-head .voice-observation-label { margin-bottom: 0; }
+.voice-heard-list { list-style: none; margin: 0; padding: 0; max-height: 190px; overflow-y: auto; overscroll-behavior: contain; }
+.voice-heard-list > li { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: start; padding: 5px 0; border-top: 1px solid var(--border); }
+.voice-heard-list > li:first-child { border-top: 0; }
+.voice-heard-text { overflow-wrap: anywhere; }
+.voice-heard-list small { color: var(--muted); font-size: .75rem; white-space: nowrap; }
+.voice-heard-mark { font-weight: 700; }
+.voice-heard-list > li.is-woke .voice-heard-mark { color: var(--accent); }
+.voice-heard-list > li.is-ignored .voice-heard-mark { color: var(--muted); }
+.voice-heard-list > li.is-ignored .voice-heard-text { color: var(--muted); }
+
+/* Which part of the chain is failing, in words. */
+.voice-recogniser { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 10px 0 0; padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); font-size: .85rem; color: var(--muted); }
+.voice-recogniser .voice-observation-label { margin-bottom: 0; }
+.voice-recogniser > strong { color: var(--text); }
+.voice-recogniser.is-running > strong { color: var(--accent); }
+.voice-recogniser.is-error > strong { color: var(--error-text); }
+.voice-recogniser-hint { flex: 1 0 100%; color: var(--warning-text); }
+
+/* The assistant panel, kept to a quarter of the page. */
+/* Two independent stacks: controls on the left, what it is hearing on the right. Each
+   item is placed in a column explicitly, so the order in the markup decides the order
+   down each column and nothing has to know about rows. */
+.voice-control-centre {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 14px;
+  row-gap: 6px;
+  /* The heading takes its natural height and the columns take the rest. Sizing them by
+     hand held only until something wrapped onto a second line, and then the bottom of the
+     panel was simply cut off. */
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+  /* Fixed, so adding a block later cannot quietly take over the page again. */
+  /* The prototype uses clamp(300px, 34vh, 385px) for its nine-block deck. This panel
+     carries four, so it is tighter — but pinned the same way, so it neither crushes on a
+     short window nor sprawls on a tall one. */
+  max-height: clamp(250px, 34vh, 340px);
+  overflow: hidden;
+  padding: 10px 12px;
+}
+.voice-control-centre > .voice-control-heading { grid-column: 1 / -1; }
+/* Anything else that appears at the top level spans, so a banner is not squeezed into
+   half the width. */
+.voice-control-centre > .learning-banner,
+.voice-control-centre > .voice-ui-action,
+.voice-control-centre > .error-banner,
+.voice-control-centre > .voice-listening-assurance { grid-column: 1 / -1; }
+.voice-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.voice-col-left { grid-column: 1; grid-row: 2; min-height: 0; overflow: hidden; }
+.voice-col-right { grid-column: 2; grid-row: 2; min-height: 0; overflow: hidden; }
+
+/* One line, and the buttons keep their size while the title gives way. Most of the height
+   the panel was losing went here, to a heading wrapping onto three lines. */
+.voice-control-centre > .voice-control-heading { grid-row: 1; flex-wrap: nowrap; align-items: center; }
+.voice-control-centre > .voice-control-heading > * { min-width: 0; }
+.voice-control-centre .voice-control-heading h2,
+.voice-control-centre .voice-control-heading h3 {
+  margin: 0; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.voice-control-centre .voice-control-actions { flex: 0 0 auto; }
+/* The history takes what is left of the column rather than a fixed height, so the two
+   sides finish level. */
+.voice-col-right .voice-heard-panel { display: flex; flex-direction: column; min-height: 0; }
+.voice-col-right .voice-heard-list { max-height: none; flex: 1 1 auto; }
+
+/* Smaller throughout: the panel is a status display, not the page. */
+.voice-control-centre .voice-hint { margin: 0; font-size: .78rem; line-height: 1.35; }
+.voice-control-centre .voice-control-privacy { display: none; }
+.voice-control-centre .voice-meter,
+.voice-control-centre .voice-heard-panel,
+.voice-control-centre .voice-recogniser { margin: 0; padding: 6px 8px; }
+.voice-control-centre .voice-meter-canvas { height: 30px; }
+.voice-control-centre .voice-heard-list { max-height: 96px; }
+.voice-control-centre .voice-heard-list > li { padding: 3px 0; font-size: .82rem; }
+.voice-control-centre .voice-listening-assurance { margin-top: 0; padding: 5px 8px; font-size: .8rem; }
+.voice-control-centre .voice-typed { margin: 0; }
+
+/* One column when there is not room for two. */
+@media (max-width: 760px) {
+  .voice-control-centre {
+    grid-template-columns: minmax(0, 1fr);
+    max-height: 42vh;
+    overflow-y: auto;
+  }
+  /* Both wrappers into the one column, and rows placed automatically so they stack.
+     Naming the old children here did nothing: they sit inside the wrappers now. */
+  .voice-control-centre > .voice-col-left,
+  .voice-control-centre > .voice-col-right { grid-column: 1; grid-row: auto; overflow: visible; }
+}
+
+/* Assistant panel in the language of the operations console prototype: dense inner boxes,
+   9px uppercase labels, a 43px waveform with a level bar under it, and a heard list with
+   times. Small labels are what let a panel carry this much without shouting. */
+.voice-control-centre { padding: 11px 13px; }
+.voice-control-centre .voice-observation-label {
+  font-size: 9px; letter-spacing: .07em; text-transform: uppercase; color: #9fb2ba; margin: 0;
+}
+.voice-control-centre .voice-meter,
+.voice-control-centre .voice-heard-panel {
+  border: 1px solid #20323c; background: #09151a; border-radius: 9px; padding: 6px 7px;
+}
+.voice-control-centre .voice-meter-head,
+.voice-control-centre .voice-heard-head { margin-bottom: 5px; gap: 8px; }
+.voice-control-centre .voice-meter-state { font-size: 9px; color: var(--muted); }
+.voice-control-centre .voice-meter.is-live .voice-meter-state { color: var(--accent); }
+.voice-control-centre .voice-meter-canvas {
+  height: 36px; background: #081217; border-radius: 6px;
+}
+/* Loudness as a bar. The waveform says what the sound looks like; this says how much. */
+.voice-meter-bar { height: 4px; background: #1d2e35; border-radius: 999px; overflow: hidden; margin-top: 5px; }
+.voice-meter-bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .08s linear; }
+
+.voice-control-centre .voice-heard-list { font-size: 9px; line-height: 1.35; }
+.voice-control-centre .voice-heard-list > li {
+  grid-template-columns: auto auto minmax(0, 1fr); gap: 6px; padding: 3px 0;
+  border-top: 0; border-bottom: 1px solid rgb(32 50 60 / 50%);
+}
+.voice-control-centre .voice-heard-list > li:last-child { border-bottom: 0; }
+.voice-heard-time { color: #637a85; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.voice-control-centre .voice-heard-list small { display: none; }
+.voice-control-centre .voice-heard-panel .hint { font-size: 9px; color: #607782; margin: 0; }
+.voice-control-centre .voice-heard-head button,
+.voice-control-centre .voice-meter-head button {
+  border: 0; background: transparent; color: #7f98a3; font-size: 9px; padding: 2px 3px; cursor: pointer;
+}
+.voice-control-centre .voice-heard-head button:hover { color: #dce9ed; background: #172730; border-radius: 4px; }
+
+.voice-control-centre .voice-recogniser {
+  border: 1px solid #20323c; background: #09151a; border-radius: 9px; padding: 6px 7px; font-size: 9px;
+}
+.voice-control-centre .voice-hint { font-size: 10px; color: var(--muted); }
+.voice-control-centre .voice-typed input { height: 30px; font-size: 12px; }
+.voice-control-centre .voice-typed button { font-size: 12px; padding: 5px 10px; }
+
+/* Telemetry belongs next to the waveform, not in a box of its own. */
+.voice-recogniser-line {
+  display: flex; flex-wrap: nowrap; white-space: nowrap; align-items: baseline; gap: 3px 8px;
+  margin: 0; padding: 0; border: 0; background: none; overflow: hidden;
+  font-size: 9px; color: var(--muted);
+}
+.voice-recogniser-line > strong { color: var(--text); font-weight: 500; }
+.voice-recogniser-line.is-running > strong { color: var(--accent); }
+.voice-recogniser-line.is-error > strong { color: var(--error-text); }
+.voice-recogniser-line .voice-recogniser-hint { flex: 1 0 100%; color: var(--warning-text); }
+/* The history keeps a usable size rather than collapsing to its own header. */
+.voice-col-right .voice-heard-panel { min-height: 48px; }
+
+/* Two lines at most: the hint is a reminder, not documentation. */
+.voice-control-centre .voice-hint {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* Which block gives way when the column is short. Everything shrinks by default, and the
+   status line was the item with no minimum, so flex took every missing pixel out of it and
+   it collapsed to zero height. The waveform and the status hold their size; the history
+   scrolls, so it can afford to lose rows. */
+.voice-col-right > .voice-meter { flex: 0 0 auto; }
+.voice-col-right > .voice-recogniser-line { flex: 0 0 auto; min-height: 14px; }
+.voice-col-right > .voice-heard-panel { flex: 1 1 auto; }
+.voice-col-left > * { flex: 0 0 auto; }
+
+/* The top is pinned and only the content scrolls.
+   Done by making the main column the scroll container rather than taking the panel out of
+   the flow: position: fixed would mean hard-coding its height into the padding of
+   everything below it, and the two drift apart the moment either changes. */
+.content {
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+}
+.content > .workspace-header,
+.content > .assistant-area { flex: 0 0 auto; }
+.content > .page-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* The padding the column gave up, so content does not end flush against the edge. */
+  padding-bottom: 48px;
+}
+
+/* Three rows rather than one. The panel is on screen permanently now, so a history you
+   cannot read is a worse trade than a slightly taller panel. */
+.voice-col-right > .voice-heard-panel { min-height: 82px; }
+
+/* On a phone the panel is stacked and tall; let the whole column scroll instead, or the
+   content below it would be unreachable. */
+@media (max-width: 760px) {
+  .content { height: auto; overflow: visible; display: block; }
+  .content > .page-content { overflow: visible; }
+}

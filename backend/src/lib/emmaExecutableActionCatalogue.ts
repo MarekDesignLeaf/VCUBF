@@ -3,6 +3,8 @@
 // only an action listed here and must provide JSON; the owning service still
 // validates every value and tenant-scopes every lookup.
 
+import { validateVoiceActionParameters } from "./voiceActionCatalogue.js";
+
 export interface EmmaExecutableActionDefinition {
   capabilityAction: string;
   fields: string;
@@ -20,6 +22,9 @@ export const EMMA_EXECUTABLE_ACTIONS = {
   link_industry_service: { capabilityAction: "link_industry_service", fields: "industry_name, service_name, notes?", confirmation: "none" },
   archive_industry_service_link: { capabilityAction: "update_industry_service_link", fields: "industry_name, service_name", confirmation: "none" },
   set_service_active: { capabilityAction: "update_service_catalogue_item", fields: "service_name, is_active", confirmation: "none" },
+  set_assistant_name: { capabilityAction: "update_voice_preferences", fields: "name", confirmation: "none" },
+  set_hotword: { capabilityAction: "update_voice_preferences", fields: "hotword", confirmation: "none" },
+  set_speech_rate: { capabilityAction: "update_voice_preferences", fields: "rate?, change?", confirmation: "none" },
   create_quote: { capabilityAction: "prepare_quote", fields: "client_name, title, items[{description, quantity?, unit_price, unit_cost?}], job_title?, notes?, valid_until?", confirmation: "none" },
   set_quote_status: { capabilityAction: "change_quote_status", fields: "quote_title, quote_status", confirmation: "none" },
   update_quote: { capabilityAction: "update_quote", fields: "quote_title, title?, notes?, valid_until?, items?", confirmation: "none" },
@@ -47,6 +52,7 @@ export const EMMA_EXECUTABLE_ACTIONS = {
   archive_learning_rule: { capabilityAction: "update_learning_rule", fields: "term", confirmation: "none" },
   reactivate_learning_rule: { capabilityAction: "update_learning_rule", fields: "term", confirmation: "none" },
   archive_memory: { capabilityAction: "archive_assistant_memory", fields: "content", confirmation: "none" },
+  get_unpaid_invoices: { capabilityAction: "get_unpaid_invoices", fields: "", confirmation: "none" },
   get_metrics: { capabilityAction: "get_metrics_overview", fields: "from?, to?", confirmation: "none" },
   suggest_schedule: { capabilityAction: "suggest_schedule", fields: "estimated_duration_hours?, required_skills?, weeks_ahead?", confirmation: "none" },
   get_recruitment_recommendation: { capabilityAction: "get_recruitment_recommendation", fields: "weeks_ahead?, minimum_repeated_weeks?", confirmation: "none" },
@@ -112,8 +118,9 @@ export function parseEmmaExecutableActionCommand(rawText: string): EmmaExecutabl
   if (!isEmmaExecutableActionName(action)) return undefined;
   try {
     const parameters = JSON.parse(match[2]);
-    if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return undefined;
-    return { action, parameters };
+    const validated = validateVoiceActionParameters(action, parameters);
+    if (!validated.success) return undefined;
+    return { action, parameters: validated.data };
   } catch {
     return undefined;
   }
@@ -124,6 +131,8 @@ export function capabilityActionForExecutableAction(action: EmmaExecutableAction
 }
 
 export const EMMA_EXECUTABLE_ACTION_PAGES: Record<EmmaExecutableActionName, string> = {
+  get_unpaid_invoices: "invoices",
+  set_assistant_name: "account", set_hotword: "account", set_speech_rate: "account",
   create_document: "documents", archive_document: "documents", set_task_status: "tasks",
   create_business_context: "business_context", archive_business_context: "business_context",
   create_industry: "industries", archive_industry: "industries", link_industry_service: "industries",
@@ -177,6 +186,12 @@ export const EMMA_NON_DIRECT_ACTIONS = {
   prepare_voice_email_deletion: { executionClass: "superseded", note: "Handled by the generic delete_gmail_message reviewed action." },
   confirm_voice_email_deletion: { executionClass: "superseded", note: "Handled by confirm action for delete_gmail_message." },
   cancel_voice_email_deletion: { executionClass: "superseded", note: "Handled by cancel action for delete_gmail_message." },
+  update_notification_digest_preferences: { executionClass: "interactive", note: "The digest opt-in and hour are set by the user on the Notifications page." },
+  send_notification_digest: { executionClass: "interactive", note: "The digest is reviewed and confirmed on the Notifications page, or sent by the scheduled sweep for users who enabled it." },
+  send_quote_pdf: { executionClass: "interactive", note: "Recipients, subject, body and the PDF attachment are reviewed in the quote page before the confirmed send." },
+  send_invoice_pdf: { executionClass: "interactive", note: "Recipients, subject, body and the PDF attachment are reviewed in the invoice page before the confirmed send." },
+  update_notification_thresholds: { executionClass: "interactive", note: "Threshold days are edited in Company settings by an administrator; not a spoken command." },
+  unmerge_clients: { executionClass: "interactive", note: "Reversal of a specific recorded merge is chosen from the Data Quality merge history and confirmed there." },
 } as const;
 
 export const EMMA_DYNAMIC_COMMAND_ACTIONS = [

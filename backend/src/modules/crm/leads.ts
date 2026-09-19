@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
-import { CONVERT_LEAD_ACTION, CREATE_LEAD_ACTION } from "../../lib/actionContracts.js";
+import { CONVERT_LEAD_ACTION, CREATE_LEAD_ACTION, UPDATE_LEAD_ACTION } from "../../lib/actionContracts.js";
 import * as leadService from "../../services/leadService.js";
 
 export const leadsRouter = Router();
@@ -21,6 +21,14 @@ leadsRouter.get("/:id", requirePermission("crm.read"), async (req, res) => {
 
 leadsRouter.post("/", requirePermission(CREATE_LEAD_ACTION.requiredPermission), async (req, res) => {
   const result = await leadService.createLead(req.user!, req.body);
+  if (!result.ok) {
+    return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  }
+  res.status(result.httpStatus).json(result.data);
+});
+
+leadsRouter.put("/:id", requirePermission(UPDATE_LEAD_ACTION.requiredPermission), async (req, res) => {
+  const result = await leadService.updateLead(req.user!, req.params.id, req.body);
   if (!result.ok) {
     return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   }

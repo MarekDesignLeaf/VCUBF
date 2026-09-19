@@ -777,6 +777,13 @@ export const EXPORT_QUOTE_PDF_ACTION: ActionContract = {
   dataSources: ["crm.quotes", "crm.clients", "crm.jobs", "company.name"],
   possibleErrors: ["MISSING_PERMISSION", "QUOTE_NOT_FOUND"],
 };
+export const GET_UNPAID_INVOICES_ACTION: ActionContract = {
+  actionName: "get_unpaid_invoices",
+  purpose: "Count issued invoices with a remaining balance for the authenticated company; drafts and void invoices are excluded.",
+  requiredPermission: "crm.read", riskLevel: 0, confirmationRequired: false,
+  dataSources: ["crm.invoices", "crm.payments"], possibleErrors: ["MISSING_PERMISSION"],
+};
+
 export const CREATE_INVOICE_ACTION: ActionContract = { actionName:"create_invoice",purpose:"Create an itemised draft invoice from entered client and line data.",requiredPermission:"crm.manage",riskLevel:2,confirmationRequired:false,dataSources:["user_input","crm.clients"],possibleErrors:["MISSING_PERMISSION","VALIDATION_FAILED","CLIENT_NOT_FOUND","INVOICE_NUMBER_EXISTS"] };
 export const CHANGE_INVOICE_STATUS_ACTION: ActionContract = { actionName:"change_invoice_status",purpose:"Change the internal invoice lifecycle state without sending it.",requiredPermission:"crm.manage",riskLevel:2,confirmationRequired:false,dataSources:["user_input","crm.invoices"],possibleErrors:["MISSING_PERMISSION","VALIDATION_FAILED","INVOICE_NOT_FOUND","INVALID_INVOICE_STATUS_TRANSITION"] };
 export const RECORD_INVOICE_PAYMENT_ACTION: ActionContract = { actionName:"record_invoice_payment",purpose:"Record a payment actually received against an issued invoice after explicit preview confirmation.",requiredPermission:"crm.manage",riskLevel:3,confirmationRequired:true,dataSources:["user_input","crm.invoices","crm.payments"],possibleErrors:["MISSING_PERMISSION","VALIDATION_FAILED","INVOICE_NOT_FOUND","INVOICE_NOT_PAYABLE","PAYMENT_EXCEEDS_BALANCE","CONFIRMATION_REQUIRED"] };

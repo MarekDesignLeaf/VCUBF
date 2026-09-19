@@ -26,6 +26,7 @@ export function Login() {
   const { login, localTestLogin, user, loading } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
+  const localTestRequested = params.get("localTest") === "1";
   const [email, setEmail] = useState(() => params.get("email") ?? localStorage.getItem("vcuf_last_email") ?? "");
   const [password, setPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -38,10 +39,13 @@ export function Login() {
 
   useEffect(() => {
     api.setupStatus().then((status) => setSetupRequired(status.setupRequired)).catch(() => setSetupRequired(false));
-    if (params.get("localTest") === "1" && ["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+    // On the developer's own machine, choosing an account is friendlier than
+    // a password box. The backend still refuses this to anything but 127.0.0.1.
+    const onLocalMachine = ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
+    if (onLocalMachine) {
       api.localTestUsers().then(setLocalTestUsers).catch(() => setLocalTestUsers(null));
     }
-  }, []);
+  }, [localTestRequested]);
 
   async function selectLocalTestUser(userId: string) {
     setError(null);
@@ -83,10 +87,10 @@ export function Login() {
 
   return (
     <div className="login-page">
-      <section className="login-introduction" aria-label="VCUF Secretary">
+      <section className="login-introduction" aria-label="VCUBF Secretary">
         <div className="login-brand">
           <span className="login-brand-mark" aria-hidden="true">S</span>
-          <span><strong>VCUF</strong><small>Secretary</small></span>
+          <span><strong>VCUBF</strong><small>Secretary</small></span>
         </div>
         <div className="login-introduction-copy">
           <p className="login-eyebrow">{copy.eyebrow}</p>
@@ -99,7 +103,7 @@ export function Login() {
           <div><span>03</span><p><strong>{copy.emma}</strong>{copy.emmaDetail}</p></div>
         </div>
         <div className="login-meta">
-          <p className="login-version">VCUF Secretary · build {__VCUBF_BUILD__}</p>
+          <p className="login-version">VCUBF Secretary · build {__VCUBF_BUILD__}</p>
           <DesignLeafCredit />
         </div>
       </section>

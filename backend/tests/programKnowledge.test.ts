@@ -17,13 +17,14 @@ describe("Emma program knowledge", () => {
   });
 
   it("grounds guidance in exact controls and safe external-effect boundaries", () => {
-    for (const label of ["New client", "Preserve message", "Create draft", "Record payment", "Confirm run", "Save voice preferences", "For the company", "Remember"]) {
+    for (const label of ["New client", "Preserve message", "Create draft", "Record payment", "Confirm run", "Save voice preferences", "For the company", "Remember", "Send by email", "Confirm and send", "Preview un-merge", "Save thresholds"]) {
       assert.ok(PROGRAM_KNOWLEDGE.includes(label), `program knowledge is missing control ${label}`);
     }
     assert.match(PROGRAM_KNOWLEDGE, /does not send/i);
     assert.match(PROGRAM_KNOWLEDGE, /does not publish/i);
     assert.match(PROGRAM_KNOWLEDGE, /there is no New invoice button and no add-line control/i);
-    assert.match(PROGRAM_KNOWLEDGE, /Only Record payment is confirmation-gated/i);
+    assert.match(PROGRAM_KNOWLEDGE, /Record payment and Send by email are confirmation-gated/i);
+    assert.match(PROGRAM_KNOWLEDGE, /Send by email appears only on an issued invoice/i);
   });
 
   it("keeps Emma's complete menu tree aligned with every sidebar item and page subtree", () => {

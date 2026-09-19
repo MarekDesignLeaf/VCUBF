@@ -39,7 +39,10 @@ describe("company Emma capability policy", () => {
     const allowed = await request(app).get("/company/emma-policy").set("Authorization", `Bearer ${administratorToken}`);
     assert.equal(allowed.status, 200);
     assert.equal(allowed.body.capabilities.length, EMMA_CAPABILITIES.length);
-    assert.ok(allowed.body.capabilities.every((item: { enabled: boolean }) => item.enabled));
+    assert.ok(allowed.body.capabilities.filter((item: { availableToEmma?: boolean }) => item.availableToEmma !== false).every((item: { enabled: boolean }) => item.enabled));
+    assert.ok(allowed.body.capabilities.filter((item: { availableToEmma?: boolean }) => item.availableToEmma === false).every((item: { enabled: boolean }) => !item.enabled));
+    assert.ok(allowed.body.summary.available > 0);
+    assert.ok(allowed.body.summary.unavailable > 0);
   });
 
   it("blocks a disabled Emma action before execution and audits the policy change", async () => {

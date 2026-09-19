@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../src/lib/commandParser.js";
+import { VOICE_PAGE_ROUTES } from "../src/lib/voiceNavigation.js";
+import { buildCommandUiAction } from "../src/lib/voiceNavigation.js";
 
 describe("commandParser", () => {
   it("parses 'create client' with email and phone", () => {
@@ -11,6 +13,18 @@ describe("commandParser", () => {
       assert.equal(result.entities.email_primary, "jane@example.com");
       assert.equal(result.entities.phone_primary, "07700900000");
     }
+  });
+
+  it("keeps and normalizes a phone number dictated with comma-separated digits", () => {
+    const result = parseTextCommand("create client George, email george@gmail.com, phone 0,7,3,9,8,5,6,3,9,8");
+    assert.deepEqual(result, {
+      intent: "create_client",
+      entities: {
+        display_name: "George",
+        email_primary: "george@gmail.com",
+        phone_primary: "0739856398",
+      },
+    });
   });
 
   it("parses a bare 'add client' with no extra fields", () => {
@@ -245,6 +259,13 @@ describe("commandParser", () => {
     assert.deepEqual(parseTextCommand("otwórz usługi"), { intent: "navigate", entities: { page: "services" } });
     assert.deepEqual(parseTextCommand("otevři nabídky"), { intent: "navigate", entities: { page: "quotes" } });
     assert.deepEqual(parseTextCommand("öffne Angebote"), { intent: "navigate", entities: { page: "quotes" } });
+    for (const [page, definition] of Object.entries(VOICE_PAGE_ROUTES)) {
+      const command = parseTextCommand(`open ${definition.label}`);
+      const uiAction = buildCommandUiAction(command.intent, {}, command.entities, "en-GB");
+      assert.equal(uiAction?.kind, "navigate", definition.label);
+      if (uiAction?.kind === "navigate") assert.equal(uiAction.path, definition.path, `${page}: ${definition.label}`);
+    }
+    assert.deepEqual(parseTextCommand("open reset password"), { intent: "navigate", entities: { page: "reset_password" } });
   });
 
   it("parses 'assign job X to Y'", () => {
@@ -415,5 +436,6 @@ describe("commandParser", () => {
     });
     assert.equal(parseTextCommand('voice action drop_database {"confirmed":true}').intent, "unrecognized");
     assert.equal(parseTextCommand("voice action set_quote_status not-json").intent, "unrecognized");
+    assert.equal(parseTextCommand('voice action set_quote_status {"quote_title":"Kitchen","quote_status":"invented"}').intent, "unrecognized");
   });
 });

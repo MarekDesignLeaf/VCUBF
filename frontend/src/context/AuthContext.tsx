@@ -2,6 +2,11 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api, ApiError, getToken, setToken, type LoginResponse } from "../api/client";
 import { AuthContext } from "./auth-state";
 
+/** Whether this page is served from the developer's own machine. */
+function isLocalhost() {
+  return ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<LoginResponse["user"] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,6 +29,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         if (localTestChooser || !getToken()) {
+          // Running from localhost there is no reason to demand a password:
+          // ask the backend for the account already selected on this machine.
+          // It answers only to 127.0.0.1 and only when explicitly enabled, so
+          // this cannot weaken a deployed server.
+          if (!localTestChooser && isLocalhost()) {
+            try {
+              const session = await api.localTestActiveSession();
+              setToken(session.token);
+              if (active) setUser(session.user);
+            } catch { /* No account chosen yet; the tiles will ask once. */ }
+          }
           if (active) setLoading(false);
           return;
         }

@@ -1,5 +1,6 @@
 import type { AuthedUser } from "../middleware/auth.js";
 import type { ParsedCommand } from "./commandParser.js";
+import { prisma } from "../db.js";
 import * as clientService from "../services/clientService.js";
 import * as jobService from "../services/jobService.js";
 import * as leadService from "../services/leadService.js";
@@ -45,10 +46,155 @@ export interface CommandResponse {
   uiAction?: CommandUiAction;
 }
 
-export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCommand): Promise<CommandResponse> {
+/** The step "faster" and "slower" move by; roughly the smallest audible change. */
+const SPEECH_RATE_STEP = 0.15;
+const SPEECH_RATE_MIN = 0.5;
+const SPEECH_RATE_MAX = 2;
+
+/** As a percentage: "130 percent" is sayable, "1.3" is not. */
+function ratePercent(rate: number): number {
+  return Math.round(rate * 100);
+}
+
+function speechRateMessage(language: string, rate: number, atLimit: "min" | "max" | null): string {
+  const percent = ratePercent(rate);
+  if (language.slice(0, 2).toLowerCase() === "cs") {
+    if (atLimit === "max") return `Rychleji už neumím, jsem na ${percent} procentech z ${ratePercent(SPEECH_RATE_MAX)}.`;
+    if (atLimit === "min") return `Pomaleji už neumím, jsem na ${percent} procentech.`;
+    return `Mluvím na ${percent} procentech. Rozsah je ${ratePercent(SPEECH_RATE_MIN)} až ${ratePercent(SPEECH_RATE_MAX)}.`;
+  }
+  if (atLimit === "max") return `That is as fast as I go: ${percent} percent of ${ratePercent(SPEECH_RATE_MAX)}.`;
+  if (atLimit === "min") return `That is as slow as I go: ${percent} percent.`;
+  return `Speaking at ${percent} percent. The range is ${ratePercent(SPEECH_RATE_MIN)} to ${ratePercent(SPEECH_RATE_MAX)}.`;
+}
+
+/**
+ * Adjusts how fast she talks and says where that landed.
+ *
+ * A direction is relative to the current value, because the person asking has no
+ * idea what it is. Hitting either end is reported rather than silently ignored,
+ * so repeating "faster" does not look broken.
+ */
+async function setSpeechRate(
+  user: AuthedUser,
+  entities: { change?: "faster" | "slower" | "normal"; rate?: number },
+): Promise<{ ok: boolean; httpStatus: number; data?: unknown; error?: string; message: string }> {
+  const current = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { voiceSpeechRate: true, voiceWakeWord: true, voiceContinuous: true, voiceLanguage: true },
+  });
+  if (!current) return { ok: false, httpStatus: 404, error: "USER_NOT_FOUND", message: "User not found." };
+
+  const now = current.voiceSpeechRate;
+  const wanted = entities.rate !== undefined
+    ? entities.rate
+    : entities.change === "faster" ? now + SPEECH_RATE_STEP
+    : entities.change === "slower" ? now - SPEECH_RATE_STEP
+    : 1;
+
+  const clamped = Math.min(SPEECH_RATE_MAX, Math.max(SPEECH_RATE_MIN, Number(wanted.toFixed(2))));
+  const atLimit = clamped >= SPEECH_RATE_MAX && wanted > SPEECH_RATE_MAX ? "max" as const
+    : clamped <= SPEECH_RATE_MIN && wanted < SPEECH_RATE_MIN ? "min" as const
+    : null;
+
+  const result = await voicePreferenceService.updateVoicePreferences(user, {
+    wake_word: current.voiceWakeWord,
+    continuous_listening: current.voiceContinuous,
+    language: current.voiceLanguage as never,
+    speech_rate: clamped,
+  });
+  if (!result.ok) {
+    return { ok: false, httpStatus: result.httpStatus, error: result.error, message: result.message ?? "Could not change the speaking speed." };
+  }
+
+  return {
+    ok: true,
+    httpStatus: 200,
+    data: { voiceSpeechRate: clamped, percent: ratePercent(clamped), min: SPEECH_RATE_MIN, max: SPEECH_RATE_MAX },
+    message: speechRateMessage(current.voiceLanguage, clamped, atLimit),
+  };
+}
+
+/** What each connector is called when spoken about. */
+const CONNECTOR_LABELS: Record<string, { cs: string; en: string }> = {
+  gmail: { cs: "Gmail", en: "Gmail" },
+  google_contacts: { cs: "Kontakty Google", en: "Google Contacts" },
+  google_calendar: { cs: "Kalendář Google", en: "Google Calendar" },
+  google_drive: { cs: "Disk Google", en: "Google Drive" },
+  google_photos: { cs: "Fotky Google", en: "Google Photos" },
+  whatsapp: { cs: "WhatsApp", en: "WhatsApp" },
+};
+
+/**
+ * Why a connector did not sync, in a sentence the user can act on.
+ *
+ * "1 connector needing attention" hides the only useful part. Naming the
+ * connector and the reason turns a dead end into a ten-second fix.
+ */
+function connectorProblem(key: string, status: string, czech: boolean): string {
+  const label = CONNECTOR_LABELS[key]?.[czech ? "cs" : "en"] ?? key.replaceAll("_", " ");
+  if (czech) {
+    switch (status) {
+      case "not_enabled": return label + " není zapnutý";
+      case "not_configured": return label + " není nastavený";
+      case "not_connected": return label + " není připojený";
+      case "expired": return label + " má prošlé přihlášení";
+      default: return label + " hlásí " + status;
+    }
+  }
+  switch (status) {
+    case "not_enabled": return label + " is not switched on";
+    case "not_configured": return label + " is not set up";
+    case "not_connected": return label + " is not connected";
+    case "expired": return label + " needs signing in again";
+    default: return label + " reports " + status;
+  }
+}
+
+function connectorSyncMessage(data: unknown, language: string): string {
+  const czech = language.slice(0, 2).toLowerCase() === "cs";
+  const results = Array.isArray((data as { results?: unknown })?.results)
+    ? (data as { results: Array<{ connectorKey?: string; ok?: boolean; status?: string }> }).results
+    : [];
+  const failed = results.filter((item) => item.ok === false);
+  const synced = results.length - failed.length;
+
+  if (failed.length === 0) {
+    return czech
+      ? (synced ? "Synchronizace hotová, konektorů: " + synced + "." : "Synchronizace hotová.")
+      : "Connector sync completed.";
+  }
+
+  const problems = failed.map((item) => connectorProblem(item.connectorKey ?? "", item.status ?? "", czech));
+  // Say what to do about it, rather than leaving the user to work it out.
+  const where = czech ? " Zapnete ho v Konektorech." : " You can turn it on under Connectors.";
+  const lead = synced ? (czech ? "Synchronizovala jsem " + synced + ". " : "Synced " + synced + ". ") : "";
+  return lead + problems.join(", ") + "." + (failed.length === 1 ? where : "");
+}
+
+
+export async function dispatchParsedCommand(
+  user: AuthedUser,
+  command: ParsedCommand,
+  options: { confirmedWorkflow?: boolean } = {},
+): Promise<CommandResponse> {
   let response: CommandResponse;
 
   switch (command.intent) {
+    case "set_speech_rate": {
+      const outcome = await setSpeechRate(user, command.entities);
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: outcome.ok,
+        httpStatus: outcome.httpStatus,
+        data: outcome.ok ? outcome.data : undefined,
+        error: outcome.ok ? undefined : outcome.error,
+        message: outcome.message,
+      };
+      break;
+    }
+
     case "execute_action": {
       const result = await executeEmmaAction(user, command.entities);
       response = result.ok
@@ -85,11 +231,17 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
       break;
     }
     case "create_client": {
-      const result = await clientService.createClient(user, {
+      const input = {
         display_name: command.entities.display_name,
         email_primary: command.entities.email_primary,
         phone_primary: command.entities.phone_primary,
-      });
+      };
+      // A confirmed playbook has already shown all resolved steps to the
+      // operator. Interactive text/voice commands still require their own
+      // spoken confirmation before a client record is written.
+      const result = options.confirmedWorkflow
+        ? await clientService.createClient(user, input, { required: true, confirmed: true })
+        : await clientService.prepareVoiceClientCreation(user, input);
       response = {
         intent: command.intent,
         interpreted: command.entities,
@@ -97,7 +249,28 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
         httpStatus: result.httpStatus,
         data: result.ok ? result.data : result.extra,
         error: result.ok ? undefined : result.error,
-        message: result.ok ? `${command.entities.display_name} was created as a client.` : result.message,
+        message: result.ok
+          ? options.confirmedWorkflow
+            ? `${command.entities.display_name} was created as a client.`
+            : (result.data as { message?: string }).message
+          : result.message,
+      };
+      break;
+    }
+
+    case "confirm_create_client":
+    case "cancel_create_client": {
+      const result = command.intent === "confirm_create_client"
+        ? await clientService.confirmVoiceClientCreation(user)
+        : await clientService.cancelVoiceClientCreation(user);
+      response = {
+        intent: command.intent,
+        interpreted: {},
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : result.extra,
+        error: result.ok ? undefined : result.error,
+        message: result.ok ? (result.data as { message?: string }).message : result.message,
       };
       break;
     }
@@ -361,6 +534,40 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
           data: result.ok ? result.data : undefined,
           error: result.ok ? undefined : result.error,
           message: result.ok ? undefined : result.message,
+        };
+      }
+      break;
+    }
+
+    case "update_lead": {
+      const leadMatches = await leadService.findLeadsByName(user, command.entities.lead_name);
+      if (leadMatches.length === 0) {
+        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 404, error: "LEAD_NOT_FOUND", message: `No lead matches "${command.entities.lead_name}".` };
+      } else if (leadMatches.length > 1) {
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: false,
+          httpStatus: 409,
+          error: "AMBIGUOUS_REFERENCE",
+          message: `Multiple leads match "${command.entities.lead_name}". Say the full name.`,
+          data: leadMatches.map((lead) => ({ id: lead.id, name: lead.name })),
+        };
+      } else {
+        const result = await leadService.updateLead(user, leadMatches[0].id, {
+          name: command.entities.name,
+          email: command.entities.email,
+          phone: command.entities.phone,
+          lead_status: command.entities.lead_status,
+        });
+        response = {
+          intent: command.intent,
+          interpreted: command.entities,
+          ok: result.ok,
+          httpStatus: result.httpStatus,
+          data: result.ok ? result.data : undefined,
+          error: result.ok ? undefined : result.error,
+          message: result.ok ? `${leadMatches[0].name} was updated.` : result.message,
         };
       }
       break;
@@ -1040,7 +1247,6 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
 
     case "sync_connectors": {
       const result = await connectorSetupService.syncConnectors(user, command.entities.connector_key);
-      const failures = result.ok ? ((result.data as any)?.failures ?? 0) : 0;
       response = {
         intent: command.intent,
         interpreted: command.entities,
@@ -1049,7 +1255,7 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
         data: result.ok ? result.data : undefined,
         error: result.ok ? undefined : result.error,
         message: result.ok
-          ? failures ? `Connector sync finished with ${failures} connector${failures === 1 ? "" : "s"} needing attention.` : "Connector sync completed."
+          ? connectorSyncMessage(result.data, user.voiceLanguage)
           : result.message,
       };
       break;
@@ -1118,7 +1324,11 @@ export async function dispatchParsedCommand(user: AuthedUser, command: ParsedCom
 
 
   if (response.ok) {
-    response.uiAction = buildCommandUiAction(response.intent, response.data, response.interpreted, user.voiceLanguage);
+    const isPendingClientPreview = response.intent === "create_client"
+      && Boolean((response.data as { confirmationRequired?: unknown } | undefined)?.confirmationRequired);
+    response.uiAction = isPendingClientPreview
+      ? undefined
+      : buildCommandUiAction(response.intent, response.data, response.interpreted, user.voiceLanguage);
     if (!response.message) {
       response.message = response.uiAction?.kind === "navigate"
         ? openingVoiceLabelMessage(response.uiAction.label, user.voiceLanguage)

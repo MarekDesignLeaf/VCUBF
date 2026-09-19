@@ -53,7 +53,7 @@ export async function getCalendarTasks(user: AuthedUser, filter: CalendarJobsFil
 }
 
 // The standard menu of realistic mitigation options for overload, taken
-// directly from the VCUF master documentation / project instructions
+// directly from the VCUBF master documentation / project instructions
 // (section 6). This is structured operational guidance, not a fabricated
 // business fact — it is attached to every overload finding so the user has
 // real options to choose from, rather than just a red flag.

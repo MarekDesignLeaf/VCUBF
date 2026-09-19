@@ -11,6 +11,125 @@ import {
 // services. Nothing shown here is invented: every field is what the user
 // typed in. Later modules (quoting, website content) read from this list
 // instead of re-typing or guessing service names/prices.
+/**
+ * The price of one service, editable in place.
+ *
+ * Correcting a rate is a five-second job, so it happens here rather than on
+ * another screen. An empty field means "no price", which is different from zero
+ * and has to survive the round trip as null.
+ */
+function PriceCell({
+  service,
+  onSaved,
+}: {
+  service: {
+    id: string;
+    basePriceMin?: number | null;
+    basePriceMax?: number | null;
+    priceUnit?: string | null;
+    /** Market rate for the area. Guidance, not this company's price. */
+    referenceRateGbp?: number | null;
+    referenceRateUnit?: string | null;
+  };
+  onSaved: () => void | Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [min, setMin] = useState(service.basePriceMin?.toString() ?? "");
+  const [max, setMax] = useState(service.basePriceMax?.toString() ?? "");
+  const [unit, setUnit] = useState(service.priceUnit ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!editing) {
+    const shown = service.basePriceMin != null || service.basePriceMax != null
+      ? `${service.basePriceMin ?? "?"}–${service.basePriceMax ?? "?"} ${service.priceUnit ?? ""}`.trim()
+      : "—";
+    return (
+      <button
+        type="button"
+        className="price-cell"
+        title="Upravit cenu"
+        onClick={() => {
+          setMin(service.basePriceMin?.toString() ?? "");
+          setMax(service.basePriceMax?.toString() ?? "");
+          setUnit(service.priceUnit ?? "");
+          setError(null);
+          setEditing(true);
+        }}
+      >
+        {shown}
+      </button>
+    );
+  }
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.catalogue.update(service.id, {
+        // An empty field clears the price rather than sending 0, which would be a
+        // free service — a different statement entirely.
+        base_price_min: min.trim() === "" ? null : Number(min),
+        base_price_max: max.trim() === "" ? null : Number(max),
+        price_unit: unit.trim() || undefined,
+      });
+      setEditing(false);
+      await onSaved();
+    } catch {
+      setError("Nepodařilo se uložit.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="price-edit">
+      <input
+        value={min}
+        onChange={(event) => setMin(event.target.value)}
+        placeholder="od"
+        inputMode="decimal"
+        size={6}
+        aria-label="Cena od"
+      />
+      <input
+        value={max}
+        onChange={(event) => setMax(event.target.value)}
+        placeholder="do"
+        inputMode="decimal"
+        size={6}
+        aria-label="Cena do"
+      />
+      <input
+        value={unit}
+        onChange={(event) => setUnit(event.target.value)}
+        placeholder="jednotka"
+        size={9}
+        aria-label="Jednotka ceny"
+      />
+      <button type="button" onClick={() => void save()} disabled={saving}>Uložit</button>
+      <button type="button" onClick={() => setEditing(false)} disabled={saving}>Zpět</button>
+      {service.referenceRateGbp != null ? (
+        <button
+          type="button"
+          title="Orientační tržní sazba pro oblast, ne vaše cena"
+          onClick={() => {
+            // Fills the field; the user still has to save it, so the price stays
+            // something they stated rather than something the system decided.
+            setMin(String(service.referenceRateGbp));
+            setMax(String(service.referenceRateGbp));
+            if (service.referenceRateUnit) setUnit(service.referenceRateUnit);
+          }}
+          disabled={saving}
+        >
+          Použít {service.referenceRateGbp} (orientační)
+        </button>
+      ) : null}
+      {error ? <span className="error">{error}</span> : null}
+    </div>
+  );
+}
+
 export function ServiceCatalogue() {
   const [services, setServices] = useState<ServiceCatalogueItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,9 +212,7 @@ export function ServiceCatalogue() {
                 </td>
                 <td>{s.category ?? "—"}</td>
                 <td>
-                  {s.basePriceMin != null || s.basePriceMax != null
-                    ? `${s.basePriceMin ?? "?"}–${s.basePriceMax ?? "?"} ${s.priceUnit ?? ""}`
-                    : "—"}
+                  <PriceCell service={s} onSaved={load} />
                 </td>
                 <td>{s.defaultDurationHours ?? "—"}</td>
                 <td>

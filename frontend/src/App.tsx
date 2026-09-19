@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { RequireAuth } from "./components/RequireAuth";
@@ -5,49 +6,51 @@ import { Layout } from "./components/Layout";
 import { Login } from "./pages/Login";
 import { PasswordRecovery } from "./pages/PasswordRecovery";
 import { InitialSetup } from "./pages/InitialSetup";
-import { CompanySettings } from "./pages/CompanySettings";
-import { Dashboard } from "./pages/Dashboard";
-import { Clients } from "./pages/Clients";
-import { ClientDetail } from "./pages/ClientDetail";
-import { Jobs } from "./pages/Jobs";
-import { JobDetail } from "./pages/JobDetail";
-import { Employees } from "./pages/Employees";
-import { EmployeeEdit } from "./pages/EmployeeEdit";
-import { Calendar } from "./pages/Calendar";
-import { ServiceCatalogue } from "./pages/ServiceCatalogue";
-import { Quotes } from "./pages/Quotes";
-import { QuoteEdit } from "./pages/QuoteEdit";
-import { Recruitment } from "./pages/Recruitment";
-import { JobOpeningDetail } from "./pages/JobOpeningDetail";
-import { Playbooks } from "./pages/Playbooks";
-import { PlaybookDetail } from "./pages/PlaybookDetail";
-import { LearningRules } from "./pages/LearningRules";
-import { Leads } from "./pages/Leads";
-import { LeadDetail } from "./pages/LeadDetail";
-import { CommunicationLog } from "./pages/CommunicationLog";
-import { Notifications } from "./pages/Notifications";
-import { DataQuality } from "./pages/DataQuality";
-import { Portfolio } from "./pages/Portfolio";
-import { PhotoSelection } from "./pages/PhotoSelection";
-import { MemoryModel } from "./pages/MemoryModel";
-import { BusinessContext } from "./pages/BusinessContext";
-import { WebsiteAudits } from "./pages/WebsiteAudits";
-import { WebsiteContentProposals } from "./pages/WebsiteContentProposals";
-import { Tasks } from "./pages/Tasks";
-import { CommunicationIntakePage } from "./pages/CommunicationIntake";
-import { Enquiries } from "./pages/Enquiries";
-import { Contacts } from "./pages/Contacts";
-import { Documents } from "./pages/Documents";
-import { Industries } from "./pages/Industries";
-import { Connectors } from "./pages/Connectors";
-import { Metrics } from "./pages/Metrics";
-import { Account } from "./pages/Account";
-import { Invoices } from "./pages/Invoices";
-import { EmmaPermissions } from "./pages/EmmaPermissions";
 import { BuildRefresh } from "./components/BuildRefresh";
 import { LocalizedSurface } from "./components/LocalizedSurface";
 import { useAuth } from "./context/useAuth";
 import { appLanguage } from "./i18n";
+
+const CompanySettings = lazy(() => import("./pages/CompanySettings").then(({ CompanySettings }) => ({ default: CompanySettings })));
+const Dashboard = lazy(() => import("./pages/Dashboard").then(({ Dashboard }) => ({ default: Dashboard })));
+const Clients = lazy(() => import("./pages/Clients").then(({ Clients }) => ({ default: Clients })));
+const ClientDetail = lazy(() => import("./pages/ClientDetail").then(({ ClientDetail }) => ({ default: ClientDetail })));
+const Jobs = lazy(() => import("./pages/Jobs").then(({ Jobs }) => ({ default: Jobs })));
+const JobDetail = lazy(() => import("./pages/JobDetail").then(({ JobDetail }) => ({ default: JobDetail })));
+const Employees = lazy(() => import("./pages/Employees").then(({ Employees }) => ({ default: Employees })));
+const EmployeeEdit = lazy(() => import("./pages/EmployeeEdit").then(({ EmployeeEdit }) => ({ default: EmployeeEdit })));
+const Calendar = lazy(() => import("./pages/Calendar").then(({ Calendar }) => ({ default: Calendar })));
+const ServiceCatalogue = lazy(() => import("./pages/ServiceCatalogue").then(({ ServiceCatalogue }) => ({ default: ServiceCatalogue })));
+const Quotes = lazy(() => import("./pages/Quotes").then(({ Quotes }) => ({ default: Quotes })));
+const QuoteEdit = lazy(() => import("./pages/QuoteEdit").then(({ QuoteEdit }) => ({ default: QuoteEdit })));
+const Recruitment = lazy(() => import("./pages/Recruitment").then(({ Recruitment }) => ({ default: Recruitment })));
+const JobOpeningDetail = lazy(() => import("./pages/JobOpeningDetail").then(({ JobOpeningDetail }) => ({ default: JobOpeningDetail })));
+const Playbooks = lazy(() => import("./pages/Playbooks").then(({ Playbooks }) => ({ default: Playbooks })));
+const PlaybookDetail = lazy(() => import("./pages/PlaybookDetail").then(({ PlaybookDetail }) => ({ default: PlaybookDetail })));
+const LearningRules = lazy(() => import("./pages/LearningRules").then(({ LearningRules }) => ({ default: LearningRules })));
+const Leads = lazy(() => import("./pages/Leads").then(({ Leads }) => ({ default: Leads })));
+const LeadDetail = lazy(() => import("./pages/LeadDetail").then(({ LeadDetail }) => ({ default: LeadDetail })));
+const CommunicationLog = lazy(() => import("./pages/CommunicationLog").then(({ CommunicationLog }) => ({ default: CommunicationLog })));
+const Notifications = lazy(() => import("./pages/Notifications").then(({ Notifications }) => ({ default: Notifications })));
+const DataQuality = lazy(() => import("./pages/DataQuality").then(({ DataQuality }) => ({ default: DataQuality })));
+const Portfolio = lazy(() => import("./pages/Portfolio").then(({ Portfolio }) => ({ default: Portfolio })));
+const PhotoSelection = lazy(() => import("./pages/PhotoSelection").then(({ PhotoSelection }) => ({ default: PhotoSelection })));
+const MemoryModel = lazy(() => import("./pages/MemoryModel").then(({ MemoryModel }) => ({ default: MemoryModel })));
+const BusinessContext = lazy(() => import("./pages/BusinessContext").then(({ BusinessContext }) => ({ default: BusinessContext })));
+const WebsiteAudits = lazy(() => import("./pages/WebsiteAudits").then(({ WebsiteAudits }) => ({ default: WebsiteAudits })));
+const WebsiteContentProposals = lazy(() => import("./pages/WebsiteContentProposals").then(({ WebsiteContentProposals }) => ({ default: WebsiteContentProposals })));
+const Tasks = lazy(() => import("./pages/Tasks").then(({ Tasks }) => ({ default: Tasks })));
+const CommunicationIntakePage = lazy(() => import("./pages/CommunicationIntake").then(({ CommunicationIntakePage }) => ({ default: CommunicationIntakePage })));
+const Enquiries = lazy(() => import("./pages/Enquiries").then(({ Enquiries }) => ({ default: Enquiries })));
+const Contacts = lazy(() => import("./pages/Contacts").then(({ Contacts }) => ({ default: Contacts })));
+const Documents = lazy(() => import("./pages/Documents").then(({ Documents }) => ({ default: Documents })));
+const Industries = lazy(() => import("./pages/Industries").then(({ Industries }) => ({ default: Industries })));
+const Connectors = lazy(() => import("./pages/Connectors").then(({ Connectors }) => ({ default: Connectors })));
+const Metrics = lazy(() => import("./pages/Metrics").then(({ Metrics }) => ({ default: Metrics })));
+const Account = lazy(() => import("./pages/Account").then(({ Account }) => ({ default: Account })));
+const Invoices = lazy(() => import("./pages/Invoices").then(({ Invoices }) => ({ default: Invoices })));
+const EmmaPermissions = lazy(() => import("./pages/EmmaPermissions").then(({ EmmaPermissions }) => ({ default: EmmaPermissions })));
+const VoiceAliases = lazy(() => import("./pages/VoiceAliases").then(({ VoiceAliases }) => ({ default: VoiceAliases })));
 
 function ApplicationRoutes() {
   const { user } = useAuth();
@@ -58,6 +61,7 @@ function ApplicationRoutes() {
       <LocalizedSurface language={language} />
       <BrowserRouter>
         <BuildRefresh />
+        <Suspense fallback={<div aria-busy="true" className="route-loading" />}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<PasswordRecovery />} />
@@ -86,6 +90,7 @@ function ApplicationRoutes() {
             <Route path="/employees/:id/edit" element={<EmployeeEdit />} />
             <Route path="/company" element={<CompanySettings />} />
             <Route path="/emma-permissions" element={<EmmaPermissions />} />
+            <Route path="/voice-aliases" element={<VoiceAliases />} />
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/tasks" element={<Tasks />} />
             <Route path="/services" element={<ServiceCatalogue />} />
@@ -113,6 +118,7 @@ function ApplicationRoutes() {
             <Route path="/website-content" element={<WebsiteContentProposals />} />
           </Route>
         </Routes>
+        </Suspense>
       </BrowserRouter>
     </>
   );

@@ -18,6 +18,22 @@ function add(file, line, value) {
 
 function walk(file) {
   const source = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  function addExpressionStrings(node) {
+    const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      add(file, line, node.text);
+      return;
+    }
+    if (ts.isTemplateExpression(node)) {
+      const template = node.templateSpans.reduce(
+        (value, span, index) => `${value}{{${index}}}${span.literal.text}`,
+        node.head.text,
+      );
+      add(file, line, template);
+      return;
+    }
+    ts.forEachChild(node, addExpressionStrings);
+  }
   function visibleJsxExpression(node) {
     let current = node.parent;
     while (current) {
@@ -47,9 +63,14 @@ function walk(file) {
       );
       add(file, line, template);
     }
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && ["setError", "confirm", "alert"].includes(node.expression.text)) {
+    if (
+      ts.isCallExpression(node)
+      && ts.isIdentifier(node.expression)
+      && (["confirm", "alert"].includes(node.expression.text)
+        || /^set(?:Error|Notice|Success|.*Warning|.*Error|.*Message|LoadingDetail)$/.test(node.expression.text))
+    ) {
       const first = node.arguments[0];
-      if (first && (ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first))) add(file, line, first.text);
+      if (first) addExpressionStrings(first);
     }
     ts.forEachChild(node, visit);
   }

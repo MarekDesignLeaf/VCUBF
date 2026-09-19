@@ -1,22 +1,57 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const dbDir = "/tmp/vcuf_test_pg";
+// Prisma's local Windows engine is x64. On Snapdragon Windows, re-run this
+// orchestrator with the same x64 Node runtime used by Secretary instead of
+// touching the live database or requiring Docker merely for architecture.
+if (process.platform === "win32" && process.arch === "arm64") {
+  const localConfigPath = process.env.LOCALAPPDATA
+    ? path.join(process.env.LOCALAPPDATA, "VCUBF", "Emma", "config.json")
+    : "";
+  let configuredNode = "";
+  try {
+    configuredNode = JSON.parse(fs.readFileSync(localConfigPath, "utf8")).LocalNodePath ?? "";
+  } catch {
+    // The Docker fallback below remains available outside the desktop setup.
+  }
+  if (configuredNode && fs.existsSync(configuredNode)) {
+    const architecture = execFileSync(configuredNode, ["-p", "process.arch"], { encoding: "utf8" }).trim();
+    if (architecture === "x64") {
+      execFileSync(configuredNode, [fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
+        env: process.env,
+        stdio: "inherit",
+      });
+      process.exit(0);
+    }
+  }
+}
+
+const dbDir = path.join(os.tmpdir(), `vcuf_test_pg_${process.pid}`);
 fs.rmSync(dbDir, { recursive: true, force: true });
 
 const prismaCli = path.resolve("node_modules/prisma/build/index.js");
 const embeddedUrl = "postgresql://vcuf:vcuf@localhost:55432/vcuf_test";
 const repositoryRoot = path.resolve(process.cwd(), "..");
 const frontendSourceRoot = path.join(repositoryRoot, "frontend", "src");
-const testTarget = process.argv[2];
+const testTargets = process.argv.slice(2);
 
 function runTests(url) {
-  console.log(`Generating Prisma Client with ${process.arch} ${process.version}...`);
-  execFileSync(process.execPath, [prismaCli, "generate"], {
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "inherit",
-  });
+  const generatedClient = path.resolve("node_modules/.prisma/client/index.js");
+  if (!fs.existsSync(generatedClient)) {
+    console.log(`Generating Prisma Client with ${process.arch} ${process.version}...`);
+    execFileSync(process.execPath, [prismaCli, "generate"], {
+      env: { ...process.env, DATABASE_URL: url },
+      stdio: "inherit",
+    });
+  } else {
+    // The running local backend has this native engine loaded. Windows locks
+    // it against replacement, and regeneration is unnecessary because the
+    // schema is unchanged; only the isolated database URL differs.
+    console.log("Using the existing compatible Prisma Client.");
+  }
   console.log("Postgres up, pushing schema...");
   execFileSync(process.execPath, [prismaCli, "db", "push", "--skip-generate"], {
     env: { ...process.env, DATABASE_URL: url },
@@ -25,7 +60,7 @@ function runTests(url) {
   console.log("Running tests...");
   execFileSync(
     process.execPath,
-    ["scripts/run-test-files.mjs", ...(testTarget ? [testTarget] : [])],
+    ["scripts/run-test-files.mjs", ...testTargets],
     {
       env: { ...process.env, DATABASE_URL: url, NODE_ENV: "test" },
       stdio: "inherit",
@@ -74,13 +109,13 @@ async function runWithDocker() {
       "run", "--rm", "--network", networkName,
       "-e", "DATABASE_URL=postgresql://vcuf:vcuf@postgres:5432/vcuf?schema=public",
       "-e", "NODE_ENV=test",
-      "-e", `VCUF_TEST_TARGET=${testTarget ?? ""}`,
+      "-e", `VCUF_TEST_TARGETS=${testTargets.join(";")}`,
       "-v", `${process.cwd()}:/source/backend:ro`,
       "-v", `${frontendSourceRoot}:/source/frontend/src:ro`,
       "-w", "/work",
       "node:22-bookworm",
       "sh", "-lc",
-      "mkdir -p /work/backend /work/frontend && tar -C /source/backend --exclude=node_modules --exclude=dist -cf - . | tar -C /work/backend -xf - && cp -a /source/frontend/src /work/frontend/src && cd /work/backend && npm ci --no-audit --no-fund && npx prisma generate && npx prisma db push --skip-generate && if [ -n \"$VCUF_TEST_TARGET\" ]; then node scripts/run-test-files.mjs \"$VCUF_TEST_TARGET\"; else node scripts/run-test-files.mjs; fi",
+      "mkdir -p /work/backend /work/frontend && tar -C /source/backend --exclude=node_modules --exclude=dist -cf - . | tar -C /work/backend -xf - && cp -a /source/frontend/src /work/frontend/src && cd /work/backend && npm ci --no-audit --no-fund && npx prisma generate && npx prisma db push --skip-generate && if [ -n \"$VCUF_TEST_TARGETS\" ]; then node scripts/run-test-files.mjs $(printf '%s' \"$VCUF_TEST_TARGETS\" | tr ';' ' '); else node scripts/run-test-files.mjs; fi",
     ], { stdio: "inherit" });
   } finally {
     try {

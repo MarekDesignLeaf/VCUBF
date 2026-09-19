@@ -23,9 +23,39 @@ fallback and ElevenLabs is documented in [`docs/VOICE_V2_SETUP.md`](docs/VOICE_V
 ## Structure
 
 ```
-backend/    Node.js + TypeScript + Express + Prisma + PostgreSQL (Secretary backend API)
-frontend/   React + TypeScript + Vite (web client — desktop and Android via PWA)
+backend/            Node.js + TypeScript + Express + Prisma + PostgreSQL (Secretary backend API)
+frontend/           React + TypeScript + Vite (web client — desktop, PWA and Capacitor Android)
+windows-companion/  Windows Emma voice runtimes (Voice v2: Porcupine + NPU Whisper + Deepgram fallback + ElevenLabs; legacy Windows-Speech companion)
+docs/               User guide, connector engine, production architecture, voice v2 setup, Android build
 ```
+
+## Current snapshot (source inventory, 19 September 2026)
+
+- **Backend**: 34 mounted route groups, 51 Prisma models, 136 Action Contracts,
+  and 9 fixed permissions. Counts describe source structure, not release acceptance.
+- **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
+  transcript rejection before interpretation, bounded speech output, interruption handling,
+  and ElevenLabs/OpenAI PCM fallback. Provider choice is preserved during upgrades.
+  Native audio and provider behaviour still require a live microphone acceptance run.
+- **Voice commands**: aliases, speech preferences, client confirmation and a read-only
+  unpaid-invoice query use the shared backend. “Kolik mám nezaplacených faktur?” and
+  “How many unpaid invoices do I have?” count issued invoices with remaining balances,
+  including partial payments, excluding drafts, voids and other companies. CRM read
+  permission and company capability policy apply. The backend supplies the spoken count.
+- **Learned browser macros**: saved steps and values require a replay preview. Replayed
+  UI interactions are not proof of successful business changes; the UI says so explicitly.
+  Live browser acceptance remains outstanding.
+- **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
+  client unmerge, configurable notification thresholds and invoice/payment KPIs.
+  Provider delivery requires separate integration acceptance; mocked sends are not live sends.
+- **Tests**: 74 test files, including database integration tests and checks that only
+  read source files. `tests/docsDrift.test.ts` checks the counts in this section.
+  See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
+- **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
+  Node 24 remains an architectural target, not a completed runtime migration.
+
+Older counts and module narratives below are historical context; this inventory does
+not certify the unavailable original SEC V9/V10 package or production readiness.
 
 ## Committed voice reliability baseline
 
@@ -581,7 +611,7 @@ npm run dev                 # http://localhost:5173
   audit entry yet is measured from `Job.createdAt` instead, since it has been sitting in
   its initial status since creation. Both reuse the existing acknowledge/unacknowledge
   mechanism; no new Prisma model. With later Task and Communication Intake additions, the
-  Notifications feed now has nine real sources: unresolved raw intakes, overdue follow-ups,
+  Notifications feed grew to nine real sources at that revision (eleven today — see Current snapshot): unresolved raw intakes, overdue follow-ups,
   capacity overload, expiring quotes, data quality findings, the portfolio
   marketing-readiness gap, stale open leads, stuck jobs, and overdue tasks.
 - **Data Quality Engine — `merge_clients` (confirmation-gated, risk 3)**: closes the
@@ -733,7 +763,7 @@ npm run dev                 # http://localhost:5173
   it never scans the whole Google Photos library or stores image bytes. See
   `docs/CONNECTOR_ENGINE.md`.
 
-Backend verified: 358/358 tests passing across 42 suites (auth, CORS, CRM clients, CRM jobs, CRM leads,
+Backend verified (historical, at an earlier revision — see Current snapshot for today's counts): 358/358 tests passing across 42 suites (auth, CORS, CRM clients, CRM jobs, CRM leads,
 command parser unit tests, command/text integration tests, capacity/allocation,
 calendar/scheduling, task management, employee/permission management, service catalogue, quotes,
  recruitment, playbooks, learning, connector lifecycle, Gmail OAuth/read-only ingestion, communication extraction/reply drafting, unresolved enquiry monitoring, communication log, notifications/escalation, data
@@ -806,7 +836,8 @@ job/communication-derived CRM links, assignment, capacity contribution/overload 
 calendar visibility, status completion/reopening, overdue filtering and notification,
 audit evidence and cross-tenant isolation; parser/integration coverage proves task creation
 and listing through the shared Voice/Text Action Engine. The complete 45-suite,
-376-test database-backed run above was verified against a real PostgreSQL instance.
+376-test database-backed run above was verified against a real PostgreSQL instance at
+that revision; the suite has since grown to 73 suites (see Current snapshot).
 
 Frontend: `npm run lint` and `npm run build` verified working with no warnings. The auth
 provider, context state and `useAuth` hook live in separate modules so Fast Refresh can
@@ -851,8 +882,9 @@ rules and unresolved-enquiry scanning across external inboxes remain
 unimplemented. The Notification and Escalation Module's feed is pull-only (a
 page you open, or a text command you run) — there is no push delivery yet: no email
 digest, no SMS/WhatsApp alert, and no in-app real-time badge/websocket, since no
-notification-delivery connector exists. It now aggregates nine real signal types
-(unresolved raw intakes, overdue follow-ups, capacity overload, expiring quotes, data
+notification-delivery connector exists. It now aggregates eleven real signal types
+(unresolved raw intakes, overdue follow-ups, capacity overload, expiring quotes, overdue
+issued invoices, job resource requirements not ready before a planned start, data
 quality findings, the portfolio marketing-readiness gap, stale open leads, stuck jobs,
 and overdue tasks); it does not yet
 cover every escalation-worthy condition the architecture lists (e.g. an employee
@@ -874,16 +906,7 @@ configurable similarity threshold (the Levenshtein cutoff and phone-normalizatio
 are fixed in code, not a per-company setting). There is also no text-command intent for
 `merge_clients` — the same judgment already applied to `prepare_quote` (real, multi-field
 actions with material consequences stay a dedicated form/API flow, never a one-line
-command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, serving or visual AI review (a `filename` is just a typed-in reference, not a stored file), no image-content recognition or auto-tagging, and no website/social publishing. Metadata-backed candidates and confirmed internal service selections now exist, but they rely only on explicit job/service links, exact tags and human-entered review states; flipping `usableForMarketing` or confirming a service selection never publishes anything anywhere. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. The Windows Voice v2 companion supports acoustic wake and NPU/cloud
-transcription through the authenticated Secretary API; its operation is not
-limited to a browser tab. The Capacitor Android client has its own native
-speech interface. Provider selection and transcript handling depend on the
-configured runtime; see the committed voice baseline above rather than
-assuming that every channel pauses for transcript review. A fully offline
-natural-language assistant and persistent microphone-audio storage are not
-established by this baseline. The KPI module includes real-data workload and
-quote-oriented metrics; invoice-derived analytics, reputation and external
-analytics are not established by the committed metrics service.
+command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, serving or visual AI review (a `filename` is just a typed-in reference, not a stored file), no image-content recognition or auto-tagging, and no website/social publishing. Metadata-backed candidates and confirmed internal service selections now exist, but they rely only on explicit job/service links, exact tags and human-entered review states; flipping `usableForMarketing` or confirming a service selection never publishes anything anywhere. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. Voice is no longer a browser feature: Windows Emma (Voice v2 — local Porcupine wake word, on-device NPU Whisper transcription with Deepgram fallback, ElevenLabs speech) and the Android app's native recognition are the voice interfaces, and the wake-word listener keeps running while the browser is minimised or closed as long as the companion is running. The default wake word is `Emma` and each user can change it in Account settings. A fully offline natural-language assistant and audio storage remain unavailable by design — transcription can be local, but assistant interpretation still uses a cloud model, and VCUBF never stores microphone audio. The KPI module is a real-data Phase 11 foundation with previous-period trend comparison and service-level accepted-quote value/margin already implemented; reputation and external analytics remain unavailable until their source records or connectors exist, and the KPI module now reads issued invoices and recorded payments, with draft and void invoices excluded. Those statements describe the working copy. In a clean checkout the committed voice baseline above governs instead: provider selection and transcript handling follow the configured runtime rather than a fixed transcript-review step, and invoice-derived KPI analytics are not part of the committed metrics service.
 Build order should follow the roadmap in the master documentation (Phase 1 → Phase 2 →
 …), not be improvised per-feature.
 
@@ -896,7 +919,13 @@ Build order should follow the roadmap in the master documentation (Phase 1 → P
   `GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET`, `GOOGLE_CALENDAR_OAUTH_REDIRECT_URI`, `GOOGLE_DRIVE_OAUTH_CLIENT_ID`,
   `GOOGLE_DRIVE_OAUTH_CLIENT_SECRET`, `GOOGLE_DRIVE_OAUTH_REDIRECT_URI`, `GOOGLE_DRIVE_PICKER_APP_ID`,
   `GOOGLE_DRIVE_PICKER_API_KEY`, `GOOGLE_PHOTOS_OAUTH_CLIENT_ID`, `GOOGLE_PHOTOS_OAUTH_CLIENT_SECRET`,
-  `GOOGLE_PHOTOS_OAUTH_REDIRECT_URI` and a 32-byte base64
+  `GOOGLE_PHOTOS_OAUTH_REDIRECT_URI`, the WhatsApp Business Cloud API values
+  (`WHATSAPP_GRAPH_API_VERSION`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_ACCOUNT_ID`,
+  `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `META_APP_SECRET`), the Emma assistant
+  values (`OPENAI_API_KEY`, optionally `OPENAI_REALTIME_MODEL`, `OPENAI_REALTIME_VOICE`,
+  `OPENAI_TRANSCRIPTION_MODEL`, `OPENAI_VOICE_MODEL`, `OPENAI_VOICE_TIMEOUT_MS`), optionally the
+  local-transcription bridge (`WHISPER_SERVER_URL`, `WHISPER_MODEL_LABEL`), a strong
+  `SEED_ADMIN_PASSWORD` before seeding, and a 32-byte base64
   `CONNECTOR_ENCRYPTION_KEY` as environment variables. Optional non-secret controls are
   `CONNECTOR_BACKGROUND_SYNC_ENABLED` (defaults to `true`) and
   `CONNECTOR_BACKGROUND_SYNC_INTERVAL_MINUTES` (defaults to `5`, minimum `1`); run

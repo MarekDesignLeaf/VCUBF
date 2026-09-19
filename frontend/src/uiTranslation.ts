@@ -11,6 +11,7 @@ const PAGE_MENU_KEYS: Record<string, MenuKey> = {
   Playbooks: "playbooks", Learning: "learning", "Emma Memory": "emmaMemory",
 };
 const templateCache = new WeakMap<Record<string, string>, Array<{ pattern: RegExp; translated: string }>>();
+const sentenceSegmentCache = new WeakMap<Record<string, string>, Array<[string, string]>>();
 
 function escapePattern(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -26,6 +27,25 @@ function templateTranslations(catalogue: Record<string, string>) {
   });
   templateCache.set(catalogue, templates);
   return templates;
+}
+
+function translatedSentenceSegments(catalogue: Record<string, string>) {
+  const cached = sentenceSegmentCache.get(catalogue);
+  if (cached) return cached;
+  const segments = Object.entries(catalogue)
+    .filter(([source]) => source.length >= 12 && /[.!?]$/u.test(source) && !source.includes("{{"))
+    .sort(([left], [right]) => right.length - left.length);
+  sentenceSegmentCache.set(catalogue, segments);
+  return segments;
+}
+
+function translateTemplateValue(catalogue: Record<string, string>, value: string) {
+  const exact = catalogue[value];
+  if (exact) return exact;
+  return translatedSentenceSegments(catalogue).reduce(
+    (translated, [source, target]) => translated.replaceAll(source, target),
+    value,
+  );
 }
 
 export async function loadUiCatalogue(language: AppLanguage): Promise<Record<string, string>> {
@@ -53,8 +73,14 @@ export function translateUiPhrase(catalogue: Record<string, string>, language: A
     if (!match) continue;
     return match.slice(1).reduce(
       (translated, value, index) => {
-        const valueMenuKey = PAGE_MENU_KEYS[value];
-        const localizedValue = valueMenuKey ? menuText(resolved, valueMenuKey) : (catalogue[value] ?? value);
+        const leading = value.match(/^\s*/u)?.[0] ?? "";
+        const trailing = value.match(/\s*$/u)?.[0] ?? "";
+        const normalizedValue = value.trim();
+        const valueMenuKey = PAGE_MENU_KEYS[normalizedValue];
+        const localizedCore = valueMenuKey
+          ? menuText(resolved, valueMenuKey)
+          : translateTemplateValue(catalogue, normalizedValue);
+        const localizedValue = `${leading}${localizedCore}${trailing}`;
         return translated.replaceAll(`{{${index}}}`, localizedValue);
       },
       template.translated,

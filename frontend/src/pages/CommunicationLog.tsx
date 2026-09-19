@@ -27,6 +27,7 @@ export function CommunicationLog() {
   const [showForm, setShowForm] = useState(Boolean(prefillClientId));
   const [channelFilter, setChannelFilter] = useState("");
   const [followUpOnly, setFollowUpOnly] = useState(false);
+  const [editing, setEditing] = useState<CommunicationRecord | null>(null);
 
   function load() {
     api.communications
@@ -95,10 +96,19 @@ export function CommunicationLog() {
               <th>Direction</th>
               <th>Summary</th>
               <th>Follow-up</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {records.map((r) => (
+              editing?.id === r.id ? (
+                <EditCommunicationRow
+                  key={r.id}
+                  record={r}
+                  onSaved={() => { setEditing(null); load(); }}
+                  onCancel={() => setEditing(null)}
+                />
+              ) : (
               <tr key={r.id}>
                 <td>{new Date(r.occurredAt).toLocaleString()}</td>
                 <td>{r.client ? <Link to={`/clients/${r.client.id}`}>{r.client.displayName}</Link> : "—"}</td>
@@ -113,7 +123,11 @@ export function CommunicationLog() {
                       : "Needed"
                     : "—"}
                 </td>
+                <td>
+                  <button className="secondary" data-action="communication-edit" onClick={() => setEditing(r)}>Edit</button>
+                </td>
               </tr>
+              )
             ))}
           </tbody>
         </table>
@@ -220,5 +234,108 @@ export function LogCommunicationForm({
       </button>
       {error && <div className="error-banner">{error}</div>}
     </form>
+  );
+}
+
+/**
+ * One logged communication, correctable where it stands.
+ *
+ * Only what the backend accepts on update is offered. The client and job links are
+ * absent on purpose: re-filing a record under a different client is not a
+ * correction, it is a different record, and quietly allowing it would let the log
+ * disagree with itself.
+ *
+ * Clearing the follow-up date sends null rather than omitting the field, so an
+ * unset date is actually unset instead of keeping the old one.
+ */
+function EditCommunicationRow({
+  record,
+  onSaved,
+  onCancel,
+}: {
+  record: CommunicationRecord;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [channel, setChannel] = useState<string>(record.channel);
+  const [direction, setDirection] = useState<string>(record.direction);
+  const [summary, setSummary] = useState(record.summary);
+  // datetime-local needs local time, not the ISO string the API returns.
+  const [occurredAt, setOccurredAt] = useState(() => {
+    const when = new Date(record.occurredAt);
+    const offset = when.getTimezoneOffset() * 60_000;
+    return new Date(when.getTime() - offset).toISOString().slice(0, 16);
+  });
+  const [followUpNeeded, setFollowUpNeeded] = useState(record.followUpNeeded);
+  const [followUpDueAt, setFollowUpDueAt] = useState(
+    record.followUpDueAt ? new Date(record.followUpDueAt).toISOString().slice(0, 10) : ""
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSaving(true);
+    try {
+      await api.communications.update(record.id, {
+        channel,
+        direction,
+        summary,
+        occurred_at: new Date(occurredAt).toISOString(),
+        follow_up_needed: followUpNeeded,
+        follow_up_due_at: followUpNeeded && followUpDueAt ? new Date(followUpDueAt).toISOString() : null,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save communication.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <tr>
+      <td colSpan={8}>
+        <form className="inline-form" onSubmit={handleSubmit}>
+          <select value={channel} onChange={(e) => setChannel(e.target.value)}>
+            {COMMUNICATION_CHANNELS.map((c) => (
+              <option key={c} value={c}>{COMMUNICATION_CHANNEL_LABELS[c]}</option>
+            ))}
+          </select>
+          <select value={direction} onChange={(e) => setDirection(e.target.value)}>
+            {COMMUNICATION_DIRECTIONS.map((d) => (
+              <option key={d} value={d}>{COMMUNICATION_DIRECTION_LABELS[d]}</option>
+            ))}
+          </select>
+          <input type="datetime-local" value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} required />
+          <input
+            placeholder="What was discussed/promised"
+            value={summary}
+            onChange={(e) => setSummary(e.target.value)}
+            required
+            style={{ minWidth: 260 }}
+          />
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" checked={followUpNeeded} onChange={(e) => setFollowUpNeeded(e.target.checked)} />
+            Follow-up needed
+          </label>
+          {followUpNeeded && (
+            <input type="date" value={followUpDueAt} onChange={(e) => setFollowUpDueAt(e.target.value)} />
+          )}
+          <span className="hint">
+            {record.client ? record.client.displayName : "\u2014"}
+            {record.job ? " \u00b7 " + record.job.jobTitle : ""} (link is fixed, not editable)
+          </span>
+          <button type="submit" data-action="communication-save" disabled={saving}>
+            {saving ? "Saving\u2026" : "Save"}
+          </button>
+          <button type="button" className="secondary" data-action="communication-cancel" onClick={onCancel} disabled={saving}>
+            Cancel
+          </button>
+          {error && <div className="error-banner">{error}</div>}
+        </form>
+      </td>
+    </tr>
   );
 }

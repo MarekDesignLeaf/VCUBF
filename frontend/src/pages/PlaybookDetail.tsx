@@ -23,6 +23,7 @@ export function PlaybookDetail() {
   const [lastRun, setLastRun] = useState<PlaybookRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const variableNames = useMemo(() => (playbook ? extractVariableNames(playbook.stepTemplates) : []), [playbook]);
 
@@ -85,14 +86,29 @@ export function PlaybookDetail() {
       {error && <div className="error-banner">{error}</div>}
       <p className="hint">{playbook.description ?? "No description."}</p>
 
-      <h2>Steps</h2>
-      <ol>
-        {playbook.stepTemplates.map((t, i) => (
-          <li key={i}>
-            <code>{t}</code>
-          </li>
-        ))}
-      </ol>
+      <div className="page-header">
+        <h2>Steps</h2>
+        {!editing && (
+          <button className="secondary" data-action="playbook-edit" onClick={() => setEditing(true)}>
+            Edit playbook
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <PlaybookEditor
+          playbook={playbook}
+          onSaved={() => { setEditing(false); load(); }}
+          onCancel={() => setEditing(false)}
+        />
+      ) : (
+        <ol>
+          {playbook.stepTemplates.map((t, i) => (
+            <li key={i}>
+              <code>{t}</code>
+            </li>
+          ))}
+        </ol>
+      )}
 
       <h2>Run this playbook</h2>
       <form onSubmit={handlePreview}>
@@ -195,5 +211,96 @@ export function PlaybookDetail() {
         </table>
       )}
     </div>
+  );
+}
+
+/**
+ * A playbook, edited in place.
+ *
+ * Steps are one per line. Blank lines are dropped rather than saved as empty steps,
+ * because the backend requires every step to be non-empty and a stray newline is
+ * not something the user meant to type.
+ *
+ * Editing a playbook does not touch its run history: past runs record what was
+ * actually executed, and rewriting them to match the new text would be a lie.
+ */
+function PlaybookEditor({
+  playbook,
+  onSaved,
+  onCancel,
+}: {
+  playbook: Playbook;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(playbook.name);
+  const [description, setDescription] = useState(playbook.description ?? "");
+  const [stepText, setStepText] = useState(playbook.stepTemplates.join("\n"));
+  const [isActive, setIsActive] = useState(playbook.isActive);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const steps = stepText.split("\n").map((line) => line.trim()).filter(Boolean);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (steps.length === 0) {
+      setError("A playbook needs at least one step.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.playbooks.update(playbook.id, {
+        name,
+        description,
+        step_templates: steps,
+        is_active: isActive,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save playbook.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="detail-list" style={{ marginTop: 12 }}>
+      <label>
+        Name
+        <input value={name} onChange={(e) => setName(e.target.value)} required />
+      </label>
+      <label>
+        Description
+        <input value={description} onChange={(e) => setDescription(e.target.value)} />
+      </label>
+      <label>
+        Steps — one per line
+        <textarea
+          value={stepText}
+          onChange={(e) => setStepText(e.target.value)}
+          rows={Math.max(4, steps.length + 2)}
+          style={{ width: "100%", fontFamily: "monospace" }}
+        />
+      </label>
+      <p className="hint">
+        {steps.length} step{steps.length === 1 ? "" : "s"}. Use {"{name}"} for a value filled in at run time.
+        Past runs keep what was actually executed and are not rewritten.
+      </p>
+      <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+        Active
+      </label>
+      <div className="inline-form">
+        <button type="submit" data-action="playbook-save" disabled={saving}>
+          {saving ? "Saving\u2026" : "Save playbook"}
+        </button>
+        <button type="button" className="secondary" data-action="playbook-cancel" onClick={onCancel} disabled={saving}>
+          Cancel
+        </button>
+      </div>
+      {error && <div className="error-banner">{error}</div>}
+    </form>
   );
 }

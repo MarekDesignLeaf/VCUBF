@@ -46,8 +46,8 @@ export function PasswordRecovery() {
   const hasToken = Boolean(token);
   return (
     <div className="login-page">
-      <section className="login-introduction" aria-label="VCUF Secretary account recovery">
-        <div className="login-brand"><span className="login-brand-mark" aria-hidden="true">S</span><span><strong>VCUF</strong><small>Secretary</small></span></div>
+      <section className="login-introduction" aria-label="VCUBF Secretary account recovery">
+        <div className="login-brand"><span className="login-brand-mark" aria-hidden="true">S</span><span><strong>VCUBF</strong><small>Secretary</small></span></div>
         <div className="login-introduction-copy">
           <p className="login-eyebrow">SECURE ACCOUNT RECOVERY</p>
           <h1>{hasToken ? "Choose a new password." : "Recover access without losing your work."}</h1>

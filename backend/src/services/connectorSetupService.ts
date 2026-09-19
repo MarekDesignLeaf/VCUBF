@@ -10,7 +10,7 @@ import { fail, ok, type ServiceResult } from "./result.js";
 export type ConnectorSetupTarget = ConnectorKey | "all";
 
 const setupDefaults: Record<ConnectorKey, { displayName: string; scopes: string[] }> = {
-  gmail: { displayName: "Gmail", scopes: ["read:messages", "write:drafts", "send:messages"] },
+  gmail: { displayName: "Gmail", scopes: ["read:messages", "write:drafts", "send:messages", "delete:messages"] },
   google_contacts: { displayName: "Google Contacts", scopes: ["read:contacts"] },
   google_calendar: { displayName: "Google Calendar", scopes: ["read:calendar"] },
   google_drive: { displayName: "Google Drive", scopes: ["select:image_files"] },

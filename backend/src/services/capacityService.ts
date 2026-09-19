@@ -5,7 +5,7 @@ import type { AuthedUser } from "../middleware/auth.js";
 //
 // The system must not offer or assign dates only because a calendar slot is
 // empty — a real available date/capacity must be calculated from actual
-// company data (see VCUF master documentation section 24A). This service is
+// company data (see VCUBF master documentation section 24A). This service is
 // the one place that computation happens; nothing here is invented or
 // estimated by a prompt.
 

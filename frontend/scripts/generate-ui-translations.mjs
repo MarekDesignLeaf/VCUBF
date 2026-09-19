@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { extractVisiblePhrases } from "./audit-i18n.mjs";
+import { commonUiPhrases } from "./ui-translation-common.mjs";
 
 const key = process.env.OPENAI_API_KEY?.trim();
 if (!key) throw new Error("OPENAI_API_KEY is required to generate the static UI catalogue.");
@@ -16,12 +17,7 @@ const targets = {
   "es-ES": "Spanish (natural European Spanish business software terminology)",
   "it-IT": "Italian (natural Italian business software terminology)",
 };
-const common = [
-  "Active", "Inactive", "Archived", "Draft", "Open", "Closed", "Pending", "Completed", "Cancelled",
-  "Accepted", "Rejected", "Unknown", "Not set", "Save", "Delete", "Edit", "Create", "Update", "Search",
-  "Loading…", "No results", "Yes", "No", "Previous", "Next", "Required", "Optional",
-];
-const phrases = [...new Set([...extractVisiblePhrases().map(([text]) => text), ...common])].sort((a, b) => a.localeCompare(b));
+const phrases = [...new Set([...extractVisiblePhrases().map(([text]) => text), ...commonUiPhrases])].sort((a, b) => a.localeCompare(b));
 const cache = fs.existsSync(cacheFile) ? JSON.parse(fs.readFileSync(cacheFile, "utf8")) : {};
 
 function outputText(payload) {

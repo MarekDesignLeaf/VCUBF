@@ -3,7 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 /**
  * Permission Engine — a voice or web command must always be evaluated
  * against the identity and permissions of the requesting user.
- * See VCUF Master Documentation section 30.
+ * See VCUBF Master Documentation section 30.
  */
 export function requirePermission(permission: string) {
   return (req: Request, res: Response, next: NextFunction) => {

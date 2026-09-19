@@ -3,7 +3,28 @@ import { prisma } from "../src/db.js";
 
 export const TEST_COMPANY_ID = "10000000-0000-0000-0000-000000000001";
 
+/**
+ * Refuses to touch anything but the isolated test database.
+ *
+ * resetDb() deletes every row in the schema. Run through
+ * scripts/test-with-embedded-pg.mjs that is the throwaway database on port
+ * 55432; run directly (node --test tests/foo.test.ts) it is whatever .env
+ * points at — the development database. There is no safe way to tell those
+ * apart after the fact, so refuse up front.
+ */
+function assertTestDatabase() {
+  const url = process.env.DATABASE_URL ?? "";
+  const isolated = url.includes(":55432/") || /\/[^/]*_test(\?|$)/.test(url);
+  if (isolated) return;
+  throw new Error(
+    "Refusing to reset a database that is not the isolated test database.\n" +
+    "DATABASE_URL points at: " + (url.replace(/\/\/[^@]*@/, "//***@") || "(unset)") + "\n" +
+    "Run the suite with: npm test    (it starts its own Postgres on port 55432)"
+  );
+}
+
 export async function resetDb() {
+  assertTestDatabase();
   // Delete in FK-dependency order: audit log first; quote items reference
   // quotes which reference clients/jobs; jobs reference clients/users/
   // catalogue items; jobs must go before the catalogue items they may
@@ -48,6 +69,7 @@ export async function resetDb() {
   await prisma.serviceCatalogueItem.deleteMany({});
   await prisma.lead.deleteMany({});
   await prisma.contact.deleteMany({});
+  await prisma.clientMergeRecord.deleteMany({});
   await prisma.client.deleteMany({});
   await prisma.user.deleteMany({});
   await prisma.company.deleteMany({});

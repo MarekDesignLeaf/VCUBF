@@ -1,4 +1,9 @@
 import "dotenv/config";
+// Express 4 does not forward rejected promises from async route handlers to
+// the error middleware by itself. Without this patch, a transient database
+// outage can terminate the whole local backend instead of returning a safe
+// service error and allowing the launcher to recover it.
+import "express-async-errors";
 import express from "express";
 import cors from "cors";
 import { authRouter } from "./modules/auth/routes.js";
@@ -7,6 +12,9 @@ import { jobsRouter } from "./modules/crm/jobs.js";
 import { leadsRouter } from "./modules/crm/leads.js";
 import { auditRouter } from "./modules/audit/routes.js";
 import { commandRouter } from "./modules/command/textCommand.js";
+import { voiceAliasRouter } from "./modules/command/voiceAliases.js";
+import { voiceSpeechRouter } from "./modules/command/voiceSpeech.js";
+import { voiceMacroRouter } from "./modules/command/voiceMacros.js";
 import { employeesRouter } from "./modules/crm/employees.js";
 import { calendarRouter } from "./modules/calendar/routes.js";
 import { catalogueRouter } from "./modules/catalogue/routes.js";
@@ -72,6 +80,9 @@ export function createServer() {
   app.use("/crm/leads", leadsRouter);
   app.use("/audit", auditRouter);
   app.use("/command", commandRouter);
+  app.use("/command", voiceAliasRouter);
+  app.use("/command", voiceSpeechRouter);
+  app.use("/command", voiceMacroRouter);
   app.use("/command", voiceStateRouter);
   app.use("/crm/employees", employeesRouter);
   app.use("/calendar", calendarRouter);
@@ -101,6 +112,10 @@ export function createServer() {
     if (err && typeof err === "object" && "type" in err && err.type === "entity.too.large") {
       return res.status(413).json({ error: "PAYLOAD_TOO_LARGE", message: "The request body is too large." });
     }
+    if (err && typeof err === "object" && "code" in err && ["P1001", "P1002", "P2024"].includes(String(err.code))) {
+      console.error("Database temporarily unavailable", err);
+      return res.status(503).json({ error: "DATABASE_UNAVAILABLE", message: "Secretary is reconnecting to the local database. Please try again in a moment." });
+    }
     console.error(err);
     res.status(500).json({ error: "INTERNAL_ERROR" });
   });
@@ -112,7 +127,7 @@ if (process.env.NODE_ENV !== "test") {
   const app = createServer();
   const port = process.env.PORT ?? 4000;
   app.listen(port, () => {
-    console.log(`VCUF Secretary backend listening on :${port}`);
+    console.log(`VCUBF Secretary backend listening on :${port}`);
     startConnectorBackgroundSync();
   });
 }

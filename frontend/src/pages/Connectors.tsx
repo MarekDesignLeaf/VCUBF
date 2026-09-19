@@ -338,18 +338,18 @@ export function Connectors() {
     try {
       const result = await api.connectors.syncSource(source.id, source.connectorKey === "gmail" ? { max_results: 25 } : {});
       await loadSources();
-      const mode = result.mode === "incremental" ? "incremental" : "full";
+      const mode = result.mode === "incremental" ? "Incremental sync" : "Full sync";
       const more = result.hasMore ? " More provider pages remain; the server will continue automatically." : "";
       if (source.connectorKey === "google_contacts") {
         const fallback = result.fallbackFromExpiredSyncToken ? " Sync token expired, so a safe full sync was used." : "";
-        setNotice(`Google Contacts ${mode} sync: ${result.upsertedCount ?? 0} staged, ${result.deletedCount ?? 0} provider deletions.${fallback}${more}`);
+        setNotice(`Google Contacts — ${mode}: ${result.upsertedCount ?? 0} staged, ${result.deletedCount ?? 0} provider deletions.${fallback}${more}`);
         await showExternalContacts(source);
       } else if (source.connectorKey === "google_calendar") {
-        setNotice(`Google Calendar ${mode} sync: ${result.calendarsSeen ?? 0} calendars checked, ${result.eventsUpserted ?? 0} events staged, ${result.eventsDeleted ?? 0} cancellations.${more}`);
+        setNotice(`Google Calendar — ${mode}: ${result.calendarsSeen ?? 0} calendars checked, ${result.eventsUpserted ?? 0} events staged, ${result.eventsDeleted ?? 0} cancellations.${more}`);
         await showExternalEvents(source);
       } else {
         const fallback = result.fallbackFromExpiredHistory ? " History cursor expired, so a safe full sync was used." : "";
-        setNotice(`Gmail ${mode} sync: ${result.importedCount} imported, ${result.skippedCount} skipped.${fallback}${more}`);
+        setNotice(`Gmail — ${mode}: ${result.importedCount} imported, ${result.removedCount ?? 0} removed from the local inbox, ${result.skippedCount} skipped.${fallback}${more}`);
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not synchronise the source.");

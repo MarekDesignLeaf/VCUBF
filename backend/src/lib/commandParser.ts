@@ -1,6 +1,6 @@
 // Text/Voice Understanding Layer — deterministic, rule-based intent parser.
 //
-// This is intentionally NOT an LLM call. Per the VCUF master documentation and
+// This is intentionally NOT an LLM call. Per the VCUBF master documentation and
 // the vcubf-programmer-skill "business logic rule", business decisions must be
 // stored in structured form, not guessed by a prompt. This MVP slice proves
 // the Voice/Text Command Layer -> Intent Layer -> Action Engine pipeline with
@@ -12,18 +12,20 @@
 //
 import { resolveVoicePage, type VoicePage } from "./voiceNavigation.js";
 import type { ConnectorKey } from "../connectors/registry.js";
-import { resolveVoiceLanguage, type VoiceLanguage } from "./voiceLanguages.js";
+import { mentionsLanguage, resolveSpokenLanguageName, resolveVoiceLanguage, type VoiceLanguage } from "./voiceLanguages.js";
 import { resolveNavigationSection, type NavigationSectionId } from "./navigationCatalogue.js";
 import { parseEmmaExecutableActionCommand, type EmmaExecutableActionName, type EmmaExecutableActionRequest } from "./emmaExecutableActionCatalogue.js";
 
 // If nothing matches, the result is `unrecognized` — the system must not
-// guess (VCUF error handling rule).
+// guess (VCUBF error handling rule).
 
 export type ParsedCommand =
   | { intent: "execute_action"; entities: EmmaExecutableActionRequest }
   | { intent: "confirm_execute_action"; entities: { action: EmmaExecutableActionName } }
   | { intent: "cancel_execute_action"; entities: { action: EmmaExecutableActionName } }
   | { intent: "create_client"; entities: { display_name: string; email_primary?: string; phone_primary?: string } }
+  | { intent: "confirm_create_client"; entities: Record<string, never> }
+  | { intent: "cancel_create_client"; entities: Record<string, never> }
   | {
       intent: "update_client";
       entities: { client_name: string; display_name?: string; email_primary?: string; phone_primary?: string };
@@ -43,6 +45,16 @@ export type ParsedCommand =
   | { intent: "create_job"; entities: { job_title: string; client_name: string } }
   | { intent: "change_job_status"; entities: { job_title: string; job_status: string } }
   | { intent: "convert_lead"; entities: { lead_name: string } }
+  | {
+      intent: "update_lead";
+      entities: {
+        lead_name: string;
+        name?: string;
+        email?: string;
+        phone?: string;
+        lead_status?: "new" | "contacted" | "qualified" | "lost";
+      };
+    }
   | { intent: "assign_job"; entities: { job_title: string; employee_name: string } }
   | { intent: "detect_overload"; entities: Record<string, never> }
   | { intent: "create_service"; entities: { name: string; category?: string } }
@@ -87,6 +99,9 @@ export type ParsedCommand =
   | { intent: "confirm_whatsapp_message"; entities: Record<string, never> }
   | { intent: "cancel_whatsapp_message"; entities: Record<string, never> }
   | { intent: "set_voice_language"; entities: { language: VoiceLanguage } }
+  /** Adjusting how fast she talks. A direction is relative to the current
+   *  value, which the speaker has no way of knowing. */
+  | { intent: "set_speech_rate"; entities: { change?: "faster" | "slower" | "normal"; rate?: number } }
   | { intent: "describe_menu"; entities: { section?: NavigationSectionId } }
   | { intent: "connector_status"; entities: { connector_key: ConnectorKey | "all" } }
   | { intent: "setup_connectors"; entities: { connector_key: ConnectorKey | "all" } }
@@ -97,12 +112,32 @@ export type ParsedCommand =
   | { intent: "unrecognized"; entities: Record<string, never> };
 
 function extractLabelled(text: string, label: string): { value?: string; rest: string } {
-  const re = new RegExp(`,?\\s*${label}\\s*[:]?\\s*([^,]+)`, "i");
+  // Phone is the final labelled field in canonical create commands. Speech
+  // recognition commonly emits dictated digits separated by commas; capture
+  // the complete remainder instead of truncating the number at its first
+  // comma. Other fields retain comma-delimited parsing.
+  const re = new RegExp(
+    label.toLowerCase() === "phone"
+      ? `,?\\s*${label}\\s*[:]?\\s*(.+)$`
+      : `,?\\s*${label}\\s*[:]?\\s*([^,]+)`,
+    "i",
+  );
   const match = text.match(re);
   if (!match) return { rest: text };
   const value = match[1].trim();
   const rest = (text.slice(0, match.index) + text.slice((match.index ?? 0) + match[0].length)).trim();
   return { value, rest };
+}
+
+function normalizeDictatedPhone(value: string | undefined): string | undefined {
+  if (!value) return value;
+  // Preserve a leading international plus and remove punctuation inserted
+  // between dictated digits. Spaces remain valid for human-readable numbers.
+  return value
+    .replace(/(?<=\d)[,;](?=\s*\d)/g, "")
+    .replace(/(?<=\d)\.(?=\s*\d)/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function resolveConnectorTarget(raw: string): ConnectorKey | "all" | undefined {
@@ -251,15 +286,63 @@ function parseVoiceLanguageCommand(text: string): Extract<ParsedCommand, { inten
     if (language) return { intent: "set_voice_language", entities: { language } };
   }
   // A bare language variant is an explicit answer to a preceding variant
-  // question and is safe because changing language is reversible.
-  const bareLanguage = resolveVoiceLanguage(text);
+  // question and is safe because changing language is reversible. Named in full,
+  // though: a bare "it" or "pl" is a word or a fragment of noise, not a request.
+  const bareLanguage = resolveSpokenLanguageName(text);
   if (bareLanguage) return { intent: "set_voice_language", entities: { language: bareLanguage } };
   return undefined;
 }
 
+/**
+ * "mluv rychleji", "pomaleji", "mluv normálně" and their English forms.
+ *
+ * Recognised here rather than left to the model: adjusting her own voice is a
+ * single word, and making it depend on a round trip means it sometimes does
+ * nothing, which is exactly how it behaved.
+ */
+function parseSpeechRateCommand(text: string): Extract<ParsedCommand, { intent: "set_speech_rate" }> | undefined {
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[.!?,]+$/g, "")
+    .replace(/\s+/g, " ");
+
+  // An explicit number, so "mluv na 1.4" works as well as a direction.
+  const numeric = normalized.match(/(?:rychlost|speed|tempo)\D{0,12}(\d+(?:[.,]\d+)?)/);
+  if (numeric) {
+    const value = Number(numeric[1].replace(",", "."));
+    if (Number.isFinite(value)) {
+      // Spoken as a percentage ("mluv na 130") rather than a multiplier.
+      const rate = value > 3 ? value / 100 : value;
+      return { intent: "set_speech_rate", entities: { rate } };
+    }
+  }
+
+  const faster = /\b(rychleji|zrychli|zrychlit|rychlejc|faster|speed up|quicker)\b/;
+  const slower = /\b(pomaleji|zpomal|zpomalit|pomalejc|slower|slow down)\b/;
+  const normal = /\b(normalne|normalni|obvykle|puvodni|normal|default)\b/;
+
+  if (faster.test(normalized)) return { intent: "set_speech_rate", entities: { change: "faster" } };
+  if (slower.test(normalized)) return { intent: "set_speech_rate", entities: { change: "slower" } };
+  // "normally" alone is ambiguous; require it to be about speaking.
+  if (normal.test(normalized) && /\b(mluv|rikej|speak|talk|rychlost|speed|tempo)\b/.test(normalized)) {
+    return { intent: "set_speech_rate", entities: { change: "normal" } };
+  }
+  return undefined;
+}
+
 export function isExplicitVoiceLanguageChange(text: string, language: VoiceLanguage): boolean {
-  const command = parseVoiceLanguageCommand(text.trim().replace(/[.!?]+$/g, ""));
-  return command?.entities.language === language;
+  const cleaned = text.trim().replace(/[.!?]+$/g, "");
+  const command = parseVoiceLanguageCommand(cleaned);
+  if (command) return command.entities.language === language;
+  // The parser did not recognise this sentence — which is the only reason the
+  // caller is asking, since an unrecognised command is what sends it to the model.
+  // Requiring the parser to succeed here therefore refused every request that got
+  // this far, and answered "ask me explicitly" to people who just had. Whether the
+  // language was named is the question that can actually be answered at this point.
+  return mentionsLanguage(cleaned, language);
 }
 
 function parseMenuDescriptionCommand(text: string): Extract<ParsedCommand, { intent: "describe_menu" }> | undefined {
@@ -366,10 +449,12 @@ function parseClientMutationCommand(text: string): Extract<
     let rest = match[1];
     const email = extractLabelled(rest, "email");
     rest = email.rest;
-    const phone = extractLabelled(rest, "phone");
-    rest = phone.rest;
     const newName = extractLabelled(rest, "new name");
     rest = newName.rest;
+    // Phone is intentionally extracted last because dictated digits may be
+    // comma-separated and therefore consume the remaining canonical field.
+    const phone = extractLabelled(rest, "phone");
+    rest = phone.rest;
     const clientName = rest.replace(/,\s*$/, "").trim();
     if (clientName && (email.value || phone.value || newName.value)) {
       return {
@@ -377,7 +462,7 @@ function parseClientMutationCommand(text: string): Extract<
         entities: {
           client_name: clientName,
           email_primary: email.value,
-          phone_primary: phone.value,
+          phone_primary: normalizeDictatedPhone(phone.value),
           display_name: newName.value,
         },
       };
@@ -424,8 +509,60 @@ function parseContactMutationCommand(text: string): Extract<
   return undefined;
 }
 
+/**
+ * Correcting a lead by voice, mirroring the client and contact commands.
+ *
+ * "converted" is absent from the status words on purpose. Saying it would claim a
+ * client record that only conversion creates, so the only way to reach that status
+ * stays the convert command.
+ */
+const SPOKEN_LEAD_STATUS: Record<string, "new" | "contacted" | "qualified" | "lost"> = {
+  new: "new", novy: "new", "nový": "new", nowy: "new",
+  contacted: "contacted", kontaktovany: "contacted", "kontaktovaný": "contacted", skontaktowany: "contacted",
+  qualified: "qualified", kvalifikovany: "qualified", "kvalifikovaný": "qualified", zakwalifikowany: "qualified",
+  lost: "lost", ztraceny: "lost", "ztracený": "lost", utracony: "lost", przegrany: "lost",
+};
+
+function parseLeadMutationCommand(text: string): Extract<ParsedCommand, { intent: "update_lead" }> | undefined {
+  const normalized = text.trim().replace(/[.!?]+$/g, "");
+
+  let match = normalized.match(/^(?:rename)\s+(?:the\s+)?lead\s+(.+?)\s+to\s+(.+)$/iu)
+    ?? normalized.match(/^(?:přejmenuj|prejmenuj)\s+(?:lead|poptávku|poptavku)\s+(.+?)\s+na\s+(.+)$/iu)
+    ?? normalized.match(/^(?:zmień|zmien)\s+nazwę\s+leada\s+(.+?)\s+na\s+(.+)$/iu);
+  if (match) return { intent: "update_lead", entities: { lead_name: match[1].trim(), name: match[2].trim() } };
+
+  match = normalized.match(/^(?:change|set|update)\s+(?:the\s+)?(?:email|email address)\s+(?:for|of)\s+(?:the\s+)?lead\s+(.+?)\s+to\s+(\S+@\S+)$/iu)
+    ?? normalized.match(/^(?:změň|zmen)\s+(?:e-?mail|email)\s+(?:leadu|poptávky|poptavky)\s+(.+?)\s+na\s+(\S+@\S+)$/iu)
+    ?? normalized.match(/^(?:zmień|zmien)\s+(?:e-?mail|email)\s+leada\s+(.+?)\s+na\s+(\S+@\S+)$/iu);
+  if (match) return { intent: "update_lead", entities: { lead_name: match[1].trim(), email: match[2].trim() } };
+
+  match = normalized.match(/^(?:change|set|update)\s+(?:the\s+)?(?:phone|phone number)\s+(?:for|of)\s+(?:the\s+)?lead\s+(.+?)\s+to\s+(.+)$/iu)
+    ?? normalized.match(/^(?:změň|zmen)\s+(?:telefon|telefonní číslo|telefonni cislo)\s+(?:leadu|poptávky|poptavky)\s+(.+?)\s+na\s+(.+)$/iu)
+    ?? normalized.match(/^(?:zmień|zmien)\s+(?:telefon|numer telefonu)\s+leada\s+(.+?)\s+na\s+(.+)$/iu);
+  if (match) {
+    return { intent: "update_lead", entities: { lead_name: match[1].trim(), phone: normalizeDictatedPhone(match[2].trim()) } };
+  }
+
+  match = normalized.match(/^(?:mark|set)\s+(?:the\s+)?lead\s+(.+?)\s+(?:as|to)\s+(.+)$/iu)
+    ?? normalized.match(/^(?:označ|oznac|nastav)\s+(?:lead|poptávku|poptavku)\s+(.+?)\s+(?:jako|na)\s+(.+)$/iu)
+    ?? normalized.match(/^(?:oznacz|ustaw)\s+leada\s+(.+?)\s+(?:jako|na)\s+(.+)$/iu);
+  if (match) {
+    const spoken = match[2].trim().toLowerCase();
+    const status = SPOKEN_LEAD_STATUS[spoken];
+    // An unrecognised status word falls through rather than guessing: setting the
+    // wrong status silently is worse than saying the command was not understood.
+    if (status) return { intent: "update_lead", entities: { lead_name: match[1].trim(), lead_status: status } };
+  }
+  return undefined;
+}
+
 export function parseTextCommand(rawText: string): ParsedCommand {
   const text = rawText.trim();
+  const invoiceQuestion = text.normalize("NFD").replace(/\p{Diacritic}/gu, "")
+    .toLowerCase().replace(/[.!?]+$/g, "").replace(/\s+/g, " ").trim();
+  if (/^(?:kolik (?:mam|mame) (?:nezaplacenych|neuhrazenych) faktur|(?:how many )?unpaid invoices(?: do (?:i|we) have)?|how many outstanding invoices(?: do (?:i|we) have)?)$/.test(invoiceQuestion)) {
+    return { intent: "execute_action", entities: { action: "get_unpaid_invoices", parameters: {} } };
+  }
 
   // This format is emitted only by Emma's structured interpretation layer.
   // It is allowlisted and JSON-parsed here; the owning business service still
@@ -435,6 +572,10 @@ export function parseTextCommand(rawText: string): ParsedCommand {
 
   const languageCommand = parseVoiceLanguageCommand(text);
   if (languageCommand) return languageCommand;
+  // Before the menu and message parsers: "mluv rychleji" is about her voice, not
+  // a search for anything.
+  const speechRate = parseSpeechRateCommand(text);
+  if (speechRate) return speechRate;
   const menuDescription = parseMenuDescriptionCommand(text);
   if (menuDescription) return menuDescription;
   const gmailMessage = parseGmailMessageCommand(text);
@@ -447,6 +588,9 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   if (notificationDeletion) return notificationDeletion;
   const clientMutation = parseClientMutationCommand(text);
   if (clientMutation) return clientMutation;
+  const leadMutation = parseLeadMutationCommand(text);
+  if (leadMutation) return leadMutation;
+
   const contactMutation = parseContactMutationCommand(text);
   if (contactMutation) return contactMutation;
   if (/^(?:confirm|send)\s+(?:the\s+)?(?:email|message)(?:\s+now)?$/iu.test(text)
@@ -497,7 +641,7 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     if (!displayName) return { intent: "unrecognized", entities: {} };
     return {
       intent: "create_client",
-      entities: { display_name: displayName, email_primary: email.value, phone_primary: phone.value },
+      entities: { display_name: displayName, email_primary: email.value, phone_primary: normalizeDictatedPhone(phone.value) },
     };
   }
 
@@ -512,7 +656,7 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     rest = phone.rest;
     const displayName = rest.replace(/,\s*$/, "").trim();
     if (!displayName || (!email.value && !phone.value)) return { intent: "unrecognized", entities: {} };
-    return { intent: "create_contact", entities: { display_name: displayName, email: email.value, phone: phone.value } };
+    return { intent: "create_contact", entities: { display_name: displayName, email: email.value, phone: normalizeDictatedPhone(phone.value) } };
   }
 
   m = text.match(/^(?:create|add|new)\s+lead\s+(.+)$/i);
@@ -534,7 +678,7 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     if (!name) return { intent: "unrecognized", entities: {} };
     return {
       intent: "create_lead",
-      entities: { name, service_requested: service, email: email.value, phone: phone.value },
+      entities: { name, service_requested: service, email: email.value, phone: normalizeDictatedPhone(phone.value) },
     };
   }
 

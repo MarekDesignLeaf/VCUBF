@@ -25,6 +25,7 @@ export type EmmaCapability = {
   voiceActions?: string[];
   executionClass?: "voice" | "interactive" | "system" | "superseded";
   executionNote?: string;
+  availableToEmma?: boolean;
 };
 
 type CommandPolicy = {
@@ -41,6 +42,8 @@ export const COMMAND_POLICY = {
   confirm_execute_action: { category: "administration", mode: "write", description: "Confirm the single reviewed Secretary action waiting for this user." },
   cancel_execute_action: { category: "administration", mode: "write", description: "Cancel the single reviewed Secretary action waiting for this user." },
   create_client: { category: "customers", mode: "write", actionName: "create_client" },
+  confirm_create_client: { category: "customers", mode: "write", actionName: "create_client" },
+  cancel_create_client: { category: "customers", mode: "write", actionName: "create_client" },
   update_client: { category: "customers", mode: "write", actionName: "update_client" },
   prepare_archive_client: { category: "customers", mode: "write", actionName: "archive_client" },
   confirm_archive_client: { category: "customers", mode: "write", actionName: "archive_client" },
@@ -53,6 +56,7 @@ export const COMMAND_POLICY = {
   create_lead: { category: "customers", mode: "write", actionName: "create_lead" },
   create_job: { category: "work", mode: "write", actionName: "create_job" },
   change_job_status: { category: "work", mode: "write", actionName: "change_job_status" },
+  update_lead: { category: "customers", mode: "write", actionName: "update_lead" },
   convert_lead: { category: "customers", mode: "write", actionName: "convert_lead_to_client" },
   assign_job: { category: "work", mode: "write", actionName: "assign_job" },
   detect_overload: { category: "work", mode: "read", actionName: "detect_overload" },
@@ -89,6 +93,8 @@ export const COMMAND_POLICY = {
   confirm_whatsapp_message: { category: "communication", mode: "external", actionName: "send_whatsapp_message" },
   cancel_whatsapp_message: { category: "communication", mode: "external", actionName: "send_whatsapp_message" },
   set_voice_language: { category: "navigation", mode: "write", actionName: "update_voice_preferences" },
+  // Same operation as the language change: it adjusts her own settings.
+  set_speech_rate: { category: "navigation", mode: "write", actionName: "update_voice_preferences" },
   describe_menu: { category: "navigation", mode: "read" },
   connector_status: { category: "connectors", mode: "read" },
   setup_connectors: { category: "connectors", mode: "administration" },
@@ -107,7 +113,7 @@ const PAGE_CATEGORIES: Record<VoicePage, string> = {
   communications: "communication", photos: "evidence", photo_selection: "evidence", business_context: "evidence",
   industries: "evidence", connectors: "connectors", company: "administration", website_audit: "evidence",
   website_content: "evidence", employees: "people", calendar: "work", services: "sales", quotes: "sales",
-  invoices: "sales", recruitment: "people", playbooks: "learning", learning: "learning", memory_model: "learning",
+  invoices: "sales", recruitment: "people", playbooks: "learning", learning: "learning", memory_model: "learning", voice_aliases: "learning", new_employee: "people", new_quote: "sales",
 };
 
 function isActionContract(value: unknown): value is ActionContract {
@@ -197,33 +203,36 @@ for (const section of SECRETARY_NAVIGATION_CATALOGUE) {
   }
 }
 
-const actionCapabilities: EmmaCapability[] = EMMA_ACTION_CONTRACTS.map((action) => ({
-  id: `action.${action.actionName}`,
-  category: actionCategory(action),
-  mode: actionMode(action),
-  kind: "action",
-  label: humanize(action.actionName),
-  description: action.purpose,
-  intents: intentsByAction.get(action.actionName) ?? [],
-  actionName: action.actionName,
-  requiredPermission: action.requiredPermission,
-  riskLevel: action.riskLevel,
-  confirmationRequired: action.confirmationRequired,
-  voiceActions: [...new Set([
-    ...(intentsByAction.get(action.actionName) ?? []),
-    ...Object.entries(EMMA_EXECUTABLE_ACTIONS)
-      .filter(([, definition]) => definition.capabilityAction === action.actionName)
-      .map(([name]) => name),
-  ])],
-  executionClass: Object.prototype.hasOwnProperty.call(EMMA_NON_DIRECT_ACTIONS, action.actionName)
-    ? EMMA_NON_DIRECT_ACTIONS[action.actionName as keyof typeof EMMA_NON_DIRECT_ACTIONS].executionClass
-    : "voice",
-  executionNote: Object.prototype.hasOwnProperty.call(EMMA_NON_DIRECT_ACTIONS, action.actionName)
-    ? EMMA_NON_DIRECT_ACTIONS[action.actionName as keyof typeof EMMA_NON_DIRECT_ACTIONS].note
-    : EMMA_DYNAMIC_COMMAND_ACTIONS.includes(action.actionName as typeof EMMA_DYNAMIC_COMMAND_ACTIONS[number])
-      ? "Executed through a dynamic command that resolves the exact connector or confirmed mutation."
-      : undefined,
-}));
+const actionCapabilities: EmmaCapability[] = EMMA_ACTION_CONTRACTS.map((action) => {
+  const nonDirect = Object.prototype.hasOwnProperty.call(EMMA_NON_DIRECT_ACTIONS, action.actionName)
+    ? EMMA_NON_DIRECT_ACTIONS[action.actionName as keyof typeof EMMA_NON_DIRECT_ACTIONS]
+    : undefined;
+  return {
+    id: `action.${action.actionName}`,
+    category: actionCategory(action),
+    mode: actionMode(action),
+    kind: "action",
+    label: humanize(action.actionName),
+    description: action.purpose,
+    intents: intentsByAction.get(action.actionName) ?? [],
+    actionName: action.actionName,
+    requiredPermission: action.requiredPermission,
+    riskLevel: action.riskLevel,
+    confirmationRequired: action.confirmationRequired,
+    voiceActions: [...new Set([
+      ...(intentsByAction.get(action.actionName) ?? []),
+      ...Object.entries(EMMA_EXECUTABLE_ACTIONS)
+        .filter(([, definition]) => definition.capabilityAction === action.actionName)
+        .map(([name]) => name),
+    ])],
+    executionClass: nonDirect?.executionClass ?? "voice",
+    executionNote: nonDirect?.note
+      ?? (EMMA_DYNAMIC_COMMAND_ACTIONS.includes(action.actionName as typeof EMMA_DYNAMIC_COMMAND_ACTIONS[number])
+        ? "Executed through a dynamic command that resolves the exact connector or confirmed mutation."
+        : undefined),
+    availableToEmma: !nonDirect,
+  };
+});
 
 const actionNames = new Set(EMMA_ACTION_CONTRACTS.map((action) => action.actionName));
 const commandCapabilities: EmmaCapability[] = (Object.entries(COMMAND_POLICY) as Array<[ParsedCommand["intent"], CommandPolicy]>)

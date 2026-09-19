@@ -1,5 +1,6 @@
 import type { AuthedUser } from "../middleware/auth.js";
 import { EMMA_EXECUTABLE_ACTIONS, type EmmaExecutableActionName, type EmmaExecutableActionRequest } from "../lib/emmaExecutableActionCatalogue.js";
+import { validateVoiceActionParameters } from "../lib/voiceActionCatalogue.js";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db.js";
@@ -11,6 +12,7 @@ import * as taskService from "./taskService.js";
 import * as documentRecordService from "./documentRecordService.js";
 import * as businessContextService from "./businessContextService.js";
 import * as industryService from "./industryService.js";
+import * as voicePreferenceService from "./voicePreferenceService.js";
 import * as serviceCatalogueService from "./serviceCatalogueService.js";
 import * as quoteService from "./quoteService.js";
 import * as invoiceService from "./invoiceService.js";
@@ -143,6 +145,42 @@ async function executeEmmaActionDirect(
     case "archive_business_context": {
       const item = lookup(await businessContextService.listBusinessContextItems(user), stringValue(p, "label"), ["label"], "business_context");
       return item.ok ? businessContextService.updateBusinessContextItem(user, item.data.id, { is_active: false }) : item;
+    }
+    // Reconfiguring the assistant by talking to her. The existing preference
+    // service owns validation, auditing and the response, so these only have to
+    // supply the field being changed and leave the rest untouched.
+    case "set_assistant_name":
+      return voicePreferenceService.updateVoicePreferences(user, {
+        wake_word: user.voiceWakeWord,
+        continuous_listening: user.voiceContinuous,
+        language: user.voiceLanguage as never,
+        assistant_name: stringValue(p, "name") ?? user.assistantName,
+      });
+    case "set_hotword":
+      return voicePreferenceService.updateVoicePreferences(user, {
+        wake_word: stringValue(p, "hotword") ?? user.voiceWakeWord,
+        continuous_listening: user.voiceContinuous,
+        language: user.voiceLanguage as never,
+      });
+    case "set_speech_rate": {
+      // A direction is relative to what she is doing now, which the speaker has
+      // no way of knowing; a step of 0.15 is about the smallest audible change.
+      const current = user.voiceSpeechRate ?? 1.15;
+      const requested = numberValue(p, "rate");
+      const direction = stringValue(p, "change");
+      const target = requested ?? (
+        direction === "faster" ? current + 0.15
+        : direction === "slower" ? current - 0.15
+        : 1
+      );
+      return voicePreferenceService.updateVoicePreferences(user, {
+        wake_word: user.voiceWakeWord,
+        continuous_listening: user.voiceContinuous,
+        language: user.voiceLanguage as never,
+        // Clamped, because past roughly double speed the words stop being
+        // intelligible and a repeated "faster" would walk straight past it.
+        speech_rate: Math.min(2, Math.max(0.5, Number(target.toFixed(2)))),
+      });
     }
     case "create_industry":
       return industryService.createIndustry(user, p);
@@ -290,6 +328,22 @@ async function executeEmmaActionDirect(
     case "archive_memory": {
       const item = lookup(await assistantMemoryService.listAssistantMemories(user, { status: "active" }), stringValue(p, "content"), ["content"], "assistant_memory");
       return item.ok ? assistantMemoryService.archiveAssistantMemory(user, item.data.id) : item;
+    }
+    case "get_unpaid_invoices": {
+      const invoices = await invoiceService.listInvoices(user);
+      const unpaid = invoices.filter((invoice) => invoice.invoiceStatus === "issued" && invoice.totals.balance > 0);
+      const count = unpaid.length;
+      const overdueCount = unpaid.filter((invoice) => invoice.isOverdue).length;
+      const messages: Record<string, string> = {
+        cs: `Počet neuhrazených vystavených faktur: ${count}. Z toho po splatnosti: ${overdueCount}.`,
+        en: `Unpaid issued invoices: ${count}. Of these, overdue: ${overdueCount}.`,
+        pl: `Nieopłacone wystawione faktury: ${count}. W tym zaległe: ${overdueCount}.`,
+        de: `Unbezahlte ausgestellte Rechnungen: ${count}. Davon überfällig: ${overdueCount}.`,
+        fr: `Factures émises impayées : ${count}. Dont en retard : ${overdueCount}.`,
+        es: `Facturas emitidas pendientes de pago: ${count}. De ellas, vencidas: ${overdueCount}.`,
+        it: `Fatture emesse non pagate: ${count}. Di cui scadute: ${overdueCount}.`,
+      };
+      return ok(200, { count, overdueCount, message: messages[user.voiceLanguage.slice(0, 2)] ?? messages.en });
     }
     case "get_metrics": {
       const parsed = metricsService.metricsQuerySchema.safeParse(p);
@@ -492,6 +546,10 @@ async function executeEmmaActionDirect(
       return duplicate.ok ? dataQualityService.mergeClients(user, { primary_client_id: primary.data.id, duplicate_client_id: duplicate.data.id, confirmed }) : duplicate;
     }
   }
+  // Exhaustive by type: a newly mirrored action cannot compile until its real,
+  // permission-checked service path has been implemented here.
+  const unimplementedAction: never = request.action;
+  return fail(500, "EMMA_ACTION_NOT_IMPLEMENTED", `Emma action ${unimplementedAction} is not implemented.`);
 }
 
 const PENDING_ACTION_TYPE = "emma_universal_action";
@@ -521,8 +579,10 @@ export async function getPendingEmmaActionName(user: AuthedUser): Promise<EmmaEx
 }
 
 export async function executeEmmaAction(user: AuthedUser, request: EmmaExecutableActionRequest): Promise<ServiceResult<unknown>> {
+  const validated = validateVoiceActionParameters(request.action, request.parameters);
+  if (!validated.success) return fail(400, "VALIDATION_FAILED", validated.message, { issues: validated.issues });
   const definition = EMMA_EXECUTABLE_ACTIONS[request.action];
-  const sanitized = { ...request, parameters: without(request.parameters, "confirmed") };
+  const sanitized = { ...request, parameters: without(validated.data, "confirmed") };
   const result = await executeEmmaActionDirect(user, sanitized, false);
   if (definition.confirmation !== "service_preview" || result.ok || result.error !== "CONFIRMATION_REQUIRED") return result;
 
@@ -553,9 +613,14 @@ export async function confirmPendingEmmaAction(user: AuthedUser): Promise<Servic
     await prisma.voicePendingAction.update({ where: { id: pending.id }, data: { status: "failed", payload: Prisma.DbNull, resolvedAt: new Date() } });
     return fail(409, "PENDING_ACTION_INVALID");
   }
+  const validated = validateVoiceActionParameters(request.action, request.parameters);
+  if (!validated.success) {
+    await prisma.voicePendingAction.update({ where: { id: pending.id }, data: { status: "failed", payload: Prisma.DbNull, resolvedAt: new Date() } });
+    return fail(409, "PENDING_ACTION_INVALID", validated.message);
+  }
   const claimed = await prisma.voicePendingAction.updateMany({ where: { id: pending.id, status: "pending" }, data: { status: "executing" } });
   if (claimed.count !== 1) return fail(409, "PENDING_ACTION_ALREADY_RESOLVED");
-  const result = await executeEmmaActionDirect(user, request, true);
+  const result = await executeEmmaActionDirect(user, { ...request, parameters: validated.data }, true);
   await prisma.voicePendingAction.update({
     where: { id: pending.id },
     data: { status: result.ok ? "completed" : "failed", payload: Prisma.DbNull, resolvedAt: new Date() },

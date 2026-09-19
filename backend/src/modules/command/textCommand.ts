@@ -1,12 +1,14 @@
 import { Router, raw } from "express";
 import { z } from "zod";
 import { requireAuth, type AuthedUser } from "../../middleware/auth.js";
+import { prisma } from "../../db.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { recordAudit } from "../../lib/audit.js";
 import { EXECUTE_TEXT_COMMAND_ACTION } from "../../lib/actionContracts.js";
 import { isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../../lib/commandParser.js";
 import { dispatchParsedCommand, type CommandResponse } from "../../lib/commandExecutor.js";
 import { resolveLearningAliases } from "../../services/learningService.js";
+import { aliasVocabulary } from "../../services/voiceAliasService.js";
 import { createRealtimeClientSession, interpretVoiceRequest, transcribeVoiceAudio } from "../../services/voiceAssistantService.js";
 import { publishVoiceUiAction } from "../../services/voiceUiActionService.js";
 import { getAssistantContext } from "../../services/assistantMemoryService.js";
@@ -18,6 +20,21 @@ import { languageChangeRejectedMessage } from "../../lib/voiceLanguages.js";
 import { evaluateEmmaCommand } from "../../services/emmaPolicyService.js";
 import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorService.js";
 import { getPendingEmmaActionName } from "../../services/emmaExecutableActionService.js";
+import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
+
+/**
+ * The user's voice language as it is right now.
+ *
+ * Falls back to the token's value if the row has gone, which only happens
+ * mid-deletion; transcribing in a slightly stale language beats failing.
+ */
+async function currentVoiceLanguage(user: AuthedUser): Promise<string> {
+  const row = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { voiceLanguage: true },
+  });
+  return row?.voiceLanguage ?? user.voiceLanguage;
+}
 
 export const commandRouter = Router();
 
@@ -46,7 +63,7 @@ const assistantSchema = commandSchema.extend({
 
 const transcriptionQuerySchema = z.object({
   language: z.string().trim().min(2).max(20).default("en-GB"),
-  wake_word: z.string().trim().min(1).max(80).default("Emma"),
+  wake_word: z.string().trim().min(1).max(80).default("Hej Emma"),
 });
 
 type ParsedTextCommand = ReturnType<typeof parseTextCommand>;
@@ -54,13 +71,19 @@ type ParsedTextCommand = ReturnType<typeof parseTextCommand>;
 async function resolveUserCommand(user: AuthedUser, text: string): Promise<ParsedTextCommand> {
   const parsed = parseTextCommand(text);
   if (parsed.intent !== "unrecognized") return parsed;
-  const [gmailPending, whatsappPending, notificationDeletionPending, pendingEmmaAction] = await Promise.all([
+  const [clientCreatePending, gmailPending, whatsappPending, notificationDeletionPending, pendingEmmaAction] = await Promise.all([
+    hasPendingVoiceClientCreation(user),
     hasPendingVoiceGmailMessage(user),
     hasPendingVoiceWhatsAppMessage(user),
     hasPendingVoiceNotificationDeletion(user),
     getPendingEmmaActionName(user),
   ]);
   const pendingActions: Array<{ pending: boolean; confirm: ParsedTextCommand; cancel: ParsedTextCommand }> = [
+    {
+      pending: clientCreatePending,
+      confirm: { intent: "confirm_create_client", entities: {} },
+      cancel: { intent: "cancel_create_client", entities: {} },
+    },
     {
       pending: gmailPending,
       confirm: { intent: "confirm_gmail_message", entities: {} },
@@ -175,9 +198,10 @@ function safeNonActionAssistantMessage(message: string, language: string) {
 }
 
 function localizeVoiceClientResponse(response: CommandResponse, language: string): CommandResponse {
-  if (response.intent !== "create_client") return response;
+  if (!["create_client", "confirm_create_client", "cancel_create_client"].includes(response.intent)) return response;
   const interpreted = response.interpreted as { display_name?: string };
-  const name = interpreted.display_name?.trim() || "client";
+  const resultName = typeof (response.data as any)?.displayName === "string" ? (response.data as any).displayName : undefined;
+  const name = interpreted.display_name?.trim() || resultName || "client";
   const invalidFields = Array.isArray((response.data as any)?.invalidFields)
     ? (response.data as any).invalidFields as string[]
     : [];
@@ -229,7 +253,28 @@ function localizeVoiceClientResponse(response: CommandResponse, language: string
     },
   };
   const selected = messages[locale] ?? messages.en;
-  if (response.ok) return { ...response, message: selected.created };
+  if (response.ok && response.intent === "confirm_create_client") return { ...response, message: selected.created };
+  if (response.ok && response.intent === "cancel_create_client") {
+    const cancelled: Record<string, string> = {
+      en: "Client creation was cancelled. Nothing was changed.",
+      cs: "Vytvoření klienta bylo zrušeno. Nic se nezměnilo.",
+      pl: "Tworzenie klienta zostało anulowane. Nic nie zmieniono.",
+      de: "Die Kundenerstellung wurde abgebrochen. Es wurde nichts geändert.",
+      fr: "La création du client a été annulée. Rien n’a été modifié.",
+      es: "Se canceló la creación del cliente. No se cambió nada.",
+      it: "La creazione del cliente è stata annullata. Non è stato modificato nulla.",
+    };
+    return { ...response, message: cancelled[locale] ?? cancelled.en };
+  }
+  if (response.ok && response.intent === "create_client") {
+    const preview = (response.data as any)?.preview ?? response.interpreted;
+    const confirmation: Record<string, string> = {
+      en: `Please confirm: create ${preview.display_name}, email ${preview.email_primary}, phone ${preview.phone_primary}? Say yes to create the client or no to cancel.`,
+      cs: `Potvrďte prosím: vytvořit klienta ${preview.display_name}, e-mail ${preview.email_primary}, telefon ${preview.phone_primary}? Řekněte ano pro vytvoření nebo ne pro zrušení.`,
+      pl: `Potwierdź: utworzyć klienta ${preview.display_name}, e-mail ${preview.email_primary}, telefon ${preview.phone_primary}? Powiedz tak, aby utworzyć, albo nie, aby anulować.`,
+    };
+    return { ...response, message: confirmation[locale] ?? confirmation.en };
+  }
   if (response.error !== "VALIDATION_FAILED" || (!invalidEmail && !invalidPhone)) return response;
   return { ...response, message: invalidEmail && invalidPhone ? selected.both : invalidEmail ? selected.email : selected.phone };
 }
@@ -262,8 +307,13 @@ commandRouter.post(
     const isWave = audio.length >= 44 && audio.subarray(0, 4).toString("ascii") === "RIFF" && audio.subarray(8, 12).toString("ascii") === "WAVE";
     if (!isWave) return res.status(400).json({ error: "INVALID_AUDIO", message: "A valid WAV command recording is required." });
     try {
-      const language = req.user!.voiceLanguage;
-      const transcription = await transcribeVoiceAudio(audio, language, query.data.wake_word);
+      // From the database, not the token: the token is signed at sign-in, so
+      // reading the language from it would keep transcribing in the old
+      // language until the next sign-in. This way a change — typed or spoken —
+      // applies to the very next utterance.
+      const language = await currentVoiceLanguage(req.user!);
+      const learned = await aliasVocabulary(req.user!.companyId);
+      const transcription = await transcribeVoiceAudio(audio, language, query.data.wake_word, learned);
       await recordAudit({
         companyId: req.user!.companyId,
         userId: req.user!.id,
@@ -420,7 +470,17 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     result: response.ok ? "success" : "error",
     errorMessage: response.ok ? undefined : response.error,
   });
-  return res.status(response.httpStatus).json({ ...response, uiAction, kind: "action", assistantMessage: assistant?.message, appliedAliases: alias.appliedRules });
+  // Once a command has reached the deterministic action engine, its verified
+  // result is the only text Emma may show or speak. The language model's
+  // interpretation message can be incomplete, malformed, or claim success
+  // before validation has run; never let it override the action result.
+  return res.status(response.httpStatus).json({
+    ...response,
+    uiAction,
+    kind: "action",
+    assistantMessage: response.message,
+    appliedAliases: alias.appliedRules,
+  });
 });
 
 // POST /command/text — Voice and Text Command Layer entry point.

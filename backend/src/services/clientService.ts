@@ -52,6 +52,12 @@ export const updateClientSchema = z.object({
 
 const archiveClientSchema = z.object({ confirmed: z.boolean().optional() });
 const pendingArchivePayloadSchema = z.object({ clientId: z.string().uuid(), displayName: z.string().min(1) });
+const pendingCreatePayloadSchema = createClientSchema.extend({
+  email_primary: z.string().email(),
+  phone_primary: z.string().min(1),
+});
+const PENDING_CLIENT_CREATE = "create_client";
+const PENDING_CLIENT_CREATE_LIFETIME_MS = 5 * 60 * 1000;
 const PENDING_CLIENT_ARCHIVE = "archive_client";
 const PENDING_CLIENT_ARCHIVE_LIFETIME_MS = 5 * 60 * 1000;
 
@@ -197,7 +203,11 @@ export async function findClientsByName(user: AuthedUser, name: string) {
 // create_client — Action Contract driven. Shared by the REST route and the
 // Voice/Text Command Layer so the duplicate-check and audit behaviour is
 // identical no matter how the request arrived.
-export async function createClient(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
+export async function createClient(
+  user: AuthedUser,
+  rawInput: unknown,
+  confirmation: { required: boolean; confirmed: boolean } = { required: false, confirmed: false },
+): Promise<ServiceResult<unknown>> {
   if (!canManageClients(user)) {
     await auditFailure(user, CREATE_CLIENT_ACTION, rawInput, "MISSING_PERMISSION");
     return fail(403, "MISSING_PERMISSION", "CRM management permission is required to create clients.");
@@ -241,11 +251,110 @@ export async function createClient(user: AuthedUser, rawInput: unknown): Promise
     inputPayload: data,
     dataAfter: client,
     riskLevel: CREATE_CLIENT_ACTION.riskLevel,
-    confirmationRequired: CREATE_CLIENT_ACTION.confirmationRequired,
+    confirmationRequired: confirmation.required,
+    confirmed: confirmation.confirmed,
     result: "success",
   });
 
   return ok(201, client);
+}
+
+async function expirePendingClientCreations(user: AuthedUser, now = new Date()) {
+  await prisma.voicePendingAction.updateMany({
+    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_CREATE, status: "pending", expiresAt: { lte: now } },
+    data: { status: "expired", payload: Prisma.DbNull, resolvedAt: now },
+  });
+}
+
+export async function hasPendingVoiceClientCreation(user: AuthedUser) {
+  const now = new Date();
+  await expirePendingClientCreations(user, now);
+  return Boolean(await prisma.voicePendingAction.findFirst({
+    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_CREATE, status: "pending", expiresAt: { gt: now } },
+    select: { id: true },
+  }));
+}
+
+export async function prepareVoiceClientCreation(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
+  if (!canManageClients(user)) {
+    await auditFailure(user, CREATE_CLIENT_ACTION, rawInput, "MISSING_PERMISSION");
+    return fail(403, "MISSING_PERMISSION", "CRM management permission is required to create clients.");
+  }
+  const parsed = createClientSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    await auditFailure(user, CREATE_CLIENT_ACTION, rawInput, "VALIDATION_FAILED");
+    return createClientValidationFailure(rawInput, parsed.error);
+  }
+  const data = parsed.data;
+  const missingFields = [!data.email_primary ? "email_primary" : undefined, !data.phone_primary ? "phone_primary" : undefined].filter(Boolean);
+  if (missingFields.length) {
+    await auditFailure(user, CREATE_CLIENT_ACTION, data, "MISSING_DATA", "rejected");
+    return fail(400, "MISSING_DATA", `${data.display_name} was not created. Say both a complete email address and a full phone number.`, { missingFields });
+  }
+  const conflict = await findIdentityConflict(user, data);
+  if (conflict) {
+    await auditFailure(user, CREATE_CLIENT_ACTION, data, conflict.error, "rejected");
+    return conflict;
+  }
+
+  const payload = pendingCreatePayloadSchema.parse(data);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + PENDING_CLIENT_CREATE_LIFETIME_MS);
+  await prisma.$transaction(async (tx) => {
+    await tx.voicePendingAction.updateMany({
+      where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_CREATE, status: "pending" },
+      data: { status: "replaced", payload: Prisma.DbNull, resolvedAt: now },
+    });
+    await tx.voicePendingAction.create({
+      data: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_CREATE, payload, expiresAt },
+    });
+  });
+  return ok(202, {
+    confirmationRequired: true,
+    expiresAt: expiresAt.toISOString(),
+    preview: payload,
+    message: `Please confirm: create ${payload.display_name}, email ${payload.email_primary}, phone ${payload.phone_primary}? Say yes to create the client or no to cancel.`,
+  });
+}
+
+export async function confirmVoiceClientCreation(user: AuthedUser): Promise<ServiceResult<unknown>> {
+  const now = new Date();
+  await expirePendingClientCreations(user, now);
+  const pending = await prisma.voicePendingAction.findFirst({
+    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_CREATE, status: "pending", expiresAt: { gt: now } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!pending) return fail(409, "NO_PENDING_CLIENT_CREATE", "There is no client waiting for confirmation.");
+  const payload = pendingCreatePayloadSchema.safeParse(pending.payload);
+  if (!payload.success) {
+    await prisma.voicePendingAction.update({ where: { id: pending.id }, data: { status: "failed", payload: Prisma.DbNull, resolvedAt: now } });
+    return fail(409, "PENDING_CLIENT_CREATE_INVALID", "The reviewed client details are no longer valid. Start again.");
+  }
+  const claimed = await prisma.voicePendingAction.updateMany({
+    where: { id: pending.id, status: "pending", expiresAt: { gt: now } },
+    data: { status: "executing" },
+  });
+  if (!claimed.count) return fail(409, "NO_PENDING_CLIENT_CREATE", "That client is no longer waiting for confirmation.");
+  const result = await createClient(user, payload.data, { required: true, confirmed: true });
+  await prisma.voicePendingAction.update({
+    where: { id: pending.id },
+    data: { status: result.ok ? "completed" : "failed", payload: Prisma.DbNull, resolvedAt: new Date() },
+  });
+  return result.ok
+    ? ok(result.httpStatus, { ...(result.data as Record<string, unknown>), message: `${payload.data.display_name} was created as a client.` })
+    : result;
+}
+
+export async function cancelVoiceClientCreation(user: AuthedUser): Promise<ServiceResult<unknown>> {
+  const now = new Date();
+  await expirePendingClientCreations(user, now);
+  const cancelled = await prisma.voicePendingAction.updateMany({
+    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_CREATE, status: "pending" },
+    data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
+  });
+  return cancelled.count
+    ? ok(200, { message: "Client creation was cancelled. Nothing was changed." })
+    : fail(409, "NO_PENDING_CLIENT_CREATE", "There is no client waiting to be cancelled.");
 }
 
 export async function updateClient(user: AuthedUser, id: string, rawInput: unknown): Promise<ServiceResult<unknown>> {

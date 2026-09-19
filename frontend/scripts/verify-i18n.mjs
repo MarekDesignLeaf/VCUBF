@@ -1,14 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { extractVisiblePhrases } from "./audit-i18n.mjs";
+import { commonUiPhrases } from "./ui-translation-common.mjs";
 
 const locales = ["cs-CZ", "pl-PL", "fr-FR", "de-DE", "es-ES", "it-IT"];
-const common = [
-  "Active", "Inactive", "Archived", "Draft", "Open", "Closed", "Pending", "Completed", "Cancelled",
-  "Accepted", "Rejected", "Unknown", "Not set", "Save", "Delete", "Edit", "Create", "Update", "Search",
-  "Loading…", "No results", "Yes", "No", "Previous", "Next", "Required", "Optional",
-];
-const expected = new Set([...extractVisiblePhrases().map(([text]) => text), ...common]);
+const expected = new Set([...extractVisiblePhrases().map(([text]) => text), ...commonUiPhrases]);
 let failed = false;
 
 for (const locale of locales) {
@@ -18,7 +14,7 @@ for (const locale of locales) {
     failed = true;
     continue;
   }
-  const source = fs.readFileSync(file, "utf8");
+  const source = fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
   const match = source.match(/= (\{[\s\S]*\});\s*\n\nexport default catalogue;/);
   if (!match) {
     console.error(`${locale}: generated catalogue has an invalid shape`);

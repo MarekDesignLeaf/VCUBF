@@ -93,7 +93,7 @@ export function EmmaPermissions() {
   const czech = language === "cs-CZ";
   const isAdministrator = user?.role === "administrator" || user?.role === "admin";
   const [capabilities, setCapabilities] = useState<EmmaCapabilityPolicyItem[]>([]);
-  const [summary, setSummary] = useState({ pages: 0, actions: 0, commands: 0 });
+  const [summary, setSummary] = useState({ pages: 0, actions: 0, commands: 0, available: 0, unavailable: 0 });
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -123,12 +123,12 @@ export function EmmaPermissions() {
   if (!isAdministrator) return <Navigate to="/" replace />;
 
   function setEnabled(id: string, enabled: boolean) {
-    setCapabilities((current) => current.map((item) => item.id === id ? { ...item, enabled } : item));
+    setCapabilities((current) => current.map((item) => item.id === id && item.availableToEmma !== false ? { ...item, enabled } : item));
     setMessage(null);
   }
 
   function setMode(mode: EmmaCapabilityPolicyItem["mode"], enabled: boolean) {
-    setCapabilities((current) => current.map((item) => item.mode === mode ? { ...item, enabled } : item));
+    setCapabilities((current) => current.map((item) => item.mode === mode && item.availableToEmma !== false ? { ...item, enabled } : item));
     setMessage(null);
   }
 
@@ -157,10 +157,11 @@ export function EmmaPermissions() {
       <div><strong>{capabilities.filter((item) => !item.enabled).length}</strong><span>{czech ? "vypnuto" : polish ? "wyłączone" : "disabled"}</span></div>
       <div><strong>{capabilities.filter((item) => item.enabled && item.mode === "external").length}</strong><span>{czech ? "vnější akce" : polish ? "działania zewnętrzne" : "external actions"}</span></div>
       <div><strong>{summary.pages} / {summary.actions} / {summary.commands}</strong><span>{czech ? "stránky / operace / příkazy" : polish ? "strony / operacje / polecenia" : "pages / actions / commands"}</span></div>
+      <div><strong>{summary.available} / {summary.unavailable}</strong><span>{czech ? "ovladatelné / pouze informační" : polish ? "sterowalne / tylko informacyjne" : "controllable / informational only"}</span></div>
     </section>
 
     <div className="emma-policy-toolbar">
-      <button type="button" className="secondary-button" onClick={() => setCapabilities((current) => current.map((item) => ({ ...item, enabled: true })))}>{czech ? "Zapnout vše" : polish ? "Włącz wszystko" : "Enable all"}</button>
+      <button type="button" className="secondary-button" onClick={() => setCapabilities((current) => current.map((item) => item.availableToEmma === false ? item : { ...item, enabled: true }))}>{czech ? "Zapnout vše" : polish ? "Włącz wszystko" : "Enable all"}</button>
       <button type="button" className="secondary-button" onClick={() => { setMode("write", false); setMode("external", false); setMode("administration", false); }}>{czech ? "Pouze čtení" : polish ? "Tylko odczyt" : "Read only"}</button>
       <button type="button" className="secondary-button" onClick={() => setMode("external", false)}>{czech ? "Vypnout vnější akce" : polish ? "Wyłącz działania zewnętrzne" : "Disable external actions"}</button>
       <input className="emma-policy-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={czech ? "Hledat stránku nebo operaci…" : polish ? "Szukaj strony lub operacji…" : "Search pages or operations…"} />
@@ -180,12 +181,14 @@ export function EmmaPermissions() {
               : polish
                 ? ({ read: "odczyt", write: "zmiana danych", external: "działanie zewnętrzne", administration: "administracja" } as const)[item.mode]
                 : item.mode;
-            return <label className={`emma-capability ${item.enabled ? "is-enabled" : "is-disabled"}`} key={item.id}>
-              <input type="checkbox" checked={item.enabled} onChange={(event) => setEnabled(item.id, event.target.checked)} />
+            const unavailable = item.availableToEmma === false;
+            return <label className={`emma-capability ${item.enabled ? "is-enabled" : "is-disabled"} ${unavailable ? "is-unavailable" : ""}`} key={item.id}>
+              <input type="checkbox" checked={item.enabled} disabled={unavailable} onChange={(event) => setEnabled(item.id, event.target.checked)} />
               <span>
                 <strong>{localized?.[0] ?? item.label}</strong>
                 <small>{localized?.[1] ?? item.description}</small>
                 {item.executionNote && <small>{item.executionClass}: {item.executionNote}</small>}
+                {unavailable && <small>{czech ? "Tuto operaci Emma přímo neprovádí; je zobrazena pouze kvůli úplnosti systémového katalogu." : polish ? "Emma nie wykonuje tej operacji bezpośrednio; jest pokazana wyłącznie dla kompletności katalogu systemowego." : "Emma does not execute this operation directly; it is shown only for completeness of the system catalogue."}</small>}
                 <small className="emma-capability-technical">{item.route ?? item.actionName ?? item.id}{item.requiredPermission ? ` · ${item.requiredPermission}` : ""}{item.voiceActions?.length ? ` · Emma: ${item.voiceActions.join(", ")}` : ""}{item.confirmationRequired ? (czech ? " · vyžaduje potvrzení" : polish ? " · wymaga potwierdzenia" : " · confirmation required") : ""}</small>
               </span>
               <em className={`emma-capability-mode mode-${item.mode}`}>{item.kind} · {mode}</em>

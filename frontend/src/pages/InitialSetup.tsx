@@ -39,7 +39,7 @@ export function InitialSetup() {
   return (
     <div className="login-page">
       <section className="login-introduction" aria-label="Secretary first-time setup">
-        <div className="login-brand"><span className="login-brand-mark" aria-hidden="true">S</span><span><strong>VCUF</strong><small>Secretary</small></span></div>
+        <div className="login-brand"><span className="login-brand-mark" aria-hidden="true">S</span><span><strong>VCUBF</strong><small>Secretary</small></span></div>
         <div className="login-introduction-copy">
           <p className="login-eyebrow">FIRST-TIME SETUP</p>
           <h1>Start with the company that owns this workspace.</h1>

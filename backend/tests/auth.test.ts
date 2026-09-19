@@ -111,11 +111,22 @@ describe("auth", () => {
 
   it("stores per-user wake-word and continuous-listening preferences", async () => {
     const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
-    assert.equal(login.body.user.voiceWakeWord, "Emma");
+    // Two words by default: a single name turns up in ordinary conversation
+    // and the recogniser produced it from room noise, waking her unasked.
+    assert.equal(login.body.user.voiceWakeWord, "Hej Emma");
+    // The name is a separate setting from the word that wakes her.
+    assert.equal(login.body.user.assistantName, "Emma");
     assert.equal(login.body.user.voiceContinuous, false);
     const updated = await request(app).put("/auth/voice-preferences").set("Authorization", `Bearer ${login.body.token}`).send({ wake_word: "Ema Assistant", continuous_listening: true, language: "cs-CZ" });
     assert.equal(updated.status, 200);
-    assert.deepEqual(updated.body, { voiceWakeWord: "Ema Assistant", voiceContinuous: true, voiceLanguage: "cs-CZ" });
+    assert.deepEqual(updated.body, {
+      voiceWakeWord: "Ema Assistant",
+      voiceContinuous: true,
+      voiceLanguage: "cs-CZ",
+      // Unsent fields keep their values rather than resetting to a default.
+      assistantName: "Emma",
+      voiceSpeechRate: 1.15,
+    });
     const me = await request(app).get("/auth/me").set("Authorization", `Bearer ${login.body.token}`);
     assert.equal(me.body.voiceWakeWord, "Ema Assistant");
     assert.equal(me.body.voiceLanguage, "cs-CZ");
@@ -123,6 +134,26 @@ describe("auth", () => {
     assert.equal(invalid.status, 400);
     const audit = await prisma.auditLog.findFirst({ where: { actionName: "update_voice_preferences", userId: me.body.id }, orderBy: { createdAt: "desc" } });
     assert.equal((audit?.dataAfter as any)?.voiceWakeWord, "Ema Assistant");
+
+
+    const renamed = await request(app).put("/auth/voice-preferences").set("Authorization", `Bearer ${login.body.token}`)
+      .send({ wake_word: "hej sekretarko", continuous_listening: true, language: "cs-CZ", assistant_name: "Petra", speech_rate: 1.4 });
+    assert.equal(renamed.status, 200);
+    // The name and the word that wakes her are independent choices.
+    assert.equal(renamed.body.assistantName, "Petra");
+    assert.equal(renamed.body.voiceWakeWord, "hej sekretarko");
+    assert.equal(renamed.body.voiceSpeechRate, 1.4);
+
+    const partial = await request(app).put("/auth/voice-preferences").set("Authorization", `Bearer ${login.body.token}`)
+      .send({ wake_word: "hej sekretarko", continuous_listening: false, language: "cs-CZ" });
+    // Omitting them must not wipe them.
+    assert.equal(partial.body.assistantName, "Petra");
+    assert.equal(partial.body.voiceSpeechRate, 1.4);
+
+    const tooFast = await request(app).put("/auth/voice-preferences").set("Authorization", `Bearer ${login.body.token}`)
+      .send({ wake_word: "hej sekretarko", continuous_listening: false, language: "cs-CZ", speech_rate: 9 });
+    // Past roughly double speed the words stop being intelligible.
+    assert.equal(tooFast.status, 400);
   });
 
   it("pairs the Windows companion through a one-time browser approval", async () => {

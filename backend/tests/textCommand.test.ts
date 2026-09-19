@@ -46,13 +46,24 @@ describe("command/text", () => {
     assert.equal(res.body.error, "INVALID_AUDIO");
   });
 
-  it("creates a client via a text command and audits it", async () => {
+  it("previews and confirms a client via a text command and audits it", async () => {
+    const preview = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "create client Command Client, email cmd@example.com, phone 07700 900111" });
+    assert.equal(preview.status, 202);
+    assert.equal(preview.body.intent, "create_client");
+    assert.equal(preview.body.ok, true);
+    assert.equal(preview.body.data.confirmationRequired, true);
+    assert.equal(preview.body.uiAction, undefined);
+    assert.equal(await prisma.client.count({ where: { displayName: "Command Client" } }), 0);
+
     const res = await request(app)
       .post("/command/text")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ text: "create client Command Client, email cmd@example.com" });
+      .send({ text: "yes" });
     assert.equal(res.status, 201);
-    assert.equal(res.body.intent, "create_client");
+    assert.equal(res.body.intent, "confirm_create_client");
     assert.equal(res.body.ok, true);
     assert.equal(res.body.data.displayName, "Command Client");
     assert.equal(res.body.uiAction.kind, "navigate");
@@ -63,7 +74,7 @@ describe("command/text", () => {
       orderBy: { createdAt: "desc" },
     });
     assert.ok(audit);
-    assert.equal(audit?.interpretedIntent, "create_client");
+    assert.equal(audit?.interpretedIntent, "confirm_create_client");
   });
 
   it("records a reviewed voice transcript while using the same deterministic command path", async () => {
@@ -198,6 +209,13 @@ describe("command/text", () => {
   });
 
   it("uses multi-turn client details, reports invalid contact data, and confirms only a real create", async () => {
+    // This scenario verifies the English response contract. Keep it independent
+    // from the preceding language-persistence tests, which intentionally leave
+    // the shared test user in Czech.
+    await prisma.user.update({
+      where: { email: "admin@test.local" },
+      data: { voiceLanguage: "en-GB" },
+    });
     const previousKey = process.env.OPENAI_API_KEY;
     const previousFetch = globalThis.fetch;
     process.env.OPENAI_API_KEY = "test-key";
@@ -229,6 +247,8 @@ describe("command/text", () => {
       assert.equal(invalid.body.ok, false);
       assert.deepEqual(invalid.body.data.invalidFields, ["phone_primary"]);
       assert.match(invalid.body.message, /Roger was not created/i);
+      assert.equal(invalid.body.assistantMessage, invalid.body.message);
+      assert.doesNotMatch(invalid.body.assistantMessage, /Creating Roger/i);
       assert.equal(await prisma.client.count({ where: { displayName: "Roger" } }), 0);
       assert.equal(providerRequest.input[0].content, "Emma, make a new client.");
       assert.equal(providerRequest.input.at(-1).content, "Phone number is 0755 835 085.");
@@ -252,13 +272,26 @@ describe("command/text", () => {
         canonical_command: "create client Roger, email roger@gmail.com, phone 07700 900123",
         message: "Creating Roger.",
       };
-      const created = await request(app)
+      const preview = await request(app)
         .post("/command/assistant")
         .set("Authorization", `Bearer ${adminToken}`)
         .send({ text: "The full phone number is 07700 900123.", input_method: "voice_transcript", language: "en-GB", history });
+      assert.equal(preview.status, 202);
+      assert.equal(preview.body.ok, true);
+      assert.equal(preview.body.intent, "create_client");
+      assert.equal(preview.body.data.confirmationRequired, true);
+      assert.match(preview.body.message, /Please confirm/i);
+      assert.equal(await prisma.client.count({ where: { displayName: "Roger" } }), 0);
+
+      const created = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ text: "yes", input_method: "voice_transcript", language: "en-GB", history: [] });
       assert.equal(created.status, 201);
       assert.equal(created.body.ok, true);
+      assert.equal(created.body.intent, "confirm_create_client");
       assert.equal(created.body.message, "Roger was created as a client.");
+      assert.equal(created.body.assistantMessage, created.body.message);
       assert.equal(await prisma.client.count({ where: { displayName: "Roger" } }), 1);
     } finally {
       globalThis.fetch = previousFetch;

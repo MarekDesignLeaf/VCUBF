@@ -269,6 +269,10 @@ export async function activateReferenceActivity(
       basePriceMax: input.base_price_max ?? null,
       priceUnit: input.price_unit ?? null,
     },
+    // The reference rate is a market benchmark for the area, not what this company
+    // charges. Copying it into their price would have the system assert a
+    // commercial fact nobody stated; it is offered in the interface instead, where
+    // one click fills the field and the user still saves it themselves.
     referenceRateAppliedToCompanyPrice: false,
     willCreateOrConfirmIndustry: entry.industryName,
     willCreateService: entry.activityName,

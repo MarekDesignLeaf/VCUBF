@@ -14,6 +14,7 @@ export { EMMA_CAPABILITIES, type EmmaCapability, type EmmaCapabilityMode };
 export type EmmaCapabilityId = (typeof EMMA_CAPABILITIES)[number]["id"];
 
 const CAPABILITY_IDS = new Set<string>(EMMA_CAPABILITIES.map((item) => item.id));
+const CONFIGURABLE_CAPABILITY_IDS = new Set<string>(EMMA_CAPABILITIES.filter((item) => item.availableToEmma !== false).map((item) => item.id));
 const LEGACY_CAPABILITY_IDS = new Set([
   "navigation.open", "navigation.help", "preferences.language", "customers.read", "customers.write",
   "customers.clients.create", "customers.clients.update", "customers.clients.archive", "customers.contacts.create",
@@ -24,7 +25,7 @@ const LEGACY_CAPABILITY_IDS = new Set([
 ]);
 const SAFE_CANCELLATION_INTENTS = new Set<ParsedCommand["intent"]>([
   "cancel_gmail_message", "cancel_whatsapp_message", "cancel_delete_notifications", "cancel_archive_client", "cancel_archive_contact",
-  "cancel_execute_action",
+  "cancel_execute_action", "cancel_create_client",
 ]);
 
 function legacyMatches(legacyId: string, capability: EmmaCapability) {
@@ -71,7 +72,7 @@ function effectiveDisabledCapabilities(stored: string[]) {
 
 export const updateEmmaPolicySchema = z.object({
   disabled_capabilities: z.array(z.string()).max(EMMA_CAPABILITIES.length).refine(
-    (ids) => new Set(ids).size === ids.length && ids.every((id) => CAPABILITY_IDS.has(id) || LEGACY_CAPABILITY_IDS.has(id)),
+    (ids) => new Set(ids).size === ids.length && ids.every((id) => CONFIGURABLE_CAPABILITY_IDS.has(id) || LEGACY_CAPABILITY_IDS.has(id)),
     "One or more Emma capability IDs are invalid.",
   ),
 });
@@ -89,14 +90,20 @@ export async function getEmmaPolicy(user: AuthedUser) {
       pages: EMMA_CAPABILITIES.filter((item) => item.kind === "page").length,
       actions: EMMA_CAPABILITIES.filter((item) => item.kind === "action").length,
       commands: EMMA_CAPABILITIES.filter((item) => item.kind === "command").length,
+      available: EMMA_CAPABILITIES.filter((item) => item.availableToEmma !== false).length,
+      unavailable: EMMA_CAPABILITIES.filter((item) => item.availableToEmma === false).length,
     },
-    capabilities: EMMA_CAPABILITIES.map((capability) => ({ ...capability, intents: [...capability.intents], enabled: !disabled.has(capability.id) })),
+    capabilities: EMMA_CAPABILITIES.map((capability) => ({
+      ...capability,
+      intents: [...capability.intents],
+      enabled: capability.availableToEmma !== false && !disabled.has(capability.id),
+    })),
   };
 }
 
 export async function updateEmmaPolicy(user: AuthedUser, disabledCapabilities: string[]) {
   const before = await prisma.company.findUniqueOrThrow({ where: { id: user.companyId }, select: { emmaDisabledCapabilities: true } });
-  const normalized = [...disabledCapabilities].filter((id) => CAPABILITY_IDS.has(id)).sort();
+  const normalized = [...disabledCapabilities].filter((id) => CONFIGURABLE_CAPABILITY_IDS.has(id)).sort();
   await prisma.company.update({ where: { id: user.companyId }, data: { emmaDisabledCapabilities: normalized } });
   await recordAudit({
     companyId: user.companyId, userId: user.id, actionName: "update_emma_company_policy",

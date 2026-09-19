@@ -119,8 +119,8 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
     description: "Operational attention, evidence quality and company-level measurements.",
     aliases: ["attention", "insight", "alerts", "notifications", "data", "metrics", "upozornění", "kvalita dat", "metriky"],
     items: [
-      item("notifications", "Attention feed for overdue follow-ups, capacity and quote facts; deleting hides an item without altering its source record and deleted items can be restored.", ["Delete", "Delete all", "Restore"]),
-      item("data_quality", "Evidence of possible duplicate clients and missing contact methods. A client merge always shows a preview and needs explicit confirmation.", ["Merge", "Confirm"]),
+      item("notifications", "Attention feed for overdue follow-ups, capacity, quote, invoice and resource facts; deleting hides an item without altering its source record and deleted items can be restored. The opt-in daily digest emails a copy of your own feed to your own account email.", ["Delete", "Delete all", "Restore", "Send me a daily digest", "Preview digest", "Confirm and send"]),
+      item("data_quality", "Evidence of possible duplicate clients and missing contact methods. A client merge always shows a preview and needs explicit confirmation; merge history allows one recorded merge to be reversed the same way.", ["Merge", "Confirm", "Preview un-merge", "Confirm un-merge"]),
       item("metrics", "Operational business measurements calculated from stored company records."),
     ],
   },
@@ -155,7 +155,7 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
         "company",
         "The owning company is the root of Secretary: company first, then its primary administrator, then user accounts. Company changes require company-management permission.",
         ["Save company profile"],
-        { access: { all: ["company.manage"] }, children: [child("Company profile", "/company", "Shows the primary administrator and links to user access management.", ["Save company profile", "Users & access"])] }
+        { access: { all: ["company.manage"] }, children: [child("Company profile", "/company", "Shows the primary administrator and links to user access management. Notification thresholds set after how many days a stale lead, stuck job, expiring quote or unready resource appears in Notifications.", ["Save company profile", "Users & access", "Save thresholds", "Reset to defaults"])] }
       ),
       item(
         "employees",
@@ -213,10 +213,10 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
         ["New quote"],
         { children: [
           child("New quote", "/quotes/new", "Starts a new itemised quote linked to a client or job.", ["Save"]),
-          child("Quote details", "/quotes/:id", "Maintains line items, reviewed status and PDF download. Downloading does not send the quote.", ["Line items", "Save", "Download PDF"]),
+          child("Quote details", "/quotes/:id", "Maintains line items, reviewed status, PDF download and confirmed email delivery. Downloading does not send the quote; Send by email sends the PDF only after an explicit confirmation.", ["Line items", "Save", "Download PDF", "Send by email", "Confirm and send"]),
         ] }
       ),
-      item("invoices", "Creates drafts, issues invoices, records real payments and downloads PDF. Only recording payment is confirmation-gated; issuing or downloading does not send an email.", ["Create draft", "Issue", "Record payment", "PDF"]),
+      item("invoices", "Creates drafts, issues invoices, records real payments, downloads PDF and emails an issued invoice. Recording payment and sending are confirmation-gated; issuing or downloading never sends an email by itself.", ["Create draft", "Issue", "Record payment", "PDF", "Send by email", "Confirm and send"]),
     ],
   },
   {
@@ -238,6 +238,9 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
         { children: [child("Playbook details", "/playbooks/:id", "Fills placeholders, previews a run and shows its history.", ["Preview run", "Confirm run", "Run history"])] }
       ),
       item("learning", "Visible, editable phrase aliases that map to deterministic commands; they never create hidden business policy.", ["Teach a rule", "Archive", "Reactivate"]),
+      item("new_employee", "Adds a user and sets what they may do. Their password is set by them, never dictated.", ["Create user"], { access: { all: ["employees.manage"] } }),
+      item("new_quote", "Builds a quote for a client from catalogue services or free items.", ["Add item", "Save quote"], { access: { all: ["sales.write"] } }),
+      item("voice_aliases", "Spoken phrases mapped onto what they mean, for how Emma is addressed and for commands. A phrase heard three times identically is learned permanently; entries can also be added and removed by hand.", ["Add alias", "Remove"], { access: { all: ["voice.execute"] } }),
       item("memory_model", "Visible personal and company persistent notes plus an admin/audit view of repeated action patterns. Audio is never retained and normal conversation is not silently promoted to memory.", ["For me", "For the company", "Remember", "Archive"], { access: { any: ["voice.execute", "audit.read"] } }),
     ],
   },
