@@ -20,7 +20,7 @@ function Stop-InstallerProcessTree([int]$ProcessId){
   Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
 }
 
-foreach($file in @('emma_voice_v2.py','emma_common.py','npu_whisper_sidecar.py','picovoice_wake.js','Run-VoiceV2.ps1','Configure-PicovoiceWake.ps1','Install-NpuWhisper.ps1','Launch-VCUBFSecretary.ps1','voice-v2.example.json','requirements.txt','requirements-v2.txt')){
+foreach($file in @('emma_voice_v2.py','emma_common.py','npu_whisper_sidecar.py','picovoice_wake.js','Run-VoiceV2.ps1','Configure-PicovoiceWake.ps1','Install-NpuWhisper.ps1','Launch-VCUBFSecretary.ps1','Test-VoiceHealth.ps1','voice-v2.example.json','requirements.txt','requirements-v2.txt')){
   Copy-Item -LiteralPath (Join-Path $source $file) -Destination $target -Force
 }
 
@@ -85,6 +85,7 @@ elseif($wake.provider -notin @('deepgram_vad','picovoice_porcupine')){$wake.prov
 if(!$wake.PSObject.Properties['word']){$wake | Add-Member -NotePropertyName word -NotePropertyValue 'Emma'}elseif([string]::IsNullOrWhiteSpace([string]$wake.word)){$wake.word='Emma'}
 if(!$wake.PSObject.Properties['accessKeyEnv']){$wake | Add-Member -NotePropertyName accessKeyEnv -NotePropertyValue 'PICOVOICE_ACCESS_KEY'}
 if(!$wake.PSObject.Properties['keywordPath']){$wake | Add-Member -NotePropertyName keywordPath -NotePropertyValue ''}
+if(!$wake.PSObject.Properties['deviceName']){$wake | Add-Member -NotePropertyName deviceName -NotePropertyValue ''}
 if(!$wake.PSObject.Properties['sensitivity']){$wake | Add-Member -NotePropertyName sensitivity -NotePropertyValue 0.65}
 if(!$wake.PSObject.Properties['speechThreshold']){$wake | Add-Member -NotePropertyName speechThreshold -NotePropertyValue 450}
 if(!$wake.PSObject.Properties['preRollMs']){$wake | Add-Member -NotePropertyName preRollMs -NotePropertyValue 600}
@@ -99,6 +100,10 @@ if(!$voiceConfig.PSObject.Properties['stt']){
 $stt=$voiceConfig.stt
 if(!$stt.PSObject.Properties['provider']){$stt|Add-Member -NotePropertyName provider -NotePropertyValue 'deepgram'}
 elseif($stt.provider -notin @('deepgram','npu_whisper')){$stt.provider='deepgram'}
+# Production command STT uses the selected-language streaming recognizer for
+# accurate dictated numbers and immediate interruption. Qualcomm NPU remains
+# installed and is used privately to verify Picovoice wake detections.
+$stt.provider='deepgram'
 if(!$stt.PSObject.Properties['fallbackProvider']){$stt|Add-Member -NotePropertyName fallbackProvider -NotePropertyValue 'deepgram'}
 if(!$stt.PSObject.Properties['endpointingMs']){$stt | Add-Member -NotePropertyName endpointingMs -NotePropertyValue 250}
 if(!$stt.PSObject.Properties['utteranceEndMs']){
@@ -116,6 +121,14 @@ foreach($pair in @(
 )){
   if(!$npu.PSObject.Properties[$pair[0]]){$npu|Add-Member -NotePropertyName $pair[0] -NotePropertyValue $pair[1]}
 }
+if(!$voiceConfig.PSObject.Properties['tts']){
+  $voiceConfig | Add-Member -NotePropertyName tts -NotePropertyValue ([pscustomobject]@{})
+}
+$tts=$voiceConfig.tts
+if(!$tts.PSObject.Properties['deviceName']){$tts|Add-Member -NotePropertyName deviceName -NotePropertyValue ''}
+# Preserve the user's provider choice on upgrades. A provider outage on one
+# installation must not overwrite speech settings for every installation.
+if(!$tts.PSObject.Properties['provider']){$tts|Add-Member -NotePropertyName provider -NotePropertyValue 'elevenlabs'}
 $voiceConfig | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $activeConfig -Encoding UTF8
 
 # The desktop test build runs the browser UI, API and Emma from this checkout.

@@ -5,7 +5,8 @@
     "word": "Emma",
     "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
     "keywordPath": "",
-    "sensitivity": 0.45,
+    "deviceName": "",
+    "sensitivity": 0.65,
     "speechThreshold": 450,
     "preRollMs": 600,
     "silenceMs": 1100,
@@ -31,11 +32,16 @@
     }
   },
   "tts": {
-    "provider": "elevenlabs",
+    "provider": "openai",
     "apiKeyEnv": "ELEVENLABS_API_KEY",
     "voiceId": "SET_YOUR_ELEVENLABS_VOICE_ID",
     "model": "eleven_flash_v2_5",
-    "outputFormat": "pcm_24000"
+    "outputFormat": "pcm_24000",
+    "deviceName": "",
+    "fallbackProvider": "openai",
+    "fallbackApiKeyEnv": "OPENAI_API_KEY",
+    "fallbackModel": "tts-1",
+    "fallbackVoice": "nova"
   },
   "session": {
     "followUpSeconds": 25,

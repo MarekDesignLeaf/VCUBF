@@ -158,10 +158,15 @@ def request_token(config: dict) -> str:
                 return str(session["token"])
         except (OSError, urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
             pass
+        # A remote token.bin can belong to an older deployment/account and is
+        # never a valid substitute for the locally selected user. Fail with a
+        # stable state error instead of leaking a FileNotFoundError or silently
+        # authenticating the wrong identity.
+        raise RuntimeError("LOCAL_TEST_SESSION_REQUIRED")
     return load_token()
 
 
-def backend_json(method: str, path: str, body: dict | None = None) -> dict:
+def backend_json(method: str, path: str, body: dict | None = None, timeout_seconds: float = 5.0) -> dict:
     config = load_config()
     data = json.dumps(body).encode("utf-8") if body is not None else None
     request = urllib.request.Request(
@@ -170,7 +175,7 @@ def backend_json(method: str, path: str, body: dict | None = None) -> dict:
         method=method,
         headers={"Authorization": f"Bearer {request_token(config)}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
         payload = response.read().decode("utf-8").strip()
         return json.loads(payload) if payload else {}
 
@@ -178,7 +183,13 @@ def backend_json(method: str, path: str, body: dict | None = None) -> dict:
 def backend_command_json(method: str, path: str, body: dict | None = None) -> dict:
     """Return structured validation failures rather than hiding them."""
     try:
-        return backend_json(method, path, body)
+        config = load_config()
+        # The backend aborts AI interpretation before this client deadline.
+        # Local deterministic commands normally complete in milliseconds; a
+        # bounded deadline prevents a stalled provider from making Emma appear
+        # frozen for half a minute.
+        timeout_seconds = 12.0 if config.get("LocalMode") is True else 18.0
+        return backend_json(method, path, body, timeout_seconds)
     except urllib.error.HTTPError as exc:
         payload = exc.read().decode("utf-8", errors="replace").strip()
         try:

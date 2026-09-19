@@ -29,13 +29,13 @@ import queue
 import re
 import subprocess
 import threading
-import time
 import unicodedata
-import wave
+import time
 from typing import Any
 from urllib.parse import urlencode
 import urllib.error
 import urllib.request
+import wave
 
 from aec_audio_processing import AudioProcessor
 import pyaudio
@@ -62,6 +62,7 @@ from emma_common import (
 
 RUNTIME_NAME = "Emma Voice v2"
 RATE = 24_000
+NATIVE_WINDOWS_OUTPUT_RATE = 48_000
 CHANNELS = 1
 SAMPLE_WIDTH = 2
 INPUT_FRAME_MS = 20
@@ -70,14 +71,33 @@ INPUT_FRAME_BYTES = RATE * SAMPLE_WIDTH * INPUT_FRAME_MS // 1_000
 # capture at 20 ms for efficient Deepgram streaming, but split it into these
 # 10 ms frames before AEC and use the same frame size for the reverse signal.
 AEC_FRAME_BYTES = RATE * SAMPLE_WIDTH * 10 // 1_000
-PLAYBACK_FRAME_BYTES = AEC_FRAME_BYTES
-PLAYBACK_PREBUFFER_BYTES = RATE * SAMPLE_WIDTH * 160 // 1_000
+# PortAudio's blocking Windows output is not reliable when Python feeds it in
+# 10 ms writes.  Keep WebRTC AEC at its required 10 ms cadence, but submit four
+# AEC frames to the audio device at once and retain enough network jitter
+# buffer to survive normal ElevenLabs streaming variation.
+PLAYBACK_DEVICE_FRAME_MS = 40
+PLAYBACK_FRAME_BYTES = RATE * SAMPLE_WIDTH * PLAYBACK_DEVICE_FRAME_MS // 1_000
+PLAYBACK_PREBUFFER_MS = 320
+PLAYBACK_PREBUFFER_BYTES = RATE * SAMPLE_WIDTH * PLAYBACK_PREBUFFER_MS // 1_000
 MAX_SESSION_SECONDS = 180
 IDLE_AFTER_RESPONSE_SECONDS = 25
 V2_CONFIG_PATH = APP_DIR / "voice-v2.json"
 V2_LOG_PATH = APP_DIR / "emma-voice-v2.log"
 PLAYBACK_END = object()
 PLAYBACK_STOP = object()
+POST_PLAYBACK_ECHO_GUARD_SECONDS = 0.75
+DELAYED_SELF_ECHO_WINDOW_SECONDS = 12.0
+BARGE_IN_MIN_RMS = 750.0
+BARGE_IN_MIN_PEAK = 2_400
+BARGE_IN_MAX_DYNAMIC_RMS = 1_800.0
+BARGE_IN_MAX_DYNAMIC_PEAK = 6_000
+BARGE_IN_OUTPUT_RMS_RATIO = 0.22
+BARGE_IN_OUTPUT_PEAK_RATIO = 0.20
+BARGE_IN_CONFIRM_FRAMES = 10
+BARGE_IN_CANDIDATE_HOLD_SECONDS = 2.2
+MAX_SPOKEN_RESPONSE_CHARS = 900
+MAX_TTS_AUDIO_SECONDS = 45
+MAX_TTS_PCM_BYTES = RATE * SAMPLE_WIDTH * MAX_TTS_AUDIO_SECONDS
 
 
 def log(message: str) -> None:
@@ -92,9 +112,10 @@ def default_v2_config() -> dict[str, Any]:
         "wake": {
             "provider": "deepgram_vad",
             "word": "Emma",
+            "deviceName": "",
             "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
             "keywordPath": "",
-            "sensitivity": 0.45,
+            "sensitivity": 0.65,
             "speechThreshold": 450,
             "preRollMs": 600,
             "silenceMs": 1_100,
@@ -121,11 +142,16 @@ def default_v2_config() -> dict[str, Any]:
             },
         },
         "tts": {
-            "provider": "elevenlabs",
+            "provider": "openai",
             "apiKeyEnv": "ELEVENLABS_API_KEY",
             "voiceId": "",
             "model": "eleven_flash_v2_5",
             "outputFormat": "pcm_24000",
+            "deviceName": "",
+            "fallbackProvider": "openai",
+            "fallbackApiKeyEnv": "OPENAI_API_KEY",
+            "fallbackModel": "tts-1",
+            "fallbackVoice": "nova",
         },
         "session": {
             "followUpSeconds": 25,
@@ -246,6 +272,95 @@ def companion_is_running(parent_pid: int = 0, stop_file: Path | None = None) -> 
         return False
 
 
+class ListeningStateHeartbeat:
+    """Publish wake-listener presence independently from the audio event loop.
+
+    Wake detection can spend an arbitrary amount of time inside a native or
+    subprocess audio read.  A dedicated thread keeps the backend's 15-second
+    presence lease truthful even if that event loop is temporarily occupied.
+    """
+
+    def __init__(
+        self,
+        parent_pid: int = 0,
+        stop_file: Path | None = None,
+        audio_ready: threading.Event | None = None,
+    ):
+        self.parent_pid = parent_pid
+        self.stop_file = stop_file
+        self.audio_ready = audio_ready or threading.Event()
+        self.stop_event = threading.Event()
+        self.paused = threading.Event()
+        self.thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self.thread and self.thread.is_alive():
+            return
+        self.stop_event.clear()
+        self.thread = threading.Thread(target=self._run, name="emma-v2-state-heartbeat", daemon=True)
+        self.thread.start()
+
+    def close(self) -> None:
+        self.stop_event.set()
+        if self.thread and self.thread is not threading.current_thread():
+            self.thread.join(timeout=2.0)
+        self.thread = None
+
+    def _run(self) -> None:
+        while not self.stop_event.is_set() and companion_is_running(self.parent_pid, self.stop_file):
+            try:
+                listening = self.audio_ready.is_set() and not self.paused.is_set()
+                state = backend_json(
+                    "PUT",
+                    "/command/voice-state",
+                    {
+                        "status": "listening" if listening else ("paused" if self.paused.is_set() else "offline"),
+                        "mode": "wake_word",
+                        "listening": listening,
+                    },
+                )
+                control = state.get("pendingControl") if isinstance(state, dict) else None
+                if control == "pause":
+                    self.paused.set()
+                    backend_json(
+                        "PUT",
+                        "/command/voice-state",
+                        {"status": "paused", "mode": "wake_word", "listening": False, "ack_control": "pause"},
+                    )
+                    log("v2 wake listening paused by acknowledged control")
+                elif control == "resume":
+                    self.paused.clear()
+                    backend_json(
+                        "PUT",
+                        "/command/voice-state",
+                        {
+                            "status": "listening" if self.audio_ready.is_set() else "offline",
+                            "mode": "wake_word",
+                            "listening": self.audio_ready.is_set(),
+                            "ack_control": "resume",
+                        },
+                    )
+                    log("v2 wake listening resumed by acknowledged control")
+                elif control == "end_conversation":
+                    # There is no active conversation in wake mode. Consume a
+                    # stale/repeated end request once so it cannot terminate
+                    # every future session immediately after activation.
+                    backend_json(
+                        "PUT",
+                        "/command/voice-state",
+                        {
+                            "status": "listening" if listening else ("paused" if self.paused.is_set() else "offline"),
+                            "mode": "wake_word",
+                            "listening": listening,
+                            "ack_control": "end_conversation",
+                        },
+                    )
+                    log("v2 stale end-conversation control acknowledged in wake mode")
+            except Exception as exc:
+                log(f"v2 wake state error: {type(exc).__name__}: {str(exc)[:240]}")
+            self.stop_event.wait(1.0)
+
+
 def current_wake_profile(config: dict[str, Any]) -> tuple[str, str]:
     """Load the persisted Secretary language before every wake-word wait."""
     common = load_config()
@@ -274,11 +389,12 @@ def wake_vad_settings(config: dict[str, Any]) -> tuple[int, int, int, int]:
     return threshold, pre_roll_ms, silence_ms, max_segment_ms
 
 
-def picovoice_wake_settings(config: dict[str, Any]) -> tuple[str, str, float]:
+def picovoice_wake_settings(config: dict[str, Any]) -> tuple[str, str, float, str]:
     wake = config["wake"]
     access_key_env = str(wake.get("accessKeyEnv") or "PICOVOICE_ACCESS_KEY").strip()
     raw_keyword_path = os.path.expandvars(str(wake.get("keywordPath") or "").strip())
     keyword_path = Path(raw_keyword_path).expanduser() if raw_keyword_path else Path()
+    device_name = str(wake.get("deviceName") or "").strip()
     try:
         sensitivity = float(wake.get("sensitivity", 0.65))
     except (TypeError, ValueError) as exc:
@@ -287,7 +403,7 @@ def picovoice_wake_settings(config: dict[str, Any]) -> tuple[str, str, float]:
         raise RuntimeError("PICOVOICE_ACCESS_KEY_ENV_INVALID")
     if not 0.0 <= sensitivity <= 1.0:
         raise RuntimeError("PICOVOICE_SENSITIVITY_INVALID")
-    return access_key_env, str(keyword_path) if raw_keyword_path else "", sensitivity
+    return access_key_env, str(keyword_path) if raw_keyword_path else "", sensitivity, device_name
 
 
 def stream_timing_settings(config: dict[str, Any]) -> tuple[int, int]:
@@ -459,6 +575,150 @@ def pcm_mean_amplitude(raw: bytes) -> int:
     return sum(abs(sample) for sample in samples) // len(samples)
 
 
+def pcm_levels(raw: bytes) -> tuple[float, int]:
+    samples = array("h")
+    samples.frombytes(raw[: len(raw) - (len(raw) % SAMPLE_WIDTH)])
+    if not samples:
+        return 0.0, 0
+    energy = sum(int(sample) * int(sample) for sample in samples)
+    return (energy / len(samples)) ** 0.5, max(abs(int(sample)) for sample in samples)
+
+
+def upsample_pcm16_2x(raw: bytes) -> bytes:
+    """Convert ElevenLabs 24 kHz PCM to native 48 kHz Windows PCM.
+
+    Linear interpolation avoids delegating sample-rate conversion to the old
+    MME compatibility layer used by the default HDMI/TV endpoint.
+    """
+    samples = array("h")
+    samples.frombytes(raw[: len(raw) - (len(raw) % SAMPLE_WIDTH)])
+    if not samples:
+        return b""
+    output = array("h", [0]) * (len(samples) * 2)
+    for index, sample in enumerate(samples):
+        output[index * 2] = sample
+        if index + 1 < len(samples):
+            output[index * 2 + 1] = (int(sample) + int(samples[index + 1])) // 2
+        else:
+            output[index * 2 + 1] = sample
+    return output.tobytes()
+
+
+def preferred_windows_output(
+    audio: pyaudio.PyAudio,
+    config: dict[str, Any],
+) -> tuple[int, int | None, str]:
+    """Use the current Windows WASAPI endpoint at its native 48 kHz rate."""
+    requested = str((config.get("tts") or {}).get("deviceName") or "").strip().lower()
+    try:
+        host = audio.get_host_api_info_by_type(pyaudio.paWASAPI)
+        candidate_indices: list[int] = []
+        if requested:
+            for index in range(audio.get_device_count()):
+                device = audio.get_device_info_by_index(index)
+                if (
+                    int(device.get("hostApi") or -1) == int(host["index"])
+                    and int(device.get("maxOutputChannels") or 0) >= CHANNELS
+                    and requested in str(device.get("name") or "").lower()
+                ):
+                    candidate_indices.append(index)
+        candidate_indices.append(int(host["defaultOutputDevice"]))
+        for device_index in dict.fromkeys(candidate_indices):
+            device = audio.get_device_info_by_index(device_index)
+            try:
+                audio.is_format_supported(
+                    NATIVE_WINDOWS_OUTPUT_RATE,
+                    output_device=device_index,
+                    output_channels=CHANNELS,
+                    output_format=pyaudio.paInt16,
+                )
+                return NATIVE_WINDOWS_OUTPUT_RATE, device_index, str(device.get("name") or "WASAPI")
+            except Exception:
+                continue
+        raise RuntimeError("NO_COMPATIBLE_WASAPI_OUTPUT")
+    except Exception:
+        try:
+            device = audio.get_default_output_device_info()
+            return RATE, None, str(device.get("name") or "default")
+        except Exception:
+            return RATE, None, "default"
+
+
+def preferred_windows_input(
+    audio: pyaudio.PyAudio,
+    config: dict[str, Any],
+    sample_rate: int,
+) -> tuple[int | None, str]:
+    """Keep wake detection and the active conversation on one microphone."""
+    requested = str((config.get("wake") or {}).get("deviceName") or "").strip().lower()
+    candidates: list[tuple[int, str]] = []
+    for index in range(audio.get_device_count()):
+        try:
+            device = audio.get_device_info_by_index(index)
+            if int(device.get("maxInputChannels") or 0) < 1:
+                continue
+            name = str(device.get("name") or "")
+            if requested and requested not in name.lower():
+                continue
+            candidates.append((index, name))
+        except Exception:
+            continue
+    for index, name in candidates:
+        try:
+            audio.is_format_supported(
+                sample_rate,
+                input_device=index,
+                input_channels=CHANNELS,
+                input_format=pyaudio.paInt16,
+            )
+            return index, name
+        except Exception:
+            continue
+    if requested:
+        raise RuntimeError(f"CONFIGURED_MICROPHONE_UNAVAILABLE: {requested}")
+    try:
+        default = audio.get_default_input_device_info()
+        return int(default["index"]), str(default.get("name") or "Windows default")
+    except Exception:
+        return None, "Windows default"
+
+
+def barge_in_thresholds(output_rms: float, output_peak: int) -> tuple[float, int]:
+    """Port the proven v1 near-end policy to Voice v2."""
+    required_rms = max(
+        BARGE_IN_MIN_RMS,
+        min(BARGE_IN_MAX_DYNAMIC_RMS, output_rms * BARGE_IN_OUTPUT_RMS_RATIO),
+    )
+    required_peak = max(
+        BARGE_IN_MIN_PEAK,
+        min(BARGE_IN_MAX_DYNAMIC_PEAK, int(output_peak * BARGE_IN_OUTPUT_PEAK_RATIO)),
+    )
+    return required_rms, required_peak
+
+
+def playback_buffer_self_test() -> bool:
+    buffer = PcmPlaybackBuffer(frame_bytes=8, prebuffer_bytes=24)
+    buffer.append(b"a" * 24)
+    if buffer.take_frame() != b"a" * 8:
+        return False
+    buffer.rebuffer()
+    if buffer.take_frame() is not None:
+        return False
+    buffer.append(b"b" * 8)
+    if buffer.take_frame() != b"a" * 8:
+        return False
+    buffer.finish()
+    return buffer.take_frame() == b"a" * 8 and buffer.take_frame() == b"b" * 8 and buffer.drained
+
+
+# --- Implausible transcripts -------------------------------------------------
+#
+# Whisper and every cloud recogniser answer *something* for any audio, and what
+# they answer for a fan, a keyboard or a door is stock filler: a bracketed
+# sound tag, a subtitle credit, or a stray full stop.  None of it was ever
+# spoken, so none of it may reach the command parser.  The check is a fixed
+# list plus three shape rules, never a guess about meaning.
+
 IMPLAUSIBLE_TRANSCRIPTS = {
     "titulky vytvoril johnyx",
     "titulky vytvoril jirka kovac",
@@ -561,6 +821,76 @@ def looks_like_self_echo(heard: str, assistant: str) -> bool:
     return SequenceMatcher(None, heard_normalized, assistant_normalized).ratio() >= 0.64
 
 
+def is_explicit_stop(heard: str, language: str) -> bool:
+    normalized = normalized_text(heard)
+    phrases = {
+        "cs": {"stop", "přestaň", "ticho", "nemluv"},
+        "pl": {"stop", "przestań", "cisza", "nie mów"},
+        "fr": {"stop", "arrête", "silence", "tais toi"},
+        "de": {"stopp", "hör auf", "ruhe", "sei still"},
+        "es": {"para", "detente", "silencio", "callate"},
+        "it": {"stop", "fermati", "silenzio", "stai zitta"},
+        "en": {"stop", "be quiet", "silence", "stop talking"},
+    }
+    locale = language.split("-", 1)[0].lower()
+    return normalized in phrases.get(locale, phrases["en"])
+
+
+def bounded_spoken_response(message: str, language: str) -> tuple[str, bool]:
+    """Keep the full response on screen while making speech safely bounded."""
+    value = message.strip()
+    if len(value) <= MAX_SPOKEN_RESPONSE_CHARS:
+        return value, False
+    boundary = max(
+        value.rfind(". ", 0, MAX_SPOKEN_RESPONSE_CHARS),
+        value.rfind("! ", 0, MAX_SPOKEN_RESPONSE_CHARS),
+        value.rfind("? ", 0, MAX_SPOKEN_RESPONSE_CHARS),
+        value.rfind("\n", 0, MAX_SPOKEN_RESPONSE_CHARS),
+    )
+    if boundary < MAX_SPOKEN_RESPONSE_CHARS // 2:
+        boundary = MAX_SPOKEN_RESPONSE_CHARS
+    else:
+        boundary += 1
+    suffixes = {
+        "cs": " Zbytek je zobrazený na obrazovce. Řekněte pokračuj a přečtu další část.",
+        "pl": " Reszta jest widoczna na ekranie. Powiedz kontynuuj, a przeczytam kolejną część.",
+        "fr": " La suite est affichée à l’écran. Dites continue pour entendre la partie suivante.",
+        "de": " Der Rest wird auf dem Bildschirm angezeigt. Sagen Sie weiter für den nächsten Teil.",
+        "es": " El resto aparece en pantalla. Diga continúa para escuchar la parte siguiente.",
+        "it": " Il resto è visualizzato sullo schermo. Dica continua per ascoltare la parte successiva.",
+        "en": " The rest is shown on screen. Say continue to hear the next part.",
+    }
+    locale = language.split("-", 1)[0].lower()
+    return value[:boundary].rstrip() + suffixes.get(locale, suffixes["en"]), True
+
+
+def classify_playback_transcript(
+    heard: str,
+    assistant: str,
+    language: str,
+    wake_word: str,
+    speaking: bool,
+    echo_guard: bool,
+) -> tuple[str, str]:
+    """Decide whether microphone text may become a user turn.
+
+    Keeping this decision independent from audio and network code makes the
+    anti-self-reply guarantee deterministic and directly testable.
+    """
+    if speaking:
+        if is_explicit_stop(heard, language):
+            return "stop", ""
+        if looks_like_self_echo(heard, assistant):
+            return "ignore", ""
+        if not contains_wake_word(heard, wake_word):
+            return "ignore", ""
+        command = wake_command_tail(heard, wake_word)
+        return ("command", command) if command else ("wake_only", "")
+    if echo_guard and not contains_wake_word(heard, wake_word):
+        return "ignore", ""
+    return "normal", heard
+
+
 def self_test() -> bool:
     defaults = default_v2_config()
     merged = merge_defaults(defaults, {"stt": {"model": "nova-3-test"}})
@@ -574,10 +904,44 @@ def self_test() -> bool:
         and contains_wake_word("Emma, otevři kontakty", "Emma")
         and pcm_mean_amplitude(b"\x00\x00\x00\x00") == 0
         and pcm_mean_amplitude(b"\x10\x00\xf0\xff") == 16
+        and len(upsample_pcm16_2x(b"\x00\x00\xe8\x03")) == 8
+        and barge_in_thresholds(0, 0) == (750.0, 2_400)
+        and barge_in_thresholds(5_000, 16_000) == (1_100.0, 3_200)
+        and playback_buffer_self_test()
+        and "".join(ElevenLabsPcmTts.chunks("a" * 7_001)) == "a" * 7_001
         and stream_timing_settings(defaults) == (250, 1_000)
         and companion_is_running(os.getpid())
         and looks_like_self_echo("hello there", "Hello there, how can I help?")
         and not looks_like_self_echo("stop now", "Hello there, how can I help?")
+        and is_explicit_stop("Přestaň", "cs-CZ")
+        and classify_playback_transcript(
+            "Né, a nezapisé vytči.",
+            "Kontakt jsem vytvořila.",
+            "cs-CZ",
+            "Emma",
+            True,
+            False,
+        ) == ("ignore", "")
+        and classify_playback_transcript(
+            "Emma, otevři kontakty",
+            "Otevírám kalendář.",
+            "cs-CZ",
+            "Emma",
+            True,
+            False,
+        ) == ("command", "otevři kontakty")
+        and classify_playback_transcript(
+            "přestaň", "Dlouhá odpověď", "cs-CZ", "Emma", True, False
+        ) == ("stop", "")
+        and classify_playback_transcript(
+            "doznívající ozvěna", "Dlouhá odpověď", "cs-CZ", "Emma", False, True
+        ) == ("ignore", "")
+        and classify_playback_transcript(
+            "otevři kontakty", "", "cs-CZ", "Emma", False, False
+        ) == ("normal", "otevři kontakty")
+        and bounded_spoken_response("Krátká odpověď.", "cs-CZ") == ("Krátká odpověď.", False)
+        and bounded_spoken_response("A" * 1_000, "cs-CZ")[1]
+        and len(bounded_spoken_response("A" * 1_000, "cs-CZ")[0]) < 1_000
     )
 
 
@@ -602,10 +966,10 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
         timing_error = str(exc)
     npu_ready, npu_error = npu_whisper_available(config)
     try:
-        picovoice_key_env, picovoice_keyword_path, _ = picovoice_wake_settings(config)
+        picovoice_key_env, picovoice_keyword_path, _, picovoice_device_name = picovoice_wake_settings(config)
         picovoice_error = ""
     except RuntimeError as exc:
-        picovoice_key_env, picovoice_keyword_path, picovoice_error = "", "", str(exc)
+        picovoice_key_env, picovoice_keyword_path, picovoice_device_name, picovoice_error = "", "", "", str(exc)
     requested_wake_provider = str(config["wake"].get("provider") or "deepgram_vad")
     deepgram_wake_ready = bool(wake_word) and not profile_error and not vad_error
     picovoice_wake_ready = (
@@ -654,6 +1018,7 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
             "picovoiceAccessKeyPresent": bool(picovoice_key_env and environment_value(picovoice_key_env)),
             "keywordModelConfigured": bool(picovoice_keyword_path),
             "keywordModelPresent": bool(picovoice_keyword_path and Path(picovoice_keyword_path).is_file()),
+            "microphone": picovoice_device_name or "Windows default",
             "picovoiceSettingsValid": not picovoice_error,
             "fallbackActive": bool(wake_fallback_reason and effective_wake_provider),
             "fallbackReason": wake_fallback_reason,
@@ -678,11 +1043,20 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
             "configurationError": npu_error,
         },
         "elevenlabs": {
-            "provider": tts["provider"],
+            "provider": "elevenlabs",
             "apiKeyPresent": bool(environment_value(str(tts["apiKeyEnv"]))),
             "voiceIdPresent": configured_value(tts.get("voiceId")),
             "model": tts["model"],
             "outputFormat": tts["outputFormat"],
+        },
+        "openaiTtsFallback": {
+            "provider": str(tts.get("fallbackProvider") or "openai"),
+            "apiKeyPresent": bool(environment_value(str(tts.get("fallbackApiKeyEnv") or "OPENAI_API_KEY"))),
+            "model": str(tts.get("fallbackModel") or "tts-1"),
+            "voice": str(tts.get("fallbackVoice") or "nova"),
+        },
+        "speech": {
+            "requestedProvider": str(tts.get("provider") or "openai"),
         },
     }
     ready = (
@@ -693,8 +1067,10 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
             configured["wake"]["effectiveProvider"] != "deepgram_vad"
             or configured["deepgram"]["apiKeyPresent"]
         )
-        and configured["elevenlabs"]["apiKeyPresent"]
-        and configured["elevenlabs"]["voiceIdPresent"]
+        and (
+            (configured["elevenlabs"]["apiKeyPresent"] and configured["elevenlabs"]["voiceIdPresent"])
+            or configured["openaiTtsFallback"]["apiKeyPresent"]
+        )
     )
     return {"runtime": RUNTIME_NAME, "ready": ready, "providers": configured}
 
@@ -702,21 +1078,40 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
 class DuplexSpeaker:
     """PCM playback thread that feeds exact far-end audio to WebRTC AEC."""
 
-    def __init__(self, audio: pyaudio.PyAudio, aec: AudioProcessor, aec_lock: threading.Lock):
+    def __init__(
+        self,
+        audio: pyaudio.PyAudio,
+        aec: AudioProcessor,
+        aec_lock: threading.Lock,
+        config: dict[str, Any],
+    ):
         self.audio = audio
         self.aec = aec
         self.aec_lock = aec_lock
+        self.config = config
         self.queue: queue.Queue[bytes | object] = queue.Queue()
         self.reset = threading.Event()
         self.stop = threading.Event()
         self.active = threading.Event()
         self.finished = threading.Event()
+        self.last_output_at = 0.0
+        self.recent_output_rms = 0.0
+        self.recent_output_peak = 0
+        self.starvation_count = 0
+        self.slow_write_count = 0
+        self.frames_written = 0
         self.thread: threading.Thread | None = None
         self.stream = None
+        self.ready = threading.Event()
+        self.worker_error = ""
 
     def start(self) -> None:
         self.thread = threading.Thread(target=self._worker, name="emma-v2-playback", daemon=True)
         self.thread.start()
+        if not self.ready.wait(timeout=4.0):
+            raise RuntimeError("AUDIO_OUTPUT_START_TIMEOUT")
+        if self.worker_error:
+            raise RuntimeError(self.worker_error)
 
     def enqueue(self, payload: bytes) -> None:
         if payload:
@@ -737,6 +1132,12 @@ class DuplexSpeaker:
             except queue.Empty:
                 break
 
+    def echo_guard_active(self) -> bool:
+        return self.active.is_set() or (
+            self.last_output_at > 0
+            and time.monotonic() - self.last_output_at < POST_PLAYBACK_ECHO_GUARD_SECONDS
+        )
+
     def close(self) -> None:
         self.stop.set()
         self.queue.put_nowait(PLAYBACK_STOP)
@@ -748,15 +1149,47 @@ class DuplexSpeaker:
                 self.stream.close()
             except Exception:
                 pass
+        if self.frames_written or self.starvation_count or self.slow_write_count:
+            log(
+                "v2 playback summary: "
+                f"frames={self.frames_written}, starvation={self.starvation_count}, "
+                f"slow_writes={self.slow_write_count}"
+            )
 
     def _worker(self) -> None:
+        try:
+            self._run_worker()
+        except Exception as exc:
+            self.worker_error = f"AUDIO_OUTPUT_FAILED_{type(exc).__name__}: {str(exc)[:200]}"
+            log(f"v2 playback error: {self.worker_error}")
+        finally:
+            self.ready.set()
+            self.active.clear()
+            self.finished.set()
+
+    def _run_worker(self) -> None:
+        # Keep the Python feeder above ordinary UI/background work. This is a
+        # dedicated blocking audio thread, never the application event loop.
+        if os.name == "nt":
+            try:
+                ctypes.windll.kernel32.SetThreadPriority(
+                    ctypes.windll.kernel32.GetCurrentThread(),
+                    2,  # THREAD_PRIORITY_HIGHEST
+                )
+            except Exception:
+                pass
+        output_rate, output_device_index, output_device_name = preferred_windows_output(self.audio, self.config)
+        output_multiplier = output_rate // RATE
         self.stream = self.audio.open(
             format=pyaudio.paInt16,
             channels=CHANNELS,
-            rate=RATE,
+            rate=output_rate,
             output=True,
-            frames_per_buffer=PLAYBACK_FRAME_BYTES // SAMPLE_WIDTH,
+            output_device_index=output_device_index,
+            frames_per_buffer=(PLAYBACK_FRAME_BYTES // SAMPLE_WIDTH) * output_multiplier,
         )
+        self.ready.set()
+        log(f"v2 playback device: {output_device_name}; rate={output_rate}; api={'WASAPI' if output_device_index is not None else 'default'}")
         try:
             delay_ms = max(20, min(300, int(self.stream.get_output_latency() * 1_000) + 30))
             self.aec.set_stream_delay(delay_ms)
@@ -772,6 +1205,21 @@ class DuplexSpeaker:
                 buffer.clear()
                 self.reset.clear()
                 continue
+            # Keep filling the jitter buffer while audio is playing.  The old
+            # loop only consumed queued network chunks after the current
+            # buffer was empty, which made every HTTP chunk boundary capable
+            # of becoming an audible gap.
+            while True:
+                try:
+                    queued_item = self.queue.get_nowait()
+                except queue.Empty:
+                    break
+                if queued_item is PLAYBACK_STOP:
+                    return
+                if queued_item is PLAYBACK_END:
+                    buffer.finish()
+                elif isinstance(queued_item, bytes):
+                    buffer.append(queued_item)
             frame = buffer.take_frame()
             if frame is None:
                 try:
@@ -780,6 +1228,12 @@ class DuplexSpeaker:
                     if buffer.drained:
                         self.active.clear()
                         self.finished.set()
+                    elif buffer.started:
+                        # A streaming network response may briefly starve. Do
+                        # not resume one frame at a time; rebuild the jitter
+                        # buffer first so speech remains continuous.
+                        self.starvation_count += 1
+                        buffer.rebuffer()
                     continue
                 if item is PLAYBACK_STOP:
                     return
@@ -792,8 +1246,23 @@ class DuplexSpeaker:
             if self.reset.is_set():
                 continue
             with self.aec_lock:
-                self.aec.process_reverse_stream(frame)
-            self.stream.write(frame, exception_on_underflow=False)
+                # WebRTC AEC accepts exact 10 ms reverse-stream frames even
+                # though Windows receives a more stable 40 ms device write.
+                for offset in range(0, len(frame), AEC_FRAME_BYTES):
+                    aec_frame = frame[offset:offset + AEC_FRAME_BYTES]
+                    if len(aec_frame) == AEC_FRAME_BYTES:
+                        self.aec.process_reverse_stream(aec_frame)
+                rms, peak = pcm_levels(frame)
+                self.recent_output_rms = (self.recent_output_rms * 0.80) + (rms * 0.20)
+                self.recent_output_peak = max(int(self.recent_output_peak * 0.85), peak)
+            write_started = time.monotonic()
+            device_frame = upsample_pcm16_2x(frame) if output_multiplier == 2 else frame
+            self.stream.write(device_frame, exception_on_underflow=False)
+            write_elapsed = time.monotonic() - write_started
+            if write_elapsed > (PLAYBACK_DEVICE_FRAME_MS / 1_000) * 2.5:
+                self.slow_write_count += 1
+            self.frames_written += 1
+            self.last_output_at = time.monotonic()
 
 
 class ElevenLabsPcmTts:
@@ -803,28 +1272,162 @@ class ElevenLabsPcmTts:
         self.model = str(config["model"]).strip()
         self.output_format = str(config["outputFormat"]).strip()
 
+    @staticmethod
+    def chunks(text: str, limit: int = 3_500) -> list[str]:
+        remaining = text.strip()
+        result: list[str] = []
+        while len(remaining) > limit:
+            split_at = max(
+                remaining.rfind(". ", 0, limit),
+                remaining.rfind("! ", 0, limit),
+                remaining.rfind("? ", 0, limit),
+                remaining.rfind("\n", 0, limit),
+                remaining.rfind(" ", 0, limit),
+            )
+            if split_at < limit // 2:
+                split_at = limit
+            else:
+                split_at += 1
+            result.append(remaining[:split_at].strip())
+            remaining = remaining[split_at:].strip()
+        if remaining:
+            result.append(remaining)
+        return result
+
     def stream(self, text: str, language: str, speaker: DuplexSpeaker, generation: int, current_generation: callable) -> None:
         if not self.api_key or not self.voice_id:
             raise RuntimeError("ELEVENLABS_NOT_CONFIGURED")
+        request_started = time.monotonic()
+        first_audio_logged = False
+        rendered_audio = bytearray()
+        audio_limit_reached = False
         query = urlencode({"output_format": self.output_format, "enable_logging": "false"})
+        for text_chunk in self.chunks(text):
+            if current_generation() != generation:
+                return
+            request = urllib.request.Request(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}/stream?{query}",
+                data=json.dumps({
+                    "text": text_chunk,
+                    "model_id": self.model,
+                    "language_code": language.split("-", 1)[0].lower(),
+                }).encode("utf-8"),
+                method="POST",
+                headers={"xi-api-key": self.api_key, "Content-Type": "application/json", "Accept": "audio/pcm"},
+            )
+            with urllib.request.urlopen(request, timeout=15) as response:
+                read_available = getattr(response, "read1", response.read)
+                while current_generation() == generation:
+                    # `HTTPResponse.read(n)` may wait for all n bytes. `read1`
+                    # returns currently available PCM sooner and lets the
+                    # playback thread maintain a continuous jitter buffer.
+                    chunk = read_available(PLAYBACK_FRAME_BYTES * 8)
+                    if not chunk:
+                        break
+                    if not first_audio_logged:
+                        first_audio_logged = True
+                        log(f"v2 TTS first PCM received in {int((time.monotonic() - request_started) * 1_000)}ms")
+                    remaining = MAX_TTS_PCM_BYTES - len(rendered_audio)
+                    if remaining <= 0:
+                        audio_limit_reached = True
+                        break
+                    rendered_audio.extend(chunk[:remaining])
+                    if len(chunk) > remaining or len(rendered_audio) >= MAX_TTS_PCM_BYTES:
+                        audio_limit_reached = True
+                        break
+            if audio_limit_reached:
+                log(f"v2 TTS provider output capped at {MAX_TTS_AUDIO_SECONDS}s")
+                break
+        if current_generation() == generation:
+            if not rendered_audio:
+                raise RuntimeError("ELEVENLABS_EMPTY_AUDIO")
+            # ElevenLabs returns several seconds of PCM in a few hundred
+            # milliseconds. Queue it as one continuous buffer so network and
+            # Python scheduling cannot create audible boundaries.
+            speaker.enqueue(bytes(rendered_audio))
+            speaker.finish()
+            log(
+                "v2 TTS ready for uninterrupted playback in "
+                f"{int((time.monotonic() - request_started) * 1_000)}ms; bytes={len(rendered_audio)}"
+            )
+
+
+class OpenAIPcmTts:
+    """24 kHz PCM fallback using the OpenAI Audio Speech endpoint."""
+
+    def __init__(self, config: dict[str, Any]):
+        self.api_key = environment_value(str(config.get("fallbackApiKeyEnv") or "OPENAI_API_KEY"))
+        self.model = str(config.get("fallbackModel") or "tts-1").strip()
+        self.voice = str(config.get("fallbackVoice") or "nova").strip()
+
+    def stream(self, text: str, language: str, speaker: DuplexSpeaker, generation: int, current_generation: callable) -> None:
+        if not self.api_key:
+            raise RuntimeError("OPENAI_TTS_NOT_CONFIGURED")
+        request_started = time.monotonic()
         request = urllib.request.Request(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}/stream?{query}",
+            "https://api.openai.com/v1/audio/speech",
             data=json.dumps({
-                "text": text[:4_000],
-                "model_id": self.model,
-                "language_code": language.split("-", 1)[0].lower(),
+                "model": self.model,
+                "voice": self.voice,
+                "input": text,
+                "response_format": "pcm",
             }).encode("utf-8"),
             method="POST",
-            headers={"xi-api-key": self.api_key, "Content-Type": "application/json", "Accept": "audio/pcm"},
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/octet-stream",
+            },
         )
-        with urllib.request.urlopen(request, timeout=45) as response:
+        rendered_audio = bytearray()
+        with urllib.request.urlopen(request, timeout=30) as response:
+            read_available = getattr(response, "read1", response.read)
             while current_generation() == generation:
-                chunk = response.read(PLAYBACK_FRAME_BYTES * 8)
+                chunk = read_available(PLAYBACK_FRAME_BYTES * 8)
                 if not chunk:
                     break
-                speaker.enqueue(chunk)
+                remaining = MAX_TTS_PCM_BYTES - len(rendered_audio)
+                if remaining <= 0:
+                    break
+                rendered_audio.extend(chunk[:remaining])
+        if current_generation() != generation:
+            return
+        if not rendered_audio:
+            raise RuntimeError("OPENAI_TTS_EMPTY_AUDIO")
+        speaker.enqueue(bytes(rendered_audio))
+        speaker.finish()
+        log(
+            "v2 OpenAI TTS fallback ready for uninterrupted playback in "
+            f"{int((time.monotonic() - request_started) * 1_000)}ms; bytes={len(rendered_audio)}"
+        )
+
+
+class ResilientPcmTts:
+    """Use one speaker pipeline and fail over before any PCM is queued."""
+
+    def __init__(self, config: dict[str, Any]):
+        requested = str(config.get("provider") or "elevenlabs").strip().lower()
+        if requested == "openai":
+            self.primary = OpenAIPcmTts(config)
+            self.fallback = ElevenLabsPcmTts(config)
+            self.primary_name = "OpenAI"
+            self.fallback_name = "ElevenLabs"
+        else:
+            self.primary = ElevenLabsPcmTts(config)
+            self.fallback = OpenAIPcmTts(config)
+            self.primary_name = "ElevenLabs"
+            self.fallback_name = "OpenAI"
+
+    def stream(self, text: str, language: str, speaker: DuplexSpeaker, generation: int, current_generation: callable) -> None:
+        try:
+            self.primary.stream(text, language, speaker, generation, current_generation)
+            return
+        except urllib.error.HTTPError as exc:
+            log(f"v2 {self.primary_name} TTS unavailable ({exc.code}); switching to {self.fallback_name}")
+        except (OSError, urllib.error.URLError, RuntimeError) as exc:
+            log(f"v2 {self.primary_name} TTS unavailable ({type(exc).__name__}); switching to {self.fallback_name}")
         if current_generation() == generation:
-            speaker.finish()
+            self.fallback.stream(text, language, speaker, generation, current_generation)
 
 
 class NpuWhisperClient:
@@ -987,24 +1590,6 @@ class DeepgramWakeWord:
             query["keyterm"] = wake_word
         return "wss://api.deepgram.com/v1/listen?" + urlencode(query)
 
-    async def publish_listening_state(self) -> None:
-        """Keep the Secretary UI truthful while V2 waits for the wake word."""
-        try:
-            await asyncio.to_thread(
-                backend_json,
-                "PUT",
-                "/command/voice-state",
-                {"status": "listening", "mode": "wake_word", "listening": True},
-            )
-        except Exception as exc:
-            log(f"v2 wake state error: {type(exc).__name__}")
-
-    async def listening_heartbeat(self) -> None:
-        """Refresh the 15-second backend presence lease without blocking audio."""
-        while companion_is_running(self.parent_pid, self.stop_file):
-            await self.publish_listening_state()
-            await asyncio.sleep(5)
-
     async def transcribe_segment(
         self,
         stream: Any,
@@ -1080,16 +1665,21 @@ class DeepgramWakeWord:
             raise RuntimeError("DEEPGRAM_NOT_CONFIGURED")
         audio = pyaudio.PyAudio()
         stream = None
-        heartbeat: asyncio.Task[None] | None = None
+        audio_ready = threading.Event()
+        heartbeat = ListeningStateHeartbeat(self.parent_pid, self.stop_file, audio_ready)
         try:
+            input_device_index, input_device_name = preferred_windows_input(audio, self.config, RATE)
             stream = audio.open(
                 format=pyaudio.paInt16,
                 channels=CHANNELS,
                 rate=RATE,
                 input=True,
+                input_device_index=input_device_index,
                 frames_per_buffer=INPUT_FRAME_BYTES // SAMPLE_WIDTH,
             )
-            heartbeat = asyncio.create_task(self.listening_heartbeat())
+            # A stream handle alone does not prove that capture is producing
+            # frames. Publish listening=true only after the first real frame.
+            heartbeat.start()
             write_live_preview(status=localized_runtime_status(language, "waiting", wake_word))
             log(f"v2 Deepgram VAD wake listener started ({language}, {wake_word})")
             pre_roll_frames = max(1, (pre_roll_ms + INPUT_FRAME_MS - 1) // INPUT_FRAME_MS)
@@ -1098,6 +1688,12 @@ class DeepgramWakeWord:
                 if not companion_is_running(self.parent_pid, self.stop_file):
                     return None
                 raw = await asyncio.to_thread(stream.read, INPUT_FRAME_BYTES // SAMPLE_WIDTH, False)
+                if not audio_ready.is_set():
+                    audio_ready.set()
+                    log(f"v2 Deepgram microphone audio confirmed: {input_device_name}")
+                if heartbeat.paused.is_set():
+                    pre_roll.clear()
+                    continue
                 pre_roll.append(raw)
                 if pcm_mean_amplitude(raw) < threshold:
                     continue
@@ -1115,9 +1711,7 @@ class DeepgramWakeWord:
                     return activation_command
                 write_live_preview(status=localized_runtime_status(language, "waiting", wake_word))
         finally:
-            if heartbeat:
-                heartbeat.cancel()
-                await asyncio.gather(heartbeat, return_exceptions=True)
+            heartbeat.close()
             if stream:
                 try:
                     stream.stop_stream()
@@ -1183,23 +1777,15 @@ class PicovoiceWakeWord:
         log(f"v2 Picovoice false wake rejected by local verifier ({elapsed_ms}ms)")
         return None
 
-    async def publish_listening_state(self) -> None:
-        try:
-            await asyncio.to_thread(
-                backend_json,
-                "PUT",
-                "/command/voice-state",
-                {"status": "listening", "mode": "wake_word", "listening": True},
-            )
-        except Exception as exc:
-            log(f"v2 wake state error: {type(exc).__name__}")
-
-    async def listening_heartbeat(self) -> None:
-        while companion_is_running(self.parent_pid, self.stop_file):
-            await self.publish_listening_state()
-            await asyncio.sleep(5)
-
-    async def wait_with_node(self, keyword_path: str, sensitivity: float, wake_word: str) -> tuple[str, str]:
+    async def wait_with_node(
+        self,
+        keyword_path: str,
+        sensitivity: float,
+        wake_word: str,
+        device_name: str,
+        audio_ready: threading.Event,
+        heartbeat: ListeningStateHeartbeat,
+    ) -> tuple[str, str]:
         node_path = os.environ["PICOVOICE_NODE_PATH"]
         modules_path = os.environ["PICOVOICE_NODE_MODULES"]
         sidecar_path = str(Path(__file__).with_name("picovoice_wake.js"))
@@ -1211,12 +1797,17 @@ class PicovoiceWakeWord:
             sidecar_path,
             keyword_path,
             str(sensitivity),
+            device_name,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=environment,
             creationflags=creation_flags,
             limit=256 * 1024,
         )
+        audio_report_count = 0
+        sidecar_ready = False
+        started_at = time.monotonic()
+        last_audio_at = started_at
         try:
             while companion_is_running(self.parent_pid, self.stop_file):
                 if process.stdout is None:
@@ -1226,9 +1817,31 @@ class PicovoiceWakeWord:
                 except asyncio.TimeoutError:
                     if process.returncode is not None:
                         raise RuntimeError("PICOVOICE_NODE_EXITED")
+                    now = time.monotonic()
+                    if not sidecar_ready and now - started_at > 8.0:
+                        raise RuntimeError("PICOVOICE_NODE_START_TIMEOUT")
+                    if sidecar_ready and now - last_audio_at > 5.0:
+                        raise RuntimeError("PICOVOICE_MICROPHONE_STALLED")
                     continue
                 line = raw_line.decode("utf-8", errors="replace").strip()
+                if line.startswith("READY"):
+                    sidecar_ready = True
+                    last_audio_at = time.monotonic()
+                    log(f"v2 Picovoice sidecar {line}")
+                    continue
+                if line.startswith("AUDIO"):
+                    last_audio_at = time.monotonic()
+                    audio_report_count += 1
+                    if not audio_ready.is_set():
+                        audio_ready.set()
+                        log(f"v2 Picovoice microphone audio confirmed: {line}")
+                    elif audio_report_count % 10 == 0:
+                        log(f"v2 Picovoice microphone level: {line}")
+                    continue
                 if line.startswith("DETECTED"):
+                    if heartbeat.paused.is_set():
+                        log("v2 ignored Picovoice detection while listening is paused")
+                        continue
                     encoded_audio = line.partition(" ")[2].strip()
                     try:
                         verification_audio = base64.b64decode(encoded_audio, validate=True) if encoded_audio else b""
@@ -1256,20 +1869,29 @@ class PicovoiceWakeWord:
 
     async def wait(self) -> str | None:
         language, wake_word = current_wake_profile(self.config)
-        access_key_env, keyword_path, sensitivity = picovoice_wake_settings(self.config)
+        access_key_env, keyword_path, sensitivity, device_name = picovoice_wake_settings(self.config)
         access_key = environment_value(access_key_env)
         if not access_key:
             raise RuntimeError("PICOVOICE_ACCESS_KEY_NOT_CONFIGURED")
         if not keyword_path or not Path(keyword_path).is_file():
             raise RuntimeError("PICOVOICE_KEYWORD_MODEL_NOT_FOUND")
 
-        heartbeat: asyncio.Task[None] | None = asyncio.create_task(self.listening_heartbeat())
+        audio_ready = threading.Event()
+        heartbeat = ListeningStateHeartbeat(self.parent_pid, self.stop_file, audio_ready)
+        heartbeat.start()
         write_live_preview(status=localized_runtime_status(language, "waiting", wake_word))
         if node_picovoice_available():
             try:
                 while companion_is_running(self.parent_pid, self.stop_file):
                     log(f"v2 Picovoice Node wake listener started ({language}, {wake_word})")
-                    result, command = await self.wait_with_node(keyword_path, sensitivity, wake_word)
+                    result, command = await self.wait_with_node(
+                        keyword_path,
+                        sensitivity,
+                        wake_word,
+                        device_name,
+                        audio_ready,
+                        heartbeat,
+                    )
                     if result == "accepted":
                         return command
                     if result == "stopped":
@@ -1278,12 +1900,10 @@ class PicovoiceWakeWord:
                     await asyncio.sleep(0.1)
                 return None
             finally:
-                heartbeat.cancel()
-                await asyncio.gather(heartbeat, return_exceptions=True)
+                heartbeat.close()
 
         if pvporcupine is None:
-            heartbeat.cancel()
-            await asyncio.gather(heartbeat, return_exceptions=True)
+            heartbeat.close()
             raise RuntimeError("PICOVOICE_PACKAGE_NOT_INSTALLED")
 
         porcupine = pvporcupine.create(
@@ -1297,16 +1917,29 @@ class PicovoiceWakeWord:
             maxlen=max(1, int((porcupine.sample_rate * 2.2) / porcupine.frame_length))
         )
         try:
+            input_device_index, input_device_name = preferred_windows_input(
+                audio,
+                self.config,
+                porcupine.sample_rate,
+            )
             stream = audio.open(
                 format=pyaudio.paInt16,
                 channels=CHANNELS,
                 rate=porcupine.sample_rate,
                 input=True,
+                input_device_index=input_device_index,
                 frames_per_buffer=porcupine.frame_length,
             )
-            log(f"v2 Picovoice wake listener started ({language}, {wake_word})")
+            audio_ready.set()
+            log(
+                f"v2 Picovoice wake listener started ({language}, {wake_word}); "
+                f"microphone={input_device_name}"
+            )
             while companion_is_running(self.parent_pid, self.stop_file):
                 raw = await asyncio.to_thread(stream.read, porcupine.frame_length, False)
+                if heartbeat.paused.is_set():
+                    buffered_frames.clear()
+                    continue
                 buffered_frames.append(raw)
                 samples = array("h")
                 samples.frombytes(raw)
@@ -1320,8 +1953,7 @@ class PicovoiceWakeWord:
                     write_live_preview(status=localized_runtime_status(language, "waiting", wake_word))
             return None
         finally:
-            heartbeat.cancel()
-            await asyncio.gather(heartbeat, return_exceptions=True)
+            heartbeat.close()
             if stream:
                 try:
                     stream.stop_stream()
@@ -1391,21 +2023,44 @@ class VoiceSessionV2:
         if self.language not in LANGUAGE_NAMES:
             raise RuntimeError("VOICE_SESSION_LANGUAGE_INVALID")
         self.audio = pyaudio.PyAudio()
+        self.input_device_index, self.input_device_name = preferred_windows_input(self.audio, config, RATE)
         self.aec_lock = threading.Lock()
         self.aec = AudioProcessor(enable_aec=True, enable_ns=True, ns_level=2, enable_agc=False, enable_vad=False)
         self.aec.set_stream_format(RATE, CHANNELS, RATE, CHANNELS)
         self.aec.set_reverse_stream_format(RATE, CHANNELS)
-        self.speaker = DuplexSpeaker(self.audio, self.aec, self.aec_lock)
-        self.tts = ElevenLabsPcmTts(config["tts"])
+        self.speaker = DuplexSpeaker(self.audio, self.aec, self.aec_lock, config)
+        self.tts = ResilientPcmTts(config["tts"])
         self.transcript = TranscriptStore()
         self.stop = asyncio.Event()
         self.turn_task: asyncio.Task | None = None
         self.generation = 0
         self.last_assistant_text = ""
+        self.recent_assistant_texts: deque[str] = deque(maxlen=6)
         self.last_activity = time.monotonic()
         self.input_stream = None
         self.pending_parts: list[str] = []
         self.npu_whisper = npu_whisper
+        self.near_end_frames = 0
+        self.barge_in_candidate_until = 0.0
+        self.barge_in_interrupted_until = 0.0
+        self.transcript_tasks: set[asyncio.Task[None]] = set()
+        self.completed_normally = False
+
+    def persist_transcript(self, role: str, content: str, source_event_id: str) -> None:
+        """Persist text concurrently so storage latency never delays speech."""
+        task = asyncio.create_task(self.transcript.append(role, content, source_event_id))
+        self.transcript_tasks.add(task)
+
+        def completed(finished: asyncio.Task[None]) -> None:
+            self.transcript_tasks.discard(finished)
+            try:
+                finished.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                log(f"v2 transcript persistence error: {type(exc).__name__}: {str(exc)[:200]}")
+
+        task.add_done_callback(completed)
 
     def current_generation(self) -> int:
         return self.generation
@@ -1438,6 +2093,50 @@ class VoiceSessionV2:
             processed.append(raw[complete:])
         return b"".join(processed)
 
+    def admit_microphone_frame(self, processed: bytes) -> bool:
+        """Keep Emma's loudspeaker out of STT while preserving true barge-in."""
+        if not self.speaker.active.is_set():
+            self.near_end_frames = 0
+            self.barge_in_candidate_until = 0.0
+            return True
+        now = time.monotonic()
+        candidate_was_active = now < self.barge_in_candidate_until
+        required_rms, required_peak = barge_in_thresholds(
+            self.speaker.recent_output_rms,
+            self.speaker.recent_output_peak,
+        )
+        longest_run = self.near_end_frames
+        consecutive = self.near_end_frames
+        complete = len(processed) - (len(processed) % AEC_FRAME_BYTES)
+        for offset in range(0, complete, AEC_FRAME_BYTES):
+            rms, peak = pcm_levels(processed[offset:offset + AEC_FRAME_BYTES])
+            if rms >= required_rms and peak >= required_peak:
+                consecutive += 1
+                longest_run = max(longest_run, consecutive)
+            else:
+                consecutive = 0
+        self.near_end_frames = consecutive
+        if longest_run >= BARGE_IN_CONFIRM_FRAMES:
+            self.near_end_frames = 0
+            self.barge_in_candidate_until = now + BARGE_IN_CANDIDATE_HOLD_SECONDS
+            if not candidate_was_active:
+                # Stop output before waiting for STT endpointing. This is the
+                # actual barge-in path: the user's first confirmed near-end
+                # syllables stop Emma, and the remaining utterance is then
+                # transcribed in silence. Incrementing generation also stops
+                # the in-flight TTS download from re-enqueueing old speech.
+                self.generation += 1
+                self.speaker.interrupt()
+                self.last_activity = now
+                self.barge_in_interrupted_until = now + 4.0
+                log(
+                    "v2 playback interrupted immediately by near-end speech; "
+                    "candidate admitted for transcript validation "
+                    f"(rms>={required_rms:.0f}, peak>={required_peak})"
+                )
+            return True
+        return candidate_was_active
+
     async def update_state(self, status: str, listening: bool, transcript: str = "", response: str = "") -> None:
         payload: dict[str, Any] = {"status": status, "mode": "realtime", "listening": listening}
         if transcript:
@@ -1455,12 +2154,22 @@ class VoiceSessionV2:
             channels=CHANNELS,
             rate=RATE,
             input=True,
+            input_device_index=self.input_device_index,
             frames_per_buffer=INPUT_FRAME_BYTES // SAMPLE_WIDTH,
         )
+        log(f"v2 session microphone: {self.input_device_name}")
         while not self.stop.is_set():
             try:
                 raw = await asyncio.to_thread(self.input_stream.read, INPUT_FRAME_BYTES // SAMPLE_WIDTH, False)
-                await ws.send(self.process_microphone_audio(raw))
+                processed = self.process_microphone_audio(raw)
+                # Always send the AEC-cleaned near-end stream. While Emma is
+                # speaking, transcripts are a control channel only: the
+                # classifier accepts an explicit stop or a wake-word-addressed
+                # replacement and rejects everything else. Sending silence
+                # here made "stop" impossible whenever the energy detector
+                # did not fire first.
+                self.admit_microphone_frame(processed)
+                await ws.send(processed)
             except Exception as exc:
                 if not self.stop.is_set():
                     log(f"v2 microphone error: {type(exc).__name__}: {str(exc)[:300]}")
@@ -1484,15 +2193,22 @@ class VoiceSessionV2:
             channels=CHANNELS,
             rate=RATE,
             input=True,
+            input_device_index=self.input_device_index,
             frames_per_buffer=INPUT_FRAME_BYTES // SAMPLE_WIDTH,
         )
+        log(f"v2 session microphone: {self.input_device_name}")
         while not self.stop.is_set():
             try:
                 raw = await asyncio.to_thread(self.input_stream.read, INPUT_FRAME_BYTES // SAMPLE_WIDTH, False)
                 processed = self.process_microphone_audio(raw)
+                pre_roll.append(processed)
+                if not self.admit_microphone_frame(processed):
+                    active_frames = []
+                    speech_frames = 0
+                    silence_frames = 0
+                    continue
                 loud = pcm_mean_amplitude(processed) >= threshold
                 if not active_frames:
-                    pre_roll.append(processed)
                     if loud:
                         active_frames = list(pre_roll)
                         speech_frames = 1
@@ -1579,32 +2295,94 @@ class VoiceSessionV2:
         heard = text.strip()
         if not heard:
             return
+        # Every provider reaches the parser through here, so this is the single
+        # place that has to hold: invented filler never becomes a command.
         reason = implausible_transcript(heard)
         if reason:
             log(f"v2 transcript ignored ({reason}): {heard[:60]}")
             return
         self.last_activity = time.monotonic()
-        if self.speaker.active.is_set() and looks_like_self_echo(heard, self.last_assistant_text):
-            log("v2 ignored transcript matching Emma playback")
+        speaking = self.speaker.active.is_set()
+        delayed_echo_window = (
+            self.speaker.last_output_at > 0
+            and time.monotonic() - self.speaker.last_output_at < DELAYED_SELF_ECHO_WINDOW_SECONDS
+        )
+        if delayed_echo_window and any(
+            looks_like_self_echo(heard, assistant)
+            for assistant in self.recent_assistant_texts
+        ):
+            # Streaming STT can finalize room echo several seconds after the
+            # speaker stopped. Compare against several previous responses,
+            # because a self-reply loop may already have replaced the latest
+            # response before that delayed transcript arrives.
+            log("v2 ignored delayed transcript matching recent Emma speech")
             return
-        if self.speaker.active.is_set():
+        wake_word = str(load_config().get("WakeWord") or "Emma")
+        barge_in_capture = time.monotonic() < self.barge_in_interrupted_until
+        action, command = classify_playback_transcript(
+            heard,
+            self.last_assistant_text,
+            self.language,
+            wake_word,
+            speaking,
+            self.speaker.echo_guard_active() and not barge_in_capture,
+        )
+        if barge_in_capture:
+            self.barge_in_interrupted_until = 0.0
+            self.barge_in_candidate_until = 0.0
+            self.near_end_frames = 0
+            if is_explicit_stop(heard, self.language):
+                action, command = "stop", ""
+            elif contains_wake_word(heard, wake_word):
+                command = wake_command_tail(heard, wake_word)
+                action = "command" if command else "wake_only"
+            else:
+                # Acoustic energy alone cannot distinguish the user from a
+                # distorted loudspeaker echo. Only an explicit stop phrase or
+                # a wake-word-addressed replacement command is safe here.
+                log("v2 ignored non-addressed barge-in transcript")
+                self.stop.set()
+                return
+        if action == "stop":
             self.generation += 1
             self.speaker.interrupt()
-            log("v2 assistant playback interrupted by validated transcript")
+            self.last_assistant_text = ""
+            log("v2 assistant playback stopped by explicit interruption")
+            await self.update_state("listening", True, transcript=heard)
+            write_live_preview("user", heard, localized_runtime_status(self.language, "active"))
+            self.stop.set()
+            return
+        if action == "ignore":
+            log(
+                "v2 ignored microphone transcript during Emma playback/echo guard: "
+                + heard[:120]
+            )
+            return
+        if action in {"command", "wake_only"}:
+            self.generation += 1
+            self.speaker.interrupt()
+            heard = command
+            log("v2 assistant playback interrupted by wake-word-addressed transcript")
+            if not heard:
+                self.last_assistant_text = ""
+                await self.update_state("listening", True)
+                self.stop.set()
+                return
         if self.turn_task and not self.turn_task.done():
             self.turn_task.cancel()
         self.turn_task = asyncio.create_task(self.execute_turn(heard))
 
     async def execute_turn(self, heard: str) -> None:
         generation = self.generation
-        await self.update_state("thinking", False, transcript=heard)
-        try:
-            await self.transcript.append("user", heard, f"v2-user-{self.transcript.sequence}")
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            log(f"v2 local transcript error: {type(exc).__name__}")
+        # Recognition stays physically available while the command is being
+        # resolved, so a newer utterance can replace a slow or mistaken one.
+        await self.update_state("thinking", True, transcript=heard)
+        self.persist_transcript("user", heard, f"v2-user-{self.transcript.sequence}")
+        # Let append update the in-memory ordered history before building the
+        # command context, while its network persistence continues in parallel.
+        await asyncio.sleep(0)
         write_live_preview("user", heard, localized_runtime_status(self.language, "thinking"))
+        business_started = time.monotonic()
         try:
             result = await asyncio.to_thread(
                 backend_command_json,
@@ -1622,6 +2400,8 @@ class VoiceSessionV2:
         except Exception as exc:
             log(f"v2 business request error: {type(exc).__name__}")
             result = {"ok": False, "message": self.localized_error_message()}
+        finally:
+            log(f"v2 business response completed in {int((time.monotonic() - business_started) * 1_000)}ms")
         # Command responses can carry a record, a list or no data at all.
         # Only a record is allowed to request a language transition; treating
         # a list (for example from "show clients") as a record used to abort
@@ -1637,34 +2417,53 @@ class VoiceSessionV2:
             log(f"v2 language changed to {selected_language}")
         message = self.result_message(result)
         if not message or generation != self.generation:
+            if generation == self.generation:
+                self.stop.set()
             return
         self.last_assistant_text = message
-        try:
-            await self.transcript.append("assistant", message, f"v2-assistant-{self.transcript.sequence}")
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            log(f"v2 local transcript error: {type(exc).__name__}")
+        self.recent_assistant_texts.append(message)
+        self.persist_transcript("assistant", message, f"v2-assistant-{self.transcript.sequence}")
         write_live_preview("assistant", message, localized_runtime_status(self.language, "speaking"))
         await self.update_state("speaking", True, response=message)
         self.speaker.active.set()
+        spoken_message, spoken_was_bounded = bounded_spoken_response(message, self.language)
+        if spoken_was_bounded:
+            log(
+                "v2 spoken response bounded while complete text remains visible: "
+                f"full_chars={len(message)}, spoken_chars={len(spoken_message)}"
+            )
         try:
-            await asyncio.to_thread(self.tts.stream, message, self.language, self.speaker, generation, self.current_generation)
+            await asyncio.to_thread(self.tts.stream, spoken_message, self.language, self.speaker, generation, self.current_generation)
             while generation == self.generation and not self.speaker.finished.is_set() and not self.stop.is_set():
                 await asyncio.sleep(0.03)
+            if self.speaker.worker_error:
+                raise RuntimeError(self.speaker.worker_error)
         except asyncio.CancelledError:
             raise
         except urllib.error.HTTPError as exc:
             # Provider failures must be distinguishable in the local log
             # without logging credentials or the spoken text.
             log(f"v2 tts HTTP error: {exc.code}")
+            self.speaker.interrupt()
         except (OSError, urllib.error.URLError) as exc:
             log(f"v2 tts error: {type(exc).__name__}")
+            self.speaker.interrupt()
+        except RuntimeError as exc:
+            log(f"v2 audio output error: {str(exc)[:240]}")
+            self.speaker.interrupt()
         finally:
             if generation == self.generation:
                 self.speaker.active.clear()
                 self.last_activity = time.monotonic()
-                await self.update_state("listening", True)
+                if self.speaker.worker_error:
+                    await self.update_state("error", False)
+                else:
+                    await self.update_state("listening", True)
+                # One activation owns exactly one business turn. Returning to
+                # the local wake listener here makes delayed room echo unable
+                # to become an unaddressed follow-up command.
+                self.completed_normally = True
+                self.stop.set()
 
     def localized_error_message(self) -> str:
         messages = {
@@ -1725,6 +2524,19 @@ class VoiceSessionV2:
             if event_type == "Results":
                 alternatives = ((event.get("channel") or {}).get("alternatives") or [])
                 transcript = str((alternatives[0] if alternatives else {}).get("transcript") or "").strip()
+                # Stop is the only control accepted from an interim result.
+                # This interrupts playback before endpointing while the final
+                # transcript is prevented from becoming a second command by
+                # the one-shot session stop event.
+                if (
+                    transcript
+                    and not event.get("is_final")
+                    and self.speaker.active.is_set()
+                    and is_explicit_stop(transcript, self.language)
+                ):
+                    self.pending_parts.clear()
+                    await self.handle_transcript(transcript)
+                    continue
                 if transcript and event.get("is_final"):
                     self.pending_parts.append(transcript)
                 if event.get("speech_final"):
@@ -1752,9 +2564,35 @@ class VoiceSessionV2:
                     log(f"v2 turn error: {type(exc).__name__}")
             try:
                 state = await asyncio.to_thread(backend_json, "GET", "/command/voice-state")
-                if state.get("pendingControl") in {"pause", "end_conversation"}:
+                control = state.get("pendingControl")
+                if control == "end_conversation":
+                    await asyncio.to_thread(
+                        backend_json,
+                        "PUT",
+                        "/command/voice-state",
+                        {
+                            "status": "offline",
+                            "mode": "realtime",
+                            "listening": False,
+                            "ack_control": "end_conversation",
+                        },
+                    )
+                    log("v2 active conversation ended by acknowledged control")
                     self.stop.set()
                     continue
+                if control == "pause":
+                    # Leave pause pending for the wake listener. It owns the
+                    # durable paused state and will acknowledge it immediately
+                    # after this active session has closed.
+                    self.stop.set()
+                    continue
+                if control == "resume":
+                    await asyncio.to_thread(
+                        backend_json,
+                        "PUT",
+                        "/command/voice-state",
+                        {"status": "listening", "mode": "realtime", "listening": True, "ack_control": "resume"},
+                    )
             except Exception:
                 pass
             idle_seconds = int(self.config["session"]["followUpSeconds"])
@@ -1762,7 +2600,10 @@ class VoiceSessionV2:
                 log("v2 follow-up window ended")
                 self.stop.set()
                 continue
-            await self.update_state("speaking" if self.speaker.active.is_set() else "listening", not self.speaker.active.is_set())
+            # The microphone remains available for acoustic barge-in while
+            # Emma speaks. `status` describes output; `listening` describes the
+            # actual microphone availability.
+            await self.update_state("speaking" if self.speaker.active.is_set() else "listening", True)
 
     async def run_deepgram_transport(self, initial_transcript: str, started: float) -> None:
         api_key = environment_value(str(self.config["stt"]["apiKeyEnv"]))
@@ -1831,7 +2672,16 @@ class VoiceSessionV2:
             if self.turn_task and not self.turn_task.done():
                 self.turn_task.cancel()
                 await asyncio.gather(self.turn_task, return_exceptions=True)
-            await self.transcript.end("completed" if not self.stop.is_set() else "interrupted")
+            if self.transcript_tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*tuple(self.transcript_tasks), return_exceptions=True),
+                        timeout=2.0,
+                    )
+                except asyncio.TimeoutError:
+                    for task in tuple(self.transcript_tasks):
+                        task.cancel()
+            await self.transcript.end("completed" if self.completed_normally else "interrupted")
             self.speaker.close()
             if self.input_stream:
                 try:
@@ -1860,22 +2710,40 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
         raise RuntimeError("VOICE_V2_NOT_CONFIGURED: " + ", ".join(missing))
     sentinel = Path(stop_file).resolve() if stop_file.strip() else None
     npu_whisper: NpuWhisperClient | None = None
-    if status["providers"]["npuWhisper"]["effectiveProvider"] == "npu_whisper":
-        candidate = NpuWhisperClient(config)
-        try:
-            await asyncio.to_thread(candidate.start)
-            npu_whisper = candidate
-        except Exception as exc:
-            candidate.close()
-            if not status["providers"]["deepgram"]["apiKeyPresent"]:
-                raise
-            log(f"v2 NPU Whisper startup failed; using Deepgram fallback: {type(exc).__name__}: {str(exc)[:200]}")
+    npu_candidate: NpuWhisperClient | None = None
+    npu_start_task: asyncio.Task[None] | None = None
+    # Keep the local NPU as Picovoice's private wake-verification engine even
+    # when Deepgram streaming owns high-accuracy command transcription.
+    if status["providers"]["npuWhisper"]["runtimePresent"]:
+        # Loading the Qualcomm Whisper graph can take tens of seconds on a
+        # cold start. Do it in parallel: Porcupine begins listening at once,
+        # and a command spoken during warm-up uses the configured Deepgram
+        # fallback. Every later session automatically receives the ready NPU.
+        npu_candidate = NpuWhisperClient(config)
+        npu_start_task = asyncio.create_task(asyncio.to_thread(npu_candidate.start))
     effective_provider = str(status["providers"]["wake"]["effectiveProvider"])
     wake = (
         PicovoiceWakeWord(config, parent_pid, sentinel, npu_whisper)
         if effective_provider == "picovoice_porcupine"
         else DeepgramWakeWord(config, parent_pid, sentinel)
     )
+
+    if npu_start_task and npu_candidate:
+        def attach_npu_when_ready(task: asyncio.Task[None]) -> None:
+            nonlocal npu_whisper
+            try:
+                task.result()
+            except Exception as exc:
+                if not status["providers"]["deepgram"]["apiKeyPresent"]:
+                    log(f"v2 NPU Whisper startup failed without STT fallback: {type(exc).__name__}: {str(exc)[:200]}")
+                else:
+                    log(f"v2 NPU Whisper startup failed; using Deepgram fallback: {type(exc).__name__}: {str(exc)[:200]}")
+                return
+            npu_whisper = npu_candidate
+            if isinstance(wake, PicovoiceWakeWord):
+                wake.npu_whisper = npu_whisper
+
+        npu_start_task.add_done_callback(attach_npu_when_ready)
     try:
         while companion_is_running(parent_pid, sentinel):
             try:
@@ -1884,22 +2752,35 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
                 if isinstance(wake, PicovoiceWakeWord):
                     # A malformed/incompatible model or a transient licence
                     # check must not leave the desktop assistant deaf.
-                    log(f"v2 Picovoice wake failure; using Deepgram fallback: {type(exc).__name__}")
+                    log(
+                        "v2 Picovoice wake failure; using Deepgram fallback: "
+                        f"{type(exc).__name__}: {str(exc)[:240]}"
+                    )
                     wake = DeepgramWakeWord(config, parent_pid, sentinel)
                     continue
                 raise
             if activation_command is None:
                 break
             try:
-                await VoiceSessionV2(config, parent_pid, sentinel, npu_whisper).run(activation_command)
+                active_npu = (
+                    npu_whisper
+                    if status["providers"]["npuWhisper"]["effectiveProvider"] == "npu_whisper"
+                    else None
+                )
+                await VoiceSessionV2(config, parent_pid, sentinel, active_npu).run(activation_command)
             except Exception as exc:
                 # A transient network/provider failure returns to the wake
                 # listener rather than creating a second process or session.
                 log(f"v2 session failure: {type(exc).__name__}: {str(exc)[:300]}")
                 await asyncio.sleep(1)
     finally:
-        if npu_whisper:
-            await asyncio.to_thread(npu_whisper.close)
+        if npu_start_task:
+            try:
+                await npu_start_task
+            except Exception:
+                pass
+        if npu_candidate:
+            await asyncio.to_thread(npu_candidate.close)
         try:
             await asyncio.to_thread(
                 backend_json,
@@ -1917,11 +2798,16 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
 def run_text_request(text: str) -> dict[str, Any]:
     common = load_config()
     language = str(common.get("Language", "en-GB"))
-    return backend_command_json(
+    result = backend_command_json(
         "POST",
         "/command/assistant",
         {"text": text, "input_method": "voice_transcript", "language": language, "history": []},
     )
+    data = result.get("data") if isinstance(result, dict) else None
+    selected_language = data.get("voiceLanguage") if isinstance(data, dict) else None
+    if selected_language in LANGUAGE_NAMES:
+        save_config_language(selected_language)
+    return result
 
 
 def main() -> int:

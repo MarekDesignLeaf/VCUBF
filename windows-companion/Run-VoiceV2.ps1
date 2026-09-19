@@ -11,7 +11,7 @@ Add-Type -AssemblyName System.Windows.Forms
 # A desktop shortcut can outlive a change to a user environment variable.
 # Reload the persisted credentials for this process before Python is launched,
 # so an updated provider key is used on the very next Emma restart.
-foreach($secretName in @('DEEPGRAM_API_KEY','ELEVENLABS_API_KEY','PICOVOICE_ACCESS_KEY')) {
+foreach($secretName in @('DEEPGRAM_API_KEY','ELEVENLABS_API_KEY','PICOVOICE_ACCESS_KEY','OPENAI_API_KEY')) {
   $userValue=[Environment]::GetEnvironmentVariable($secretName,'User')
   if($userValue) { Set-Item -Path "Env:$secretName" -Value $userValue }
 }
@@ -29,7 +29,7 @@ if(Test-Path -LiteralPath $desktopConfigPath){
     if($desktopConfig.LocalNodePath){$nodeCandidates+=[string]$desktopConfig.LocalNodePath}
   }catch{}
 }
-$nodeCandidates+='C:\Users\hutra\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
+$nodeCandidates+=(Join-Path $env:LOCALAPPDATA 'VCUBF\node-x64\node.exe')
 $nodeCandidates+=@(Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue|Select-Object -ExpandProperty Source)
 foreach($candidate in @($nodeCandidates|Select-Object -Unique)){
   if(!(Test-Path -LiteralPath $candidate)){continue}

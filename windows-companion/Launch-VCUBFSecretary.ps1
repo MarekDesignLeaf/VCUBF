@@ -47,6 +47,9 @@ $v2Runtime = Join-Path $app 'emma_voice_v2.py'
 $npuWhisperSidecar = Join-Path $app 'npu_whisper_sidecar.py'
 $v2Runner = Join-Path $app 'Run-VoiceV2.ps1'
 $localProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
+$localBackendProcess = $null
+$localFrontendProcess = $null
+$voiceRunnerProcess = $null
 $legacyScripts = @(
   (Join-Path $app 'VCUBF-Emma.ps1'),
   (Join-Path $app 'emma_realtime.py'),
@@ -133,6 +136,7 @@ function Stop-VoiceV2 {
       $_.CommandLine.IndexOf($npuWhisperSidecar,[StringComparison]::OrdinalIgnoreCase) -ge 0
     )
   } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  $script:voiceRunnerProcess = $null
 }
 
 function Test-TcpPort([string]$HostName, [int]$Port) {
@@ -159,6 +163,15 @@ function Wait-HttpEndpoint([string]$Url, [string]$Name, [int]$Seconds = 45) {
     Start-Sleep -Milliseconds 500
   } while([datetime]::UtcNow -lt $deadline)
   throw "$Name se nepodařilo spustit. Podrobnosti jsou v $appDir."
+}
+
+function Test-HttpEndpoint([string]$Url) {
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 1
+    return [int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500
+  } catch {
+    return $false
+  }
 }
 
 function Start-LocalPostgres {
@@ -202,6 +215,8 @@ function Start-LocalNodeProcess([string]$Name, [string]$WorkingDirectory, [strin
   Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue
   $process = Start-Process -FilePath $node -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
   $localProcesses.Add($process)
+  if($Name -eq 'backend') { $script:localBackendProcess = $process }
+  if($Name -eq 'frontend') { $script:localFrontendProcess = $process }
 }
 
 function Stop-ProcessTree([int]$RootProcessId) {
@@ -237,8 +252,23 @@ function Start-LocalRuntime([string]$ProjectRoot) {
   # Desktop shortcuts inherit the environment of Explorer, which can be older
   # than a newly saved user secret. Reload the local language-service key on
   # every launch without putting it in the repository or config JSON.
-  $openAiKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY','User')
-  if($openAiKey) { $env:OPENAI_API_KEY = $openAiKey }
+  # Reload local provider configuration from the current Windows user on every
+  # launch. Values stay outside the repository and config JSON; this also
+  # avoids Explorer keeping a stale environment after connector setup.
+  foreach($name in @(
+    'OPENAI_API_KEY','OPENAI_VOICE_MODEL','OPENAI_VOICE_TIMEOUT_MS','CONNECTOR_ENCRYPTION_KEY','JWT_SECRET','FRONTEND_URL',
+    'GMAIL_OAUTH_CLIENT_ID','GMAIL_OAUTH_CLIENT_SECRET','GMAIL_OAUTH_REDIRECT_URI',
+    'GOOGLE_CONTACTS_OAUTH_CLIENT_ID','GOOGLE_CONTACTS_OAUTH_CLIENT_SECRET','GOOGLE_CONTACTS_OAUTH_REDIRECT_URI',
+    'GOOGLE_CALENDAR_OAUTH_CLIENT_ID','GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET','GOOGLE_CALENDAR_OAUTH_REDIRECT_URI',
+    'GOOGLE_DRIVE_OAUTH_CLIENT_ID','GOOGLE_DRIVE_OAUTH_CLIENT_SECRET','GOOGLE_DRIVE_OAUTH_REDIRECT_URI',
+    'GOOGLE_DRIVE_PICKER_API_KEY','GOOGLE_DRIVE_PICKER_APP_ID',
+    'GOOGLE_PHOTOS_OAUTH_CLIENT_ID','GOOGLE_PHOTOS_OAUTH_CLIENT_SECRET','GOOGLE_PHOTOS_OAUTH_REDIRECT_URI',
+    'WHATSAPP_GRAPH_API_VERSION','WHATSAPP_PHONE_NUMBER_ID','WHATSAPP_BUSINESS_ACCOUNT_ID',
+    'WHATSAPP_ACCESS_TOKEN','WHATSAPP_WEBHOOK_VERIFY_TOKEN','META_APP_SECRET'
+  )) {
+    $value = [Environment]::GetEnvironmentVariable($name,'User')
+    if($value) { Set-Item -Path "Env:$name" -Value $value }
+  }
   $env:VCUBF_LOCAL_TEST_LOGIN = '1'
   Stop-StaleLocalWebRuntime
   Start-LocalPostgres
@@ -249,11 +279,35 @@ function Start-LocalRuntime([string]$ProjectRoot) {
   Wait-HttpEndpoint 'http://localhost:5173/' 'Lokální frontend'
 }
 
+function Restart-LocalBackend([string]$ProjectRoot) {
+  if($script:localBackendProcess) {
+    if(!$script:localBackendProcess.HasExited) { Stop-ProcessTree $script:localBackendProcess.Id }
+    [void]$localProcesses.Remove($script:localBackendProcess)
+    $script:localBackendProcess = $null
+  }
+  Start-LocalPostgres
+  $env:PRISMA_CLIENT_ENGINE_TYPE = 'library'
+  Start-LocalNodeProcess 'backend' (Join-Path $ProjectRoot 'backend') @('node_modules\tsx\dist\cli.mjs','watch','src/server.ts') $true
+  Wait-HttpEndpoint 'http://localhost:4000/health' 'Lokální backend' 20
+}
+
+function Restart-LocalFrontend([string]$ProjectRoot) {
+  if($script:localFrontendProcess) {
+    if(!$script:localFrontendProcess.HasExited) { Stop-ProcessTree $script:localFrontendProcess.Id }
+    [void]$localProcesses.Remove($script:localFrontendProcess)
+    $script:localFrontendProcess = $null
+  }
+  Start-LocalNodeProcess 'frontend' (Join-Path $ProjectRoot 'frontend') @('node_modules\vite\bin\vite.js','--host','localhost')
+  Wait-HttpEndpoint 'http://localhost:5173/' 'Lokální frontend' 20
+}
+
 function Stop-LocalRuntime {
   foreach($process in @($localProcesses)) {
     if($process -and !$process.HasExited) { Stop-ProcessTree $process.Id }
   }
   $localProcesses.Clear()
+  $script:localBackendProcess = $null
+  $script:localFrontendProcess = $null
 }
 
 function Start-VoiceV2 {
@@ -261,10 +315,10 @@ function Start-VoiceV2 {
     throw 'Emma Voice v2 is not installed. Run Install-VoiceV2.ps1 again.'
   }
   Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
-  Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @(
+  $script:voiceRunnerProcess = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @(
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$v2Runner`"",
     '-OwnerProcessId', $PID, '-StopFile', "`"$stopFile`""
-  ) -WorkingDirectory $app -WindowStyle Hidden | Out-Null
+  ) -WorkingDirectory $app -WindowStyle Hidden -PassThru
 }
 
 function Find-AppBrowser {
@@ -344,12 +398,16 @@ try {
     $server = if($config.ServerUrl) { ([string]$config.ServerUrl).TrimEnd('/') } else { 'https://backend-production-7952.up.railway.app' }
     $frontend = if($config.FrontendUrl) { ([string]$config.FrontendUrl).TrimEnd('/') } else { 'https://frontend-production-ee13.up.railway.app' }
   }
-  $profile = Get-ExistingDeviceProfile $server
+  # Local testing authenticates through the passwordless user tile and the
+  # loopback-only active-session endpoint. Device pairing belongs only to a
+  # remote deployment; requiring an old paired profile here prevented Emma
+  # from starting after a perfectly valid local sign-in.
+  $profile = if($localMode) { $null } else { Get-ExistingDeviceProfile $server }
   $pairing = $null
-  if(!$profile) {
+  if(!$localMode -and !$profile) {
     try { $pairing = Invoke-RestMethod -Method POST -Uri "$server/auth/device/start" -ContentType 'application/json' -Body '{}' -TimeoutSec 15 } catch {}
   }
-  $browserUrl = if($localMode -and $profile) {
+  $browserUrl = if($localMode) {
     "$frontend/login?desktop=1&localTest=1"
   } elseif($pairing -and $pairing.verification_url) {
     [string]$pairing.verification_url
@@ -362,9 +420,43 @@ try {
   # deployments still use the authenticated desktop bootstrap flow.
   $secretaryWindow = Open-SecretaryWindow $browser $browserUrl
 
-  if($profile) { Start-VoiceV2 }
+  $localVoiceStarted = $false
+  $nextLocalHealthCheck = [datetime]::UtcNow.AddSeconds(2)
+  if(!$localMode -and $profile) { Start-VoiceV2 }
   $pairingDeadline = if($pairing) { [datetime]::UtcNow.AddMinutes(10) } else { [datetime]::MinValue }
   while([VcubfWindowApi]::WindowExists($secretaryWindow)) {
+
+    if($localVoiceStarted -and (!$script:voiceRunnerProcess -or $script:voiceRunnerProcess.HasExited)) {
+      # A provider or audio-driver failure must not leave the web page claiming
+      # that Emma is active. Re-arm the same single runtime; the mutex and
+      # Run-VoiceV2 duplicate guard still prevent parallel listeners.
+      $localVoiceStarted = $false
+    }
+
+    if($localMode -and [datetime]::UtcNow -ge $nextLocalHealthCheck) {
+      $nextLocalHealthCheck = [datetime]::UtcNow.AddSeconds(2)
+      if(!(Test-HttpEndpoint "$server/health")) {
+        # A tsx watch parent can remain alive after its backend child exits.
+        # Restart only that pair; the healthy frontend and browser stay open.
+        Restart-LocalBackend $projectRoot
+      }
+      if(!(Test-HttpEndpoint "$frontend/")) {
+        Restart-LocalFrontend $projectRoot
+      }
+    }
+
+    if($localMode -and !$localVoiceStarted) {
+      try {
+        $localSession = Invoke-RestMethod -Method GET -Uri "$server/auth/local-test-active-session" -TimeoutSec 3
+        if($localSession.token) {
+          Start-VoiceV2
+          $localVoiceStarted = $true
+        }
+      } catch {
+        # The user has not selected an account yet. Keep the browser open and
+        # start Emma on the first successful local sign-in.
+      }
+    }
 
     if($pairing -and !$profile -and [datetime]::UtcNow -lt $pairingDeadline) {
       try {
