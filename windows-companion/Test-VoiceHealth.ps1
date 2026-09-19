@@ -14,8 +14,12 @@ $openAiTtsFallbackOk = $false
 $state = $null
 $activeConversationCount = -1
 $serverLanguage = ''
-try { $backendOk = (Invoke-WebRequest -Uri "$server/health" -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200 } catch {}
-try { $frontendOk = (Invoke-WebRequest -Uri "$frontend/" -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200 } catch {}
+# 5 seconds, not 2: resolving "localhost" tries IPv6 first and falls back to
+# IPv4 after about two seconds on this machine, which reported a running
+# server as down. Measured at 2129 ms for localhost against 78 ms for
+# 127.0.0.1.
+try { $backendOk = (Invoke-WebRequest -Uri "$server/health" -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 } catch {}
+try { $frontendOk = (Invoke-WebRequest -Uri "$frontend/" -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 } catch {}
 $elevenLabsKey = [Environment]::GetEnvironmentVariable('ELEVENLABS_API_KEY','User')
 if($elevenLabsKey) {
   try { $elevenLabsOk = (Invoke-WebRequest -Uri 'https://api.elevenlabs.io/v1/user' -Headers @{'xi-api-key'=$elevenLabsKey} -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 } catch {}
