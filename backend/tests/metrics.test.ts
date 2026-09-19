@@ -41,6 +41,21 @@ describe("Measurement and KPI Module", () => {
     await prisma.quote.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, title: "Previous quote", quoteStatus: "accepted", createdAt: previousCreatedAt, items: { create: [{ description: "Previous work", quantity: 1, unitPrice: 500, sortOrder: 0 }] } } });
     await prisma.job.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, jobTitle: "Previous completed job", jobStatus: "dokonceno", createdAt: previousCreatedAt } });
     await prisma.user.updateMany({ where: { companyId: TEST_COMPANY_ID }, data: { weeklyCapacityHours: 20 } });
+    const day = 86_400_000;
+    const now = Date.now();
+    // Issued 20 days ago, due 10 days ago, £300 with £100 paid -> £200 overdue.
+    await prisma.invoice.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, invoiceNumber: "INV-1", title: "Overdue", invoiceStatus: "issued", issueDate: new Date(now - 20 * day), dueDate: new Date(now - 10 * day), items: { create: [{ description: "Work", quantity: 1, unitPrice: 300 }] }, payments: { create: [{ amount: 100, paidAt: new Date(now - 15 * day) }] } } });
+    // Issued 12 days ago, due in 5 days, £150 unpaid -> outstanding but not overdue.
+    await prisma.invoice.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, invoiceNumber: "INV-2", title: "Open", invoiceStatus: "issued", issueDate: new Date(now - 12 * day), dueDate: new Date(now + 5 * day), items: { create: [{ description: "Work", quantity: 2, unitPrice: 75 }] } } });
+    // Issued 9 days ago and settled in full 3 days ago -> 6 days to settle.
+    await prisma.invoice.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, invoiceNumber: "INV-3", title: "Settled", invoiceStatus: "issued", issueDate: new Date(now - 9 * day), dueDate: new Date(now + 20 * day), items: { create: [{ description: "Work", quantity: 1, unitPrice: 500 }] }, payments: { create: [{ amount: 500, paidAt: new Date(now - 3 * day) }] } } });
+    // Overdue but with no due date entered -> outstanding, never "overdue".
+    await prisma.invoice.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, invoiceNumber: "INV-4", title: "No due date", invoiceStatus: "issued", issueDate: new Date(now - 25 * day), items: { create: [{ description: "Work", quantity: 1, unitPrice: 40 }] } } });
+    // Draft and void invoices must never be counted.
+    await prisma.invoice.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, invoiceNumber: "INV-5", title: "Draft", invoiceStatus: "draft", items: { create: [{ description: "Work", quantity: 1, unitPrice: 9_999 }] } } });
+    await prisma.invoice.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, invoiceNumber: "INV-6", title: "Void", invoiceStatus: "void", issueDate: new Date(now - 2 * day), items: { create: [{ description: "Work", quantity: 1, unitPrice: 9_999 }] } } });
+    // Previous-period invoice: issued and paid 40 days ago.
+    await prisma.invoice.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, invoiceNumber: "INV-0", title: "Previous", invoiceStatus: "issued", issueDate: new Date(now - 40 * day), items: { create: [{ description: "Work", quantity: 1, unitPrice: 1_000 }] }, payments: { create: [{ amount: 1_000, paidAt: new Date(now - 38 * day) }] } } });
     const { weekStart } = getWeekRange();
     await prisma.job.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, jobTitle: "Capacity job", jobStatus: "naplanovano", assignedUserId: admin.id, estimatedDurationHours: 35, plannedStartAt: new Date(weekStart.getTime() + 86_400_000) } });
   });
@@ -81,7 +96,19 @@ describe("Measurement and KPI Module", () => {
     assert.equal(res.body.revenueByService.unlinkedAcceptedValueGbp, 0);
     assert.equal(res.body.capacity.available, true);
     assert.equal(res.body.capacity.utilizationPct, 88);
-    assert.equal(res.body.unavailableMetrics.unpaidInvoices, "No invoice/payment module exists.");
+    assert.equal(res.body.unavailableMetrics.unpaidInvoices, undefined);
+    assert.deepEqual(res.body.invoicing.issued.count, { current: 4, previous: 1, delta: 3 });
+    assert.deepEqual(res.body.invoicing.issued.valueGbp, { current: 990, previous: 1000 });
+    assert.deepEqual(res.body.invoicing.paymentsReceived.count, { current: 2, previous: 1, delta: 1 });
+    assert.deepEqual(res.body.invoicing.paymentsReceived.valueGbp, { current: 600, previous: 1000 });
+    assert.equal(res.body.invoicing.outstanding.count, 3);
+    assert.equal(res.body.invoicing.outstanding.balanceGbp, 390);
+    assert.equal(res.body.invoicing.outstanding.overdueCount, 1);
+    assert.equal(res.body.invoicing.outstanding.overdueBalanceGbp, 200);
+    assert.equal(res.body.invoicing.outstanding.withoutDueDateCount, 1);
+    assert.equal(res.body.invoicing.averageDaysToSettle, 6);
+    assert.equal(res.body.invoicing.settledInvoiceCount, 1);
+    assert.ok(!res.body.recommendations.some((item: any) => item.title === "Overdue invoices need follow-up"), "one overdue invoice is below the two-invoice threshold");
     assert.ok(res.body.recommendations.some((item: any) => item.title === "Lead loss is elevated"));
     assert.ok(res.body.recommendations.some((item: any) => item.title === "Quote conversion is below 40%"));
     assert.ok(res.body.recommendations.some((item: any) => item.title === "Current team capacity is tight"));

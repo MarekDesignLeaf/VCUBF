@@ -8,6 +8,75 @@ export const metricsQuerySchema = z.object({
   to: z.string().datetime().optional(),
 }).refine((value) => !value.from || !value.to || new Date(value.from) <= new Date(value.to), { message: "from must be before to" });
 
+type IssuedInvoiceRow = { id: string; issueDate: Date | null; dueDate: Date | null; items: { quantity: number; unitPrice: unknown }[]; payments: { amount: unknown; paidAt: Date }[] };
+type Period = { from: Date; to: Date };
+
+function money(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Invoicing KPIs from real issued invoices and recorded payments only.
+ *
+ * "Issued" and "paid" are period-bounded by issueDate / paidAt. "Outstanding"
+ * is a point-in-time picture at the end of the selected period: every issued
+ * invoice whose recorded payments do not cover its total, with the overdue
+ * subset determined solely by an entered due date. Draft and void invoices are
+ * never counted. Nothing here is accounting revenue recognition.
+ */
+export function summariseInvoicing(invoices: IssuedInvoiceRow[], current: Period, previous: Period) {
+  const inPeriod = (date: Date | null, period: Period) => date != null && date >= period.from && date <= period.to;
+  const totalOf = (invoice: IssuedInvoiceRow) => invoice.items.reduce((sum, item) => sum + item.quantity * Number(item.unitPrice), 0);
+  const paidBy = (invoice: IssuedInvoiceRow, until: Date) => invoice.payments.filter((payment) => payment.paidAt <= until).reduce((sum, payment) => sum + Number(payment.amount), 0);
+
+  const issuedIn = (period: Period) => invoices.filter((invoice) => inPeriod(invoice.issueDate, period));
+  const paymentsIn = (period: Period) => invoices.flatMap((invoice) => invoice.payments.filter((payment) => inPeriod(payment.paidAt, period)));
+  const issuedCurrent = issuedIn(current);
+  const issuedPrevious = issuedIn(previous);
+  const paymentsCurrent = paymentsIn(current);
+  const paymentsPrevious = paymentsIn(previous);
+
+  const openAtEnd = invoices
+    .filter((invoice) => invoice.issueDate != null && invoice.issueDate <= current.to)
+    .map((invoice) => ({ invoice, balance: money(totalOf(invoice) - paidBy(invoice, current.to)) }))
+    .filter((row) => row.balance > 0);
+  const overdue = openAtEnd.filter((row) => row.invoice.dueDate != null && row.invoice.dueDate < current.to);
+  const withoutDueDate = openAtEnd.filter((row) => row.invoice.dueDate == null).length;
+
+  // Days from issue to the payment that settled the invoice, for invoices
+  // settled inside the current period. Unknown when nothing was settled.
+  const settledDays: number[] = [];
+  for (const invoice of invoices) {
+    if (!invoice.issueDate || invoice.payments.length === 0) continue;
+    const settledAt = [...invoice.payments].sort((a, b) => a.paidAt.getTime() - b.paidAt.getTime()).find((payment, index, all) => all.slice(0, index + 1).reduce((sum, p) => sum + Number(p.amount), 0) >= totalOf(invoice) - 0.005)?.paidAt;
+    if (settledAt && inPeriod(settledAt, current)) settledDays.push(Math.max(0, Math.round((settledAt.getTime() - invoice.issueDate.getTime()) / 86_400_000)));
+  }
+
+  const sumValue = (rows: IssuedInvoiceRow[]) => money(rows.reduce((sum, invoice) => sum + totalOf(invoice), 0));
+  const sumPayments = (rows: { amount: unknown }[]) => money(rows.reduce((sum, payment) => sum + Number(payment.amount), 0));
+  return {
+    issued: {
+      count: { current: issuedCurrent.length, previous: issuedPrevious.length, delta: issuedCurrent.length - issuedPrevious.length },
+      valueGbp: { current: sumValue(issuedCurrent), previous: sumValue(issuedPrevious) },
+    },
+    paymentsReceived: {
+      count: { current: paymentsCurrent.length, previous: paymentsPrevious.length, delta: paymentsCurrent.length - paymentsPrevious.length },
+      valueGbp: { current: sumPayments(paymentsCurrent), previous: sumPayments(paymentsPrevious) },
+    },
+    outstanding: {
+      asOf: current.to.toISOString(),
+      count: openAtEnd.length,
+      balanceGbp: money(openAtEnd.reduce((sum, row) => sum + row.balance, 0)),
+      overdueCount: overdue.length,
+      overdueBalanceGbp: money(overdue.reduce((sum, row) => sum + row.balance, 0)),
+      withoutDueDateCount: withoutDueDate,
+    },
+    averageDaysToSettle: settledDays.length ? Math.round(settledDays.reduce((a, b) => a + b, 0) / settledDays.length) : null,
+    settledInvoiceCount: settledDays.length,
+    basis: "Issued invoices and recorded payments only; drafts and void invoices are excluded. Outstanding is measured at the end of the selected period and overdue requires an entered due date. This is not recognised accounting revenue.",
+  };
+}
+
 function unavailable(reason: string) {
   return { available: false as const, value: null, reason };
 }
@@ -25,7 +94,7 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
   const previousFrom = new Date(previousTo.getTime() - durationMs);
   const previousCreatedAt = { gte: previousFrom, lte: previousTo };
 
-  const [leads, quotes, jobs, employees, previousLeads, previousQuotes, previousJobs] = await Promise.all([
+  const [leads, quotes, jobs, employees, previousLeads, previousQuotes, previousJobs, issuedInvoices] = await Promise.all([
     prisma.lead.findMany({ where: { companyId: user.companyId, createdAt }, select: { leadStatus: true, source: true, serviceRequested: true } }),
     prisma.quote.findMany({ where: { companyId: user.companyId, createdAt }, select: { quoteStatus: true, items: { select: { quantity: true, unitPrice: true, unitCost: true, serviceCatalogueItem: { select: { id: true, name: true } } } } } }),
     prisma.job.findMany({ where: { companyId: user.companyId, createdAt }, select: { jobStatus: true, estimatedDurationHours: true, plannedStartAt: true, serviceCatalogueItemId: true } }),
@@ -33,7 +102,9 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
     prisma.lead.findMany({ where: { companyId: user.companyId, createdAt: previousCreatedAt }, select: { leadStatus: true, serviceRequested: true } }),
     prisma.quote.findMany({ where: { companyId: user.companyId, createdAt: previousCreatedAt }, select: { quoteStatus: true, items: { select: { quantity: true, unitPrice: true } } } }),
     prisma.job.findMany({ where: { companyId: user.companyId, createdAt: previousCreatedAt }, select: { jobStatus: true } }),
+    prisma.invoice.findMany({ where: { companyId: user.companyId, invoiceStatus: "issued" }, select: { id: true, issueDate: true, dueDate: true, items: { select: { quantity: true, unitPrice: true } }, payments: { select: { amount: true, paidAt: true } } } }),
   ]);
+  const invoicing = summariseInvoicing(issuedInvoices, { from, to }, { from: previousFrom, to: previousTo });
 
   const leadSources = new Map<string, { source: string; count: number; convertedCount: number; lostCount: number }>();
   for (const lead of leads) {
@@ -119,6 +190,7 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
     if (check.metric.total >= 3 && check.metric.pct != null && check.metric.pct < 80) recommendations.push({ severity: "warning", title: `${check.label} is below 80%`, evidence: `${check.metric.complete} of ${check.metric.total} relevant records are complete (${check.metric.pct}%).`, action: check.action });
   }
   if (quoteDecisions.length >= 3 && acceptedQuotes / quoteDecisions.length < 0.4) recommendations.push({ severity: "warning", title: "Quote conversion is below 40%", evidence: `${acceptedQuotes} of ${quoteDecisions.length} decided quotes were accepted.`, action: "Review rejected and expired quotes and follow-up timing; do not change prices without evidence." });
+  if (invoicing.outstanding.overdueCount >= 2) recommendations.push({ severity: "warning", title: "Overdue invoices need follow-up", evidence: `${invoicing.outstanding.overdueCount} issued invoices are past their due date with £${invoicing.outstanding.overdueBalanceGbp} still unpaid.`, action: "Review each overdue invoice and record a follow-up communication; Secretary does not chase payment automatically." });
   if (utilization != null && utilization >= 85) recommendations.push({ severity: "warning", title: "Current team capacity is tight", evidence: `${totalLoad} of ${totalCapacity} entered hours are allocated this week (${utilization}%).`, action: "Review scheduling, subcontracting or recruitment capacity before accepting urgent dates." });
   if (recommendations.length === 0) recommendations.push({ severity: "info", title: "No threshold-based issue detected", evidence: `Analysis used ${leads.length} leads, ${quotes.length} quotes and ${jobs.length} jobs in the selected period.`, action: "Keep collecting complete source, status, price, cost and duration data to improve decisions." });
 
@@ -139,12 +211,12 @@ export async function getMetricsOverview(user: AuthedUser, input: z.infer<typeof
     jobs: { acceptedCount: jobs.filter((job) => ["prijato", "naplanovano", "v_realizaci", "dokonceno"].includes(job.jobStatus)).length, completedCount: jobs.filter((job) => job.jobStatus === "dokonceno").length, cancelledCount: jobs.filter((job) => job.jobStatus === "zruseno").length, lostDueToAvailability: unavailable("Jobs do not currently record a cancellation reason.") },
     revenueByService: { rows: [...serviceRevenue.values()].map((row) => { const costKnown = row.linesWithKnownCost === row.lineCount; const margin = costKnown ? row.acceptedValueGbp - row.knownCostGbp : null; return { serviceId: row.serviceId, serviceName: row.serviceName, acceptedValueGbp: Math.round(row.acceptedValueGbp * 100) / 100, lineCount: row.lineCount, linesWithKnownCost: row.linesWithKnownCost, costKnown, marginGbp: margin == null ? null : Math.round(margin * 100) / 100, marginPct: margin == null || row.acceptedValueGbp === 0 ? (margin === 0 ? 0 : null) : Math.round((margin / row.acceptedValueGbp) * 1000) / 10 }; }).sort((a, b) => b.acceptedValueGbp - a.acceptedValueGbp || a.serviceName.localeCompare(b.serviceName)), unlinkedAcceptedValueGbp: Math.round(unlinkedAcceptedValueGbp * 100) / 100, basis: "Accepted quote line value, not recognized accounting revenue. Margin is available only when every included line has an entered unit cost." },
     capacity: totalCapacity > 0 ? { available: true as const, weekStart: capacities[0]?.weekStart ?? null, weekEnd: capacities[0]?.weekEnd ?? null, loadHours: totalLoad, capacityHours: totalCapacity, utilizationPct: utilization, overloadedEmployees: capacities.filter((value) => value.overloaded).length, missingEstimates: missingCapacityEstimates } : unavailable("No active employee has entered weekly capacity."),
+    invoicing,
     unavailableMetrics: {
       responseTime: "No reliable inbound-to-first-response link is stored.",
       firstAvailableDateWait: "Jobs do not store enquiry date and offered-date history.",
       jobProfitability: "Quotes contain costs, but completed-job revenue/cost attribution is not stored.",
       clientSatisfaction: "No satisfaction or review records exist.",
-      unpaidInvoices: "No invoice/payment module exists.",
       websiteAndSocialActivity: "No verified analytics connector exists.",
     },
     recommendations,
