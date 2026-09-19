@@ -11,7 +11,19 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>VCUBF Secretary</title>
-  </head>
+      <!-- Voice activity detection, loaded as plain scripts because that is how the
+         library is meant to be loaded: the ONNX runtime fetches its own WebAssembly, and
+         bundling that fails. Everything is served from public/vad, so nothing is fetched
+         from the internet. -->
+    <script src="/ort.wasm.min.js"></script>
+    <script>
+      // One thread: the model is tiny, and threading needs cross-origin isolation this
+      // app does not have. The paths are deliberately not set — bundle.min.js overwrites
+      // them with its own default, which is "./", and every file sits there.
+      if (window.ort) window.ort.env.wasm.numThreads = 1;
+    </script>
+    <script src="/bundle.min.js"></script>
+</head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

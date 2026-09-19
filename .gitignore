@@ -3,5 +3,17 @@ dist/
 dist_old*/
 .env
 *.log
+__pycache__/
+*.py[cod]
 frontend/scripts/.ui-translation-cache.json
 .DS_Store
+
+# Browser voice detector runtime. Byte-identical to what npm installs, so it is
+# copied out of node_modules by frontend/scripts/copy-vad-assets.mjs rather than
+# committed (about 16 MB, most of it one WebAssembly file).
+frontend/public/bundle.min.js
+frontend/public/vad.worklet.bundle.min.js
+frontend/public/silero_vad_v5.onnx
+frontend/public/ort.wasm.min.js
+frontend/public/ort-wasm-simd-threaded.mjs
+frontend/public/ort-wasm-simd-threaded.wasm
