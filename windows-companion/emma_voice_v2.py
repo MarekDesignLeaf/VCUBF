@@ -188,6 +188,37 @@ def environment_value(name: str) -> str:
     return os.environ.get(name.strip(), "").strip()
 
 
+SINGLE_INSTANCE_MUTEX_NAME = "Local\\VCUBF.Emma.VoiceV2.Runtime"
+_single_instance_handle: int | None = None
+
+
+def acquire_single_instance() -> bool:
+    """Hold one named kernel mutex for the life of this runtime process.
+
+    Every launcher path (desktop shortcut re-arm, a manual Run-VoiceV2, an
+    orphaned tray wrapper) reaches ``--run`` through here, so a second
+    microphone listener cannot start even when the process-list guards race.
+    The handle is intentionally never closed: Windows releases it at exit.
+    """
+    global _single_instance_handle
+    if os.name != "nt" or _single_instance_handle is not None:
+        return True
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p)
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    handle = kernel32.CreateMutexW(None, False, SINGLE_INSTANCE_MUTEX_NAME)
+    if not handle:
+        # Kernel objects unavailable: never block the only listener.
+        return True
+    error_already_exists = 183
+    if ctypes.get_last_error() == error_already_exists:
+        kernel32.CloseHandle(handle)
+        return False
+    _single_instance_handle = handle
+    return True
+
+
 def backend_transcribe_pcm(pcm16: bytes, sample_rate: int, wake_word: str = "") -> str:
     """Use Secretary's authenticated STT fallback without writing audio to disk."""
     memory = io.BytesIO()
@@ -989,6 +1020,11 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
     elif requested_wake_provider == "deepgram_vad" and deepgram_wake_ready:
         effective_wake_provider = "deepgram_vad"
         wake_fallback_reason = ""
+    elif requested_wake_provider == "openai_vad" and deepgram_wake_ready:
+        # Same local voice gate; the gated segment goes to the backend's
+        # OpenAI transcription instead of Deepgram. No client-side key.
+        effective_wake_provider = "openai_vad"
+        wake_fallback_reason = ""
     else:
         effective_wake_provider = ""
         wake_fallback_reason = "WAKE_PROVIDER_NOT_READY"
@@ -1001,6 +1037,11 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
         stt_fallback_reason = npu_error or "NPU_WHISPER_UNAVAILABLE"
     elif requested_stt_provider == "deepgram" and deepgram_ready:
         effective_stt_provider = "deepgram"
+        stt_fallback_reason = ""
+    elif requested_stt_provider == "openai":
+        # Readiness is decided by the authenticated backend at request time
+        # (OPENAI_API_KEY lives there); nothing to verify on this PC.
+        effective_stt_provider = "openai"
         stt_fallback_reason = ""
     else:
         effective_stt_provider = ""
@@ -1057,6 +1098,12 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
         },
         "speech": {
             "requestedProvider": str(tts.get("provider") or "openai"),
+        },
+        "openaiStt": {
+            "provider": "openai",
+            "viaBackend": True,
+            "endpoint": "/command/transcribe",
+            "active": effective_stt_provider == "openai" or effective_wake_provider == "openai_vad",
         },
     }
     ready = (
@@ -1721,6 +1768,108 @@ class DeepgramWakeWord:
             audio.terminate()
 
 
+class OpenAIWakeWord:
+    """Wake detection by GPT transcription through the authenticated backend.
+
+    The microphone stays local until a cheap amplitude gate opens. The gated
+    segment (pre-roll + speech + trailing silence) is transcribed by the
+    Secretary backend (OpenAI transcription; the API key never lives on this
+    PC) and the wake word is matched in text. No Picovoice, no Deepgram.
+    """
+
+    def __init__(self, config: dict[str, Any], parent_pid: int = 0, stop_file: Path | None = None):
+        self.config = config
+        self.parent_pid = parent_pid
+        self.stop_file = stop_file
+
+    async def wait(self) -> str | None:
+        language, wake_word = current_wake_profile(self.config)
+        threshold, pre_roll_ms, silence_ms, max_segment_ms = wake_vad_settings(self.config)
+        audio = pyaudio.PyAudio()
+        stream = None
+        audio_ready = threading.Event()
+        heartbeat = ListeningStateHeartbeat(self.parent_pid, self.stop_file, audio_ready)
+        try:
+            input_device_index, input_device_name = preferred_windows_input(audio, self.config, RATE)
+            stream = audio.open(
+                format=pyaudio.paInt16,
+                channels=CHANNELS,
+                rate=RATE,
+                input=True,
+                input_device_index=input_device_index,
+                frames_per_buffer=INPUT_FRAME_BYTES // SAMPLE_WIDTH,
+            )
+            heartbeat.start()
+            write_live_preview(status=localized_runtime_status(language, "waiting", wake_word))
+            log(f"v2 OpenAI (GPT) wake listener started ({language}, {wake_word})")
+            pre_roll_frames = max(1, (pre_roll_ms + INPUT_FRAME_MS - 1) // INPUT_FRAME_MS)
+            silence_frames_required = max(1, (silence_ms + INPUT_FRAME_MS - 1) // INPUT_FRAME_MS)
+            max_segment_frames = max(1, max_segment_ms // INPUT_FRAME_MS)
+            # 160 ms of energy before a segment is worth one transcription
+            # request; a door slam or a cough stays local.
+            min_speech_frames = 8
+            pre_roll: deque[bytes] = deque(maxlen=pre_roll_frames)
+            active: list[bytes] = []
+            speech_frames = 0
+            silence_frames = 0
+            while True:
+                if not companion_is_running(self.parent_pid, self.stop_file):
+                    return None
+                raw = await asyncio.to_thread(stream.read, INPUT_FRAME_BYTES // SAMPLE_WIDTH, False)
+                if not audio_ready.is_set():
+                    audio_ready.set()
+                    log(f"v2 OpenAI wake microphone audio confirmed: {input_device_name}")
+                if heartbeat.paused.is_set():
+                    pre_roll.clear()
+                    active = []
+                    speech_frames = silence_frames = 0
+                    continue
+                loud = pcm_mean_amplitude(raw) >= threshold
+                if not active:
+                    pre_roll.append(raw)
+                    if loud:
+                        active = list(pre_roll)
+                        speech_frames = 1
+                        silence_frames = 0
+                    continue
+                active.append(raw)
+                if loud:
+                    speech_frames += 1
+                    silence_frames = 0
+                else:
+                    silence_frames += 1
+                if silence_frames < silence_frames_required and len(active) < max_segment_frames:
+                    continue
+                segment, active = b"".join(active), []
+                pre_roll.clear()
+                worth_request = speech_frames >= min_speech_frames
+                speech_frames = silence_frames = 0
+                if not worth_request:
+                    continue
+                try:
+                    transcript = await asyncio.to_thread(backend_transcribe_pcm, segment, RATE, wake_word)
+                except Exception as exc:
+                    log(f"v2 OpenAI wake transcription error: {type(exc).__name__}: {str(exc)[:200]}")
+                    await asyncio.sleep(0.5)
+                    continue
+                if not transcript:
+                    continue
+                # Pre-wake hypotheses stay in the private local monitor only.
+                write_live_preview("hypothesis", transcript, localized_runtime_status(language, "waiting", wake_word))
+                if contains_wake_word(transcript, wake_word):
+                    log("v2 OpenAI wake word detected")
+                    return wake_command_tail(transcript, wake_word)
+        finally:
+            heartbeat.close()
+            if stream:
+                try:
+                    stream.stop_stream()
+                    stream.close()
+                except Exception:
+                    pass
+            audio.terminate()
+
+
 class PicovoiceWakeWord:
     """Fully local, low-latency wake-word detection using a custom .ppn file."""
 
@@ -2025,10 +2174,14 @@ class VoiceSessionV2:
         parent_pid: int = 0,
         stop_file: Path | None = None,
         npu_whisper: NpuWhisperClient | None = None,
+        stt_mode: str = "",
     ):
         self.config = config
         self.parent_pid = parent_pid
         self.stop_file = stop_file
+        # "openai" = GPT transcription through the backend; "npu_whisper";
+        # anything else = Deepgram streaming.
+        self.stt_mode = stt_mode or ("npu_whisper" if npu_whisper else "deepgram")
         self.common_config = load_config()
         self.language = str(self.common_config.get("Language", "en-GB"))
         if self.language not in LANGUAGE_NAMES:
@@ -2189,7 +2342,47 @@ class VoiceSessionV2:
     async def npu_microphone_segmenter(self, segments: asyncio.Queue[bytes]) -> None:
         if not self.npu_whisper:
             raise RuntimeError("NPU_WHISPER_NOT_CONFIGURED")
-        settings = self.npu_whisper.settings
+        await self.microphone_segmenter(segments, self.npu_whisper.settings, "NPU")
+
+    def backend_segmenter_settings(self) -> dict[str, Any]:
+        """Local voice-gate timing for GPT transcription (stt.openai, else stt.npu)."""
+        npu = self.config["stt"].get("npu") or {}
+        openai = self.config["stt"].get("openai") or {}
+
+        def value(name: str, default: int) -> int:
+            try:
+                return int(openai.get(name, npu.get(name, default)))
+            except (TypeError, ValueError):
+                return default
+
+        return {
+            "speechThreshold": value("speechThreshold", 300),
+            "preRollMs": value("preRollMs", 320),
+            "silenceMs": value("silenceMs", 700),
+            "minSpeechMs": value("minSpeechMs", 180),
+            "maxSegmentMs": value("maxSegmentMs", 15_000),
+        }
+
+    async def backend_microphone_segmenter(self, segments: asyncio.Queue[bytes]) -> None:
+        await self.microphone_segmenter(segments, self.backend_segmenter_settings(), "OpenAI")
+
+    async def backend_transcription_receiver(self, segments: asyncio.Queue[bytes]) -> None:
+        """Every utterance goes to the backend's OpenAI transcription (GPT STT)."""
+        while not self.stop.is_set():
+            segment = await segments.get()
+            started = time.monotonic()
+            try:
+                text = await asyncio.to_thread(backend_transcribe_pcm, segment, RATE)
+                log(f"v2 OpenAI transcription completed in {int((time.monotonic() - started) * 1_000)}ms")
+                if text:
+                    await self.handle_transcript(text)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # One failed request must not end the conversation.
+                log(f"v2 OpenAI transcription error: {type(exc).__name__}: {str(exc)[:240]}")
+
+    async def microphone_segmenter(self, segments: asyncio.Queue[bytes], settings: dict[str, Any], label: str) -> None:
         threshold = int(settings["speechThreshold"])
         pre_roll_frames = max(1, int(settings["preRollMs"]) // INPUT_FRAME_MS)
         silence_frames_required = max(1, int(settings["silenceMs"]) // INPUT_FRAME_MS)
@@ -2241,7 +2434,7 @@ class VoiceSessionV2:
                     pre_roll.clear()
             except Exception as exc:
                 if not self.stop.is_set():
-                    log(f"v2 NPU microphone error: {type(exc).__name__}: {str(exc)[:300]}")
+                    log(f"v2 {label} microphone error: {type(exc).__name__}: {str(exc)[:300]}")
                 self.stop.set()
 
     async def npu_transcription_receiver(self, segments: asyncio.Queue[bytes]) -> None:
@@ -2661,6 +2854,26 @@ class VoiceSessionV2:
             task.cancel()
         await asyncio.gather(sender, receiver, heartbeat, return_exceptions=True)
 
+    async def run_backend_transport(self, initial_transcript: str, started: float) -> None:
+        """Local voice gate + GPT transcription via the authenticated backend."""
+        segments: asyncio.Queue[bytes] = asyncio.Queue(maxsize=3)
+        sender = asyncio.create_task(self.backend_microphone_segmenter(segments))
+        receiver = asyncio.create_task(self.backend_transcription_receiver(segments))
+        heartbeat = asyncio.create_task(self.heartbeat())
+        if initial_transcript.strip():
+            await self.handle_transcript(initial_transcript)
+        while not self.stop.is_set() and time.monotonic() - started < int(self.config["session"]["maxSeconds"]):
+            for task in (sender, receiver):
+                if task.done():
+                    error = task.exception()
+                    if error:
+                        raise error
+                    self.stop.set()
+            await asyncio.sleep(0.05)
+        for task in (sender, receiver, heartbeat):
+            task.cancel()
+        await asyncio.gather(sender, receiver, heartbeat, return_exceptions=True)
+
     async def run(self, initial_transcript: str = "") -> None:
         self.speaker.start()
         try:
@@ -2668,9 +2881,13 @@ class VoiceSessionV2:
             await self.update_state("listening", True)
             write_live_preview(status=localized_runtime_status(self.language, "active"))
             started = time.monotonic()
-            stt_provider = "npu_whisper" if self.npu_whisper else "deepgram"
+            stt_provider = self.stt_mode
+            if stt_provider == "npu_whisper" and not self.npu_whisper:
+                stt_provider = "deepgram"
             log(f"v2 session started with language {self.language}; stt={stt_provider}")
-            if self.npu_whisper:
+            if stt_provider == "openai":
+                await self.run_backend_transport(initial_transcript, started)
+            elif stt_provider == "npu_whisper":
                 await self.run_npu_transport(initial_transcript, started)
             else:
                 await self.run_deepgram_transport(initial_transcript, started)
@@ -2725,7 +2942,12 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
     npu_start_task: asyncio.Task[None] | None = None
     # Keep the local NPU as Picovoice's private wake-verification engine even
     # when Deepgram streaming owns high-accuracy command transcription.
-    if status["providers"]["npuWhisper"]["runtimePresent"]:
+    effective_stt_provider = str(status["providers"]["npuWhisper"]["effectiveProvider"])
+    npu_needed = (
+        str(status["providers"]["wake"]["effectiveProvider"]) == "picovoice_porcupine"
+        or effective_stt_provider == "npu_whisper"
+    )
+    if status["providers"]["npuWhisper"]["runtimePresent"] and npu_needed:
         # Loading the Qualcomm Whisper graph can take tens of seconds on a
         # cold start. Do it in parallel: Porcupine begins listening at once,
         # and a command spoken during warm-up uses the configured Deepgram
@@ -2733,11 +2955,12 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
         npu_candidate = NpuWhisperClient(config)
         npu_start_task = asyncio.create_task(asyncio.to_thread(npu_candidate.start))
     effective_provider = str(status["providers"]["wake"]["effectiveProvider"])
-    wake = (
-        PicovoiceWakeWord(config, parent_pid, sentinel, npu_whisper)
-        if effective_provider == "picovoice_porcupine"
-        else DeepgramWakeWord(config, parent_pid, sentinel)
-    )
+    if effective_provider == "picovoice_porcupine":
+        wake: Any = PicovoiceWakeWord(config, parent_pid, sentinel, npu_whisper)
+    elif effective_provider == "openai_vad":
+        wake = OpenAIWakeWord(config, parent_pid, sentinel)
+    else:
+        wake = DeepgramWakeWord(config, parent_pid, sentinel)
 
     if npu_start_task and npu_candidate:
         def attach_npu_when_ready(task: asyncio.Task[None]) -> None:
@@ -2767,7 +2990,11 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
                         "v2 Picovoice wake failure; using Deepgram fallback: "
                         f"{type(exc).__name__}: {str(exc)[:240]}"
                     )
-                    wake = DeepgramWakeWord(config, parent_pid, sentinel)
+                    wake = (
+                        OpenAIWakeWord(config, parent_pid, sentinel)
+                        if effective_stt_provider == "openai"
+                        else DeepgramWakeWord(config, parent_pid, sentinel)
+                    )
                     continue
                 raise
             if activation_command is None:
@@ -2778,7 +3005,9 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
                     if status["providers"]["npuWhisper"]["effectiveProvider"] == "npu_whisper"
                     else None
                 )
-                await VoiceSessionV2(config, parent_pid, sentinel, active_npu).run(activation_command)
+                await VoiceSessionV2(
+                    config, parent_pid, sentinel, active_npu, stt_mode=effective_stt_provider
+                ).run(activation_command)
             except Exception as exc:
                 # A transient network/provider failure returns to the wake
                 # listener rather than creating a second process or session.
@@ -2841,6 +3070,10 @@ def main() -> int:
         print(json.dumps(run_text_request(args.text), ensure_ascii=False))
         return 0
     if args.run:
+        if not acquire_single_instance():
+            log("v2 runtime already running in this session; second instance exits (code 3)")
+            print(json.dumps({"status": "already_running", "runtime": RUNTIME_NAME}))
+            return 3
         asyncio.run(run_voice_v2(args.parent_pid, str(args.stop_file)))
         return 0
     parser.print_help()

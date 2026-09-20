@@ -314,6 +314,10 @@ function Start-VoiceV2 {
   if(!(Test-Path -LiteralPath $v2Runner) -or !(Test-Path -LiteralPath $v2Runtime)) {
     throw 'Emma Voice v2 is not installed. Run Install-VoiceV2.ps1 again.'
   }
+  # Exactly one listener: an orphaned runtime from an earlier launcher (or a
+  # runner whose Python child outlived it) is stopped before a new one starts.
+  # The Python runtime additionally holds a kernel mutex as the last guard.
+  Stop-VoiceV2
   Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
   $script:voiceRunnerProcess = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @(
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$v2Runner`"",

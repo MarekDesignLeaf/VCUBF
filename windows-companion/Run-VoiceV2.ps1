@@ -86,8 +86,10 @@ $alreadyRunning=@(Get-CimInstance Win32_Process|Where-Object{
   $_.CommandLine -and $_.CommandLine.IndexOf($runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -like '*--run*'
 })
 if($alreadyRunning){
-  [Windows.Forms.MessageBox]::Show('Emma Voice v2 is already running.','VCUBF Emma Voice v2','OK','Information')|Out-Null
-  exit 0
+  # Silent: the unified launcher re-arms automatically and a modal dialog here
+  # blocked it. The Python runtime also holds a kernel mutex (exit code 3), so
+  # a second listener cannot start even if this process-list check races.
+  exit 3
 }
 
 if(!$v2Diagnostic.ready){
@@ -101,6 +103,7 @@ if(!$v2Diagnostic.ready){
     if(!$v2Diagnostic.providers.wake.picovoiceSettingsValid){$missing+='Picovoice wake-word settings'}
   }elseif(!$v2Diagnostic.providers.wake.vadSettingsValid){$missing+='Deepgram VAD wake-word settings'}
   if(!$v2Diagnostic.providers.npuWhisper.providerConfigured){$missing+='speech-to-text provider'}
+  if($v2Diagnostic.providers.wake.requestedProvider -eq 'openai_vad' -and !$v2Diagnostic.providers.wake.vadSettingsValid){$missing+='wake-word voice-gate settings'}
   if($v2Diagnostic.providers.npuWhisper.effectiveProvider -eq 'deepgram'){
     if(!$v2Diagnostic.providers.deepgram.apiKeyPresent){$missing+='DEEPGRAM_API_KEY'}
     if(!$v2Diagnostic.providers.deepgram.streamTimingValid){$missing+='Deepgram streaming timing (utterance end must be 1000–5000 ms)'}
@@ -119,8 +122,16 @@ $ownerPid=if($OwnerProcessId -gt 0){$OwnerProcessId}else{$PID}
 Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
 $arguments=@($python.Prefix) + @("`"$runtime`"",'--run','--parent-pid',$ownerPid,'--stop-file',"`"$stopFile`"")
 $process=Start-Process -FilePath $python.Path -ArgumentList $arguments -WindowStyle Hidden -PassThru
-$wakeEngine=if($v2Diagnostic.providers.wake.effectiveProvider -eq 'picovoice_porcupine'){'Picovoice (lokálně)'}else{'Deepgram VAD'}
-$sttEngine=if($v2Diagnostic.providers.npuWhisper.effectiveProvider -eq 'npu_whisper'){'Qualcomm NPU Whisper'}else{'Deepgram'}
+$wakeEngine=switch($v2Diagnostic.providers.wake.effectiveProvider){
+  'picovoice_porcupine'{'Picovoice (lokálně)'}
+  'openai_vad'{'GPT (OpenAI)'}
+  default{'Deepgram VAD'}
+}
+$sttEngine=switch($v2Diagnostic.providers.npuWhisper.effectiveProvider){
+  'npu_whisper'{'Qualcomm NPU Whisper'}
+  'openai'{'GPT (OpenAI)'}
+  default{'Deepgram'}
+}
 
 $menu=New-Object Windows.Forms.ContextMenuStrip
 $exit=$menu.Items.Add('Ukončit Emmu Voice v2')
@@ -135,7 +146,9 @@ $exit.Add_Click({ $context.ExitThread() })
 $timer=New-Object Windows.Forms.Timer -Property @{Interval=1000}
 $timer.Add_Tick({
   if($process.HasExited){
-    $notify.ShowBalloonTip(3000,'Emma Voice v2','Hlasová relace skončila.','Info')
+    if($process.ExitCode -ne 3){
+      $notify.ShowBalloonTip(3000,'Emma Voice v2','Hlasová relace skončila.','Info')
+    }
     $context.ExitThread()
   }
 })

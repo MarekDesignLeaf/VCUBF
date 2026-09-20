@@ -131,6 +131,27 @@ function buildTranscriptionPrompt(isoLanguage: string, wakeWord: string, extraVo
 }
 
 /**
+ * The gpt-4o transcribe models can answer near-silent audio with the prompt
+ * itself (or a large piece of it). Nobody dictates the vocabulary list, so a
+ * transcript that mostly consists of prompt words is treated as silence.
+ */
+export function isPromptEcho(text: string, prompt: string): boolean {
+  const fold = (value: string) =>
+    value.toLowerCase().normalize("NFKD").replace(/\p{M}+/gu, "").replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
+  const heard = fold(text);
+  if (heard.length === 0) return false;
+  const promptWords = new Set(fold(prompt));
+  if (promptWords.size === 0) return false;
+  const joinedHeard = heard.join(" ");
+  const joinedPrompt = [...fold(prompt)].join(" ");
+  if (heard.length >= 3 && joinedPrompt.includes(joinedHeard)) return true;
+  if (/^(context|kontext|prompt|vocabulary|slovnik)\b/.test(joinedHeard)) return true;
+  if (heard.length < 6) return false;
+  const overlap = heard.filter((word) => promptWords.has(word)).length / heard.length;
+  return overlap >= 0.85;
+}
+
+/**
  * Whisper fabricates text from silence or noise. These are the shapes it
  * produces in practice: bare URLs, subtitle credits and stock sign-offs. They
  * are never real commands here, so treating them as "heard nothing" is safe.
@@ -191,10 +212,12 @@ export async function transcribeVoiceAudio(
   // after the fact.
   extraVocabulary: string[] = []
 ): Promise<VoiceTranscription> {
-  // whisper-1, not gpt-4o-*-transcribe: the 4o transcribe models treat the
-  // prompt as an instruction and echo it back as the transcript when the audio
-  // carries no speech, which surfaced as commands like "context: ### Emma ###".
-  const model = process.env.OPENAI_TRANSCRIPTION_MODEL ?? "whisper-1";
+  // GPT transcription (gpt-4o-transcribe) is the default: measurably better
+  // Czech/English recognition of short commands than whisper-1. The 4o models
+  // treat the prompt as an instruction and can echo it back when the audio
+  // carries no speech (seen as "context: ### Emma ###"); isPromptEcho() below
+  // turns that into "heard nothing" instead of a command.
+  const model = process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe";
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(audio)], { type: "audio/wav" }), "emma-command.wav");
   form.append("model", model);
@@ -237,6 +260,7 @@ export async function transcribeVoiceAudio(
   if (!response.ok) throw new Error(`OPENAI_TRANSCRIPTION_FAILED_${response.status}`);
   const payload = z.object({ text: z.string() }).parse(await response.json());
   const text = payload.text.trim();
+  if (isPromptEcho(text, prompt)) return { text: "", model };
   // Silence is a normal outcome of always-on listening, not an error. Whisper
   // invents plausible sentences from near-silent audio (observed: Czech website
   // names), so anything shaped like a hallucination becomes empty text and the
