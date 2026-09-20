@@ -198,6 +198,8 @@ describe("command/text", () => {
   });
 
   it("uses multi-turn client details, reports invalid contact data, and confirms only a real create", async () => {
+    // The language-change test above persists cs-CZ on the admin user; this test asserts English copy.
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "en-GB" } });
     const previousKey = process.env.OPENAI_API_KEY;
     const previousFetch = globalThis.fetch;
     process.env.OPENAI_API_KEY = "test-key";
