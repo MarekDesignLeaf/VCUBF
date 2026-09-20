@@ -73,8 +73,15 @@ async function main() {
 }
 
 main().catch((error) => {
-  const name = error && error.name ? error.name : 'Error';
-  const message = error && error.message ? String(error.message).slice(0, 300) : '';
+  // Picovoice errors leave ``name`` as the generic "Error"; the constructor
+  // carries the class that says why (for example an exhausted AccessKey
+  // activation limit), and the message arrives with embedded newlines that
+  // would break the single-line companion log.
+  const name =
+    (error && error.constructor && error.constructor.name) || (error && error.name) || 'Error';
+  const message = error && error.message
+    ? String(error.message).replace(/\s+/g, ' ').trim().slice(0, 300)
+    : '';
   process.stderr.write(`PICOVOICE_SIDECAR_FAILED ${name} ${message}\n`);
   process.exitCode = 1;
 });

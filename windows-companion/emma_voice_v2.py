@@ -1812,17 +1812,33 @@ class PicovoiceWakeWord:
             while companion_is_running(self.parent_pid, self.stop_file):
                 if process.stdout is None:
                     raise RuntimeError("PICOVOICE_NODE_STDOUT_UNAVAILABLE")
+                now = time.monotonic()
+                if not sidecar_ready and now - started_at > 8.0:
+                    raise RuntimeError("PICOVOICE_NODE_START_TIMEOUT")
+                if sidecar_ready and now - last_audio_at > 5.0:
+                    raise RuntimeError("PICOVOICE_MICROPHONE_STALLED")
                 try:
                     raw_line = await asyncio.wait_for(process.stdout.readline(), timeout=1.0)
                 except asyncio.TimeoutError:
                     if process.returncode is not None:
                         raise RuntimeError("PICOVOICE_NODE_EXITED")
-                    now = time.monotonic()
-                    if not sidecar_ready and now - started_at > 8.0:
-                        raise RuntimeError("PICOVOICE_NODE_START_TIMEOUT")
-                    if sidecar_ready and now - last_audio_at > 5.0:
-                        raise RuntimeError("PICOVOICE_MICROPHONE_STALLED")
                     continue
+                if not raw_line:
+                    # Closed stdout means the sidecar has exited or is exiting.
+                    # ``returncode`` stays None until the child is reaped, so
+                    # reading it alone turned this into a busy wait: readline
+                    # returned end-of-file immediately and forever, the start
+                    # timeout above was never reached, and a wake word that
+                    # failed to initialise left Emma silent instead of falling
+                    # back to Deepgram.
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=2.0)
+                    except asyncio.TimeoutError:
+                        pass
+                    error_name = ""
+                    if process.stderr is not None:
+                        error_name = (await process.stderr.read()).decode("utf-8", errors="replace").strip()[:160]
+                    raise RuntimeError(error_name or "PICOVOICE_NODE_EXITED")
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if line.startswith("READY"):
                     sidecar_ready = True
@@ -1852,11 +1868,6 @@ class PicovoiceWakeWord:
                         log("v2 Picovoice Node wake word detected and confirmed")
                         return "accepted", command
                     return "rejected", ""
-                if not line and process.returncode is not None:
-                    error_name = ""
-                    if process.stderr is not None:
-                        error_name = (await process.stderr.read()).decode("utf-8", errors="replace").strip()[:160]
-                    raise RuntimeError(error_name or "PICOVOICE_NODE_EXITED")
             return "stopped", ""
         finally:
             if process.returncode is None:
