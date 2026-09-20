@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import { prisma } from "../db.js";
+import { idempotency } from "./idempotency.js";
 
 export interface AuthedUser {
   id: string;
@@ -25,7 +26,16 @@ declare global {
   }
 }
 
-const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-me";
+// CP-CODE-001 (SEC-04 / SYS-NFR-003): fail closed in production — a missing JWT secret must never
+// silently fall back to a well-known development value.
+const JWT_SECRET: string = (() => {
+  const configured = process.env.JWT_SECRET;
+  if (configured && configured.length >= 16) return configured;
+  if (process.env.NODE_ENV === "production" || process.env.RAILWAY_ENVIRONMENT) {
+    throw new Error("JWT_SECRET_MISSING_OR_TOO_SHORT: set JWT_SECRET (>=16 chars) in the production environment");
+  }
+  return "dev-secret-change-me";
+})();
 
 export function signToken(user: AuthedUser, authVersion: number, expiresIn: SignOptions["expiresIn"] = "7d"): string {
   return jwt.sign({ sub: user.id, authVersion }, JWT_SECRET, { expiresIn });
@@ -49,6 +59,8 @@ export async function verifyDesktopBootstrapToken(token: string): Promise<{ user
     },
   };
 }
+
+const idempotencyGuard = idempotency();
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
@@ -75,8 +87,14 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       voiceContinuous: user.voiceContinuous,
       voiceLanguage: user.voiceLanguage,
     };
-    next();
   } catch {
     return res.status(401).json({ error: "MISSING_PERMISSION", message: "Invalid token" });
+  }
+  // Idempotency is enforced for every authenticated mutating request (CON-012 / OAS-001).
+  // Runs outside the token try/catch so a storage error is reported as such, not as "Invalid token".
+  try {
+    return await idempotencyGuard(req, res, next);
+  } catch (error) {
+    return res.status(503).json({ code: "IDEMPOTENCY_STORE_UNAVAILABLE", message: (error as Error).message, retryable: true });
   }
 }

@@ -217,7 +217,7 @@ export async function createQuote(user: AuthedUser, rawInput: unknown): Promise<
       notes: data.notes,
       validUntil: data.valid_until ? new Date(data.valid_until) : undefined,
       createdBy: user.id,
-      items: { create: resolved.data! },
+      items: { create: resolved.data!.map((item) => ({ ...item, companyId: user.companyId })) },
     },
     include: quoteInclude,
   });
@@ -304,7 +304,7 @@ export async function updateQuote(user: AuthedUser, quoteId: string, rawInput: u
       where: { id: quoteId },
       data: {
         ...changes,
-        ...(itemsResolved?.data ? { items: { create: itemsResolved.data } } : {}),
+        ...(itemsResolved?.data ? { items: { create: itemsResolved.data.map((item) => ({ ...item, companyId: user.companyId })) } } : {}),
       },
       include: quoteInclude,
     });

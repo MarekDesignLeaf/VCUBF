@@ -41,6 +41,11 @@ model Company {
   jobs                         Job[]
   leads                        Lead[]
   auditLogs                    AuditLog[]
+  payments                     Payment[]
+  quoteItems                   QuoteItem[]
+  invoiceItems                 InvoiceItem[]
+  jobResourceRequirements      JobResourceRequirement[]
+  idempotencyKeys              IdempotencyKey[]
   serviceCatalogueItems        ServiceCatalogueItem[]
   quotes                       Quote[]
   invoices                     Invoice[]
@@ -443,6 +448,7 @@ model Job {
 // client account is created. Source fields keep every fact traceable.
 model JobResourceRequirement {
   id String @id @default(uuid())
+  companyId String @map("company_id")
   jobId String @map("job_id")
   resourceType String @map("resource_type")
   name String
@@ -456,6 +462,8 @@ model JobResourceRequirement {
   updatedAt DateTime @updatedAt @map("updated_at")
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
   @@index([jobId])
+  company Company @relation(fields: [companyId], references: [id])
+  @@index([companyId])
   @@map("job_resource_requirements")
 }
 
@@ -773,6 +781,7 @@ model Quote {
 
 model QuoteItem {
   id                     String   @id @default(uuid())
+  companyId              String   @map("company_id")
   quoteId                String   @map("quote_id")
   serviceCatalogueItemId String?  @map("service_catalogue_item_id")
   description            String
@@ -787,6 +796,8 @@ model QuoteItem {
 
   @@index([quoteId])
   @@index([serviceCatalogueItemId])
+  company Company @relation(fields: [companyId], references: [id])
+  @@index([companyId])
   @@map("quote_items")
 }
 
@@ -814,6 +825,7 @@ model Invoice {
 
 model InvoiceItem {
   id String @id @default(uuid())
+  companyId String @map("company_id")
   invoiceId String @map("invoice_id")
   description String
   quantity Float @default(1)
@@ -821,11 +833,14 @@ model InvoiceItem {
   sortOrder Int @default(0) @map("sort_order")
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   @@index([invoiceId])
+  company Company @relation(fields: [companyId], references: [id])
+  @@index([companyId])
   @@map("invoice_items")
 }
 
 model Payment {
   id String @id @default(uuid())
+  companyId String @map("company_id")
   invoiceId String @map("invoice_id")
   amount Decimal @db.Decimal(14, 2)
   paidAt DateTime @map("paid_at")
@@ -834,6 +849,8 @@ model Payment {
   createdAt DateTime @default(now()) @map("created_at")
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   @@index([invoiceId])
+  company Company @relation(fields: [companyId], references: [id])
+  @@index([companyId])
   @@map("payments")
 }
 
@@ -1362,10 +1379,32 @@ model AuditLog {
   result               String
   errorMessage         String?  @map("error_message")
   createdAt            DateTime @default(now()) @map("created_at")
+  sequenceNo           BigInt?  @map("sequence_no")
+  prevHash             String?  @map("prev_hash")
+  entryHash            String?  @map("entry_hash")
 
   company Company @relation(fields: [companyId], references: [id])
   user    User?   @relation(fields: [userId], references: [id])
 
+  @@unique([companyId, sequenceNo])
   @@index([companyId, createdAt])
   @@map("audit_log")
+}
+
+// CP-CODE-001 / SEC-29 OAS-001 / CON-012: idempotent mutating requests.
+model IdempotencyKey {
+  id             String   @id @default(uuid())
+  companyId      String   @map("company_id")
+  userId         String?  @map("user_id")
+  key            String
+  requestHash    String   @map("request_hash")
+  responseStatus Int?     @map("response_status")
+  responseBody   Json?    @map("response_body")
+  state          String   @default("IN_PROGRESS")
+  createdAt      DateTime @default(now()) @map("created_at")
+  completedAt    DateTime? @map("completed_at")
+  company Company @relation(fields: [companyId], references: [id])
+  @@unique([companyId, key])
+  @@index([companyId, createdAt])
+  @@map("idempotency_keys")
 }
