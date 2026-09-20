@@ -24,7 +24,8 @@ function runTests(url) {
     env: { ...process.env, DATABASE_URL: url },
     stdio: "inherit",
   });
-  console.log("Checking schema/migration drift...");
+  console.log("Checking schema/migration drift (diff printed below if any)...");
+  try { execFileSync(process.execPath, [prismaCli, "migrate", "diff", "--from-schema-datasource", "prisma/schema.prisma", "--to-schema-datamodel", "prisma/schema.prisma", "--script"], { env: { ...process.env, DATABASE_URL: url }, stdio: "inherit" }); } catch {}
   // Compare the freshly migrated live DB with the datamodel (no shadow DB needed; touches nothing).
   execFileSync(process.execPath, [prismaCli, "migrate", "diff", "--from-schema-datasource", "prisma/schema.prisma", "--to-schema-datamodel", "prisma/schema.prisma", "--exit-code"], {
     env: { ...process.env, DATABASE_URL: url },
