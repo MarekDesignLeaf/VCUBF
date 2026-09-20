@@ -1,6 +1,6 @@
 -- CP-CODE-001 follow-up: the original CHECK constraint on voice_pending_actions.status
 -- listed only the e-mail sending states. The service layer has since added
--- 'deleting', 'archiving', 'executing' and 'replaced' (voiceNotificationService,
+-- 'deleting', 'archiving', 'executing', 'replaced' and 'completed' (voiceNotificationService,
 -- voiceGmailService, emmaExecutableActionService, ...). Environments created with
 -- `prisma db push` never carried the constraint (Prisma does not manage CHECK
 -- constraints), so the mismatch was invisible until CI switched to `migrate deploy`.
@@ -12,7 +12,7 @@ ALTER TABLE "voice_pending_actions"
   ADD CONSTRAINT "voice_pending_actions_status_check"
   CHECK ("status" IN (
     'pending', 'sending', 'sent', 'cancelled', 'expired', 'failed',
-    'deleting', 'archiving', 'executing', 'replaced'
+    'deleting', 'archiving', 'executing', 'replaced', 'completed'
   )) NOT VALID;
 
 -- Validate separately so existing rows are checked without a long exclusive lock.
