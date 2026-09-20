@@ -20,6 +20,12 @@ describe("Idempotency-Key middleware (CON-012 / OAS-001)", () => {
     const body = { display_name: "Idem Client", email_primary: "idem@example.com" };
     const first = await request(app).post("/crm/clients").set("Authorization", `Bearer ${token}`).set("Idempotency-Key", "k-1").send(body);
     assert.equal(first.status, 201);
+    // The COMPLETED write is dispatched before the response is flushed but is not awaited; wait for it deterministically.
+    for (let i = 0; i < 50; i += 1) {
+      const row = await prisma.idempotencyKey.findUnique({ where: { companyId_key: { companyId: TEST_COMPANY_ID, key: "k-1" } } });
+      if (row?.state === "COMPLETED") break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
     const second = await request(app).post("/crm/clients").set("Authorization", `Bearer ${token}`).set("Idempotency-Key", "k-1").send(body);
     assert.equal(second.status, 201);
     assert.equal(second.headers["idempotency-replayed"], "true");
@@ -39,7 +45,7 @@ describe("Idempotency-Key middleware (CON-012 / OAS-001)", () => {
     assert.equal(a.status, 201); assert.equal(b.status, 201); assert.equal(b.headers["idempotency-replayed"], "true");
   });
 
-  it("does not memoise a validation failure differently from success semantics: 4xx is replayed, 5xx is not stored", async () => {
+  it("memoises a 4xx validation failure as COMPLETED (5xx path is not exercised here; see idempotency.ts)", async () => {
     const bad = await request(app).post("/crm/clients").set("Authorization", `Bearer ${token}`).set("Idempotency-Key", "k-3").send({});
     assert.ok(bad.status >= 400 && bad.status < 500);
     const row = await prisma.idempotencyKey.findUnique({ where: { companyId_key: { companyId: TEST_COMPANY_ID, key: "k-3" } } });
