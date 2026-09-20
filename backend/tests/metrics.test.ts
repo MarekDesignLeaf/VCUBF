@@ -32,13 +32,13 @@ describe("Measurement and KPI Module", () => {
     const service = await prisma.serviceCatalogueItem.create({ data: { companyId: TEST_COMPANY_ID, name: "Fencing" } });
     for (const [index, status] of ["accepted", "rejected", "rejected", "expired"].entries()) {
       const items = index === 0
-        ? [{ description: "Costed work", quantity: 1, unitPrice: 100, unitCost: 60, serviceCatalogueItemId: service.id, sortOrder: 0 }, { description: "Uncosted work", quantity: 1, unitPrice: 50, serviceCatalogueItemId: service.id, sortOrder: 1 }]
-        : [{ description: "Work", quantity: 1, unitPrice: 100 + index * 100, sortOrder: 0 }];
+        ? [{ companyId: TEST_COMPANY_ID, description: "Costed work", quantity: 1, unitPrice: 100, unitCost: 60, serviceCatalogueItemId: service.id, sortOrder: 0 }, { companyId: TEST_COMPANY_ID, description: "Uncosted work", quantity: 1, unitPrice: 50, serviceCatalogueItemId: service.id, sortOrder: 1 }]
+        : [{ companyId: TEST_COMPANY_ID, description: "Work", quantity: 1, unitPrice: 100 + index * 100, sortOrder: 0 }];
       await prisma.quote.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, title: `Quote ${index}`, quoteStatus: status, items: { create: items } } });
     }
     const previousCreatedAt = new Date(Date.now() - 45 * 86_400_000);
     await prisma.lead.create({ data: { companyId: TEST_COMPANY_ID, name: "Previous lead", leadStatus: "converted", serviceRequested: "FENCING", createdAt: previousCreatedAt } });
-    await prisma.quote.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, title: "Previous quote", quoteStatus: "accepted", createdAt: previousCreatedAt, items: { create: [{ description: "Previous work", quantity: 1, unitPrice: 500, sortOrder: 0 }] } } });
+    await prisma.quote.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, title: "Previous quote", quoteStatus: "accepted", createdAt: previousCreatedAt, items: { create: [{ companyId: TEST_COMPANY_ID, description: "Previous work", quantity: 1, unitPrice: 500, sortOrder: 0 }] } } });
     await prisma.job.create({ data: { companyId: TEST_COMPANY_ID, clientId: client.id, jobTitle: "Previous completed job", jobStatus: "dokonceno", createdAt: previousCreatedAt } });
     await prisma.user.updateMany({ where: { companyId: TEST_COMPANY_ID }, data: { weeklyCapacityHours: 20 } });
     const { weekStart } = getWeekRange();

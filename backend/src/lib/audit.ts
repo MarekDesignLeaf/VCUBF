@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { computeEntryHash, GENESIS_HASH } from "./auditChain.js";
 
@@ -31,12 +32,15 @@ interface AuditEntryInput {
  */
 export async function recordAudit(entry: AuditEntryInput) {
   const createdAt = new Date();
-  return prisma.$transaction(async (tx) => {
-    // Serialise per company: lock the latest chained row (if any).
+  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    // Serialise per company with a transaction-scoped advisory lock. A row lock would not
+    // work: under READ COMMITTED a waiter re-reads the same (stale) latest row after the
+    // holder commits, and there is no row to lock for a company's first entry.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${entry.companyId}))`;
     const last = await tx.$queryRaw<Array<{ sequence_no: bigint | null; entry_hash: string | null }>>`
       SELECT sequence_no, entry_hash FROM audit_log
       WHERE company_id = ${entry.companyId} AND sequence_no IS NOT NULL
-      ORDER BY sequence_no DESC LIMIT 1 FOR UPDATE`;
+      ORDER BY sequence_no DESC LIMIT 1`;
     const prevSeq = last[0]?.sequence_no ?? 0n;
     const prevHash = last[0]?.entry_hash ?? GENESIS_HASH;
     const sequenceNo = BigInt(prevSeq) + 1n;

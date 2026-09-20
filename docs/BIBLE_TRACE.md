@@ -10,8 +10,8 @@ Reconciliation date: 20 September 2026 (CP-CODE-001). Bible package: v6.1 (CP-v6
 |---|---|---|---|---|
 | middleware/auth, modules/auth, devicePairing | SEC-04, SEC-11 §7, SEC-31 | W1 | IMPLEMENTED | JWT only; no step-up/identity assurance levels; Voice ID absent (SEC-02 §4) |
 | middleware/permissions, User.permissions[] | SEC-11, SEC-31 | W1 | IMPLEMENTED | flat permission strings (`crm.manage`) vs registry capabilities — bridged by `docs/bible/action_capability_map.csv`; no delegation, no data-class scopes |
-| lib/actionContracts, lib/audit, modules/audit | SEC-01 CON-010/011, SEC-04, SEC-25 | W1 | IMPLEMENTED | contracts are static metadata (no persisted contract, payload_hash, Approval entity, OUTCOME_UNKNOWN); audit hash-chain + append-only trigger added in CP-CODE-001 |
-| middleware/idempotency (new) | CON-012, SEC-29 OAS-001, API-030 | W1 | IMPLEMENTED (CP-CODE-001) | soft mode by default; `IDEMPOTENCY_REQUIRED=1` enforces; no If-Match/entity_version yet |
+| lib/actionContracts, lib/audit, modules/audit | SEC-01 CON-010/011, SEC-04, SEC-25 | W1 | IMPLEMENTED | contracts are static metadata (no persisted contract, payload_hash, Approval entity, OUTCOME_UNKNOWN); audit hash-chain (advisory-lock serialised) + append-only trigger added in CP-CODE-001; `GET /audit/log` serialises sequence_no as string |
+| middleware/idempotency (new) | CON-012, SEC-29 OAS-001, API-030 | W1 | IMPLEMENTED (CP-CODE-001) | soft mode by default; `IDEMPOTENCY_REQUIRED=1` enforces; frontend does not yet send keys; 5xx not memoised; no If-Match/entity_version yet; no key retention job |
 | modules/company, SystemSetup | SEC-40 | W1 | IMPLEMENTED | bootstrap sequence partial; no BOOT-001 activation evidence record |
 | modules/crm (clients, contacts, leads, employees), services/client*/contact*/lead* | SEC-02 §5, SEC-08, SEC-28 | W1/W3 | IMPLEMENTED | dedupe basic; no provenance/uncertainty states on extracted records |
 | modules/crm/jobs, services/jobService, jobResourceService | SEC-02 §9–10, SEC-21 (Job) | W1 | IMPLEMENTED | job statuses are a flat list; SEC-21 transition table/guards not enforced; completion evidence gate absent |
@@ -35,6 +35,9 @@ Approval entity and payload-hash binding (SEC-04/SEC-25) · state-machine engine
 
 ## Deployment reality (Railway project VCUBF, 20 Sep 2026)
 backend deployed from `84c64f2` (15 Jul), frontend from 17 Jul, master at `6816619` (18 Jul); production traffic ≈ health-checks only; no staging environment; DB backups not evidenced (SYS-NFR-005).
+
+## Test evidence
+Pure: `tests/auditChain.test.ts`, `tests/idempotencyFingerprint.test.ts` (run in authoring sandbox). DB-backed (CI): `tests/idempotency.test.ts`, `tests/auditChainDb.test.ts`; CI now applies real migrations (`prisma migrate deploy`) and fails on schema/migration drift.
 
 ## Bridge artefacts in this repo
 - `docs/bible/capability_registry.csv` — copy of the canonical registry (v6.1, 49 capabilities)

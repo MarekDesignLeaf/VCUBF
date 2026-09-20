@@ -3,7 +3,8 @@
 // at least as strict as the registry (PERM-011). Exit 1 on drift. Runs in CI without a database.
 import fs from "node:fs";
 import path from "node:path";
-const root = path.resolve(new URL(".", import.meta.url).pathname, "../..");
+import { fileURLToPath } from "node:url";
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const csv = (p) => { const [h, ...rows] = fs.readFileSync(p, "utf8").trim().split(/\r?\n/).map(l => l.match(/("([^"]|"")*"|[^,]*)(,|$)/g).map(c => c.replace(/,$/, "").replace(/^"|"$/g, "").replace(/""/g, '"'))); return rows.map(r => Object.fromEntries(h.map((k, i) => [k, r[i] ?? ""]))); };
 const reg = new Map(csv(path.join(root, "docs/bible/capability_registry.csv")).map(r => [r.capability, r]));
 for (const r of csv(path.join(root, "docs/bible/capability_registry_proposed_additions.csv"))) reg.set(r.capability, { ...r, proposed: true });

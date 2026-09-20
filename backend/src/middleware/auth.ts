@@ -30,9 +30,9 @@ declare global {
 // silently fall back to a well-known development value.
 const JWT_SECRET: string = (() => {
   const configured = process.env.JWT_SECRET;
-  if (configured && configured.length >= 16) return configured;
+  if (configured && configured.length >= 32) return configured;
   if (process.env.NODE_ENV === "production" || process.env.RAILWAY_ENVIRONMENT) {
-    throw new Error("JWT_SECRET_MISSING_OR_TOO_SHORT: set JWT_SECRET (>=16 chars) in the production environment");
+    throw new Error("JWT_SECRET_MISSING_OR_TOO_SHORT: set JWT_SECRET (>=32 chars) in the production environment");
   }
   return "dev-secret-change-me";
 })();

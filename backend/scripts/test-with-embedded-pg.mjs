@@ -17,8 +17,15 @@ function runTests(url) {
     env: { ...process.env, DATABASE_URL: url },
     stdio: "inherit",
   });
-  console.log("Postgres up, pushing schema...");
-  execFileSync(process.execPath, [prismaCli, "db", "push", "--skip-generate"], {
+  // CP-CODE-001: apply the real migrations (not db push) so backfill SQL and triggers are exercised in CI,
+  // then fail if schema.prisma has drifted from the migration history.
+  console.log("Postgres up, applying migrations...");
+  execFileSync(process.execPath, [prismaCli, "migrate", "deploy"], {
+    env: { ...process.env, DATABASE_URL: url },
+    stdio: "inherit",
+  });
+  console.log("Checking schema/migration drift...");
+  execFileSync(process.execPath, [prismaCli, "migrate", "diff", "--from-migrations", "prisma/migrations", "--to-schema-datamodel", "prisma/schema.prisma", "--shadow-database-url", url, "--exit-code"], {
     env: { ...process.env, DATABASE_URL: url },
     stdio: "inherit",
   });

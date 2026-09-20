@@ -10,4 +10,5 @@ test("fingerprint distinguishes method, path and body", () => {
   assert.notEqual(a, requestFingerprint(req("POST", "/crm/clients", { name: "B" })));
   assert.notEqual(a, requestFingerprint(req("PUT", "/crm/clients", { name: "A" })));
   assert.notEqual(a, requestFingerprint(req("POST", "/crm/leads", { name: "A" })));
+  assert.equal(requestFingerprint(req("POST", "/x", { a: 1, b: 2 })), requestFingerprint(req("POST", "/x", { b: 2, a: 1 })));
 });

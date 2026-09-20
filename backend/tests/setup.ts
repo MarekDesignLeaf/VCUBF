@@ -8,7 +8,11 @@ export async function resetDb() {
   // quotes which reference clients/jobs; jobs reference clients/users/
   // catalogue items; jobs must go before the catalogue items they may
   // reference.
+  // audit_log is append-only at DB level (CP-CODE-001 trigger); tests reset it with the trigger disabled.
+  await prisma.$executeRawUnsafe('ALTER TABLE audit_log DISABLE TRIGGER USER');
   await prisma.auditLog.deleteMany({});
+  await prisma.$executeRawUnsafe('ALTER TABLE audit_log ENABLE TRIGGER USER');
+  await prisma.idempotencyKey.deleteMany({});
   await prisma.systemSetup.deleteMany({});
   await prisma.passwordResetToken.deleteMany({});
   await prisma.assistantMemory.deleteMany({});
