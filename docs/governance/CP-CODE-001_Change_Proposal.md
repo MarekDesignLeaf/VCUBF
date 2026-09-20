@@ -29,7 +29,10 @@ No article weakened. Tighter: audit becomes tamper-evident and append-only; secr
 - `node scripts/check-action-capability-map.mjs` → PASS (138 actions, 138 mapped).
 - Verification pass 1: REJECT (C1 CI-breaking test, C2 BigInt 500 on /audit/log, M1 chain race, M2 key deletion on disconnect, M3 trigger vs tests + migrations never executed in CI, M4 literal risk, M5 broad catch) — all fixed in `fd76dc5`.
 - Verification pass 2: APPROVE-WITH-FIXES (M3 shadow-DB misuse in migrate diff; Docker path still db push; flaky replay test; test title) — all fixed in `55105c0`. Pass-2 closing edits are builder-applied and not re-verified by a third pass (disclosed).
-- **Not verified here:** `tsc` and DB tests could not run in the authoring sandbox (Prisma engine download blocked). The first authoritative run is GitHub CI on push.
+- Sandbox limitation (disclosed): `tsc` and DB tests could not run in the authoring sandbox (Prisma engine download blocked); the authoritative run is GitHub CI.
+- **CI evidence (PR #1, commit `6eddb70`):** run https://github.com/MarekDesignLeaf/VCUBF/actions/runs/35534942171 — Backend build + PostgreSQL tests PASS (64 test files, 495 tests, 0 failures, incl. the 8 new DB-backed tests), Frontend build + lint PASS. Migration history now applied with `prisma migrate deploy` and drift-checked against `schema.prisma`.
+- Latent defects surfaced by running migrations in CI for the first time (all pre-existing, fixed in follow-up commits on this branch): (a) legacy FK/index names in `external_google_photos` / `voice_pending_actions` differed from Prisma-derived names → idempotent rename migration `20260920110000`; (b) `voice_pending_actions_status_check` lacked `deleting/archiving/executing/replaced/completed` used by the services (invisible under `db push`) → migration `20260920120000`; (c) `BigInt` `sequence_no` broke `JSON.stringify` of a raw audit row → global `BigInt.prototype.toJSON` in `src/db.ts`; (d) test-order leak in `tests/textCommand.test.ts` (admin language left as cs-CZ) → explicit reset.
+- Production note: item (b) means production (if created with `db push`) has NO check constraint today; `migrate deploy` will add the corrected one (`NOT VALID` + `VALIDATE`, no lock storm). Item (a) renames are conditional and no-ops where names already match.
 
 ## 5. How to apply
 ```
