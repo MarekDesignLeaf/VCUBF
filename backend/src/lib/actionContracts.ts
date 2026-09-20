@@ -779,7 +779,7 @@ export const EXPORT_QUOTE_PDF_ACTION: ActionContract = {
 };
 export const GET_UNPAID_INVOICES_ACTION: ActionContract = {
   actionName: "get_unpaid_invoices",
-  purpose: "Count issued invoices with a remaining balance for the authenticated company; drafts and void invoices are excluded.",
+  purpose: "Report issued invoices with a remaining balance for the authenticated company: how many, how much is outstanding, how much is overdue and which clients hold the largest balances. Every figure is a sum of recorded invoice balances; drafts and void invoices are excluded and nothing is estimated or forecast.",
   requiredPermission: "crm.read", riskLevel: 0, confirmationRequired: false,
   dataSources: ["crm.invoices", "crm.payments"], possibleErrors: ["MISSING_PERMISSION"],
 };

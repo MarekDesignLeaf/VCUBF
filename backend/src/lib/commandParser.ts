@@ -556,11 +556,21 @@ function parseLeadMutationCommand(text: string): Extract<ParsedCommand, { intent
   return undefined;
 }
 
+// "How many are unpaid", "how much is outstanding" and "who has not paid" are
+// three ways of asking one question, and get_unpaid_invoices answers all three
+// from the same real balances: the counts, the totals and the largest debtors.
+const UNPAID_INVOICE_QUESTION =
+  /^(?:kolik (?:mam|mame) (?:nezaplacenych|neuhrazenych) faktur(?:y)?|kolik (?:je|mame) (?:nezaplacenych|neuhrazenych) faktur(?:y)?|kdo (?:mi|nam) nezaplatil|kdo (?:mi|nam) dluzi|kolik (?:mi|nam) dluzi(?: klienti)?|(?:how many )?unpaid invoices(?: do (?:i|we) have)?|how many outstanding invoices(?: do (?:i|we) have)?|who owes (?:us|me)(?: money)?|who (?:has|have)(?:n['\u2019]?t| not) paid(?: (?:us|me))?|how much (?:are we|am i) owed)$/;
+
 export function parseTextCommand(rawText: string): ParsedCommand {
   const text = rawText.trim();
   const invoiceQuestion = text.normalize("NFD").replace(/\p{Diacritic}/gu, "")
     .toLowerCase().replace(/[.!?]+$/g, "").replace(/\s+/g, " ").trim();
-  if (/^(?:kolik (?:mam|mame) (?:nezaplacenych|neuhrazenych) faktur|(?:how many )?unpaid invoices(?: do (?:i|we) have)?|how many outstanding invoices(?: do (?:i|we) have)?)$/.test(invoiceQuestion)) {
+  // Money questions answered from real invoice balances. They are matched here
+  // rather than sent to the language model so the common phrasings answer
+  // without a network round trip; anything else still reaches the model, which
+  // returns the same allowlisted action.
+  if (UNPAID_INVOICE_QUESTION.test(invoiceQuestion)) {
     return { intent: "execute_action", entities: { action: "get_unpaid_invoices", parameters: {} } };
   }
 

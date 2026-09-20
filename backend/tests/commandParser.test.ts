@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../src/lib/commandParser.js";
+import { EMMA_EXECUTABLE_ACTION_GUIDE } from "../src/lib/emmaExecutableActionCatalogue.js";
 import { VOICE_PAGE_ROUTES } from "../src/lib/voiceNavigation.js";
 import { buildCommandUiAction } from "../src/lib/voiceNavigation.js";
 
@@ -437,5 +438,49 @@ describe("commandParser", () => {
     assert.equal(parseTextCommand('voice action drop_database {"confirmed":true}').intent, "unrecognized");
     assert.equal(parseTextCommand("voice action set_quote_status not-json").intent, "unrecognized");
     assert.equal(parseTextCommand('voice action set_quote_status {"quote_title":"Kitchen","quote_status":"invented"}').intent, "unrecognized");
+  });
+
+  it("accepts an allowlisted action that arrives without the voice action prefix", () => {
+    assert.deepEqual(parseTextCommand("get_unpaid_invoices {}"), {
+      intent: "execute_action",
+      entities: { action: "get_unpaid_invoices", parameters: {} },
+    });
+    assert.deepEqual(parseTextCommand('set_quote_status {"quote_title":"Kitchen","quote_status":"sent"}'), {
+      intent: "execute_action",
+      entities: { action: "set_quote_status", parameters: { quote_title: "Kitchen", quote_status: "sent" } },
+    });
+    // Dropping the prefix must not widen what may run.
+    assert.equal(parseTextCommand('drop_database {"confirmed":true}').intent, "unrecognized");
+    assert.equal(parseTextCommand('set_quote_status {"quote_title":"Kitchen","quote_status":"invented"}').intent, "unrecognized");
+  });
+
+  it("answers the spoken money questions from one allowlisted invoice action", () => {
+    const asked = [
+      "Kolik mam nezaplacenych faktur?",
+      "Kolik máme neuhrazených faktury",
+      "Kdo mi nezaplatil?",
+      "Kdo nám dluží",
+      "Who owes us money?",
+      "Who hasn\u2019t paid us",
+      "How much are we owed?",
+      "unpaid invoices",
+    ];
+    for (const question of asked) {
+      assert.deepEqual(
+        parseTextCommand(question),
+        { intent: "execute_action", entities: { action: "get_unpaid_invoices", parameters: {} } },
+        question,
+      );
+    }
+    // A question about money we owe is not the same question and must not be
+    // answered with our own receivables.
+    assert.equal(parseTextCommand("How much do we owe?").intent, "unrecognized");
+    assert.equal(parseTextCommand("Komu dlužíme?").intent, "unrecognized");
+  });
+
+  it("shows every allowlisted action to the model in its full canonical form", () => {
+    for (const line of EMMA_EXECUTABLE_ACTION_GUIDE.split("\n")) {
+      assert.match(line, /^- voice action [a-z_]+ \{/);
+    }
   });
 });

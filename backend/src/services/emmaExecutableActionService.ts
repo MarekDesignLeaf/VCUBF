@@ -108,6 +108,20 @@ async function connectorSource(user: AuthedUser, connectorKey: string) {
   return ok(200, (enabled[0] ?? matches[0]) as Row);
 }
 
+// Money spoken back to the user is rounded once, the same way invoice totals
+// are, so a sum of balances can never drift into a third decimal place.
+function moneyToTwoDecimals(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+// The user hears the amount written the way their own language writes it. No
+// currency symbol is added: the company record does not state a currency, and
+// inventing one would be a fabricated business fact.
+function spokenAmount(voiceLanguage: string) {
+  const formatter = new Intl.NumberFormat(voiceLanguage, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (value: number) => formatter.format(value);
+}
+
 function without(parameters: Record<string, unknown>, ...keys: string[]) {
   return Object.fromEntries(Object.entries(parameters).filter(([key]) => !keys.includes(key)));
 }
@@ -332,18 +346,58 @@ async function executeEmmaActionDirect(
     case "get_unpaid_invoices": {
       const invoices = await invoiceService.listInvoices(user);
       const unpaid = invoices.filter((invoice) => invoice.invoiceStatus === "issued" && invoice.totals.balance > 0);
+      const overdue = unpaid.filter((invoice) => invoice.isOverdue);
       const count = unpaid.length;
-      const overdueCount = unpaid.filter((invoice) => invoice.isOverdue).length;
-      const messages: Record<string, string> = {
-        cs: `Počet neuhrazených vystavených faktur: ${count}. Z toho po splatnosti: ${overdueCount}.`,
-        en: `Unpaid issued invoices: ${count}. Of these, overdue: ${overdueCount}.`,
-        pl: `Nieopłacone wystawione faktury: ${count}. W tym zaległe: ${overdueCount}.`,
-        de: `Unbezahlte ausgestellte Rechnungen: ${count}. Davon überfällig: ${overdueCount}.`,
-        fr: `Factures émises impayées : ${count}. Dont en retard : ${overdueCount}.`,
-        es: `Facturas emitidas pendientes de pago: ${count}. De ellas, vencidas: ${overdueCount}.`,
-        it: `Fatture emesse non pagate: ${count}. Di cui scadute: ${overdueCount}.`,
+      const overdueCount = overdue.length;
+      // Every figure below is a sum of real issued invoice balances. Nothing is
+      // estimated, apportioned or forecast, and no currency is spoken because
+      // the company record does not carry one.
+      const sumBalances = (list: typeof unpaid) =>
+        moneyToTwoDecimals(list.reduce((running, invoice) => running + invoice.totals.balance, 0));
+      const outstandingTotal = sumBalances(unpaid);
+      const overdueTotal = sumBalances(overdue);
+      const byClient = new Map<string, { client: string; balance: number; overdueBalance: number }>();
+      for (const invoice of unpaid) {
+        const name = invoice.client.displayName;
+        const entry = byClient.get(name) ?? { client: name, balance: 0, overdueBalance: 0 };
+        entry.balance = moneyToTwoDecimals(entry.balance + invoice.totals.balance);
+        if (invoice.isOverdue) entry.overdueBalance = moneyToTwoDecimals(entry.overdueBalance + invoice.totals.balance);
+        byClient.set(name, entry);
+      }
+      const debtors = [...byClient.values()].sort((left, right) => right.balance - left.balance);
+      const amount = spokenAmount(user.voiceLanguage);
+      const namedDebtors = debtors.slice(0, 3).map((entry) => `${entry.client} ${amount(entry.balance)}`).join(", ");
+      const owed: Record<string, string> = {
+        cs: `Neuhrazené vystavené faktury: ${count}, celkem ${amount(outstandingTotal)}. Po splatnosti: ${overdueCount}, celkem ${amount(overdueTotal)}.`,
+        en: `Unpaid issued invoices: ${count}, totalling ${amount(outstandingTotal)}. Overdue: ${overdueCount}, totalling ${amount(overdueTotal)}.`,
+        pl: `Nieopłacone wystawione faktury: ${count}, łącznie ${amount(outstandingTotal)}. Zaległe: ${overdueCount}, łącznie ${amount(overdueTotal)}.`,
+        de: `Unbezahlte ausgestellte Rechnungen: ${count}, insgesamt ${amount(outstandingTotal)}. Überfällig: ${overdueCount}, insgesamt ${amount(overdueTotal)}.`,
+        fr: `Factures émises impayées : ${count}, pour un total de ${amount(outstandingTotal)}. En retard : ${overdueCount}, pour un total de ${amount(overdueTotal)}.`,
+        es: `Facturas emitidas pendientes de pago: ${count}, por un total de ${amount(outstandingTotal)}. Vencidas: ${overdueCount}, por un total de ${amount(overdueTotal)}.`,
+        it: `Fatture emesse non pagate: ${count}, per un totale di ${amount(outstandingTotal)}. Scadute: ${overdueCount}, per un totale di ${amount(overdueTotal)}.`,
       };
-      return ok(200, { count, overdueCount, message: messages[user.voiceLanguage.slice(0, 2)] ?? messages.en });
+      const nothingOwed: Record<string, string> = {
+        cs: "Nemáte žádné neuhrazené vystavené faktury.",
+        en: "There are no unpaid issued invoices.",
+        pl: "Nie ma nieopłaconych wystawionych faktur.",
+        de: "Es gibt keine unbezahlten ausgestellten Rechnungen.",
+        fr: "Il n’y a aucune facture émise impayée.",
+        es: "No hay facturas emitidas pendientes de pago.",
+        it: "Non ci sono fatture emesse non pagate.",
+      };
+      const whoOwes: Record<string, string> = {
+        cs: `Nejvíc dluží: ${namedDebtors}.`,
+        en: `Largest balances: ${namedDebtors}.`,
+        pl: `Największe salda: ${namedDebtors}.`,
+        de: `Größte offene Beträge: ${namedDebtors}.`,
+        fr: `Soldes les plus élevés : ${namedDebtors}.`,
+        es: `Mayores saldos: ${namedDebtors}.`,
+        it: `Saldi più alti: ${namedDebtors}.`,
+      };
+      const spokenLanguage = user.voiceLanguage.slice(0, 2);
+      const pick = (table: Record<string, string>) => table[spokenLanguage] ?? table.en;
+      const message = count === 0 ? pick(nothingOwed) : `${pick(owed)} ${pick(whoOwes)}`;
+      return ok(200, { count, overdueCount, outstandingTotal, overdueTotal, debtors, message });
     }
     case "get_metrics": {
       const parsed = metricsService.metricsQuerySchema.safeParse(p);

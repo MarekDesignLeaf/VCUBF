@@ -416,6 +416,22 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     }
     command = await resolveUserCommand(user, assistant.canonical_command);
     if (command.intent === "unrecognized") {
+      // The user hears "not supported yet" while the command the model
+      // actually produced disappears. Recording it is what tells the
+      // difference between a capability the product lacks and a capability it
+      // has that the canonical parser rejected on a formatting detail.
+      await recordAudit({
+        companyId: user.companyId,
+        userId: user.id,
+        actionName: "interpret_voice_request",
+        interpretedIntent: "unrecognized",
+        inputPayload: { text: auditAssistantInput(text), inputMethod: input_method },
+        dataAfter: { kind: assistant.kind, canonicalCommand: auditAssistantInput(assistant.canonical_command) },
+        riskLevel: 0,
+        confirmationRequired: false,
+        result: "error",
+        errorMessage: "CANONICAL_COMMAND_NOT_RECOGNISED",
+      });
       return res.json({ ok: true, kind: "clarification", message: assistantServiceMessage(language, "unsupported") });
     }
     if (command.intent === "set_voice_language" && !isExplicitVoiceLanguageChange(alias.resolvedText, command.entities.language)) {

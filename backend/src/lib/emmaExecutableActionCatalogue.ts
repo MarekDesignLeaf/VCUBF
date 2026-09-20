@@ -112,7 +112,14 @@ export function isEmmaExecutableActionName(value: string): value is EmmaExecutab
 }
 
 export function parseEmmaExecutableActionCommand(rawText: string): EmmaExecutableActionRequest | undefined {
-  const match = rawText.trim().match(/^voice\s+action\s+([a-z_]+)\s*:?\s*(\{[\s\S]*\})$/i);
+  // The "voice action" prefix is how the guide asks for these, but a model
+  // that has just been shown a bare action name drops it often enough that a
+  // real capability came back to the user as "not supported yet". The prefix
+  // is therefore optional here: the action still has to be on the allowlist
+  // below, its parameters still have to validate, and the owning service still
+  // enforces the user's permission, so accepting the shorter form widens
+  // nothing except the spelling the parser will read.
+  const match = rawText.trim().match(/^(?:voice\s+action\s+)?([a-z_]+)\s*:?\s*(\{[\s\S]*\})$/i);
   if (!match) return undefined;
   const action = match[1].toLowerCase();
   if (!isEmmaExecutableActionName(action)) return undefined;
@@ -163,8 +170,12 @@ export const EMMA_EXECUTABLE_ACTION_PAGES: Record<EmmaExecutableActionName, stri
   update_emma_behavior: "learning", update_emma_permissions: "emma_permissions",
 };
 
+// Every line carries the whole canonical form the backend expects. Listing
+// the bare action name invited a reply of `get_unpaid_invoices {}`, which the
+// parser could not read, so an action the product does support was reported to
+// the user as unsupported.
 export const EMMA_EXECUTABLE_ACTION_GUIDE = Object.entries(EMMA_EXECUTABLE_ACTIONS)
-  .map(([name, definition]) => `- ${name} {${definition.fields}}${definition.confirmation === "service_preview" ? "; preview only, explicit confirmation remains required" : ""}`)
+  .map(([name, definition]) => `- voice action ${name} {${definition.fields}}${definition.confirmation === "service_preview" ? "; preview only, explicit confirmation remains required" : ""}`)
   .join("\n");
 
 // These contracts are still mirrored in administrator settings, but are not

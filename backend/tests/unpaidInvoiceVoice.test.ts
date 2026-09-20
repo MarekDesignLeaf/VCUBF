@@ -39,7 +39,7 @@ describe("Unpaid invoice voice query", () => {
   after(async () => { await prisma.$disconnect(); });
 
   it("recognises Czech and English count questions without a model", () => {
-    for (const text of ["Kolik mám nezaplacených faktur?", "kolik máme neuhrazených faktur", "How many unpaid invoices do I have?"]) {
+    for (const text of ["Kolik mám nezaplacených faktur?", "kolik máme neuhrazených faktur", "How many unpaid invoices do I have?", "Kdo mi nezaplatil?", "Who owes us money?"]) {
       assert.deepEqual(parseTextCommand(text), { intent: "execute_action", entities: { action: "get_unpaid_invoices", parameters: {} } });
     }
     assert.equal(parseTextCommand("zaplať všechny nezaplacené faktury").intent, "unrecognized");
@@ -52,7 +52,15 @@ describe("Unpaid invoice voice query", () => {
     assert.equal(res.body.kind, "action");
     assert.equal(res.body.data.count, 2);
     assert.equal(res.body.data.overdueCount, 2);
-    assert.match(res.body.message, /faktur: 2/);
+    // 100 unpaid plus 100 with 40 already paid. The fully paid invoice, the
+    // draft, the void one and the other tenant's invoice contribute nothing.
+    assert.equal(res.body.data.outstandingTotal, 160);
+    assert.equal(res.body.data.overdueTotal, 160);
+    assert.deepEqual(res.body.data.debtors, [{ client: "Invoice voice fixture", balance: 160, overdueBalance: 160 }]);
+    assert.equal(
+      res.body.message,
+      "Neuhrazené vystavené faktury: 2, celkem 160,00. Po splatnosti: 2, celkem 160,00. Nejvíc dluží: Invoice voice fixture 160,00.",
+    );
     const audit = await prisma.auditLog.findFirst({ where: { companyId, result: "success", interpretedIntent: "execute_action" } });
     assert.ok(audit);
   });
