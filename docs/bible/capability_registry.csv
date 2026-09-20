@@ -1,0 +1,50 @@
+capability,base_risk,escalated_risk,escalation_condition,meaning,holder_roles,gate
+crm.customer.read,R0,,,Customer data read,Role scope,Customer scope / data class
+crm.customer.write,R2,R4,restricted data class field touched,Create/update customer,Sales/Ops,Field classification
+crm.lead.manage,R2,,,Lead lifecycle,Sales/Ops,Assigned/team/all scope; none unless sensitive override
+notes.internal.create,R2,,,Create internal note/task,Role scope,Policy dependent
+sales.quote.prepare,R1,R2,price outside pricing baseline or discount above limit,Draft/revise quote (no send),Sales/Ops,Service/price policy
+sales.quote.send,R3,R4,discount/variance above threshold,Send quote to customer,Sales/Ops,Approval or pre-authorised communication rule
+schedule.view,R0,,,View schedule/capacity,Role scope,Team scope
+schedule.commit,R3,R4,capacity override or customer commitment change,Confirm/reschedule work,Scheduler/Ops,Valid capacity + policy; override requires approval
+jobs.assign,R2,,,Assign workers/resources,Scheduler/Ops,Team/skill scope
+jobs.complete,R2,R3,evidence gate exceptions unresolved,Complete job,Ops/Field lead,Evidence gate
+field.time.submit,R2,,,Submit own time,Field Worker/Employee,Self only unless manager
+field.location.capture,R2,R5,location captured outside lawful purpose/consent window,Capture GPS/geofence,Field Worker,Lawful policy + purpose
+inventory.reserve,R2,,,Reserve stock,Ops/Field,Location/job scope
+inventory.adjust,R2,R5,adjustment above approval threshold or no reason code,Stock correction,Ops/Inventory,Reason + approval threshold
+purchasing.po.send,R3,R5,value above financial limit,Supplier commitment,Ops/Finance,Financial limit
+finance.invoice.issue,R4,R5,amount above threshold or no source job/quote,Issue invoice,Finance/authorised Ops,Approval policy + source job/quote
+finance.payment.record,R2,R4,unreconciled or manual evidence only,Record received payment (evidence only; moves no funds),Finance,Evidence/reconciliation
+finance.payment.capture,R5,,,Capture/move funds,Specifically authorised Finance/Owner,Explicit confirmation + financial limit + step-up
+finance.payment.refund,R5,,,Refund payment,Specifically authorised Finance/Owner,Explicit confirmation + financial limit + dual approval
+workforce.skill.verify,R2,R5,qualification is safety/legal critical,Verify qualification,Authorised verifier,Authorised verifier only
+workforce.bonus.offer,R3,R5,offer changes pay terms or exceeds profitability guard,Offer compensation/bonus,Owner/HR-authorised,Profitability/quality/employment policy
+workforce.employment.change,R5,,,Hire/dismiss/change pay,Owner/HR-authorised,Explicit human approval + legal policy
+recruitment.publish,R4,,,Publish vacancy,Owner/HR/Admin,Employment/publication approval
+communication.send,R3,R4,new external recipient or legal/complaint context,Send external message,Sales/Ops/CS,Channel/customer scope
+frontdesk.record,R5,,,Record call,Owner/Admin configured,Consent/jurisdiction/company policy
+growth.publish,R4,,,Publish website/social content,Marketing/Admin,Explicit approval unless pre-authorised content class; public-claim provenance
+privacy.restricted.export,R5,,,Delete/export restricted personal data,Data controller-authorised,Explicit workflow + retention/legal checks
+connectors.authorise,R5,,,Grant connector scopes,Owner/Security Admin,Owner/admin + step-up
+permissions.manage,R5,,,Change user authority,Owner/Security Admin,Step-up + audit; cannot grant above own ceiling; Secretary cannot self-grant
+audit.read,R0,,,Read audit evidence,Auditor/Owner/Security,Security/data scope
+audit.export,R5,,,Export audit/restricted evidence,Auditor/Owner,Purpose + recipient
+autonomy.configure,R5,,,Change autonomy class/limits,Owner,Constitutional restrictions
+evolution.deploy,R5,,,Deploy self-generated software change,Release authority,Independent verification + release evidence + all SEC-05 gates
+emergency.safe_mode,R5,,,Trigger safe mode (protective),Authorised Owner/Security/Ops,"Immediate effect, strongly audited"
+assistant.invocation.read,R0,,,Read active tenant Invocation Keyword,Tenant scope,None
+assistant.invocation.configure,R2,R5,keyword collides with reserved/brand/legal term list,Replace single active tenant Invocation Keyword,Owner/Admin,Audit; no permission effect
+policy.approval.request,R1,,,Request approval for an Action Contract,Any principal holding the contract's capability,payload_hash bound; requester recorded
+policy.approval.decide,R4,R5,"target contract risk is R5 or approval_pattern in {dual, four_eyes}",Decide (approve/reject) an approval,Approver roles per SEC-11 §5 pattern; never AGENT principals,decided_by != requested_by for four_eyes; identity assurance high for R5; audited
+execution.contract.create,R1,,,Create/validate an Action Contract draft,Any principal / Execution Agent on behalf of principal,No effect; policy.evaluate_action runs at VALIDATED
+execution.contract.authorise,R3,R5,"contract risk_class is R4 or R5 (gate inherits the contract's class; R4 contracts require the R4 gate, R5 the R5 gate)",Authorise a validated contract for execution,Holder of the contract's capability; Execution Agent only via consumed approval,Approval CONSUMED with matching payload_hash where required
+execution.contract.execute,R3,R5,"contract risk_class is R4 or R5 (gate inherits the contract's class; R4 contracts require the R4 gate, R5 the R5 gate)",Execute an authorised contract,Execution Engine on behalf of authorising principal,Idempotency lock; risk inherited from contract
+execution.contract.reconcile,R2,,,Reconcile OUTCOME_UNKNOWN against external truth,Execution Engine / Ops,Independent evidence required; never infers success
+finance.invoice.read,R0,,,Read invoices/receivables,Finance/Ops/Owner; Customer for own,Customer scope / data class
+identity.self.read,R0,,,Read own identity context and effective permissions,Any authenticated principal,Self only
+schedule.request,R1,,,Create a booking request (no capacity commitment),"Customer (own), Sales/Ops, Front Desk",Request only; commitment requires schedule.commit
+prediction.request,R1,,,Request a prediction or read prediction outputs,Ops/Manager/Owner; agents by routing policy,Non-authoritative output; never mutates business state
+scenario.simulate,R2,R3,scenario consumes restricted data classes or exceeds compute quota,Create and run a non-authoritative Digital Twin scenario,Manager/Owner; Scenario Simulation Agent,No live-state mutation (SEC-18); quota per SEC-42
+agent.run.start,R2,R3,run may prepare Action Contracts (A2+) for consequential domains,Start an orchestrated agent run,Authenticated tenant users within role scope,Effective permission ceiling of initiator (AGT-004); quota per SEC-42
+agent.run.cancel,R1,,,Cancel own or team agent run,"Initiator, Manager/Owner","Own runs, or team scope for managers"

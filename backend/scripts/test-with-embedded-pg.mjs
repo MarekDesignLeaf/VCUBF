@@ -17,8 +17,17 @@ function runTests(url) {
     env: { ...process.env, DATABASE_URL: url },
     stdio: "inherit",
   });
-  console.log("Postgres up, pushing schema...");
-  execFileSync(process.execPath, [prismaCli, "db", "push", "--skip-generate"], {
+  // CP-CODE-001: apply the real migrations (not db push) so backfill SQL and triggers are exercised in CI,
+  // then fail if schema.prisma has drifted from the migration history.
+  console.log("Postgres up, applying migrations...");
+  execFileSync(process.execPath, [prismaCli, "migrate", "deploy"], {
+    env: { ...process.env, DATABASE_URL: url },
+    stdio: "inherit",
+  });
+  console.log("Checking schema/migration drift (diff printed below if any)...");
+  try { execFileSync(process.execPath, [prismaCli, "migrate", "diff", "--from-schema-datasource", "prisma/schema.prisma", "--to-schema-datamodel", "prisma/schema.prisma", "--script"], { env: { ...process.env, DATABASE_URL: url }, stdio: "inherit" }); } catch {}
+  // Compare the freshly migrated live DB with the datamodel (no shadow DB needed; touches nothing).
+  execFileSync(process.execPath, [prismaCli, "migrate", "diff", "--from-schema-datasource", "prisma/schema.prisma", "--to-schema-datamodel", "prisma/schema.prisma", "--exit-code"], {
     env: { ...process.env, DATABASE_URL: url },
     stdio: "inherit",
   });
@@ -80,7 +89,7 @@ async function runWithDocker() {
       "-w", "/work",
       "node:22-bookworm",
       "sh", "-lc",
-      "mkdir -p /work/backend /work/frontend && tar -C /source/backend --exclude=node_modules --exclude=dist -cf - . | tar -C /work/backend -xf - && cp -a /source/frontend/src /work/frontend/src && cd /work/backend && npm ci --no-audit --no-fund && npx prisma generate && npx prisma db push --skip-generate && if [ -n \"$VCUF_TEST_TARGET\" ]; then node scripts/run-test-files.mjs \"$VCUF_TEST_TARGET\"; else node scripts/run-test-files.mjs; fi",
+      "mkdir -p /work/backend /work/frontend && tar -C /source/backend --exclude=node_modules --exclude=dist -cf - . | tar -C /work/backend -xf - && cp -a /source/frontend/src /work/frontend/src && cd /work/backend && npm ci --no-audit --no-fund && npx prisma generate && npx prisma migrate deploy && if [ -n \"$VCUF_TEST_TARGET\" ]; then node scripts/run-test-files.mjs \"$VCUF_TEST_TARGET\"; else node scripts/run-test-files.mjs; fi",
     ], { stdio: "inherit" });
   } finally {
     try {

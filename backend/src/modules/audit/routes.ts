@@ -14,5 +14,6 @@ auditRouter.get("/log", async (req, res) => {
     orderBy: { createdAt: "desc" },
     take: 100,
   });
-  res.json(entries);
+  // sequence_no is BIGINT (CP-CODE-001); JSON cannot carry bigint.
+  res.json(entries.map((e) => ({ ...e, sequenceNo: e.sequenceNo === null ? null : e.sequenceNo.toString() })));
 });

@@ -1,3 +1,5 @@
+> **SUPERSEDED (20 September 2026, CP-CODE-001).** This document described the July 2026 production direction ("Emma" persona, FastAPI+LangGraph orchestrator, Redis, pgvector, Neon). It is retained for history only. The authoritative specification is the **VCUBF Secretary Engineering Bible v6.1** (SEC-00..SEC-42); the technology choices proposed here are carried into the ADR backlog (ADR-001/003/004/008) as PROPOSED, not accepted. Where this document and the Bible disagree, the Bible governs (GOV-001/GOV-002). See `docs/BIBLE_TRACE.md` for the module-to-specification map.
+
 # VCUF Secretary / Emma — produkční architektura
 
 Tento dokument je závazný produkční směr od 17. července 2026. Vychází z

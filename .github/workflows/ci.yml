@@ -25,6 +25,7 @@ jobs:
       - run: npm ci
       - run: npm run prisma:generate
       - run: npm run build
+      - run: node scripts/check-action-capability-map.mjs
       - run: npm run test:embedded
 
   frontend:

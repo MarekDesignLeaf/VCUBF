@@ -350,7 +350,7 @@ export const REGISTER_CONNECTOR_SOURCE_ACTION: ActionContract = {
   actionName: "register_connector_source",
   purpose: "Register a disabled external data-source configuration against a declared connector contract without storing credentials or accessing the provider.",
   requiredPermission: "connectors.manage",
-  riskLevel: 2,
+  riskLevel: 3,
   confirmationRequired: false,
   dataSources: ["user_input", "connector_registry"],
   possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONNECTOR_DEFINITION_NOT_FOUND", "CONNECTOR_SOURCE_ALREADY_EXISTS"],
@@ -360,7 +360,7 @@ export const UPDATE_CONNECTOR_SOURCE_ACTION: ActionContract = {
   actionName: "update_connector_source",
   purpose: "Update connector metadata, logical scopes or an opaque secret-store reference without reading the referenced secret.",
   requiredPermission: "connectors.manage",
-  riskLevel: 2,
+  riskLevel: 3,
   confirmationRequired: false,
   dataSources: ["user_input", "connector_registry", "connector_sources"],
   possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_MUST_BE_DISABLED", "UNSUPPORTED_CONNECTOR_SCOPE", "CONNECTOR_SOURCE_ALREADY_EXISTS"],
@@ -370,7 +370,7 @@ export const DISABLE_CONNECTOR_SOURCE_ACTION: ActionContract = {
   actionName: "disable_connector_source",
   purpose: "Disable an external data source immediately so it cannot be used by connector reads, writes or synchronisation.",
   requiredPermission: "connectors.manage",
-  riskLevel: 2,
+  riskLevel: 3,
   confirmationRequired: false,
   dataSources: ["connector_sources"],
   possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND"],
@@ -390,7 +390,7 @@ export const START_GMAIL_OAUTH_ACTION: ActionContract = {
   actionName: "start_gmail_oauth",
   purpose: "Create a short-lived one-time OAuth state and return Google's authorization URL for Gmail read-only access.",
   requiredPermission: "connectors.manage",
-  riskLevel: 1,
+  riskLevel: 3,
   confirmationRequired: false,
   dataSources: ["connector_sources", "server_configuration"],
   possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_CONFIGURATION_MISSING"],
@@ -400,7 +400,7 @@ export const COMPLETE_GMAIL_OAUTH_ACTION: ActionContract = {
   actionName: "complete_gmail_oauth",
   purpose: "Validate one-time OAuth state, exchange Google's authorization code, verify Gmail read-only scope and store only encrypted provider tokens.",
   requiredPermission: "connectors.manage",
-  riskLevel: 2,
+  riskLevel: 3,
   confirmationRequired: false,
   dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials"],
   possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED", "CONNECTOR_CONFIGURATION_MISSING"],
@@ -560,7 +560,7 @@ export const START_GOOGLE_CONTACTS_OAUTH_ACTION: ActionContract = {
   actionName: "start_google_contacts_oauth",
   purpose: "Create a short-lived one-time OAuth state for Google Contacts read-only access.",
   requiredPermission: "connectors.manage",
-  riskLevel: 1,
+  riskLevel: 3,
   confirmationRequired: false,
   dataSources: ["connector_sources", "server_configuration"],
   possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_CONFIGURATION_MISSING"],
@@ -570,7 +570,7 @@ export const COMPLETE_GOOGLE_CONTACTS_OAUTH_ACTION: ActionContract = {
   actionName: "complete_google_contacts_oauth",
   purpose: "Validate OAuth state, verify the exact contacts.readonly scope and store only encrypted Google tokens.",
   requiredPermission: "connectors.manage",
-  riskLevel: 2,
+  riskLevel: 3,
   confirmationRequired: false,
   dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials"],
   possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED", "CONNECTOR_CONFIGURATION_MISSING"],
@@ -608,12 +608,12 @@ export const DISCONNECT_GOOGLE_CONTACTS_SOURCE_ACTION: ActionContract = {
 
 export const START_GOOGLE_CALENDAR_OAUTH_ACTION: ActionContract = {
   actionName: "start_google_calendar_oauth", purpose: "Start Google Calendar read-only OAuth with a one-time state.",
-  requiredPermission: "connectors.manage", riskLevel: 1, confirmationRequired: false,
+  requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: false,
   dataSources: ["connector_sources", "server_configuration"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_CONFIGURATION_MISSING"],
 };
 export const COMPLETE_GOOGLE_CALENDAR_OAUTH_ACTION: ActionContract = {
   actionName: "complete_google_calendar_oauth", purpose: "Verify exact calendar.readonly scope and store only encrypted Google tokens.",
-  requiredPermission: "connectors.manage", riskLevel: 2, confirmationRequired: false,
+  requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: false,
   dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials"], possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED"],
 };
 export const SYNC_GOOGLE_CALENDAR_ACTION: ActionContract = {
@@ -627,11 +627,11 @@ export const DISCONNECT_GOOGLE_CALENDAR_SOURCE_ACTION: ActionContract = {
   dataSources: ["connector_sources", "connector_credentials", "google_oauth"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONFIRMATION_REQUIRED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
 };
 export const START_GOOGLE_DRIVE_OAUTH_ACTION: ActionContract = {
-  actionName: "start_google_drive_oauth", purpose: "Start per-file Google Drive OAuth for explicitly selected images.", requiredPermission: "connectors.manage", riskLevel: 1, confirmationRequired: false,
+  actionName: "start_google_drive_oauth", purpose: "Start per-file Google Drive OAuth for explicitly selected images.", requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: false,
   dataSources: ["connector_sources", "server_configuration"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_CONFIGURATION_MISSING"],
 };
 export const COMPLETE_GOOGLE_DRIVE_OAUTH_ACTION: ActionContract = {
-  actionName: "complete_google_drive_oauth", purpose: "Verify exact drive.file scope and store only encrypted Google tokens.", requiredPermission: "connectors.manage", riskLevel: 2, confirmationRequired: false,
+  actionName: "complete_google_drive_oauth", purpose: "Verify exact drive.file scope and store only encrypted Google tokens.", requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: false,
   dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials"], possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED"],
 };
 export const STAGE_GOOGLE_DRIVE_IMAGES_ACTION: ActionContract = {
@@ -647,11 +647,11 @@ export const DISCONNECT_GOOGLE_DRIVE_SOURCE_ACTION: ActionContract = {
   dataSources: ["connector_sources", "connector_credentials", "google_oauth"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONFIRMATION_REQUIRED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
 };
 export const START_GOOGLE_PHOTOS_OAUTH_ACTION: ActionContract = {
-  actionName: "start_google_photos_oauth", purpose: "Start Google Photos Picker OAuth for photos the user will explicitly choose.", requiredPermission: "connectors.manage", riskLevel: 1, confirmationRequired: false,
+  actionName: "start_google_photos_oauth", purpose: "Start Google Photos Picker OAuth for photos the user will explicitly choose.", requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: false,
   dataSources: ["connector_sources", "server_configuration"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_CONFIGURATION_MISSING"],
 };
 export const COMPLETE_GOOGLE_PHOTOS_OAUTH_ACTION: ActionContract = {
-  actionName: "complete_google_photos_oauth", purpose: "Verify Google Photos Picker scope and store only encrypted Google tokens.", requiredPermission: "connectors.manage", riskLevel: 2, confirmationRequired: false,
+  actionName: "complete_google_photos_oauth", purpose: "Verify Google Photos Picker scope and store only encrypted Google tokens.", requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: false,
   dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials"], possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED"],
 };
 export const CREATE_GOOGLE_PHOTOS_PICKER_SESSION_ACTION: ActionContract = {
@@ -752,7 +752,7 @@ export const CHANGE_QUOTE_STATUS_ACTION: ActionContract = {
   actionName: "change_quote_status",
   purpose: "Change a quote's status along its lifecycle (draft, sent, accepted, rejected, expired).",
   requiredPermission: "crm.manage",
-  riskLevel: 2,
+  riskLevel: 3,
   confirmationRequired: false,
   dataSources: ["user_input", "crm.quotes"],
   possibleErrors: ["MISSING_PERMISSION", "QUOTE_NOT_FOUND", "VALIDATION_FAILED"],
@@ -768,7 +768,7 @@ export const EXPORT_QUOTE_PDF_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "QUOTE_NOT_FOUND"],
 };
 export const CREATE_INVOICE_ACTION: ActionContract = { actionName:"create_invoice",purpose:"Create an itemised draft invoice from entered client and line data.",requiredPermission:"crm.manage",riskLevel:2,confirmationRequired:false,dataSources:["user_input","crm.clients"],possibleErrors:["MISSING_PERMISSION","VALIDATION_FAILED","CLIENT_NOT_FOUND","INVOICE_NUMBER_EXISTS"] };
-export const CHANGE_INVOICE_STATUS_ACTION: ActionContract = { actionName:"change_invoice_status",purpose:"Change the internal invoice lifecycle state without sending it.",requiredPermission:"crm.manage",riskLevel:2,confirmationRequired:false,dataSources:["user_input","crm.invoices"],possibleErrors:["MISSING_PERMISSION","VALIDATION_FAILED","INVOICE_NOT_FOUND","INVALID_INVOICE_STATUS_TRANSITION"] };
+export const CHANGE_INVOICE_STATUS_ACTION: ActionContract = { actionName:"change_invoice_status",purpose:"Change the internal invoice lifecycle state without sending it.",requiredPermission:"crm.manage",riskLevel:4,confirmationRequired:false,dataSources:["user_input","crm.invoices"],possibleErrors:["MISSING_PERMISSION","VALIDATION_FAILED","INVOICE_NOT_FOUND","INVALID_INVOICE_STATUS_TRANSITION"] };
 export const RECORD_INVOICE_PAYMENT_ACTION: ActionContract = { actionName:"record_invoice_payment",purpose:"Record a payment actually received against an issued invoice after explicit preview confirmation.",requiredPermission:"crm.manage",riskLevel:3,confirmationRequired:true,dataSources:["user_input","crm.invoices","crm.payments"],possibleErrors:["MISSING_PERMISSION","VALIDATION_FAILED","INVOICE_NOT_FOUND","INVOICE_NOT_PAYABLE","PAYMENT_EXCEEDS_BALANCE","CONFIRMATION_REQUIRED"] };
 export const EXPORT_INVOICE_PDF_ACTION: ActionContract = { actionName:"export_invoice_pdf",purpose:"Render a client-facing invoice PDF without sending or changing it.",requiredPermission:"crm.read",riskLevel:1,confirmationRequired:false,dataSources:["crm.invoices","crm.clients","crm.payments"],possibleErrors:["MISSING_PERMISSION","INVOICE_NOT_FOUND"] };
 export const ADD_JOB_RESOURCE_ACTION: ActionContract = { actionName:"add_job_resource",purpose:"Record a real material, equipment, vehicle, hire or waste requirement for a job.",requiredPermission:"crm.manage",riskLevel:2,confirmationRequired:false,dataSources:["user_input","crm.jobs"],possibleErrors:["MISSING_PERMISSION","VALIDATION_FAILED","JOB_NOT_FOUND"] };
@@ -1325,7 +1325,7 @@ export const DECIDE_WEBSITE_CONTENT_PROPOSAL_ACTION: ActionContract = {
   purpose:
     "Explicitly approve or reject a website content proposal after presenting the exact proposed status change for confirmation; this does not publish anything.",
   requiredPermission: "crm.manage",
-  riskLevel: 2,
+  riskLevel: 4,
   confirmationRequired: true,
   dataSources: ["user_input", "website_content_proposals"],
   possibleErrors: [

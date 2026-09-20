@@ -1,0 +1,20 @@
+capability,base_risk,escalated_risk,escalation_condition,meaning,holder_roles,gate
+catalogue.config.write,R2,,,"Maintain service catalogue, industries, reference activities, company profile",Owner/Admin/Ops,tenant scope
+catalogue.config.read,R0,,,Read catalogue/industry/reference data,Any authenticated,tenant scope
+knowledge.playbook.write,R2,R3,playbook can trigger consequential actions,Create/update playbooks and learning rules,Owner/Admin,critical playbook changes need approval (SEC-02 §19)
+knowledge.playbook.run,R3,,,Run a playbook,Owner/Admin/Ops,each step subject to its own capability
+knowledge.memory.write,R1,,,"Create/archive assistant memory, business context, documents metadata, tasks",Any authenticated within role scope,governed memory stores (SEC-03 §9)
+knowledge.memory.read,R0,,,Recall memory / context,Any authenticated within role scope,purpose-filtered
+communication.prepare,R1,,,Prepare draft message/reply (no send),Sales/Ops/CS,no external side effect
+communication.record,R2,,,"Log/update inbound communication, intake, resolution",Sales/Ops/CS/Front Desk,provenance retained
+connectors.self.oauth,R3,,,Start/complete OAuth for own connector account; enable/disable/disconnect,Owner/Admin,scopes limited to declared connector capability; never widens scope (CON-023)
+connectors.sync.read,R0,,,"Trigger/read connector synchronisation, stage media for review",Owner/Admin/Ops,read + staging only
+workforce.employee.manage,R3,R5,role/permission change or password reset,Create/update employee records,Owner/Admin,permission changes escalate to permissions.manage
+recruitment.prepare,R2,,,"Job openings, candidates, advert drafts, recommendations (no publish)",Owner/HR/Admin,publishing requires recruitment.publish
+growth.prepare,R1,,,"Website audit, content proposal drafts, portfolio photo curation (no publish)",Marketing/Admin,publishing requires growth.publish
+growth.decide,R4,,,Approve/reject website content proposal,Owner/Admin,public-claim provenance
+notifications.self.manage,R1,,,Acknowledge/delete own notifications,Any authenticated,self only
+voice.session.control,R1,,,"Voice device/session control, transcription, interpretation, device pairing",Any authenticated (self),never grants authority (CON-076)
+analytics.read,R0,,,"Metrics, attention feed, data quality analysis",Owner/Admin/Manager,tenant scope
+finance.invoice.prepare,R2,,,"Create/update invoice draft, export PDF",Finance/Ops,issue requires finance.invoice.issue
+assistant.behaviour.configure,R2,R3,policy disables safety-relevant confirmations,Configure assistant behaviour/policy scenarios,Owner/Admin,cannot weaken approval gates (CON-021)
