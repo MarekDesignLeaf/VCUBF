@@ -18,7 +18,34 @@ function getToken() {
   return localStorage.getItem("vcuf_token");
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+/** The one endpoint that must never be retried after a refresh: it is the refresh. */
+const LOCAL_SESSION_PATH = "/auth/local-test-active-session";
+
+/** Raised when the session is over, so the app can ask for a sign-in instead of showing broken panels. */
+export const SESSION_ENDED_EVENT = "vcuf:session-ended";
+
+let pendingRefresh: Promise<string | null> | null = null;
+
+/**
+ * One place decides what a refused token means.
+ *
+ * A token is refused for two ordinary reasons: it has outlived its seven days,
+ * or the account's authVersion moved on after a password change. Neither means
+ * the person stopped being entitled to be here. Until now every screen met that
+ * refusal alone and reported it as whatever it happened to be loading — "could
+ * not load the persistent memory", "error: http-401" on the speech recognition
+ * line — so one ended session looked like a dozen unrelated faults and none of
+ * them suggested signing in again.
+ *
+ * Concurrent callers share one refresh: a page that loads six panels must not
+ * ask for six new sessions.
+ */
+function refreshSessionOnce(): Promise<string | null> {
+  pendingRefresh ??= refreshLocalSessionToken().finally(() => { pendingRefresh = null; });
+  return pendingRefresh;
+}
+
+async function request<T>(path: string, options: RequestInit = {}, mayRetry = true): Promise<T> {
   const token = getToken();
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
@@ -29,6 +56,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     },
   });
 
+  if (res.status === 401 && mayRetry && path !== LOCAL_SESSION_PATH) {
+    const refreshed = await refreshSessionOnce();
+    if (refreshed) return request<T>(path, options, false);
+  }
+
   const isJson = res.headers.get("content-type")?.includes("application/json");
   const body = isJson ? await res.json() : undefined;
 
@@ -38,9 +70,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
-async function download(path: string): Promise<Blob> {
+async function download(path: string, mayRetry = true): Promise<Blob> {
   const token = getToken();
   const res = await fetch(`${API_URL}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (res.status === 401 && mayRetry) {
+    const refreshed = await refreshSessionOnce();
+    if (refreshed) return download(path, false);
+  }
   if (!res.ok) {
     const body = res.headers.get("content-type")?.includes("application/json") ? await res.json() : undefined;
     throw new ApiError(res.status, body?.error ?? "UNKNOWN_ERROR", body?.message, body);
@@ -2328,4 +2364,31 @@ export { getToken };
 export function setToken(token: string | null) {
   if (token) localStorage.setItem("vcuf_token", token);
   else localStorage.removeItem("vcuf_token");
+}
+
+/**
+ * Recover the session after the backend has refused the stored token.
+ *
+ * A token is refused for two ordinary reasons: it is older than its seven days,
+ * or the account's authVersion moved on (a password change). Neither means the
+ * person is no longer entitled to be here. On this machine the account has
+ * already been chosen, so the current session can simply be asked for again and
+ * nobody has to type a password. Anywhere else there is nothing to recover
+ * from: the stored token is cleared and null says so, which is a real sign-out.
+ */
+export async function refreshLocalSessionToken(): Promise<string | null> {
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) {
+    setToken(null);
+    window.dispatchEvent(new Event(SESSION_ENDED_EVENT));
+    return null;
+  }
+  try {
+    const session = await api.localTestActiveSession();
+    setToken(session.token);
+    return session.token;
+  } catch {
+    setToken(null);
+    window.dispatchEvent(new Event(SESSION_ENDED_EVENT));
+    return null;
+  }
 }

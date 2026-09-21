@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, ApiError, getToken, setToken, type LoginResponse } from "../api/client";
+import { api, ApiError, getToken, setToken, SESSION_ENDED_EVENT, type LoginResponse } from "../api/client";
 import { AuthContext } from "./auth-state";
 
 /** Whether this page is served from the developer's own machine. */
@@ -10,6 +10,19 @@ function isLocalhost() {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<LoginResponse["user"] | null>(null);
   const [loading, setLoading] = useState(true);
+
+  /**
+   * The session can end while the app is open — a token outlives its seven days,
+   * or a password change moves the account on. The api layer recovers where it
+   * can and raises this when it cannot; forgetting the signed-in user here is
+   * what sends the person to the sign-in screen instead of leaving every panel
+   * reporting its own failure.
+   */
+  useEffect(() => {
+    const ended = () => setUser(null);
+    window.addEventListener(SESSION_ENDED_EVENT, ended);
+    return () => window.removeEventListener(SESSION_ENDED_EVENT, ended);
+  }, []);
 
   useEffect(() => {
     let active = true;

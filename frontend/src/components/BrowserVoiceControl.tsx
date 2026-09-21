@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { DEFAULT_ASSISTANT_NAME } from "../assistantName";
-import { api, type MobileAssistantResponse } from "../api/client";
+import { api, getToken, refreshLocalSessionToken, type MobileAssistantResponse } from "../api/client";
 import { appLanguage } from "../i18n";
 import { useAuth } from "../context/useAuth";
 import { MacroRecorder, replayMacro, type MacroStep } from "../lib/macroRecorder";
@@ -13,6 +13,9 @@ import {
 } from "../lib/learningPhrases";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+
+/** The recogniser state that means the sign-in ended, not that recognition broke. */
+const SESSION_EXPIRED = "session-expired";
 
 /**
  * Voice control built on the browser's streaming speech recogniser.
@@ -53,6 +56,34 @@ const STALE_AFTER_MS = 30_000;
 const ACTIVE_WINDOW_MS = 20_000;
 const CONVERSATION_CAP_MS = 90_000;
 
+type RecogniserState = {
+  status: "starting" | "running" | "stopped" | "error";
+  error?: string;
+  // Kept until a phrase actually arrives. Recognition restarts after every failure,
+  // and clearing the error on restart turned a permanent fault into a flicker.
+  errorCount: number;
+  phrases: number;
+  lastPhraseAt?: number;
+};
+
+/**
+ * What the speech recognition line says.
+ *
+ * Decided here rather than inside the markup so that an end of session is named
+ * in the person's own language. An expired sign-in used to arrive on this line
+ * as "error: http-401", which describes the wire and not the situation.
+ */
+function recogniserLabel(state: RecogniserState, copy: Copy): string {
+  if (state.error === SESSION_EXPIRED) return copy.recogniserSessionExpired;
+  if (state.error) {
+    return `${copy.recogniserErrorPrefix}: ${state.error}`
+      + (state.errorCount > 1 ? ` \u00d7${state.errorCount}` : "");
+  }
+  if (state.status === "running") return copy.recogniserRunning;
+  if (state.status === "starting") return copy.recogniserStarting;
+  return copy.recogniserStopped;
+}
+
 type Copy = {
   title: (name: string) => string;
   listening: string;
@@ -84,6 +115,8 @@ type Copy = {
   recogniserStopped: string;
   recogniserPhrases: (count: number) => string;
   recogniserErrorPrefix: string;
+  /** A refused sign-in is a state of the session, never an HTTP number. */
+  recogniserSessionExpired: string;
   recogniserNetworkHint: string;
   matched: string;
   ignored: string;
@@ -119,6 +152,7 @@ function copyFor(language: string): Copy {
       recogniserStarting: "starting", recogniserStopped: "stopped",
       recogniserPhrases: (count) => `${count} phrase${count === 1 ? "" : "s"} returned`,
       recogniserErrorPrefix: "error",
+      recogniserSessionExpired: "your sign-in has ended — sign in again",
       recogniserNetworkHint: "Browser speech recognition sends audio to Google. A VPN, a firewall or being offline stops it completely.",
       matched: "recognised", ignored: "not addressed — ignored", clearLog: "Clear",
       knownAs: (list) => `Also recognised as: ${list.join(", ")}.`,
@@ -147,6 +181,7 @@ function copyFor(language: string): Copy {
       recogniserStarting: "spouští se", recogniserStopped: "zastaveno",
       recogniserPhrases: (count) => `rozpoznaných úseků: ${count}`,
       recogniserErrorPrefix: "chyba",
+      recogniserSessionExpired: "přihlášení vypršelo — přihlaste se znovu",
       recogniserNetworkHint: "Rozpoznávání řeči v prohlížeči posílá zvuk na Google. VPN, firewall nebo chybějící připojení ho zastaví úplně.",
       matched: "rozpoznáno", ignored: "bez oslovení — ignorováno", clearLog: "Vymazat",
       knownAs: (list) => `Rozpozná také: ${list.join(", ")}.`,
@@ -175,6 +210,7 @@ function copyFor(language: string): Copy {
       recogniserStarting: "uruchamia się", recogniserStopped: "zatrzymane",
       recogniserPhrases: (count) => `rozpoznanych fragmentów: ${count}`,
       recogniserErrorPrefix: "błąd",
+      recogniserSessionExpired: "sesja wygasła — zaloguj się ponownie",
       recogniserNetworkHint: "Rozpoznawanie mowy w przeglądarce wysyła dźwięk do Google. VPN, zapora lub brak połączenia zatrzymuje je całkowicie.",
       matched: "rozpoznano", ignored: "bez wywołania — pominięto", clearLog: "Wyczyść",
       knownAs: (list) => `Rozpoznaje też: ${list.join(", ")}.`,
@@ -203,6 +239,7 @@ function copyFor(language: string): Copy {
       recogniserStarting: "startet", recogniserStopped: "gestoppt",
       recogniserPhrases: (count) => `${count} erkannte Abschnitte`,
       recogniserErrorPrefix: "Fehler",
+      recogniserSessionExpired: "Die Anmeldung ist abgelaufen — bitte erneut anmelden",
       recogniserNetworkHint: "Die Spracherkennung des Browsers sendet Audio an Google. Ein VPN, eine Firewall oder fehlendes Internet stoppt sie vollständig.",
       matched: "erkannt", ignored: "nicht angesprochen — ignoriert", clearLog: "Löschen",
       knownAs: (list) => `Wird auch erkannt als: ${list.join(", ")}.`,
@@ -231,6 +268,7 @@ function copyFor(language: string): Copy {
       recogniserStarting: "démarrage", recogniserStopped: "arrêtée",
       recogniserPhrases: (count) => `${count} segments reconnus`,
       recogniserErrorPrefix: "erreur",
+      recogniserSessionExpired: "la session a expiré — reconnectez-vous",
       recogniserNetworkHint: "La reconnaissance vocale du navigateur envoie l’audio à Google. Un VPN, un pare-feu ou l’absence de connexion l’arrête complètement.",
       matched: "reconnu", ignored: "sans appel — ignoré", clearLog: "Effacer",
       knownAs: (list) => `Également reconnu comme : ${list.join(", ")}.`,
@@ -259,6 +297,7 @@ function copyFor(language: string): Copy {
       recogniserStarting: "iniciando", recogniserStopped: "detenido",
       recogniserPhrases: (count) => `${count} fragmentos reconocidos`,
       recogniserErrorPrefix: "error",
+      recogniserSessionExpired: "la sesión ha caducado — vuelve a iniciar sesión",
       recogniserNetworkHint: "El reconocimiento de voz del navegador envía audio a Google. Una VPN, un cortafuegos o la falta de conexión lo detiene por completo.",
       matched: "reconocido", ignored: "sin llamada — ignorado", clearLog: "Borrar",
       knownAs: (list) => `También se reconoce como: ${list.join(", ")}.`,
@@ -287,6 +326,7 @@ function copyFor(language: string): Copy {
       recogniserStarting: "avvio", recogniserStopped: "fermo",
       recogniserPhrases: (count) => `${count} frammenti riconosciuti`,
       recogniserErrorPrefix: "errore",
+      recogniserSessionExpired: "la sessione è scaduta — accedi di nuovo",
       recogniserNetworkHint: "Il riconoscimento vocale del browser invia l’audio a Google. Una VPN, un firewall o la mancanza di connessione lo blocca del tutto.",
       matched: "riconosciuto", ignored: "senza richiamo — ignorato", clearLog: "Cancella",
       knownAs: (list) => `Riconosciuto anche come: ${list.join(", ")}.`,
@@ -512,6 +552,31 @@ function withLeadIn(context: AudioContext, decoded: AudioBuffer): AudioBuffer {
 }
 
 /**
+ * Send a voice request with the current session, and survive a refused token.
+ *
+ * The voice path talks to the backend directly rather than through the api
+ * client, because it carries raw audio rather than JSON. It must still obey the
+ * same rule about identity as the rest of the app: a refused token means the
+ * session ended, not that speech recognition is broken. That distinction was
+ * missing, so an expired sign-in surfaced as "error: http-401" on the speech
+ * recognition line and stayed there — the number named the symptom and nothing
+ * recovered from it.
+ *
+ * A stale token on this machine is recoverable, because the account is already
+ * chosen here, so the first 401 is answered by fetching the current session once
+ * and repeating the request. A second 401 is a genuine sign-out and is returned
+ * to the caller to report in words.
+ */
+async function authorizedVoiceFetch(url: string, init: RequestInit & { headers: Record<string, string> }): Promise<Response> {
+  const send = (token: string | null) =>
+    fetch(url, { ...init, headers: { ...init.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+  const response = await send(getToken());
+  if (response.status !== 401) return response;
+  const refreshed = await refreshLocalSessionToken();
+  return refreshed ? send(refreshed) : response;
+}
+
+/**
  * Speak through the backend's neural voice.
  *
  * Returns the playback that started, or null when nothing could be played — the signal
@@ -524,13 +589,9 @@ async function playNeuralVoice(text: string, language: string): Promise<Playback
     const context = ensureAudioContext();
     if (!context) return null;
 
-    const token = localStorage.getItem("vcuf_token");
-    const response = await fetch(`${API_URL}/command/speak`, {
+    const response = await authorizedVoiceFetch(`${API_URL}/command/speak`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, language }),
     });
     if (!response.ok) return null;
@@ -846,15 +907,7 @@ export function BrowserVoiceControl() {
    * look identical: the microphone is not capturing, recognition is failing, or the
    * wake word is not matching. The meter answers the first, this answers the second.
    */
-  const [recogniserState, setRecogniserState] = useState<{
-    status: "starting" | "running" | "stopped" | "error";
-    error?: string;
-    // Kept until a phrase actually arrives. Recognition restarts after every failure,
-    // and clearing the error on restart turned a permanent fault into a flicker.
-    errorCount: number;
-    phrases: number;
-    lastPhraseAt?: number;
-  }>({ status: "stopped", errorCount: 0, phrases: 0 });
+  const [recogniserState, setRecogniserState] = useState<RecogniserState>({ status: "stopped", errorCount: 0, phrases: 0 });
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const [hotwordAliases, setHotwordAliases] = useState<string[]>([]);
   const [hasMicrophone, setHasMicrophone] = useState(true);
@@ -1304,22 +1357,20 @@ export function BrowserVoiceControl() {
       // The library resamples to 16 kHz and writes the RIFF header; nothing here does
       // arithmetic on the samples.
       const wav = window.vad!.utils.encodeWAV(audio);
-      const token = localStorage.getItem("vcuf_token");
       const query = new URLSearchParams({ wake_word: hotword, language });
       try {
-        const response = await fetch(`${API_URL}/command/transcribe?${query}`, {
+        const response = await authorizedVoiceFetch(`${API_URL}/command/transcribe?${query}`, {
           method: "POST",
-          headers: {
-            "Content-Type": "audio/wav",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
+          headers: { "Content-Type": "audio/wav" },
           body: wav,
         });
         if (!response.ok) {
           setRecogniserState((current) => ({
             ...current,
             status: "error",
-            error: response.status === 503 ? "transcription-unavailable" : `http-${response.status}`,
+            error: response.status === 401
+              ? SESSION_EXPIRED
+              : response.status === 503 ? "transcription-unavailable" : `http-${response.status}`,
             errorCount: current.errorCount + 1,
           }));
           return;
@@ -1682,12 +1733,7 @@ export function BrowserVoiceControl() {
       <p className={`voice-recogniser-line is-${recogniserState.status}`}>
         <span className="voice-observation-label">{copy.recogniser}</span>
         <strong>
-          {recogniserState.error
-            ? `${copy.recogniserErrorPrefix}: ${recogniserState.error}`
-              + (recogniserState.errorCount > 1 ? ` \u00d7${recogniserState.errorCount}` : "")
-            : recogniserState.status === "running" ? copy.recogniserRunning
-            : recogniserState.status === "starting" ? copy.recogniserStarting
-            : copy.recogniserStopped}
+          {recogniserLabel(recogniserState, copy)}
         </strong>
         <span>{copy.recogniserPhrases(recogniserState.phrases)}</span>
         {recogniserState.error === "network" ? (
