@@ -163,11 +163,54 @@ export async function activeWakeWordAliases(user: AuthedUser): Promise<string[]>
  * words this user actually says is what stops the same word being misheard over
  * and over, instead of only correcting it afterwards.
  */
-export async function aliasVocabulary(companyId: string): Promise<string[]> {
+/**
+ * The names the assistant answers to right now.
+ *
+ * Two settings, because either can be spoken: the word that wakes it and the
+ * name it is called. Both are account data and both can change.
+ */
+export function addressedAs(user: { voiceWakeWord?: string | null; assistantName?: string | null }): string[] {
+  // Tolerant of a caller that carries neither: not knowing what the assistant
+  // is called is a reason to apply no wake-word alias, never to fail.
+  return [user.voiceWakeWord, user.assistantName].filter((name): name is string => Boolean(name));
+}
+
+/**
+ * Does a learned rule still stand for the assistant as it is called now?
+ *
+ * A wake-word alias is a mishearing of one particular name: "ema" was learned
+ * as a way of hearing Emma. The name is a setting, so it changes — and the
+ * rules learned for the old name went on applying, which is how an assistant
+ * renamed to Alfonzo kept answering to Emma. Nothing had invalidated them, and
+ * nothing could: the rules were read by category alone, never by the name they
+ * were learned for.
+ *
+ * Each rule records that name, so matching it against the current ones makes a
+ * rename take effect by itself, and throws nothing away — renaming back brings
+ * the learned spellings back with it.
+ *
+ * Command aliases name a piece of business, not the assistant, so they always
+ * apply.
+ */
+export function aliasStillApplies(
+  rule: { category: string | null; aliasFor: string | null },
+  names: string[]
+): boolean {
+  if (rule.category !== WAKE_WORD) return true;
+  const current = new Set(names.map(normalisePhrase).filter(Boolean));
+  return current.has(normalisePhrase(rule.aliasFor ?? ""));
+}
+
+export async function aliasVocabulary(companyId: string, names: string[] = []): Promise<string[]> {
   const rules = await prisma.learningRule.findMany({
     where: { companyId, status: "active", category: { in: [WAKE_WORD, VOICE_COMMAND] } },
-    select: { aliasFor: true },
+    select: { aliasFor: true, category: true },
     take: 60,
   });
-  return [...new Set(rules.map((rule) => rule.aliasFor).filter((value): value is string => Boolean(value)))];
+  // Handing the decoder the assistant's previous name biases it towards
+  // hearing that name, which is the opposite of what this vocabulary is for.
+  return [...new Set(rules
+    .filter((rule) => aliasStillApplies(rule, names))
+    .map((rule) => rule.aliasFor)
+    .filter((value): value is string => Boolean(value)))];
 }

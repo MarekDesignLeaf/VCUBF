@@ -5,6 +5,7 @@ import { createServer } from "../src/server.js";
 import { prisma } from "../src/db.js";
 import { resetDb, seedCompanyAndAdmin } from "./setup.js";
 import { resolveLearningAliases } from "../src/services/learningService.js";
+import { aliasVocabulary } from "../src/services/voiceAliasService.js";
 
 const app = createServer();
 
@@ -148,5 +149,52 @@ describe("Voice aliases", () => {
       .delete("/command/aliases/00000000-0000-0000-0000-000000000000")
       .set("Authorization", `Bearer ${adminToken}`);
     assert.equal(res.status, 404);
+  });
+
+  // A wake-word alias is a mishearing of one particular name. The name is a
+  // setting, so renaming the assistant has to retire the spellings learned for
+  // the old one — otherwise it goes on answering to a name it no longer has,
+  // and a command containing the old spelling is rewritten back into it.
+  it("stops applying a wake-word alias once the assistant is renamed", async () => {
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } });
+    await prisma.learningRule.create({
+      data: {
+        companyId: admin.companyId, term: "ema", meaning: "Emma", aliasFor: "Emma",
+        category: "wake_word", status: "active", confirmations: 3, createdBy: admin.id,
+      },
+    });
+    const asUser = (assistantName: string, voiceWakeWord: string) => ({
+      id: admin.id, companyId: admin.companyId, email: admin.email, displayName: admin.displayName,
+      role: admin.role, permissions: admin.permissions, mustChangePassword: admin.mustChangePassword,
+      voiceContinuous: admin.voiceContinuous, voiceLanguage: admin.voiceLanguage,
+      voiceSpeechRate: admin.voiceSpeechRate, assistantName, voiceWakeWord,
+    });
+
+    const whileNamedEmma = await resolveLearningAliases(asUser("Emma", "Hej Emma"), "ema otevři kontakty");
+    assert.equal(whileNamedEmma.resolvedText, "Emma otevři kontakty");
+
+    const afterRename = await resolveLearningAliases(asUser("Alfonzo", "Alfonzo"), "ema otevři kontakty");
+    assert.equal(afterRename.resolvedText, "ema otevři kontakty");
+    assert.deepEqual(afterRename.appliedRules, []);
+
+    // A command alias names a piece of business, not the assistant, so a rename
+    // leaves it alone.
+    await prisma.learningRule.create({
+      data: {
+        companyId: admin.companyId, term: "ukaz zakazniky", meaning: "ukaž klienty", aliasFor: "ukaž klienty",
+        category: "voice_command", status: "active", confirmations: 3, createdBy: admin.id,
+      },
+    });
+    const command = await resolveLearningAliases(asUser("Alfonzo", "Alfonzo"), "ukaz zakazniky");
+    assert.equal(command.resolvedText, "ukaž klienty");
+  });
+
+  it("keeps the assistant's previous name out of the transcription vocabulary", async () => {
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } });
+    const forEmma = await aliasVocabulary(admin.companyId, ["Hej Emma", "Emma"]);
+    assert.ok(forEmma.includes("Emma"), "the name in use belongs in the vocabulary");
+    const forAlfonzo = await aliasVocabulary(admin.companyId, ["Alfonzo", "Alfonzo"]);
+    assert.ok(!forAlfonzo.includes("Emma"), "the old name must not be suggested to the decoder");
+    assert.ok(forAlfonzo.includes("ukaž klienty"), "command aliases survive a rename");
   });
 });

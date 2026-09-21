@@ -8,7 +8,7 @@ import { EXECUTE_TEXT_COMMAND_ACTION } from "../../lib/actionContracts.js";
 import { isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../../lib/commandParser.js";
 import { dispatchParsedCommand, type CommandResponse } from "../../lib/commandExecutor.js";
 import { resolveLearningAliases } from "../../services/learningService.js";
-import { aliasVocabulary } from "../../services/voiceAliasService.js";
+import { addressedAs, aliasVocabulary } from "../../services/voiceAliasService.js";
 import { createRealtimeClientSession, interpretVoiceRequest, transcribeVoiceAudio } from "../../services/voiceAssistantService.js";
 import { publishVoiceUiAction } from "../../services/voiceUiActionService.js";
 import { getAssistantContext } from "../../services/assistantMemoryService.js";
@@ -313,7 +313,7 @@ commandRouter.post(
       // language until the next sign-in. This way a change — typed or spoken —
       // applies to the very next utterance.
       const language = await currentVoiceLanguage(req.user!);
-      const learned = await aliasVocabulary(req.user!.companyId);
+      const learned = await aliasVocabulary(req.user!.companyId, addressedAs(req.user!));
       const transcription = await transcribeVoiceAudio(audio, language, query.data.wake_word, learned);
       await recordAudit({
         companyId: req.user!.companyId,

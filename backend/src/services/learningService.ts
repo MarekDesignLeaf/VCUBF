@@ -4,6 +4,7 @@ import { recordAudit } from "../lib/audit.js";
 import { CREATE_LEARNING_RULE_ACTION, UPDATE_LEARNING_RULE_ACTION, LEARNING_RULE_STATUSES } from "../lib/actionContracts.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
+import { addressedAs, aliasStillApplies } from "./voiceAliasService.js";
 
 // Learning Engine. Every rule is created from an explicit user statement —
 // never inferred from a single weak signal — and stays visible, editable
@@ -159,9 +160,13 @@ export interface AliasResolution {
 // active rules with aliasFor set participate; longer terms are matched
 // first so a more specific alias wins over a shorter one it contains.
 export async function resolveLearningAliases(user: AuthedUser, text: string): Promise<AliasResolution> {
-  const rules = await prisma.learningRule.findMany({
+  const stored = await prisma.learningRule.findMany({
     where: { companyId: user.companyId, status: "active", aliasFor: { not: null } },
   });
+  // A wake-word alias stands for one particular name. When the assistant is
+  // renamed, rules learned for the old name must stop rewriting what was said,
+  // or a command is silently turned back into the previous name.
+  const rules = stored.filter((rule) => aliasStillApplies(rule, addressedAs(user)));
   if (rules.length === 0) {
     return { originalText: text, resolvedText: text, appliedRules: [] };
   }

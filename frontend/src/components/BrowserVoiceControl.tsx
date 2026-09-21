@@ -981,16 +981,28 @@ export function BrowserVoiceControl() {
     activeUntil.current = Math.min(Date.now() + ACTIVE_WINDOW_MS, cap);
   }, []);
 
+  /**
+   * Which learned spellings still apply.
+   *
+   * A wake-word alias is a mishearing of one particular name: "ema" was learned
+   * as a way of hearing Emma. Every active one used to be accepted whatever the
+   * assistant is called today, so a rename left it still answering to its old
+   * name. Each rule records the name it stands for, so keeping only those that
+   * match what the assistant is called now makes a rename take effect by itself
+   * and discards nothing the recogniser has learned.
+   */
   const refreshAliases = useCallback(async () => {
     try {
       const { aliases } = await api.command.aliases.list();
+      const addressedAs = new Set([fold(hotword), fold(assistantName)].filter(Boolean));
       const active = aliases
         .filter((alias) => alias.category === "wake_word" && alias.status === "active")
+        .filter((alias) => addressedAs.has(fold(alias.aliasFor ?? "")))
         .map((alias) => alias.term);
       aliasesRef.current = active;
       setHotwordAliases(active);
     } catch { /* Aliases are an improvement, never a requirement. */ }
-  }, []);
+  }, [hotword, assistantName]);
 
   useEffect(() => { void refreshAliases(); }, [refreshAliases]);
 
