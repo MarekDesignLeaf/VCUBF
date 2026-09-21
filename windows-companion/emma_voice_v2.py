@@ -532,17 +532,59 @@ def normalized_text(value: str) -> str:
     return " ".join("".join(character.lower() if character.isalnum() else " " for character in value).split())
 
 
-def contains_wake_word(transcript: str, wake_word: str) -> bool:
-    phrase = normalized_text(wake_word)
-    heard = normalized_text(transcript)
-    if not phrase or not heard:
+def spoken_fold(value: str) -> str:
+    """One spelling for a sound a recogniser writes more than one way.
+
+    The same name comes back written several ways: Alfonzo, Alfonso, Alfonz;
+    Emma, Ema. Only the pairs that genuinely collide in Czech, Polish and
+    English spelling of one sound are folded here, and a double letter is
+    treated as the spelling choice it is. Anything wider would start waking the
+    assistant on ordinary words.
+    """
+    folded = folded_text(value).replace("ph", "f")
+    for source, target in (("z", "s"), ("w", "v"), ("y", "i")):
+        folded = folded.replace(source, target)
+    return re.sub(r"(.)\1+", r"\1", folded)
+
+
+def same_spoken_word(heard: str, expected: str) -> bool:
+    """The same name, allowing for how it was spelled and how it was declined."""
+    if not heard or not expected:
         return False
-    accepted = {phrase}
-    # Czech address of the default name is naturally "Emmo". It is still the
-    # same configured wake word, not a language fallback or a second assistant.
-    if phrase == "emma":
-        accepted.update({"emmo", "ema"})
-    return any(f" {candidate} " in f" {heard} " for candidate in accepted)
+    if heard == expected:
+        return True
+    # Czech and Polish decline a name when addressing someone — Alfonzo,
+    # Alfonze, Alfonzi — so the last letter may differ or be absent, and no
+    # more than that. A name of one or two letters has no room for the
+    # allowance and does not get it.
+    shorter, longer = sorted((heard, expected), key=len)
+    if len(longer) - len(shorter) > 1 or len(shorter) < 3:
+        return False
+    return longer[:-1] == (shorter[:-1] if len(longer) == len(shorter) else shorter)
+
+
+def wake_word_end(transcript: str, wake_word: str) -> int | None:
+    """Where the wake word ends in the transcript, or None if it is not there.
+
+    Tolerance is derived from the configured wake word rather than written out
+    for one particular name. Emma had its spellings listed in the source and
+    Alfonzo had none, so renaming the assistant left it deaf to everything but
+    an exact transcription of its new name — which a speech model produces only
+    some of the time.
+    """
+    expected = [spoken_fold(token) for token in normalized_text(wake_word).split() if token]
+    if not expected:
+        return None
+    words = list(re.finditer(r"\w+", transcript, re.UNICODE))
+    folded = [spoken_fold(match.group(0)) for match in words]
+    for start in range(len(folded) - len(expected) + 1):
+        if all(same_spoken_word(folded[start + offset], word) for offset, word in enumerate(expected)):
+            return words[start + len(expected) - 1].end()
+    return None
+
+
+def contains_wake_word(transcript: str, wake_word: str) -> bool:
+    return wake_word_end(transcript, wake_word) is not None
 
 
 def consonant_skeleton(word: str) -> str:
@@ -594,12 +636,8 @@ def wake_word_plausible(transcript: str, wake_word: str) -> bool:
 
 def wake_command_tail(transcript: str, wake_word: str) -> str:
     """Keep a command spoken directly after the wake word, if there is one."""
-    candidates = [wake_word]
-    if normalized_text(wake_word) == "emma":
-        candidates.append("Emmo")
-    pattern = "|".join(re.escape(candidate) for candidate in candidates if candidate.strip())
-    match = re.search(rf"(?i)(?<!\w)(?:{pattern})(?!\w)", transcript)
-    return transcript[match.end():].lstrip(" ,.:;!?-–—") if match else ""
+    end = wake_word_end(transcript, wake_word)
+    return transcript[end:].lstrip(" ,.:;!?-–—") if end is not None else ""
 
 
 def pcm_mean_amplitude(raw: bytes) -> int:
@@ -938,6 +976,18 @@ def self_test() -> bool:
         and contains_wake_word("Emmo, otevři kontakty", "Emma")
         and wake_command_tail("Emma, otevři kontakty", "Emma") == "otevři kontakty"
         and contains_wake_word("Emma, otevři kontakty", "Emma")
+        # The tolerance is derived from the configured name, not written out for
+        # one of them. These are the spellings a speech model actually returns
+        # for this name, and the declined forms a Czech speaker actually says.
+        and all(
+            contains_wake_word(f"{heard}, ukaž klienty", "Alfonzo")
+            for heard in ("Alfonzo", "Alfonso", "Alfonz", "Alfons", "Alfonzi", "Alfonze")
+        )
+        and wake_command_tail("Alfonso ukaž klienty", "Alfonzo") == "ukaž klienty"
+        # And ordinary speech still does not wake it.
+        and not contains_wake_word("ukaž klienty", "Alfonzo")
+        and not contains_wake_word("telefon zvoní", "Alfonzo")
+        and not contains_wake_word("pošli to emailem", "Emma")
         and pcm_mean_amplitude(b"\x00\x00\x00\x00") == 0
         and pcm_mean_amplitude(b"\x10\x00\xf0\xff") == 16
         and len(upsample_pcm16_2x(b"\x00\x00\xe8\x03")) == 8
