@@ -43,6 +43,7 @@ import { recordAudit } from "../lib/audit.js";
 import { frontendUrl } from "../lib/frontendUrl.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
+import { TranslationUnavailable, translateOutgoingMessage, type OutgoingTranslation } from "./translationService.js";
 
 const OAUTH_STATE_LIFETIME_MS = 10 * 60 * 1000;
 const TOKEN_REFRESH_MARGIN_MS = 60 * 1000;
@@ -79,7 +80,12 @@ const gmailComposeFields = {
   body: z.string().min(1).max(100_000),
 };
 export const createGmailDraftSchema = z.object(gmailComposeFields).strict();
-export const sendGmailMessageSchema = z.object({ ...gmailComposeFields, confirmed: z.boolean().optional() }).strict();
+export const sendGmailMessageSchema = z.object({
+  ...gmailComposeFields,
+  /** Dictate in one language, send in another: "en-GB", "English", "anglicky". */
+  send_in: z.string().trim().min(1).max(40).optional(),
+  confirmed: z.boolean().optional(),
+}).strict();
 
 function stateHash(state: string) {
   return createHash("sha256").update(state).digest("hex");
@@ -815,8 +821,30 @@ export async function sendGmailMessageNow(
     await auditFailure(SEND_GMAIL_MESSAGE_ACTION, user, sourceId, lookup.failure.error);
     return lookup.failure;
   }
-  const { confirmed: _confirmed, ...message } = parsed.data;
-  const preview = { sourceId, provider: "gmail", ...message };
+  const { confirmed: _confirmed, send_in: sendIn, ...dictated } = parsed.data;
+  // Dictated in one language, sent in another. The translation is made now,
+  // before approval, so the person approves the words that will actually leave
+  // the building. On the confirmed call there is nothing left to translate: the
+  // approved text IS the message, and translating again could produce something
+  // nobody read (section 41).
+  let message = dictated;
+  let translation: OutgoingTranslation | undefined;
+  if (sendIn) {
+    if (parsed.data.confirmed) {
+      return fail(400, "TRANSLATION_AFTER_APPROVAL", "Confirm the message that was reviewed; it is already in the language it will be sent in.");
+    }
+    try {
+      translation = await translateOutgoingMessage(dictated, sendIn);
+      message = { ...dictated, body: translation.body, subject: translation.subject ?? dictated.subject };
+    } catch (error) {
+      if (error instanceof TranslationUnavailable) return fail(503, error.reason, error.message);
+      throw error;
+    }
+  }
+  const preview = {
+    sourceId, provider: "gmail", ...message,
+    ...(translation ? { sentIn: translation.languageLabel, dictated: translation.original } : {}),
+  };
   if (!parsed.data.confirmed) {
     await recordAudit({
       companyId: user.companyId,
@@ -828,7 +856,12 @@ export async function sendGmailMessageNow(
       result: "rejected",
       errorMessage: "CONFIRMATION_REQUIRED",
     });
-    return fail(409, "CONFIRMATION_REQUIRED", "Review the final recipients, subject and body, then confirm sending.", { preview });
+    return fail(409, "CONFIRMATION_REQUIRED", "Review the final recipients, subject and body, then confirm sending.", {
+      preview,
+      // What confirmation must send: the reviewed operation, not the sentence
+      // that asked for it.
+      confirmInput: message,
+    });
   }
   try {
     const credential = await usableCredential({ credential: lookup.source.credential! });

@@ -515,6 +515,14 @@ async function executeEmmaActionDirect(
       const source = await connectorSource(user, "gmail");
       return source.ok ? gmailConnectorService.createGmailDraftMessage(user, source.data.id, p) : source;
     }
+    case "send_email": {
+      const source = await connectorSource(user, "gmail");
+      return source.ok ? gmailConnectorService.sendGmailMessageNow(user, source.data.id, { ...p, confirmed }) : source;
+    }
+    case "send_whatsapp": {
+      const source = await connectorSource(user, "whatsapp_business");
+      return source.ok ? whatsappBusinessConnectorService.sendWhatsAppMessage(user, source.data.id, { ...p, confirmed }) : source;
+    }
     case "delete_gmail_message": {
       const intake = await intakeByReference(user, stringValue(p, "sender_or_message"));
       return intake.ok ? gmailConnectorService.deleteGmailIntake(user, intake.data.id, { confirmed }) : intake;
@@ -640,6 +648,22 @@ export async function executeEmmaAction(user: AuthedUser, request: EmmaExecutabl
   const result = await executeEmmaActionDirect(user, sanitized, false);
   if (definition.confirmation !== "service_preview" || result.ok || result.error !== "CONFIRMATION_REQUIRED") return result;
 
+  // Approval binds to the operation that was reviewed, not to the sentence that
+  // asked for it (section 41). Usually those are the same request. They are not
+  // when preparing the preview changed the operation — a message dictated in
+  // Czech and reviewed in English is the clear case: confirming must send the
+  // English that was read back, never the Czech that was spoken. A service that
+  // reshapes its operation says so by returning confirmInput, and that is what
+  // waits for the yes.
+  // Replaced, not merged: confirmInput is the whole reviewed operation. Keeping
+  // any of the original parameters alongside it would carry back the very
+  // instruction that reshaped it — "send this in English" — and the reviewed
+  // English text would be translated a second time.
+  const reviewed = result.extra?.confirmInput;
+  const awaiting = reviewed && typeof reviewed === "object" && !Array.isArray(reviewed)
+    ? { ...sanitized, parameters: reviewed as Record<string, unknown> }
+    : sanitized;
+
   await prisma.$transaction([
     prisma.voicePendingAction.updateMany({
       where: { companyId: user.companyId, userId: user.id, actionType: PENDING_ACTION_TYPE, status: "pending" },
@@ -651,7 +675,7 @@ export async function executeEmmaAction(user: AuthedUser, request: EmmaExecutabl
         userId: user.id,
         actionType: PENDING_ACTION_TYPE,
         status: "pending",
-        payload: sanitized as unknown as Prisma.InputJsonValue,
+        payload: awaiting as unknown as Prisma.InputJsonValue,
         expiresAt: new Date(Date.now() + PENDING_TTL_MS),
       },
     }),

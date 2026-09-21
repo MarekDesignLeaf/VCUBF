@@ -20,10 +20,13 @@ import { recordAudit } from "../lib/audit.js";
 import { isValidPhoneNumberFormat, normalizePhone, phoneNumberSchema } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
+import { TranslationUnavailable, translateOutgoingMessage, type OutgoingTranslation } from "./translationService.js";
 
 export const sendWhatsAppMessageSchema = z.object({
   to: phoneNumberSchema,
   body: z.string().trim().min(1).max(4096),
+  /** Dictate in one language, send in another: "en-GB", "English", "anglicky". */
+  send_in: z.string().trim().min(1).max(40).optional(),
   confirmed: z.boolean().optional(),
 }).strict();
 export const disconnectWhatsAppSchema = z.object({ confirmed: z.boolean().optional() }).strict();
@@ -352,7 +355,29 @@ export async function sendWhatsAppMessage(
   if (!source) return fail(404, "CONNECTOR_SOURCE_NOT_FOUND");
   if (!source.isEnabled) return fail(409, "CONNECTOR_NOT_ENABLED");
   if (!source.configuredScopes.includes("send:messages")) return fail(409, "CONNECTOR_SCOPE_REQUIRED");
-  const preview = { sourceId, provider: "whatsapp_business", to: parsed.data.to, body: parsed.data.body };
+  // Dictated in one language, sent in another. The translation is made now,
+  // before approval, so the person approves the words that will actually leave
+  // the building. On the confirmed call there is nothing left to translate: the
+  // approved text IS the message, and translating again could produce something
+  // nobody read (section 41).
+  let body = parsed.data.body;
+  let translation: OutgoingTranslation | undefined;
+  if (parsed.data.send_in) {
+    if (parsed.data.confirmed) {
+      return fail(400, "TRANSLATION_AFTER_APPROVAL", "Confirm the message that was reviewed; it is already in the language it will be sent in.");
+    }
+    try {
+      translation = await translateOutgoingMessage({ body }, parsed.data.send_in);
+      body = translation.body;
+    } catch (error) {
+      if (error instanceof TranslationUnavailable) return fail(503, error.reason, error.message);
+      throw error;
+    }
+  }
+  const preview = {
+    sourceId, provider: "whatsapp_business", to: parsed.data.to, body,
+    ...(translation ? { sentIn: translation.languageLabel, dictated: translation.original.body } : {}),
+  };
   if (!parsed.data.confirmed) {
     await recordAudit({
       companyId: user.companyId,
@@ -364,10 +389,15 @@ export async function sendWhatsAppMessage(
       result: "rejected",
       errorMessage: "CONFIRMATION_REQUIRED",
     });
-    return fail(409, "CONFIRMATION_REQUIRED", "Review the final WhatsApp recipient and message, then confirm sending.", { preview });
+    return fail(409, "CONFIRMATION_REQUIRED", "Review the final WhatsApp recipient and message, then confirm sending.", {
+      preview,
+      // What confirmation must send: the reviewed operation, not the sentence
+      // that asked for it.
+      confirmInput: { to: parsed.data.to, body },
+    });
   }
   try {
-    const sent = await sendWhatsAppText({ to: parsed.data.to, body: parsed.data.body });
+    const sent = await sendWhatsAppText({ to: parsed.data.to, body });
     const result = { sourceId, messageId: sent.messageId, sentAt: new Date() };
     await recordAudit({
       companyId: user.companyId,
