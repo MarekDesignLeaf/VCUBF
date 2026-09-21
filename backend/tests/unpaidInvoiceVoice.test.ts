@@ -25,15 +25,15 @@ describe("Unpaid invoice voice query", () => {
       await prisma.invoice.create({ data: {
         companyId, clientId: client.id, invoiceNumber: `VOICE-${index}`, title: "Fixture", invoiceStatus: status,
         createdBy: admin.id, dueDate: new Date("2020-01-01T00:00:00Z"),
-        items: { create: { description: "Work", quantity: 1, unitPrice: 100, sortOrder: 0 } },
-        ...(paid ? { payments: { create: { amount: paid, paidAt: new Date() } } } : {}),
+        items: { create: { companyId, description: "Work", quantity: 1, unitPrice: 100, sortOrder: 0 } },
+        ...(paid ? { payments: { create: { companyId, amount: paid, paidAt: new Date() } } } : {}),
       } });
     }
     const other = await prisma.company.create({ data: { name: "Other tenant" } });
     const otherClient = await prisma.client.create({ data: { companyId: other.id, displayName: "Private" } });
     await prisma.invoice.create({ data: {
       companyId: other.id, clientId: otherClient.id, invoiceNumber: "PRIVATE", title: "Private", invoiceStatus: "issued",
-      items: { create: { description: "Private", quantity: 1, unitPrice: 100, sortOrder: 0 } },
+      items: { create: { companyId: other.id, description: "Private", quantity: 1, unitPrice: 100, sortOrder: 0 } },
     } });
   });
   after(async () => { await prisma.$disconnect(); });

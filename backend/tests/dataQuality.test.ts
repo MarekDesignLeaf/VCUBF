@@ -260,7 +260,7 @@ describe("Data Quality Engine", () => {
       });
       taskId = task.id;
       const invoice = await prisma.invoice.create({
-        data: { companyId: duplicate.companyId, clientId: duplicateId, invoiceNumber: "MERGE-INV-1", title: "Invoice on duplicate", items: { create: [{ description: "Work", quantity: 1, unitPrice: 120 }] } },
+        data: { companyId: duplicate.companyId, clientId: duplicateId, invoiceNumber: "MERGE-INV-1", title: "Invoice on duplicate", items: { create: [{ companyId: duplicate.companyId, description: "Work", quantity: 1, unitPrice: 120 }] } },
       });
       invoiceId = invoice.id;
     });

@@ -72,6 +72,10 @@ model Company {
   passwordResetTokens          PasswordResetToken[]
   voiceMacros                  VoiceMacro[]
   voiceMacroNames              VoiceMacroName[]
+  jobResourceRequirements      JobResourceRequirement[]
+  quoteItems                   QuoteItem[]
+  invoiceItems                 InvoiceItem[]
+  payments                     Payment[]
 
   @@map("companies")
 }
@@ -461,6 +465,7 @@ model Job {
 // client account is created. Source fields keep every fact traceable.
 model JobResourceRequirement {
   id String @id @default(uuid())
+  companyId String @map("company_id")
   jobId String @map("job_id")
   resourceType String @map("resource_type")
   name String
@@ -472,7 +477,9 @@ model JobResourceRequirement {
   notes String?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+  company Company @relation(fields: [companyId], references: [id])
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  @@index([companyId])
   @@index([jobId])
   @@map("job_resource_requirements")
 }
@@ -791,6 +798,7 @@ model Quote {
 
 model QuoteItem {
   id                     String   @id @default(uuid())
+  companyId              String   @map("company_id")
   quoteId                String   @map("quote_id")
   serviceCatalogueItemId String?  @map("service_catalogue_item_id")
   description            String
@@ -800,9 +808,11 @@ model QuoteItem {
   sortOrder              Int      @default(0) @map("sort_order")
   createdAt              DateTime @default(now()) @map("created_at")
 
+  company              Company               @relation(fields: [companyId], references: [id])
   quote                Quote                 @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   serviceCatalogueItem ServiceCatalogueItem? @relation(fields: [serviceCatalogueItemId], references: [id])
 
+  @@index([companyId])
   @@index([quoteId])
   @@index([serviceCatalogueItemId])
   @@map("quote_items")
@@ -832,25 +842,31 @@ model Invoice {
 
 model InvoiceItem {
   id String @id @default(uuid())
+  companyId String @map("company_id")
   invoiceId String @map("invoice_id")
   description String
   quantity Float @default(1)
   unitPrice Decimal @db.Decimal(14, 2) @map("unit_price")
   sortOrder Int @default(0) @map("sort_order")
+  company Company @relation(fields: [companyId], references: [id])
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  @@index([companyId])
   @@index([invoiceId])
   @@map("invoice_items")
 }
 
 model Payment {
   id String @id @default(uuid())
+  companyId String @map("company_id")
   invoiceId String @map("invoice_id")
   amount Decimal @db.Decimal(14, 2)
   paidAt DateTime @map("paid_at")
   method String?
   reference String?
   createdAt DateTime @default(now()) @map("created_at")
+  company Company @relation(fields: [companyId], references: [id])
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  @@index([companyId])
   @@index([invoiceId])
   @@map("payments")
 }

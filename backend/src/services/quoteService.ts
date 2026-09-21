@@ -133,6 +133,10 @@ async function resolveItemInputs(user: AuthedUser, items: z.infer<typeof quoteIt
   }
   return {
     data: items.map((item, index) => ({
+      // The tenant key is written on the line itself, not inherited from the
+      // quote at read time, so a query that never joins the quote still knows
+      // whose line this is.
+      companyId: user.companyId,
       serviceCatalogueItemId: item.service_catalogue_item_id,
       description: item.description,
       quantity: item.quantity,
