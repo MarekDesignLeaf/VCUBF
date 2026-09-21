@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import { prisma } from "../db.js";
+import { idempotencyGuard } from "./idempotency.js";
 
 export interface AuthedUser {
   id: string;
@@ -82,7 +83,11 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       assistantName: user.assistantName,
       voiceSpeechRate: user.voiceSpeechRate,
     };
-    next();
+    // Identity is the earliest point at which a repeated write can be
+    // recognised as repeated: the key is scoped to the company, and this is
+    // where the company becomes known. Every authenticated route passes through
+    // here, so the guarantee cannot be forgotten at an individual route.
+    return idempotencyGuard(req, res, next);
   } catch {
     return res.status(401).json({ error: "MISSING_PERMISSION", message: "Invalid token" });
   }

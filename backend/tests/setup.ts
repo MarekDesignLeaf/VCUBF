@@ -29,6 +29,7 @@ export async function resetDb() {
   // quotes which reference clients/jobs; jobs reference clients/users/
   // catalogue items; jobs must go before the catalogue items they may
   // reference.
+  await prisma.idempotencyRecord.deleteMany({});
   await prisma.auditLog.deleteMany({});
   await prisma.systemSetup.deleteMany({});
   await prisma.passwordResetToken.deleteMany({});

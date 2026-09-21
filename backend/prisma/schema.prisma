@@ -76,6 +76,7 @@ model Company {
   quoteItems                   QuoteItem[]
   invoiceItems                 InvoiceItem[]
   payments                     Payment[]
+  idempotencyRecords           IdempotencyRecord[]
 
   @@map("companies")
 }
@@ -1484,4 +1485,28 @@ model VoiceMacroName {
   @@unique([companyId, term])
   @@index([macroId])
   @@map("voice_macro_names")
+}
+
+// Write idempotency — master documentation section 43. One row per
+// Idempotency-Key per company: what the key was first used for, and the answer
+// the first attempt gave, so a retry is answered rather than acted on. The row
+// is short-lived by design; expiresAt is what frees a key again rather than
+// blocking it for ever.
+model IdempotencyRecord {
+  id String @id @default(uuid())
+  companyId String @map("company_id")
+  userId String @map("user_id")
+  key String
+  /// The request the key was claimed for. A different one under the same key is refused, never answered.
+  fingerprint String
+  status String @default("in_progress")
+  responseStatus Int? @map("response_status")
+  responseBody Json? @map("response_body")
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+  company Company @relation(fields: [companyId], references: [id])
+  @@unique([companyId, key])
+  @@index([companyId])
+  @@index([expiresAt])
+  @@map("idempotency_records")
 }
