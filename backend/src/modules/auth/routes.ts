@@ -8,11 +8,11 @@ import { requireAuth, signDesktopBootstrapToken, signToken, verifyDesktopBootstr
 import { recordAudit } from "../../lib/audit.js";
 import { CHANGE_OWN_PASSWORD_ACTION, KNOWN_PERMISSIONS } from "../../lib/actionContracts.js";
 import { frontendUrl } from "../../lib/frontendUrl.js";
+import { readLocalTestSelection, writeLocalTestSelection } from "../../lib/localTestSelection.js";
 import { deliverGmailSecurityMessage } from "../../services/gmailConnectorService.js";
 import { updateVoicePreferences, voicePreferencesSchema } from "../../services/voicePreferenceService.js";
 
 export const authRouter = Router();
-let selectedLocalTestUserId: string | null = null;
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -236,7 +236,7 @@ authRouter.post("/local-test-login", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED" });
   const user = await prisma.user.findUnique({ where: { id: parsed.data.user_id } });
   if (!user?.isActive) return res.status(404).json({ error: "USER_NOT_FOUND" });
-  selectedLocalTestUserId = user.id;
+  writeLocalTestSelection(user.id);
   res.json({ token: signToken({
     id: user.id, companyId: user.companyId, email: user.email, displayName: user.displayName,
     role: user.role, permissions: user.permissions, mustChangePassword: user.mustChangePassword,
@@ -248,18 +248,22 @@ authRouter.post("/local-test-login", async (req, res) => {
 
 authRouter.get("/local-test-active-session", async (req, res) => {
   if (!localTestRequestAllowed(req)) return localTestNotFound(res);
-  if (!selectedLocalTestUserId) {
-    // A local backend recovery clears only this in-memory selection. If this
-    // PC has exactly one active test account, restore it automatically so the
-    // already signed-in browser and its one Voice V2 process recover together.
-    // With multiple accounts we still require an explicit tile selection.
+  let selected = readLocalTestSelection();
+  if (!selected) {
+    // Nothing has been chosen on this machine yet. If there is exactly one
+    // active account, choose it, so the already signed-in browser and its one
+    // Voice V2 process recover together. With several accounts, which one is
+    // meant is a question only the person can answer, so the tiles ask.
     const onlyActiveUsers = await prisma.user.findMany({ where: { isActive: true }, select: { id: true }, take: 2 });
-    if (onlyActiveUsers.length === 1) selectedLocalTestUserId = onlyActiveUsers[0].id;
+    if (onlyActiveUsers.length === 1) {
+      selected = onlyActiveUsers[0].id;
+      writeLocalTestSelection(selected);
+    }
   }
-  if (!selectedLocalTestUserId) return res.status(404).json({ error: "LOCAL_TEST_USER_NOT_SELECTED" });
-  const user = await prisma.user.findUnique({ where: { id: selectedLocalTestUserId } });
+  if (!selected) return res.status(404).json({ error: "LOCAL_TEST_USER_NOT_SELECTED" });
+  const user = await prisma.user.findUnique({ where: { id: selected } });
   if (!user?.isActive) {
-    selectedLocalTestUserId = null;
+    writeLocalTestSelection(null);
     return res.status(404).json({ error: "USER_NOT_FOUND" });
   }
   res.json({ token: signToken({

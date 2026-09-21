@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import request from "supertest";
 import { createServer } from "../src/server.js";
@@ -213,5 +216,68 @@ describe("auth", () => {
     const audit = await prisma.auditLog.findFirst({ where: { actionName: "change_own_password", result: "success" }, orderBy: { createdAt: "desc" } });
     assert.deepEqual(audit?.inputPayload, { passwordFieldsRedacted: true });
     assert.deepEqual(audit?.dataAfter, { passwordChanged: true });
+  });
+});
+
+// The passwordless tiles are the way this machine signs in, and the choice they
+// record used to live only in the running process. Every backend restart threw
+// it away: the browser kept a token for an account the server no longer owned
+// up to having chosen, and the Windows companion repeated
+// LOCAL_TEST_SESSION_REQUIRED once a second until somebody clicked a tile.
+describe("the local passwordless account choice", () => {
+  const stateFile = path.join(os.tmpdir(), `vcuf-local-test-choice-${process.pid}.json`);
+  let previousEnabled: string | undefined;
+
+  before(async () => {
+    await resetDb();
+    await seedCompanyAndAdmin();
+    previousEnabled = process.env.VCUBF_LOCAL_TEST_LOGIN;
+    process.env.VCUBF_LOCAL_TEST_LOGIN = "1";
+    process.env.VCUBF_LOCAL_TEST_STATE = stateFile;
+    fs.rmSync(stateFile, { force: true });
+  });
+  after(async () => {
+    fs.rmSync(stateFile, { force: true });
+    delete process.env.VCUBF_LOCAL_TEST_STATE;
+    if (previousEnabled === undefined) delete process.env.VCUBF_LOCAL_TEST_LOGIN;
+    else process.env.VCUBF_LOCAL_TEST_LOGIN = previousEnabled;
+    await resetDb();
+    await prisma.$disconnect();
+  });
+
+  it("survives the process that recorded it", async () => {
+    const tiles = await request(app).get("/auth/local-test-users");
+    assert.equal(tiles.status, 200);
+    const chosen = tiles.body.find((candidate: { role: string }) => candidate.role === "administrator");
+    assert.ok(chosen, "the seeded administrator should be offered as a tile");
+
+    const signedIn = await request(app).post("/auth/local-test-login").send({ user_id: chosen.id });
+    assert.equal(signedIn.status, 200);
+    // On disk, not in a variable: this is what the next process reads.
+    assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).userId, chosen.id);
+
+    const session = await request(app).get("/auth/local-test-active-session");
+    assert.equal(session.status, 200);
+    assert.equal(session.body.user.id, chosen.id);
+  });
+
+  it("asks rather than guesses when nothing has been chosen and several accounts are active", async () => {
+    fs.rmSync(stateFile, { force: true });
+    assert.equal(await prisma.user.count({ where: { isActive: true } }), 2);
+    const session = await request(app).get("/auth/local-test-active-session");
+    assert.equal(session.status, 404);
+    assert.equal(session.body.error, "LOCAL_TEST_USER_NOT_SELECTED");
+  });
+
+  it("chooses for itself only when this machine has one account", async () => {
+    fs.rmSync(stateFile, { force: true });
+    const worker = await prisma.user.findFirstOrThrow({ where: { email: "worker@test.local" } });
+    await prisma.user.update({ where: { id: worker.id }, data: { isActive: false } });
+    const session = await request(app).get("/auth/local-test-active-session");
+    assert.equal(session.status, 200);
+    assert.equal(session.body.user.email, "admin@test.local");
+    // Written down, so the next restart does not have to work it out again.
+    assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).userId, session.body.user.id);
+    await prisma.user.update({ where: { id: worker.id }, data: { isActive: true } });
   });
 });
