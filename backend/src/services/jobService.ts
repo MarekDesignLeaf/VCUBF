@@ -195,6 +195,12 @@ const STATUS_WORD_MAP: Record<string, string> = {
   ceka_na_klienta: "ceka_na_klienta",
   done: "dokonceno",
   completed: "dokonceno",
+  // The words a Czech speaker actually says, folded to the stored value.
+  hotovo: "dokonceno",
+  "v realizaci": "v_realizaci",
+  "probiha": "v_realizaci",
+  "ceka na material": "ceka_na_material",
+  "ceka na klienta": "ceka_na_klienta",
   dokonceno: "dokonceno",
   cancelled: "zruseno",
   canceled: "zruseno",
@@ -202,8 +208,17 @@ const STATUS_WORD_MAP: Record<string, string> = {
 };
 
 export function resolveStatusWord(word: string): string {
-  const key = word.trim().toLowerCase();
-  return STATUS_WORD_MAP[key] ?? key;
+  // A status spoken in Czech arrives with its diacritics and with spaces where
+  // the stored value has underscores. Folding both is what lets "změň stav
+  // zakázky Zahrada na dokončeno" reach the same state as the English form,
+  // instead of failing validation on a word the speaker said correctly.
+  const key = word
+    .trim()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  return STATUS_WORD_MAP[key] ?? STATUS_WORD_MAP[key.replace(/ /g, "_")] ?? key.replace(/ /g, "_");
 }
 
 // assign_job — Action Contract driven. Assigns a job to an employee,

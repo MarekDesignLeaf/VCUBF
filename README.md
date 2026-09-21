@@ -37,6 +37,11 @@ docs/               User guide, connector engine, production architecture, voice
   transcript rejection before interpretation, bounded speech output, interruption handling,
   and ElevenLabs/OpenAI PCM fallback. Provider choice is preserved during upgrades.
   Native audio and provider behaviour still require a live microphone acceptance run.
+- **Spoken languages**: the deterministic parser, not the language model, decides what a
+  command means. Its coverage is measured per language by `voiceLanguageCoverage.test.ts`,
+  which keeps the same commands in English and Czech and fails if either falls. A command
+  the parser does not know still works, through the model, at the cost of a round trip and
+  one more place to be misheard.
 - **Voice commands**: aliases, speech preferences, client confirmation and a read-only
   money query use the shared backend. “Kolik mám nezaplacených faktur?”, “Kdo mi
   nezaplatil?”, “Who owes us money?” and “How much are we owed?” are one question about
@@ -52,7 +57,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 75 test files, including database integration tests and checks that only
+- **Tests**: 76 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.

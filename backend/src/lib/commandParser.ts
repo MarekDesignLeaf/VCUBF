@@ -111,13 +111,15 @@ export type ParsedCommand =
   | { intent: "navigate"; entities: { page: VoicePage } }
   | { intent: "unrecognized"; entities: Record<string, never> };
 
+const PHONE_FIELD_LABELS = new Set(["phone", "telefon", "telefonu"]);
+
 function extractLabelled(text: string, label: string): { value?: string; rest: string } {
   // Phone is the final labelled field in canonical create commands. Speech
   // recognition commonly emits dictated digits separated by commas; capture
   // the complete remainder instead of truncating the number at its first
   // comma. Other fields retain comma-delimited parsing.
   const re = new RegExp(
-    label.toLowerCase() === "phone"
+    PHONE_FIELD_LABELS.has(label.toLowerCase())
       ? `,?\\s*${label}\\s*[:]?\\s*(.+)$`
       : `,?\\s*${label}\\s*[:]?\\s*([^,]+)`,
     "i",
@@ -127,6 +129,19 @@ function extractLabelled(text: string, label: string): { value?: string; rest: s
   const value = match[1].trim();
   const rest = (text.slice(0, match.index) + text.slice((match.index ?? 0) + match[0].length)).trim();
   return { value, rest };
+}
+
+/** The labels people actually speak. "email" is the same word in Czech, the
+ *  phone field is not, and a create command is worthless if the number is
+ *  dropped because the speaker said "telefon". */
+function extractSpokenContact(text: string) {
+  const email = extractLabelled(text, "email");
+  let phone = extractLabelled(email.rest, "phone");
+  for (const label of ["telefon", "telefonu"]) {
+    if (phone.value) break;
+    phone = extractLabelled(email.rest, label);
+  }
+  return { email: email.value, phone: normalizeDictatedPhone(phone.value), rest: phone.rest };
 }
 
 function normalizeDictatedPhone(value: string | undefined): string | undefined {
@@ -152,6 +167,10 @@ function resolveConnectorTarget(raw: string): ConnectorKey | "all" | undefined {
     "google drive": "google_drive", "google drive photos": "google_drive", drive: "google_drive",
     "google photos": "google_photos", "google photo": "google_photos", photos: "google_photos",
     whatsapp: "whatsapp_business", "whatsapp business": "whatsapp_business",
+    // "stav gmailu", "stav kalendare" — Czech asks in the genitive, and the
+    // connector is the same connector whichever case names it.
+    gmailu: "gmail", posty: "gmail", kontaktu: "google_contacts", kalendare: "google_calendar",
+    konektoru: "all", integraci: "all",
   };
   return aliases[normalized];
 }
@@ -559,6 +578,17 @@ function parseLeadMutationCommand(text: string): Extract<ParsedCommand, { intent
 // "How many are unpaid", "how much is outstanding" and "who has not paid" are
 // three ways of asking one question, and get_unpaid_invoices answers all three
 // from the same real balances: the counts, the totals and the largest debtors.
+// A spoken Czech command reaches the parser with whatever diacritics the
+// transcription produced, so the subject is compared without them.
+function foldCzech(value: string) {
+  return value.trim().normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().replace(/\s+/g, " ");
+}
+
+// "ukaž klienty", "vypiš nabídky pro Nováka", "zobraz nevyřízené poptávky".
+// The optional tail after "pro" is a client name for the listings that take one.
+const CZECH_LIST_COMMAND =
+  /^(?:uka[žz]|vyp[ií][šs]|zobraz|p[řr]e[čc]ti|dej\s+mi|seznam)\s+(?:mi\s+)?((?:nevy[řr][ií]zen[ée]\s+)?[\p{L}\s]+?)(?:\s+pro\s+(.+))?$/iu;
+
 const UNPAID_INVOICE_QUESTION =
   /^(?:kolik (?:mam|mame) (?:nezaplacenych|neuhrazenych) faktur(?:y)?|kolik (?:je|mame) (?:nezaplacenych|neuhrazenych) faktur(?:y)?|kdo (?:mi|nam) nezaplatil|kdo (?:mi|nam) dluzi|kolik (?:mi|nam) dluzi(?: klienti)?|(?:how many )?unpaid invoices(?: do (?:i|we) have)?|how many outstanding invoices(?: do (?:i|we) have)?|who owes (?:us|me)(?: money)?|who (?:has|have)(?:n['\u2019]?t| not) paid(?: (?:us|me))?|how much (?:are we|am i) owed)$/;
 
@@ -625,6 +655,11 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     const connectorKey = resolveConnectorTarget(connectorMatch[1]);
     if (connectorKey) return { intent: "connector_status", entities: { connector_key: connectorKey } };
   }
+  connectorMatch = text.match(/^stav\s+(.+?)$/iu);
+  if (connectorMatch) {
+    const connectorKey = resolveConnectorTarget(connectorMatch[1]);
+    if (connectorKey) return { intent: "connector_status", entities: { connector_key: connectorKey } };
+  }
   if (/^(?:check|show|list)\s+(?:my\s+)?(?:connectors?|integrations?)(?:\s+status)?$/i.test(text))
     return { intent: "connector_status", entities: { connector_key: "all" } };
 
@@ -640,18 +675,15 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     if (connectorKey) return { intent: "sync_connectors", entities: { connector_key: connectorKey } };
   }
 
-  let m = text.match(/^(?:create|add|new)\s+client\s+(.+)$/i);
+  let m = text.match(/^(?:create|add|new)\s+client\s+(.+)$/i)
+    ?? text.match(/^(?:vytvo[řr]|p[řr]idej|nov[ýy])\s+(?:klienta|klient|z[áa]kazn[íi]ka|z[áa]kazn[íi]k)\s+(.+)$/iu);
   if (m) {
-    let rest = m[1];
-    const email = extractLabelled(rest, "email");
-    rest = email.rest;
-    const phone = extractLabelled(rest, "phone");
-    rest = phone.rest;
-    const displayName = rest.replace(/,\s*$/, "").trim();
+    const contact = extractSpokenContact(m[1]);
+    const displayName = contact.rest.replace(/,\s*$/, "").trim();
     if (!displayName) return { intent: "unrecognized", entities: {} };
     return {
       intent: "create_client",
-      entities: { display_name: displayName, email_primary: email.value, phone_primary: normalizeDictatedPhone(phone.value) },
+      entities: { display_name: displayName, email_primary: contact.email, phone_primary: contact.phone },
     };
   }
 
@@ -669,12 +701,13 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     return { intent: "create_contact", entities: { display_name: displayName, email: email.value, phone: normalizeDictatedPhone(phone.value) } };
   }
 
-  m = text.match(/^(?:create|add|new)\s+lead\s+(.+)$/i);
+  m = text.match(/^(?:create|add|new)\s+lead\s+(.+)$/i)
+    ?? text.match(/^(?:vytvo[řr]|p[řr]idej|nov[áa])\s+(?:poptávku|poptavku|popt[áa]vka)\s+(.+)$/iu);
   if (m) {
     let rest = m[1];
     // Extract "for <service>" first — email/phone extraction is greedy and
     // would otherwise swallow a trailing "for ..." clause.
-    const forMatch = rest.match(/\bfor\s+(.+)$/i);
+    const forMatch = rest.match(/\b(?:for|pro|na)\s+(.+)$/i);
     let service: string | undefined;
     if (forMatch) {
       service = forMatch[1].trim();
@@ -692,7 +725,8 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     };
   }
 
-  m = text.match(/^(?:create|add|new)\s+job\s+(.+?)\s+for\s+(.+)$/i);
+  m = text.match(/^(?:create|add|new)\s+job\s+(.+?)\s+for\s+(.+)$/i)
+    ?? text.match(/^(?:vytvo[řr]|p[řr]idej|nov[áa])\s+(?:zak[áa]zku|zak[áa]zka)\s+(.+?)\s+pro\s+(?:klienta\s+)?(.+)$/iu);
   if (m) {
     const jobTitle = m[1].trim();
     const clientName = m[2].trim();
@@ -700,27 +734,33 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     return { intent: "create_job", entities: { job_title: jobTitle, client_name: clientName } };
   }
 
-  m = text.match(/^(?:set|change|mark)\s+job\s+(.+?)\s+(?:as|to|status)\s+(.+)$/i);
+  m = text.match(/^(?:set|change|mark)\s+job\s+(.+?)\s+(?:as|to|status)\s+(.+)$/i)
+    ?? text.match(/^(?:zm[ěe][ňn]|nastav|ozna[čc])\s+(?:stav\s+)?zak[áa]zk[yu]\s+(.+?)\s+na\s+(.+)$/iu);
   if (m) {
     return { intent: "change_job_status", entities: { job_title: m[1].trim(), job_status: m[2].trim() } };
   }
 
-  m = text.match(/^convert\s+lead\s+(.+)$/i);
+  m = text.match(/^convert\s+lead\s+(.+)$/i)
+    ?? text.match(/^(?:p[řr]eve[ďd]|zm[ěe][ňn])\s+popt[áa]vku\s+(.+?)\s+na\s+(?:klienta|z[áa]kazn[íi]ka)$/iu);
   if (m) {
     return { intent: "convert_lead", entities: { lead_name: m[1].trim() } };
   }
 
-  m = text.match(/^assign\s+job\s+(.+?)\s+to\s+(.+)$/i);
+  m = text.match(/^assign\s+job\s+(.+?)\s+to\s+(.+)$/i)
+    ?? text.match(/^(?:p[řr]i[řr]a[ďd]|p[řr]ide[ľl]|zadej)\s+zak[áa]zku\s+(.+?)\s+(?:zam[ěe]stnanci|pracovn[íi]kovi|kolegovi)\s+(.+)$/iu);
   if (m) {
     return { intent: "assign_job", entities: { job_title: m[1].trim(), employee_name: m[2].trim() } };
   }
 
-  if (/^(?:show|check)\s+overload$/i.test(text)) return { intent: "detect_overload", entities: {} };
+  if (/^(?:show|check)\s+overload$/i.test(text)
+    || /^(?:zkontroluj|uka[žz]|ov[ěe][řr])\s+p[řr]et[íi][žz]en[íi]$/iu.test(text))
+    return { intent: "detect_overload", entities: {} };
 
   // Task Management — deterministic forms:
   // "create task for Daniel: Prepare materials"
   // "create task Prepare materials, assigned to Daniel, due 2026-08-01T09:00:00.000Z"
-  m = text.match(/^(?:create|add|new)\s+task\s+for\s+(.+?)\s*:\s*(.+)$/i);
+  m = text.match(/^(?:create|add|new)\s+task\s+for\s+(.+?)\s*:\s*(.+)$/i)
+    ?? text.match(/^(?:vytvo[řr]|p[řr]idej|nov[ýy])\s+[úu]kol\s+pro\s+(.+?)\s*:\s*(.+)$/iu);
   if (m) {
     const employeeName = m[1].trim();
     const title = m[2].trim();
@@ -728,7 +768,8 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     return { intent: "create_task", entities: { title, employee_name: employeeName } };
   }
 
-  m = text.match(/^(?:create|add|new)\s+task\s+(.+)$/i);
+  m = text.match(/^(?:create|add|new)\s+task\s+(.+)$/i)
+    ?? text.match(/^(?:vytvo[řr]|p[řr]idej|nov[ýy])\s+[úu]kol\s+(.+)$/iu);
   if (m) {
     let rest = m[1];
     const assigned = extractLabelled(rest, "assigned to");
@@ -741,14 +782,18 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   }
 
   if (/^(?:list|show)\s+tasks?$/i.test(text)) return { intent: "list_tasks", entities: {} };
-  const taskStatusMatch = text.match(/^(?:start|complete|cancel)\s+(?:task\s+)?(.+)$/i);
+  const taskStatusMatch = text.match(/^(?:start|complete|cancel)\s+(?:task\s+)?(.+)$/i)
+    ?? text.match(/^(?:zahaj|za[čc]ni|dokon[čc]i|dokon[čc]it|hotovo|zru[šs])\s+(?:[úu]kol\s+)?(.+)$/iu);
   if (taskStatusMatch) {
-    const verb = text.match(/^(start|complete|cancel)/i)?.[1].toLowerCase();
-    const task_status = verb === "start" ? "in_progress" : verb === "complete" ? "completed" : "cancelled";
+    const verb = text.match(/^(start|complete|cancel|zahaj|za[čc]ni|dokon[čc]i|dokon[čc]it|hotovo|zru[šs])/iu)?.[1].toLowerCase();
+    const started = /^(start|zahaj|za[čc]ni)/iu.test(verb ?? "");
+    const finished = /^(complete|dokon[čc]|hotovo)/iu.test(verb ?? "");
+    const task_status = started ? "in_progress" : finished ? "completed" : "cancelled";
     return { intent: "change_task_status", entities: { title: taskStatusMatch[1].trim(), task_status } };
   }
 
-  m = text.match(/^(?:create|add|new)\s+service\s+(.+)$/i);
+  m = text.match(/^(?:create|add|new)\s+service\s+(.+)$/i)
+    ?? text.match(/^(?:vytvo[řr]|p[řr]idej|nov[áa])\s+(?:slu[žz]bu|slu[žz]ba)\s+(.+)$/iu);
   if (m) {
     let rest = m[1];
     const category = extractLabelled(rest, "category");
@@ -790,11 +835,11 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   // inferred from "with"/"to" (outbound) vs "from" (inbound) — a reasonable
   // deterministic default the user can always correct via the form/API.
   m = text.match(
-    /^log\s+(call|phone call|email|whatsapp|sms|text|messenger|message|meeting|visit)\s+(with|to|from)\s+(.+?)\s*:\s*(.+)$/i
+    /^(?:log|zaznamenej|zapi[šs])\s+(call|phone call|email|whatsapp|sms|text|messenger|message|meeting|visit|hovor|telefon[áa]t|e-?mail|zpr[áa]vu|sch[ůu]zku|n[áa]v[šs]t[ěe]vu)\s+(with|to|from|s|se|pro|od)\s+(?:klientem\s+|klientkou\s+|client\s+)?(.+?)\s*:\s*(.+)$/iu
   );
   if (m) {
-    const channelWord = m[1].toLowerCase();
-    const directionWord = m[2].toLowerCase();
+    const channelWord = foldCzech(m[1]);
+    const directionWord = foldCzech(m[2]);
     const clientName = m[3].trim();
     const summary = m[4].trim();
     const channelMap: Record<string, string> = {
@@ -808,9 +853,16 @@ export function parseTextCommand(rawText: string): ParsedCommand {
       message: "messenger",
       meeting: "in_person",
       visit: "in_person",
+      // The same channels named in Czech, folded so a dictated diacritic does
+      // not decide whether a call is recorded as a call or as "other".
+      hovor: "phone_call",
+      telefonat: "phone_call",
+      zpravu: "messenger",
+      schuzku: "in_person",
+      navstevu: "in_person",
     };
     const channel = channelMap[channelWord] ?? "other";
-    const direction = directionWord === "from" ? "inbound" : "outbound";
+    const direction = /^(?:from|od)$/u.test(directionWord) ? "inbound" : "outbound";
     if (!clientName || !summary) return { intent: "unrecognized", entities: {} };
     return { intent: "log_communication", entities: { client_name: clientName, channel, direction, summary } };
   }
@@ -884,6 +936,8 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   // Memory Model — Pattern Detection: read-only analysis of the AuditLog for
   // repeated manual action sequences. Never creates a Playbook itself; see
   // memoryModelService.ts.
+  if (/^(?:uka[žz]|najdi|zobraz|vyhledej)\s+(?:opakovan[ée]\s+)?(?:[čc]innosti|vzorce|postupy)$/iu.test(text))
+    return { intent: "detect_action_patterns", entities: {} };
   if (/^(?:show|detect|list)\s+(?:repeated\s+)?(?:action\s+)?patterns?$/i.test(text))
     return { intent: "detect_action_patterns", entities: {} };
 
@@ -901,6 +955,35 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     return { intent: "list_channel_messages", entities: { channel: "whatsapp" } };
   if (/^(?:list|show(?:\s+me)?|open)\s+jobs?$/i.test(text)) return { intent: "list_jobs", entities: {} };
   if (/^(?:list|show(?:\s+me)?|open)\s+leads?$/i.test(text)) return { intent: "list_leads", entities: {} };
+
+  // Czech listing commands. These existed in English only, so a Czech speaker
+  // reached them through the language model: a second of latency, a charge per
+  // sentence, and one more place to be misheard. The same words spoken here go
+  // straight to the deterministic path the constitution asks for.
+  // The nouns are written in the accusative, because that is the case a spoken
+  // command uses: "ukaž klienty", not "ukaž klienti".
+  m = text.match(CZECH_LIST_COMMAND);
+  if (m) {
+    const subject = foldCzech(m[1]);
+    const client = m[2]?.trim();
+    switch (subject) {
+      case "klienty": case "zakazniky": return { intent: "list_clients", entities: {} };
+      case "kontakty": return { intent: "list_contacts", entities: {} };
+      case "zakazky": return { intent: "list_jobs", entities: {} };
+      case "ukoly": return { intent: "list_tasks", entities: {} };
+      case "poptavky": return { intent: "list_leads", entities: {} };
+      case "nabidky": return { intent: "list_quotes", entities: { client_name: client } };
+      case "komunikaci": return { intent: "list_communications", entities: { client_name: client } };
+      case "fotky": case "fotografie": return { intent: "list_portfolio_photos", entities: { client_name: client } };
+      case "volna mista": case "nabor": return { intent: "list_job_openings", entities: {} };
+      case "pravidla uceni": return { intent: "list_learning_rules", entities: {} };
+      case "nasledne kroky": return { intent: "list_follow_ups", entities: {} };
+      case "nevyrizene poptavky": case "nevyrizene dotazy": return { intent: "list_unresolved_enquiries", entities: {} };
+      case "oznameni": return { intent: "list_notifications", entities: {} };
+      case "kvalitu dat": return { intent: "list_data_quality", entities: {} };
+      default: break;
+    }
+  }
 
   // "Opan" and "oppen" are common English speech-to-text renderings of
   // "open". Accept them only as command verbs; the page name must still

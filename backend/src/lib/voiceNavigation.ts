@@ -1,5 +1,6 @@
 import { isVoiceLanguage, VOICE_LANGUAGE_LABELS, type VoiceLanguage } from "./voiceLanguages.js";
 import { EMMA_EXECUTABLE_ACTION_PAGES, isEmmaExecutableActionName } from "./emmaExecutableActionCatalogue.js";
+import { ASSISTANT_NAME_TOKEN } from "./assistantName.js";
 
 export const VOICE_PAGE_ROUTES = {
   dashboard: { path: "/", label: "Dashboard" },
@@ -211,7 +212,18 @@ const PAGE_ALIASES: Record<string, VoicePage> = {
   "vyber fotografii": "photo_selection", "kontext firmy": "business_context", obory: "industries", konektory: "connectors",
   firma: "company", "audit webu": "website_audit", "obsah webu": "website_content", uzivatele: "employees", kalendar: "calendar",
   sluzby: "services", "katalog sluzeb": "services", nabidky: "quotes", faktury: "invoices", nabor: "recruitment", postupy: "playbooks",
-  uceni: "learning", "pamet emmy": "memory_model",
+  uceni: "learning", "pamet asistenta": "memory_model", pamet: "memory_model",
+  // Czech declines, and a spoken command uses the accusative: "ukaž klienty",
+  // not "ukaž klienti". Only the first case was listed, so the commands people
+  // actually say missed the map and fell through to the language model.
+  klienty: "clients", zakaznici: "clients", zakazniky: "clients",
+  zamestnanci: "employees", zamestnance: "employees", lide: "employees", lidi: "employees",
+  "opravneni asistenta": "emma_permissions", "opravneni": "emma_permissions",
+  "pravidla uceni": "learning", "hlasove aliasy": "voice_aliases",
+  rozvrh: "calendar", "volna mista": "recruitment", "nabor lidi": "recruitment",
+  "kontrola kvality": "data_quality", metriky: "metrics", "vykon firmy": "metrics",
+  "nasledne kroky": "communications", fotky: "photos",
+  nastaveni: "company", "nastaveni firmy": "company",
   // Polish menu labels and common spoken variants.
   "panel glowny": "dashboard", przeglad: "dashboard", konto: "account", powiadomienia: "notifications", "jakosc danych": "data_quality",
   "wskazniki firmy": "metrics", "potencjalni klienci": "leads", klienci: "clients", zlecenia: "jobs", zadania: "tasks",
@@ -237,8 +249,19 @@ function normalizePageName(rawPage: string) {
 // The canonical English label becomes a valid spoken destination whenever a
 // page is added. Mirroring a page into administrator permissions can therefore
 // never get ahead of the actual voice navigation catalogue.
+function registerSpokenLabel(label: string, page: VoicePage) {
+  PAGE_ALIASES[normalizePageName(label)] = page;
+  // A label that carries the assistant's name registers a phrase nobody can
+  // say, because the name is filled in only when the label is displayed. The
+  // rest of the label is what a person speaks, so register that too.
+  if (label.includes(ASSISTANT_NAME_TOKEN)) {
+    const withoutName = normalizePageName(label.replaceAll(ASSISTANT_NAME_TOKEN, " "));
+    if (withoutName) PAGE_ALIASES[withoutName] = page;
+  }
+}
+
 for (const [page, definition] of Object.entries(VOICE_PAGE_ROUTES)) {
-  PAGE_ALIASES[normalizePageName(definition.label)] = page as VoicePage;
+  registerSpokenLabel(definition.label, page as VoicePage);
 }
 
 // Every label rendered by the localized Secretary menu is also a valid {assistant}
@@ -246,7 +269,7 @@ for (const [page, definition] of Object.entries(VOICE_PAGE_ROUTES)) {
 // to the same page IDs instead of maintaining two drifting vocabularies.
 for (const labels of Object.values(LOCALIZED_PAGE_LABELS)) {
   for (const [page, label] of Object.entries(labels ?? {})) {
-    if (label) PAGE_ALIASES[normalizePageName(label)] = page as VoicePage;
+    if (label) registerSpokenLabel(label, page as VoicePage);
   }
 }
 
