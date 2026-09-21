@@ -112,10 +112,11 @@ describe("auth", () => {
   it("stores per-user wake-word and continuous-listening preferences", async () => {
     const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
     // Two words by default: a single name turns up in ordinary conversation
-    // and the recogniser produced it from room noise, waking her unasked.
-    assert.equal(login.body.user.voiceWakeWord, "Hej Emma");
-    // The name is a separate setting from the word that wakes her.
-    assert.equal(login.body.user.assistantName, "Emma");
+    // and the recogniser produced it from room noise, waking the assistant
+    // unasked.
+    assert.equal(login.body.user.voiceWakeWord, "Hej Alfonzo");
+    // The name is a separate setting from the word that wakes the assistant.
+    assert.equal(login.body.user.assistantName, "Alfonzo");
     assert.equal(login.body.user.voiceContinuous, false);
     const updated = await request(app).put("/auth/voice-preferences").set("Authorization", `Bearer ${login.body.token}`).send({ wake_word: "Ema Assistant", continuous_listening: true, language: "cs-CZ" });
     assert.equal(updated.status, 200);
@@ -124,7 +125,7 @@ describe("auth", () => {
       voiceContinuous: true,
       voiceLanguage: "cs-CZ",
       // Unsent fields keep their values rather than resetting to a default.
-      assistantName: "Emma",
+      assistantName: "Alfonzo",
       voiceSpeechRate: 1.15,
     });
     const me = await request(app).get("/auth/me").set("Authorization", `Bearer ${login.body.token}`);
