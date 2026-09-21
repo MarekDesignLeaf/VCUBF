@@ -11,7 +11,7 @@ function withOriginalSpacing(current: string, translated: string) {
   return `${leading}${translated}${trailing}`;
 }
 
-export function LocalizedSurface({ language }: { language: AppLanguage }) {
+export function LocalizedSurface({ language, assistantName }: { language: AppLanguage; assistantName: string }) {
   const originalText = useRef(new WeakMap<Text, string>());
   const renderedText = useRef(new WeakMap<Text, string>());
   const originalAttributes = useRef(new WeakMap<Element, Map<string, string>>());
@@ -36,7 +36,7 @@ export function LocalizedSurface({ language }: { language: AppLanguage }) {
         source = current;
         originalText.current.set(node, source);
       }
-      const translated = translateUiPhrase(catalogue, language, source);
+      const translated = translateUiPhrase(catalogue, language, source, assistantName);
       const next = translated === source.trim() ? source : withOriginalSpacing(source, translated);
       renderedText.current.set(node, next);
       if (current !== next) node.data = next;
@@ -62,7 +62,7 @@ export function LocalizedSurface({ language }: { language: AppLanguage }) {
           originals.set(attribute, current);
         }
         const source = originals.get(attribute) ?? current;
-        const next = translateUiPhrase(catalogue, language, source);
+        const next = translateUiPhrase(catalogue, language, source, assistantName);
         rendered.set(attribute, next);
         if (next !== current) element.setAttribute(attribute, next);
       }
@@ -107,7 +107,7 @@ export function LocalizedSurface({ language }: { language: AppLanguage }) {
       active = false;
       observer?.disconnect();
     };
-  }, [language]);
+  }, [language, assistantName]);
 
   return null;
 }

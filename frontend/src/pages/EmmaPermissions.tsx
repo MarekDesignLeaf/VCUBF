@@ -7,36 +7,36 @@ import { appLanguage } from "../i18n";
 const CATEGORY_ORDER = ["navigation", "customers", "work", "sales", "communication", "attention", "people", "learning", "evidence", "connectors", "administration"];
 
 const PL_CAPABILITIES: Record<string, [string, string]> = {
-  "navigation.open": ["Otwieranie stron aplikacji", "Emma może otwierać ekrany i zakładki w Secretary."],
-  "navigation.help": ["Czytanie menu i prowadzenie użytkownika", "Emma może czytać strukturę aplikacji i wyjaśniać, gdzie znajdują się funkcje."],
-  "preferences.language": ["Zmiana języka aplikacji", "Emma może jednocześnie zmieniać swój język mówiony i język menu Secretary."],
-  "customers.read": ["Odczyt klientów, kontaktów i leadów", "Emma może wyświetlać klientów, kontakty i potencjalnych klientów."],
-  "customers.clients.create": ["Tworzenie klientów", "Emma może tworzyć klienta po sprawdzeniu nazwy, adresu e-mail i numeru telefonu."],
-  "customers.clients.update": ["Edycja klientów", "Emma może zmieniać zweryfikowane dane istniejącego klienta."],
-  "customers.clients.archive": ["Archiwizowanie klientów", "Emma może po wyraźnym potwierdzeniu zarchiwizować klienta bez usuwania powiązanych danych."],
-  "customers.contacts.create": ["Tworzenie kontaktów", "Emma może dodawać zweryfikowane osoby do katalogu kontaktów."],
-  "customers.contacts.update": ["Edycja kontaktów", "Emma może zmieniać zweryfikowane dane istniejącego kontaktu."],
-  "customers.contacts.archive": ["Archiwizowanie kontaktów", "Emma może po wyraźnym potwierdzeniu zarchiwizować kontakt."],
-  "customers.leads.write": ["Tworzenie i konwersja leadów", "Emma może tworzyć leady i przekształcać sprawdzony lead w klienta."],
-  "work.read": ["Odczyt zleceń, zadań i kalendarza", "Emma może wyświetlać pracę, zadania, działania następcze, wydarzenia i obciążenie."],
-  "work.write": ["Zmiana zleceń i zadań", "Emma może tworzyć i zmieniać zlecenia oraz zadania, a także przydzielać pracę."],
-  "services.write": ["Tworzenie usług", "Emma może dodawać pozycje do katalogu usług."],
-  "sales.read": ["Odczyt ofert", "Emma może wyświetlać oferty i filtrować je według klienta."],
-  "communication.read": ["Odczyt komunikacji", "Emma może czytać historię komunikacji, zapytania oraz listy wiadomości e-mail i WhatsApp."],
-  "communication.write": ["Zapisywanie komunikacji", "Emma może dodawać wewnętrzne wpisy historii komunikacji."],
-  "communication.email_send": ["Przygotowanie i wysyłanie e-maili", "Emma może przygotować, a po wyraźnym potwierdzeniu wysłać wiadomość Gmail."],
-  "communication.whatsapp_send": ["Przygotowanie i wysyłanie WhatsApp", "Emma może przygotować, a po wyraźnym potwierdzeniu wysłać wiadomość WhatsApp Business."],
-  "notifications.read": ["Odczyt powiadomień", "Emma może wyświetlać listę spraw wymagających uwagi."],
-  "notifications.delete": ["Usuwanie powiadomień", "Emma może przygotować i po potwierdzeniu usunąć powiadomienia."],
-  "quality.read": ["Odczyt jakości danych", "Emma może informować o możliwych duplikatach i brakujących danych kontaktowych."],
-  "analytics.patterns": ["Analiza wzorców działań", "Emma może analizować powtarzające się działania zapisane w audycie."],
-  "recruitment.read": ["Odczyt rekrutacji", "Emma może wyświetlać aktualne oferty pracy."],
-  "learning.read": ["Odczyt reguł uczenia i pamięci", "Emma może czytać jawne reguły zwrotów i zapisane informacje."],
-  "learning.write": ["Uczenie Emmy i zapisywanie pamięci", "Emma może tworzyć reguły uczenia oraz jawną pamięć osobistą lub firmową."],
-  "photos.read": ["Odczyt zdjęć portfolio", "Emma może wyświetlać zarejestrowane zdjęcia portfolio."],
-  "photos.write": ["Rejestrowanie zdjęć portfolio", "Emma może rejestrować zdjęcia na podstawie podanego odwołania do pliku."],
-  "connectors.read": ["Odczyt stanu integracji", "Emma może informować, które integracje są skonfigurowane i dostępne."],
-  "connectors.manage": ["Konfiguracja i synchronizacja integracji", "Emma może uruchamiać konfigurację integracji i synchronizację."],
+  "navigation.open": ["Otwieranie stron aplikacji", "{assistant} może otwierać ekrany i zakładki w Secretary."],
+  "navigation.help": ["Czytanie menu i prowadzenie użytkownika", "{assistant} może czytać strukturę aplikacji i wyjaśniać, gdzie znajdują się funkcje."],
+  "preferences.language": ["Zmiana języka aplikacji", "{assistant} może jednocześnie zmieniać swój język mówiony i język menu Secretary."],
+  "customers.read": ["Odczyt klientów, kontaktów i leadów", "{assistant} może wyświetlać klientów, kontakty i potencjalnych klientów."],
+  "customers.clients.create": ["Tworzenie klientów", "{assistant} może tworzyć klienta po sprawdzeniu nazwy, adresu e-mail i numeru telefonu."],
+  "customers.clients.update": ["Edycja klientów", "{assistant} może zmieniać zweryfikowane dane istniejącego klienta."],
+  "customers.clients.archive": ["Archiwizowanie klientów", "{assistant} może po wyraźnym potwierdzeniu zarchiwizować klienta bez usuwania powiązanych danych."],
+  "customers.contacts.create": ["Tworzenie kontaktów", "{assistant} może dodawać zweryfikowane osoby do katalogu kontaktów."],
+  "customers.contacts.update": ["Edycja kontaktów", "{assistant} może zmieniać zweryfikowane dane istniejącego kontaktu."],
+  "customers.contacts.archive": ["Archiwizowanie kontaktów", "{assistant} może po wyraźnym potwierdzeniu zarchiwizować kontakt."],
+  "customers.leads.write": ["Tworzenie i konwersja leadów", "{assistant} może tworzyć leady i przekształcać sprawdzony lead w klienta."],
+  "work.read": ["Odczyt zleceń, zadań i kalendarza", "{assistant} może wyświetlać pracę, zadania, działania następcze, wydarzenia i obciążenie."],
+  "work.write": ["Zmiana zleceń i zadań", "{assistant} może tworzyć i zmieniać zlecenia oraz zadania, a także przydzielać pracę."],
+  "services.write": ["Tworzenie usług", "{assistant} może dodawać pozycje do katalogu usług."],
+  "sales.read": ["Odczyt ofert", "{assistant} może wyświetlać oferty i filtrować je według klienta."],
+  "communication.read": ["Odczyt komunikacji", "{assistant} może czytać historię komunikacji, zapytania oraz listy wiadomości e-mail i WhatsApp."],
+  "communication.write": ["Zapisywanie komunikacji", "{assistant} może dodawać wewnętrzne wpisy historii komunikacji."],
+  "communication.email_send": ["Przygotowanie i wysyłanie e-maili", "{assistant} może przygotować, a po wyraźnym potwierdzeniu wysłać wiadomość Gmail."],
+  "communication.whatsapp_send": ["Przygotowanie i wysyłanie WhatsApp", "{assistant} może przygotować, a po wyraźnym potwierdzeniu wysłać wiadomość WhatsApp Business."],
+  "notifications.read": ["Odczyt powiadomień", "{assistant} może wyświetlać listę spraw wymagających uwagi."],
+  "notifications.delete": ["Usuwanie powiadomień", "{assistant} może przygotować i po potwierdzeniu usunąć powiadomienia."],
+  "quality.read": ["Odczyt jakości danych", "{assistant} może informować o możliwych duplikatach i brakujących danych kontaktowych."],
+  "analytics.patterns": ["Analiza wzorców działań", "{assistant} może analizować powtarzające się działania zapisane w audycie."],
+  "recruitment.read": ["Odczyt rekrutacji", "{assistant} może wyświetlać aktualne oferty pracy."],
+  "learning.read": ["Odczyt reguł uczenia i pamięci", "{assistant} może czytać jawne reguły zwrotów i zapisane informacje."],
+  "learning.write": ["Uczenie asystenta i zapisywanie pamięci", "{assistant} może tworzyć reguły uczenia oraz jawną pamięć osobistą lub firmową."],
+  "photos.read": ["Odczyt zdjęć portfolio", "{assistant} może wyświetlać zarejestrowane zdjęcia portfolio."],
+  "photos.write": ["Rejestrowanie zdjęć portfolio", "{assistant} może rejestrować zdjęcia na podstawie podanego odwołania do pliku."],
+  "connectors.read": ["Odczyt stanu integracji", "{assistant} może informować, które integracje są skonfigurowane i dostępne."],
+  "connectors.manage": ["Konfiguracja i synchronizacja integracji", "{assistant} może uruchamiać konfigurację integracji i synchronizację."],
 };
 
 const PL_CATEGORIES: Record<string, string> = {
@@ -47,36 +47,36 @@ const PL_CATEGORIES: Record<string, string> = {
 };
 
 const CS_CAPABILITIES: Record<string, [string, string]> = {
-  "navigation.open": ["Otevírání stránek aplikace", "Emma může otevírat obrazovky a záložky v Secretary."],
-  "navigation.help": ["Čtení menu a vedení uživatele", "Emma může číst strukturu aplikace a vysvětlit, kde se jednotlivé funkce nacházejí."],
-  "preferences.language": ["Změna jazyka aplikace", "Emma může současně změnit svůj mluvený jazyk i jazyk menu Secretary."],
-  "customers.read": ["Čtení klientů, kontaktů a poptávek", "Emma může zobrazovat klienty, kontakty a potenciální klienty."],
-  "customers.clients.create": ["Vytváření klientů", "Emma může vytvořit klienta po ověření názvu, e-mailu a telefonního čísla."],
-  "customers.clients.update": ["Úprava klientů", "Emma může měnit ověřené údaje existujícího klienta."],
-  "customers.clients.archive": ["Archivace klientů", "Emma může po výslovném potvrzení archivovat klienta bez odstranění souvisejících dat."],
-  "customers.contacts.create": ["Vytváření kontaktů", "Emma může přidávat ověřené osoby do seznamu kontaktů."],
-  "customers.contacts.update": ["Úprava kontaktů", "Emma může měnit ověřené údaje existujícího kontaktu."],
-  "customers.contacts.archive": ["Archivace kontaktů", "Emma může po výslovném potvrzení archivovat kontakt."],
-  "customers.leads.write": ["Vytváření a převod poptávek", "Emma může vytvářet poptávky a převádět ověřenou poptávku na klienta."],
-  "work.read": ["Čtení zakázek, úkolů a kalendáře", "Emma může zobrazovat práci, úkoly, následné kroky, události a vytížení."],
-  "work.write": ["Změny zakázek a úkolů", "Emma může vytvářet a měnit zakázky a úkoly a přidělovat práci."],
-  "services.write": ["Vytváření služeb", "Emma může přidávat položky do katalogu služeb."],
-  "sales.read": ["Čtení nabídek", "Emma může zobrazovat nabídky a filtrovat je podle klienta."],
-  "communication.read": ["Čtení komunikace", "Emma může číst historii komunikace, dotazy a seznamy e-mailů a zpráv WhatsApp."],
-  "communication.write": ["Zapisování komunikace", "Emma může přidávat interní záznamy do historie komunikace."],
-  "communication.email_send": ["Příprava a odesílání e-mailů", "Emma může připravit a po výslovném potvrzení odeslat zprávu Gmail."],
-  "communication.whatsapp_send": ["Příprava a odesílání přes WhatsApp", "Emma může připravit a po výslovném potvrzení odeslat zprávu WhatsApp Business."],
-  "notifications.read": ["Čtení oznámení", "Emma může zobrazovat seznam záležitostí vyžadujících pozornost."],
-  "notifications.delete": ["Mazání oznámení", "Emma může připravit a po potvrzení odstranit oznámení."],
-  "quality.read": ["Čtení kvality dat", "Emma může upozornit na možné duplicity a chybějící kontaktní údaje."],
-  "analytics.patterns": ["Analýza vzorců činností", "Emma může analyzovat opakující se činnosti uložené v auditu."],
-  "recruitment.read": ["Čtení náboru", "Emma může zobrazovat aktuální pracovní pozice."],
-  "learning.read": ["Čtení pravidel učení a paměti", "Emma může číst výslovná pravidla frází a uložené informace."],
-  "learning.write": ["Učení Emmy a ukládání paměti", "Emma může vytvářet pravidla učení a výslovnou osobní nebo firemní paměť."],
-  "photos.read": ["Čtení fotografií portfolia", "Emma může zobrazovat evidované fotografie portfolia."],
-  "photos.write": ["Evidence fotografií portfolia", "Emma může evidovat fotografie podle zadaného odkazu na soubor."],
-  "connectors.read": ["Čtení stavu konektorů", "Emma může sdělit, které konektory jsou nastavené a dostupné."],
-  "connectors.manage": ["Nastavení a synchronizace konektorů", "Emma může spouštět nastavení a synchronizaci konektorů."],
+  "navigation.open": ["Otevírání stránek aplikace", "{assistant} může otevírat obrazovky a záložky v Secretary."],
+  "navigation.help": ["Čtení menu a vedení uživatele", "{assistant} může číst strukturu aplikace a vysvětlit, kde se jednotlivé funkce nacházejí."],
+  "preferences.language": ["Změna jazyka aplikace", "{assistant} může současně změnit svůj mluvený jazyk i jazyk menu Secretary."],
+  "customers.read": ["Čtení klientů, kontaktů a poptávek", "{assistant} může zobrazovat klienty, kontakty a potenciální klienty."],
+  "customers.clients.create": ["Vytváření klientů", "{assistant} může vytvořit klienta po ověření názvu, e-mailu a telefonního čísla."],
+  "customers.clients.update": ["Úprava klientů", "{assistant} může měnit ověřené údaje existujícího klienta."],
+  "customers.clients.archive": ["Archivace klientů", "{assistant} může po výslovném potvrzení archivovat klienta bez odstranění souvisejících dat."],
+  "customers.contacts.create": ["Vytváření kontaktů", "{assistant} může přidávat ověřené osoby do seznamu kontaktů."],
+  "customers.contacts.update": ["Úprava kontaktů", "{assistant} může měnit ověřené údaje existujícího kontaktu."],
+  "customers.contacts.archive": ["Archivace kontaktů", "{assistant} může po výslovném potvrzení archivovat kontakt."],
+  "customers.leads.write": ["Vytváření a převod poptávek", "{assistant} může vytvářet poptávky a převádět ověřenou poptávku na klienta."],
+  "work.read": ["Čtení zakázek, úkolů a kalendáře", "{assistant} může zobrazovat práci, úkoly, následné kroky, události a vytížení."],
+  "work.write": ["Změny zakázek a úkolů", "{assistant} může vytvářet a měnit zakázky a úkoly a přidělovat práci."],
+  "services.write": ["Vytváření služeb", "{assistant} může přidávat položky do katalogu služeb."],
+  "sales.read": ["Čtení nabídek", "{assistant} může zobrazovat nabídky a filtrovat je podle klienta."],
+  "communication.read": ["Čtení komunikace", "{assistant} může číst historii komunikace, dotazy a seznamy e-mailů a zpráv WhatsApp."],
+  "communication.write": ["Zapisování komunikace", "{assistant} může přidávat interní záznamy do historie komunikace."],
+  "communication.email_send": ["Příprava a odesílání e-mailů", "{assistant} může připravit a po výslovném potvrzení odeslat zprávu Gmail."],
+  "communication.whatsapp_send": ["Příprava a odesílání přes WhatsApp", "{assistant} může připravit a po výslovném potvrzení odeslat zprávu WhatsApp Business."],
+  "notifications.read": ["Čtení oznámení", "{assistant} může zobrazovat seznam záležitostí vyžadujících pozornost."],
+  "notifications.delete": ["Mazání oznámení", "{assistant} může připravit a po potvrzení odstranit oznámení."],
+  "quality.read": ["Čtení kvality dat", "{assistant} může upozornit na možné duplicity a chybějící kontaktní údaje."],
+  "analytics.patterns": ["Analýza vzorců činností", "{assistant} může analyzovat opakující se činnosti uložené v auditu."],
+  "recruitment.read": ["Čtení náboru", "{assistant} může zobrazovat aktuální pracovní pozice."],
+  "learning.read": ["Čtení pravidel učení a paměti", "{assistant} může číst výslovná pravidla frází a uložené informace."],
+  "learning.write": ["Učení asistenta a ukládání paměti", "{assistant} může vytvářet pravidla učení a výslovnou osobní nebo firemní paměť."],
+  "photos.read": ["Čtení fotografií portfolia", "{assistant} může zobrazovat evidované fotografie portfolia."],
+  "photos.write": ["Evidence fotografií portfolia", "{assistant} může evidovat fotografie podle zadaného odkazu na soubor."],
+  "connectors.read": ["Čtení stavu konektorů", "{assistant} může sdělit, které konektory jsou nastavené a dostupné."],
+  "connectors.manage": ["Nastavení a synchronizace konektorů", "{assistant} může spouštět nastavení a synchronizaci konektorů."],
 };
 
 const CS_CATEGORIES: Record<string, string> = {
@@ -104,7 +104,7 @@ export function EmmaPermissions() {
     if (!isAdministrator) return;
     api.company.emmaPolicy()
       .then((policy) => { setCapabilities(policy.capabilities); setSummary(policy.summary); })
-      .catch((reason) => setError(reason instanceof ApiError ? reason.message : (czech ? "Nepodařilo se načíst oprávnění Emmy." : polish ? "Nie udało się wczytać uprawnień Emmy." : "Could not load Emma permissions.")))
+      .catch((reason) => setError(reason instanceof ApiError ? reason.message : (czech ? "Nepodařilo se načíst oprávnění asistenta." : polish ? "Nie udało się wczytać uprawnień asystenta." : "Could not load {assistant} permissions.")))
       .finally(() => setLoading(false));
   }, [czech, isAdministrator, polish]);
 
@@ -138,9 +138,9 @@ export function EmmaPermissions() {
       const policy = await api.company.updateEmmaPolicy(capabilities.filter((item) => !item.enabled).map((item) => item.id));
       setCapabilities(policy.capabilities);
       setSummary(policy.summary);
-      setMessage(czech ? "Oprávnění Emmy byla uložena a platí okamžitě." : polish ? "Uprawnienia Emmy zostały zapisane i obowiązują od razu." : "Emma permissions were saved and apply immediately.");
+      setMessage(czech ? "Oprávnění asistenta byla uložena a platí okamžitě." : polish ? "Uprawnienia asystenta zostały zapisane i obowiązują od razu." : "{assistant} permissions were saved and apply immediately.");
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : (czech ? "Nepodařilo se uložit oprávnění Emmy." : polish ? "Nie udało się zapisać uprawnień Emmy." : "Could not save Emma permissions."));
+      setError(reason instanceof ApiError ? reason.message : (czech ? "Nepodařilo se uložit oprávnění asistenta." : polish ? "Nie udało się zapisać uprawnień asystenta." : "Could not save {assistant} permissions."));
     } finally { setSaving(false); }
   }
 
@@ -148,8 +148,8 @@ export function EmmaPermissions() {
 
   return <div className="emma-permissions-page">
     <div className="page-header"><div>
-      <h1>{czech ? "Oprávnění Emmy" : polish ? "Uprawnienia Emmy" : "Emma permissions"}</h1>
-      <p className="hint">{czech ? "Úplná, automaticky zrcadlená oprávnění pro každou stránku, operaci backendu a příkaz Emmy. Vypnutou funkci server zablokuje všem uživatelům." : polish ? "Pełne, automatycznie odzwierciedlane uprawnienia do każdej strony, operacji i polecenia Emmy. Wyłączona funkcja jest blokowana przez serwer dla wszystkich użytkowników." : "Complete automatically mirrored permissions for every page, backend action and Emma command. A disabled capability is blocked by the server for every user."}</p>
+      <h1>{czech ? "Oprávnění asistenta" : polish ? "Uprawnienia asystenta" : "{assistant} permissions"}</h1>
+      <p className="hint">{czech ? "Úplná, automaticky zrcadlená oprávnění pro každou stránku, operaci backendu a příkaz asistenta. Vypnutou funkci server zablokuje všem uživatelům." : polish ? "Pełne, automatycznie odzwierciedlane uprawnienia do każdej strony, operacji i polecenia asystenta. Wyłączona funkcja jest blokowana przez serwer dla wszystkich użytkowników." : "Complete automatically mirrored permissions for every page, backend action and {assistant} command. A disabled capability is blocked by the server for every user."}</p>
     </div></div>
 
     <section className="emma-policy-summary">
@@ -188,8 +188,8 @@ export function EmmaPermissions() {
                 <strong>{localized?.[0] ?? item.label}</strong>
                 <small>{localized?.[1] ?? item.description}</small>
                 {item.executionNote && <small>{item.executionClass}: {item.executionNote}</small>}
-                {unavailable && <small>{czech ? "Tuto operaci Emma přímo neprovádí; je zobrazena pouze kvůli úplnosti systémového katalogu." : polish ? "Emma nie wykonuje tej operacji bezpośrednio; jest pokazana wyłącznie dla kompletności katalogu systemowego." : "Emma does not execute this operation directly; it is shown only for completeness of the system catalogue."}</small>}
-                <small className="emma-capability-technical">{item.route ?? item.actionName ?? item.id}{item.requiredPermission ? ` · ${item.requiredPermission}` : ""}{item.voiceActions?.length ? ` · Emma: ${item.voiceActions.join(", ")}` : ""}{item.confirmationRequired ? (czech ? " · vyžaduje potvrzení" : polish ? " · wymaga potwierdzenia" : " · confirmation required") : ""}</small>
+                {unavailable && <small>{czech ? "Tuto operaci {assistant} přímo neprovádí; je zobrazena pouze kvůli úplnosti systémového katalogu." : polish ? "{assistant} nie wykonuje tej operacji bezpośrednio; jest pokazana wyłącznie dla kompletności katalogu systemowego." : "{assistant} does not execute this operation directly; it is shown only for completeness of the system catalogue."}</small>}
+                <small className="emma-capability-technical">{item.route ?? item.actionName ?? item.id}{item.requiredPermission ? ` · ${item.requiredPermission}` : ""}{item.voiceActions?.length ? ` · {assistant}: ${item.voiceActions.join(", ")}` : ""}{item.confirmationRequired ? (czech ? " · vyžaduje potvrzení" : polish ? " · wymaga potwierdzenia" : " · confirmation required") : ""}</small>
               </span>
               <em className={`emma-capability-mode mode-${item.mode}`}>{item.kind} · {mode}</em>
             </label>;
@@ -199,7 +199,7 @@ export function EmmaPermissions() {
     </div>
 
     <div className="emma-policy-save">
-      <button type="button" onClick={save} disabled={saving}>{saving ? (czech ? "Ukládání…" : polish ? "Zapisywanie…" : "Saving…") : (czech ? "Uložit oprávnění Emmy" : polish ? "Zapisz uprawnienia Emmy" : "Save Emma permissions")}</button>
+      <button type="button" onClick={save} disabled={saving}>{saving ? (czech ? "Ukládání…" : polish ? "Zapisywanie…" : "Saving…") : (czech ? "Uložit oprávnění asistenta" : polish ? "Zapisz uprawnienia asystenta" : "Save {assistant} permissions")}</button>
     </div>
   </div>;
 }

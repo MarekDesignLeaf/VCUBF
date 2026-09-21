@@ -5,7 +5,7 @@ import type { AuthedUser } from "../middleware/auth.js";
 /**
  * Learned voice aliases.
  *
- * Speech recognition mishears the same word the same way every time: "Emma"
+ * Speech recognition mishears the same word the same way every time: "{assistant}"
  * comes back as "Ema", "Emo", "Ema," and so on. Rather than fighting the
  * recogniser, the phrase actually heard is learned and mapped onto what was
  * meant.
@@ -18,7 +18,7 @@ import type { AuthedUser } from "../middleware/auth.js";
  * Storage reuses LearningRule, which /command/assistant already applies before
  * parsing, so an alias learned here changes behaviour everywhere at once.
  *   term      what was heard          ("ema")
- *   aliasFor  what it means           ("Emma")
+ *   aliasFor  what it means           ("{assistant}")
  *   category  "wake_word" | "voice_command"
  */
 

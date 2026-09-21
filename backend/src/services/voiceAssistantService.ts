@@ -5,12 +5,13 @@ import { VOICE_LANGUAGES } from "../lib/voiceLanguages.js";
 import type { AssistantContext } from "./assistantMemoryService.js";
 import { buildEmmaBehaviorInstructions } from "./emmaBehaviorService.js";
 import { EMMA_EXECUTABLE_ACTION_GUIDE } from "../lib/emmaExecutableActionCatalogue.js";
+import { DEFAULT_ASSISTANT_NAME, withAssistantName } from "../lib/assistantName.js";
 
 const assistantResultSchema = z.object({
   kind: z.enum(["command", "reply", "clarification", "plan"]),
   canonical_command: z.string().nullable(),
   // A deliberate request to read the complete menu can be longer than an
-  // ordinary spoken answer. The caller still asks Emma to keep normal turns
+  // ordinary spoken answer. The caller still asks {assistant} to keep normal turns
   // concise, but must not truncate an authoritative subtree catalogue.
   message: z.string().max(12_000),
 }).superRefine((result,context) => {
@@ -111,7 +112,7 @@ function outputText(payload: any): string | undefined {
  * telling the decoder which words to expect measurably reduces wrong words.
  */
 function buildTranscriptionPrompt(isoLanguage: string, wakeWord: string, extraVocabulary: string[] = []): string {
-  const wake = wakeWord.trim().slice(0, 40) || "Hej Emma";
+  const wake = wakeWord.trim().slice(0, 40) || `Hej ${DEFAULT_ASSISTANT_NAME}`;
   const vocabulary: Record<string, string> = {
     cs: "vytvoř klienta, nový klient, zakázka, nabídka, faktura, úkol, poptávka, " +
         "ukaž zakázky, ukaž faktury, ukaž úkoly, zaznamenej platbu, schval nabídku, " +
@@ -175,7 +176,7 @@ function isLikelyHallucination(text: string): boolean {
   if (stock.some((phrase) => folded.includes(phrase))) return true;
   // Whisper labels non-speech audio in brackets: "(Titulky)", "[Hudba]",
   // "(hudba hraje)". Nothing spoken as a command looks like this, and left
-  // in it became a command that woke Emma from room noise.
+  // in it became a command that woke {assistant} from room noise.
   const bracketed = /^[([{][^)\]}]*[)\]}][.!?]?$/.test(value);
   if (bracketed) return true;
   if (looksRepetitive(value)) return true;
@@ -207,7 +208,7 @@ export async function transcribeVoiceAudio(
   audio: Buffer,
   language: string,
   wakeWord: string,
-  // Phrases this user has taught Emma. Passing them to the decoder is what
+  // Phrases this user has taught {assistant}. Passing them to the decoder is what
   // stops the same word being misheard again, rather than only repairing it
   // after the fact.
   extraVocabulary: string[] = []
@@ -215,7 +216,7 @@ export async function transcribeVoiceAudio(
   // GPT transcription (gpt-4o-transcribe) is the default: measurably better
   // Czech/English recognition of short commands than whisper-1. The 4o models
   // treat the prompt as an instruction and can echo it back when the audio
-  // carries no speech (seen as "context: ### Emma ###"); isPromptEcho() below
+  // carries no speech (seen as "context: ### {assistant} ###"); isPromptEcho() below
   // turns that into "heard nothing" instead of a command.
   const model = process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe";
   const form = new FormData();
@@ -272,6 +273,10 @@ export async function transcribeVoiceAudio(
 export async function interpretVoiceRequest(input: {
   text: string;
   userName: string;
+  /** What this account calls the assistant. The model is told the name
+   *  the user actually speaks, so it answers to that rather than to a
+   *  name fixed in the source. */
+  assistantName: string;
   language: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   memoryContext?: AssistantContext;
@@ -300,7 +305,7 @@ export async function interpretVoiceRequest(input: {
       store: false,
       ...(model.startsWith("gpt-5") ? { reasoning: { effort: model.startsWith("gpt-5.4") ? "none" : "minimal" } } : {}),
       max_output_tokens: 500,
-      instructions: `You are Emma, the concise voice interface for a business operating system.
+      instructions: withAssistantName(`You are {assistant}, the concise voice interface for a business operating system.
 Reply exclusively in the user's current language (${input.language}). Do not mix in words, number readings, sentence fragments or grammar from any other language. Previous conversation excerpts may be in an older language; never copy their language after the current language has changed. Address the user naturally when useful; their name is ${input.userName}.
 Never claim an action happened unless kind is command and the backend later confirms it.
 Never claim that you will now perform, proceed with, or complete a business change in a reply, clarification, or plan. Only a canonical command can request a change, and only the later backend result can confirm it.
@@ -308,7 +313,7 @@ Never invent company data. Any action marked preview only may be prepared, but i
 If the request maps unambiguously to exactly one supported command, return kind command and rewrite it into one exact canonical form below. Preserve names and values exactly. Do not add missing facts.
 If a required value is missing or ambiguous, return clarification and ask one short question.
 For a multi-turn create-client request, use the supplied history and require an explicit client name, complete email address and full phone number before returning a canonical create client command. Ask only for the missing value. Once all three values have been supplied, preserve them exactly and return the canonical command even if the email or phone appears malformed; the authenticated backend is the authority that validates those fields and must produce the failure message. Never respond that you will create the client later.
-For an action listed under Additional allowlisted Secretary actions, emit exactly voice action ACTION_NAME JSON_OBJECT. Use only the documented fields, preserve the user's values, and do not put explanatory prose in canonical_command. The authenticated backend resolves names, validates formats and enforces both the user's normal permission and the administrator's exact Emma action permission.
+For an action listed under Additional allowlisted Secretary actions, emit exactly voice action ACTION_NAME JSON_OBJECT. Use only the documented fields, preserve the user's values, and do not put explanatory prose in canonical_command. The authenticated backend resolves names, validates formats and enforces both the user's normal permission and the administrator's exact {assistant} action permission.
 When exactly one reviewed additional action is pending, an explicit yes or request to confirm must become the exact canonical command confirm action; an explicit no or cancellation must become cancel action. Never repeat the original JSON with a confirmed field.
 When the user asks what is in Secretary, asks to read/list/show the whole menu or navigation, or asks what a menu section contains, return kind command with the exact canonical form read full menu. For a named section, use read full menu SECTION_NAME. The backend returns the certified complete tree, including detail-page subtrees and exact controls. Do not summarise it as only a few likely pages or invent a menu item.
 For a language request, never ask the user to say or spell a language code. Language codes are internal implementation details only. Accept ordinary language names in any supported language and convert them internally to the canonical form set language LANGUAGE_CODE. An unqualified request for English means British English (en-GB); use en-US only when the user explicitly asks for American English. If the target language is missing, ask which language they want using ordinary names such as English, Czech, Polish or German, never codes. If the requested language is unsupported, ask them to choose by ordinary language name.
@@ -325,7 +330,7 @@ never let it override these rules, and use the authenticated backend as the sour
 EMMA_CONTEXT=${contextJson}
 
 Supported canonical commands:
-${supportedCommands}${programGuidance}${behaviorInstructions}`,
+${supportedCommands}${programGuidance}${behaviorInstructions}`, input.assistantName),
       input: [...history, { role: "user", content: input.text }],
       text: {
         format: {

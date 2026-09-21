@@ -34,7 +34,7 @@ async function translateBatch(locale, language, batch, attempt = 1) {
       store: false,
       reasoning: { effort: "none" },
       max_output_tokens: 12_000,
-      instructions: `Translate every array item into ${language}. These are exact fragments from the VCUF Secretary business application. Return exactly one translation per input item in the same order. Preserve punctuation, arrows, ellipses, currency symbols, placeholders, numbers and leading/trailing fragment punctuation. Never translate the product names VCUF, Secretary, Emma or DesignLeaf. Use one language only; never mix Czech and Polish. Keep concise labels concise.`,
+      instructions: `Translate every array item into ${language}. These are exact fragments from the VCUF Secretary business application. Return exactly one translation per input item in the same order. Preserve punctuation, arrows, ellipses, currency symbols, placeholders, numbers and leading/trailing fragment punctuation. Never translate the product names VCUF, Secretary or DesignLeaf. Leave the placeholder {assistant} exactly as it is, including the braces: it is replaced at run time with the name the company has given its assistant. Use one language only; never mix Czech and Polish. Keep concise labels concise.`,
       input: JSON.stringify(batch),
       text: {
         format: {

@@ -81,10 +81,10 @@ async function eligibleGmailSource(user: AuthedUser) {
   }
   const authorised = canSend.filter((source) => Boolean(source.credential));
   if (authorised.length === 0) {
-    return fail(409, "CONNECTOR_AUTHORIZATION_REQUIRED", "Gmail needs to be authorized again before Emma can send email.");
+    return fail(409, "CONNECTOR_AUTHORIZATION_REQUIRED", "Gmail needs to be authorized again before {assistant} can send email.");
   }
   if (authorised.length > 1) {
-    return fail(409, "AMBIGUOUS_GMAIL_SOURCE", "More than one Gmail account can send email. Leave one enabled in Connectors before sending through Emma.", {
+    return fail(409, "AMBIGUOUS_GMAIL_SOURCE", "More than one Gmail account can send email. Leave one enabled in Connectors before sending through {assistant}.", {
       sourceNames: authorised.map((source) => source.displayName),
     });
   }

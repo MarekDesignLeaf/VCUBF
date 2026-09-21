@@ -176,7 +176,7 @@ const pageCapabilities: EmmaCapability[] = Object.entries(VOICE_PAGE_ROUTES).map
   mode: "read",
   kind: "page",
   label: `Open ${definition.label}`,
-  description: `Emma may open and guide the user through ${definition.label}.`,
+  description: `{assistant} may open and guide the user through ${definition.label}.`,
   intents: [],
   route: definition.path,
   page: page as VoicePage,
@@ -243,7 +243,7 @@ const commandCapabilities: EmmaCapability[] = (Object.entries(COMMAND_POLICY) as
     mode: policy.mode,
     kind: "command",
     label: humanize(intent),
-    description: policy.description ?? `Emma may execute the ${humanize(intent).toLowerCase()} voice operation.`,
+    description: policy.description ?? `{assistant} may execute the ${humanize(intent).toLowerCase()} voice operation.`,
     intents: [intent],
   }));
 

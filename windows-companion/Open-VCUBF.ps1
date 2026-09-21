@@ -61,7 +61,7 @@ function Open-Login([string]$Email) {
   Start-Process $url
 }
 
-# A valid local device token represents the already-approved Windows Emma
+# A valid local device token represents the already-approved Windows voice
 # account.  Reuse it instead of forcing a fresh pairing on every double-click.
 $profile=Get-ExistingDeviceProfile
 if($profile){
@@ -71,14 +71,14 @@ if($profile){
   exit 0
 }
 
-# First use or an expired token: pair in the browser first.  Emma starts only
+# First use or an expired token: pair in the browser first.  The runtime starts only
 # after the device token and voice language have been stored, so it cannot
 # briefly listen in the wrong language or claim to be ready without access.
 $pairing=$null
 try{$pairing=Invoke-RestMethod -Method POST -Uri "$server/auth/device/start" -ContentType 'application/json' -Body '{}' -TimeoutSec 15}catch{}
 if(!$pairing){
   Open-Login (Get-SavedEmail)
-  [Windows.Forms.MessageBox]::Show('VCUBF could not start secure device pairing. Sign in in the browser, then open the desktop icon again.','VCUBF Emma','OK','Warning')|Out-Null
+  [Windows.Forms.MessageBox]::Show('VCUBF could not start secure device pairing. Sign in in the browser, then open the desktop icon again.','VCUBF Secretary','OK','Warning')|Out-Null
   exit 1
 }
 
@@ -94,5 +94,5 @@ do{
 }while((Get-Date)-lt $deadline)
 
 if($paired){Start-Emma;exit 0}
-[Windows.Forms.MessageBox]::Show('Pairing expired before sign-in was approved. Open VCUBF Secretary again to create a new secure code.','VCUBF Emma','OK','Warning')|Out-Null
+[Windows.Forms.MessageBox]::Show('Pairing expired before sign-in was approved. Open VCUBF Secretary again to create a new secure code.','VCUBF Secretary','OK','Warning')|Out-Null
 exit 1

@@ -8,7 +8,7 @@ import { prisma } from "../../db.js";
 import { speakReply } from "../../services/voiceSpeechService.js";
 
 /**
- * POST /command/speak — audio for one of Emma's replies.
+ * POST /command/speak — audio for one of {assistant}'s replies.
  *
  * Answers 503 when no voice is available so the browser falls back to its own
  * synthesis instead of going quiet.

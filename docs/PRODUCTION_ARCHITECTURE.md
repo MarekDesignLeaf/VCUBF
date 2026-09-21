@@ -1,4 +1,4 @@
-# VCUF Secretary / Emma — produkční architektura
+# VCUF Secretary / Alfonzo — produkční architektura
 
 Tento dokument je závazný produkční směr od 17. července 2026. Vychází z
 aktualizovaného návrhu produktu a doplňuje stávající implementaci; neruší již
@@ -13,7 +13,7 @@ jednotný jazyk rozhraní i Emmy v osmi lokalizacích (en-GB, en-US, cs, pl, fr,
 de, es, it), vynucený stav aktivace wake wordem, katalog menu s automatickým
 testem úplnosti a Windows runtime Voice v2 (`docs/VOICE_V2_SETUP.md`).
 
-Zatím nedodáno: samostatný Emma Voice Orchestrator (FastAPI/LangGraph), Redis
+Zatím nedodáno: samostatný Alfonzo Voice Orchestrator (FastAPI/LangGraph), Redis
 pro krátkodobý stav relace, pgvector pro dlouhodobou paměť (poznámky Emmy dnes
 ukládá `AssistantMemory` v PostgreSQL bez vektorového vyhledávání), migrace
 webu na Next.js a Flutter mobilní klient. Realtime adaptér zůstává přechodovým
@@ -21,7 +21,7 @@ webu na Next.js a Flutter mobilní klient. Realtime adaptér zůstává přechod
 
 ## Produktový kontrakt
 
-Emma je hlasový asistent integrovaný do business platformy. Web je plná
+Alfonzo je hlasový asistent integrovaný do business platformy. Web je plná
 pracovní plocha; mobil slouží především pro hlasové rychlé akce, upozornění a
 práci na cestách. Zdroj pravdy pro operace zůstává společný backend.
 
@@ -43,7 +43,7 @@ Následující vlastnosti jsou regresní brány pro každou změnu:
 Webová pracovní plocha / mobilní klient
                   │  HTTPS + WebSocket
                   ▼
-       Emma Voice Orchestrator (session, language, tools, memory)
+       Alfonzo Voice Orchestrator (session, language, tools, memory)
                   │
                   ▼
 Stávající Secretary business API (práva, validace, audit, data, konektory)
@@ -71,7 +71,7 @@ Proto se postupuje po vrstvách:
 1. **Business jádro zůstává.** Node API a Prisma zůstávají autoritativní pro
    data, Action Contracts, práva, audit a konektory. PostgreSQL musí být
    připravené pro Neon a rozšíření `pgvector`.
-2. **Emma Voice Orchestrator se přidává jako oddělená služba.** Cílová
+2. **Alfonzo Voice Orchestrator se přidává jako oddělená služba.** Cílová
    implementace je FastAPI + LangGraph, komunikující se Secretary přes
    verzované HTTP/WebSocket tool kontrakty. Dokud není nasazen, existující
    Realtime adaptér zůstává funkčním přechodovým řešením.
@@ -89,7 +89,7 @@ Proto se postupuje po vrstvách:
 
 ## Hlasové chování
 
-- Wake word je lokální a konfigurovatelné, výchozí hodnota je `Emma`.
+- Wake word je lokální a konfigurovatelné, výchozí hodnota je `Alfonzo`.
 - Web může běžet v kontinuálním režimu. Android může nabídnout background režim
   v mezích systému. iOS používá push-to-talk, pokud systém nedovolí spolehlivý
   background režim.

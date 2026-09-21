@@ -3,7 +3,7 @@ import { NAVIGATION_TRANSLATIONS } from "./navigationTranslations.js";
 
 // This is the backend-certified map of every signed-in Secretary screen. It
 // deliberately includes page subtrees that do not have their own sidebar row
-// (for example a client detail or a quote editor), so Emma can explain the
+// (for example a client detail or a quote editor), so {assistant} can explain the
 // complete application rather than only the flat sidebar.
 type PermissionRule = {
   all?: readonly string[];
@@ -106,11 +106,11 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
         "Personal account, password, wake word, recognition language, continuous listening and Windows pairing.",
         ["Change password", "Save voice preferences"],
         { children: [
-          child("Voice control", undefined, "Changes Emma's wake word, spoken language, Secretary menu language and continuous-listening preference.", ["Save voice preferences"]),
+          child("Voice control", undefined, "Changes {assistant}'s wake word, spoken language, Secretary menu language and continuous-listening preference.", ["Save voice preferences"]),
           child("Windows pairing", undefined, "Approves the current Windows companion after browser sign-in."),
         ] }
       ),
-      item("emma_permissions", "Company-wide administrator controls for every read, write, external and connector capability Emma may execute.", ["Enable", "Disable", "Save Emma permissions"], { access: { all: ["company.manage"] } }),
+      item("emma_permissions", "Company-wide administrator controls for every read, write, external and connector capability {assistant} may execute.", ["Enable", "Disable", "Save {assistant} permissions"], { access: { all: ["company.manage"] } }),
     ],
   },
   {
@@ -221,7 +221,7 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
   },
   {
     id: "people_process_and_learning",
-    label: "People, process and Emma learning",
+    label: "People, process and {assistant} learning",
     description: "Recruitment, repeatable workflows, visible phrase learning and explicit long-term memory.",
     aliases: ["people", "process", "learning", "memory", "team", "recruitment", "lidé", "procesy", "učení", "paměť", "nábor"],
     items: [
@@ -240,7 +240,7 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
       item("learning", "Visible, editable phrase aliases that map to deterministic commands; they never create hidden business policy.", ["Teach a rule", "Archive", "Reactivate"]),
       item("new_employee", "Adds a user and sets what they may do. Their password is set by them, never dictated.", ["Create user"], { access: { all: ["employees.manage"] } }),
       item("new_quote", "Builds a quote for a client from catalogue services or free items.", ["Add item", "Save quote"], { access: { all: ["sales.write"] } }),
-      item("voice_aliases", "Spoken phrases mapped onto what they mean, for how Emma is addressed and for commands. A phrase heard three times identically is learned permanently; entries can also be added and removed by hand.", ["Add alias", "Remove"], { access: { all: ["voice.execute"] } }),
+      item("voice_aliases", "Spoken phrases mapped onto what they mean, for how {assistant} is addressed and for commands. A phrase heard three times identically is learned permanently; entries can also be added and removed by hand.", ["Add alias", "Remove"], { access: { all: ["voice.execute"] } }),
       item("memory_model", "Visible personal and company persistent notes plus an admin/audit view of repeated action patterns. Audio is never retained and normal conversation is not silently promoted to memory.", ["For me", "For the company", "Remember", "Archive"], { access: { any: ["voice.execute", "audit.read"] } }),
     ],
   },
@@ -254,7 +254,7 @@ const SECTION_COPY: Record<string, Partial<Record<NavigationSectionId, { label: 
     communication: { label: "Komunikacja", description: "Przychodzące wiadomości, historia komunikacji, zapytania i integracje kanałów." },
     evidence_and_growth: { label: "Materiały i rozwój", description: "Zdjęcia, kontekst firmy, branże i zawartość strony internetowej." },
     sales_and_finance: { label: "Sprzedaż i finanse", description: "Katalog usług, oferty i faktury." },
-    people_process_and_learning: { label: "Ludzie, procesy i nauka", description: "Rekrutacja, procedury, uczenie i trwała pamięć Emmy." },
+    people_process_and_learning: { label: "Ludzie, procesy i nauka", description: "Rekrutacja, procedury, uczenie i trwała pamięć asystenta." },
   },
   "cs-CZ": {
     start_and_control: { label: "Začátek a ovládání", description: "Osobní nastavení, provozní přehled a záležitosti vyžadující pozornost." },
@@ -263,7 +263,7 @@ const SECTION_COPY: Record<string, Partial<Record<NavigationSectionId, { label: 
     communication: { label: "Komunikace", description: "Příchozí zprávy, historie komunikace, dotazy a propojené kanály." },
     evidence_and_growth: { label: "Podklady a růst", description: "Fotografie, kontext firmy, obory a obsah webu." },
     sales_and_finance: { label: "Obchod a finance", description: "Katalog služeb, nabídky a faktury." },
-    people_process_and_learning: { label: "Lidé, procesy a učení", description: "Nábor, postupy, učení a trvalá paměť Emmy." },
+    people_process_and_learning: { label: "Lidé, procesy a učení", description: "Nábor, postupy, učení a trvalá paměť asistenta." },
   },
   "fr-FR": {
     start_and_control: { label: "Démarrage et contrôle", description: "Paramètres personnels, vue opérationnelle et éléments nécessitant une attention." },
@@ -272,7 +272,7 @@ const SECTION_COPY: Record<string, Partial<Record<NavigationSectionId, { label: 
     communication: { label: "Communication", description: "Messages entrants, historique des communications, demandes et canaux connectés." },
     evidence_and_growth: { label: "Preuves et croissance", description: "Photos, contexte de l’entreprise, secteurs et contenu du site." },
     sales_and_finance: { label: "Ventes et finances", description: "Catalogue de services, devis et factures." },
-    people_process_and_learning: { label: "Personnel, processus et apprentissage", description: "Recrutement, procédures, apprentissage et mémoire permanente d’Emma." },
+    people_process_and_learning: { label: "Personnel, processus et apprentissage", description: "Recrutement, procédures, apprentissage et mémoire permanente d’{assistant}." },
   },
   "de-DE": {
     start_and_control: { label: "Start und Steuerung", description: "Persönliche Einstellungen, Betriebsübersicht und Punkte, die Aufmerksamkeit erfordern." },
@@ -281,7 +281,7 @@ const SECTION_COPY: Record<string, Partial<Record<NavigationSectionId, { label: 
     communication: { label: "Kommunikation", description: "Eingehende Nachrichten, Kommunikationsverlauf, Anfragen und verbundene Kanäle." },
     evidence_and_growth: { label: "Nachweise und Wachstum", description: "Fotos, Unternehmenskontext, Branchen und Website-Inhalte." },
     sales_and_finance: { label: "Vertrieb und Finanzen", description: "Leistungskatalog, Angebote und Rechnungen." },
-    people_process_and_learning: { label: "Personal, Prozesse und Lernen", description: "Personalbeschaffung, Abläufe, Lernen und Emmas dauerhaftes Gedächtnis." },
+    people_process_and_learning: { label: "Personal, Prozesse und Lernen", description: "Personalbeschaffung, Abläufe, Lernen und das dauerhafte Gedächtnis des Assistenten." },
   },
   "es-ES": {
     start_and_control: { label: "Inicio y control", description: "Ajustes personales, visión operativa y elementos que requieren atención." },
@@ -290,7 +290,7 @@ const SECTION_COPY: Record<string, Partial<Record<NavigationSectionId, { label: 
     communication: { label: "Comunicación", description: "Mensajes entrantes, historial de comunicaciones, consultas y canales conectados." },
     evidence_and_growth: { label: "Evidencia y crecimiento", description: "Fotos, contexto empresarial, sectores y contenido web." },
     sales_and_finance: { label: "Ventas y finanzas", description: "Catálogo de servicios, presupuestos y facturas." },
-    people_process_and_learning: { label: "Personas, procesos y aprendizaje", description: "Selección de personal, procedimientos, aprendizaje y memoria permanente de Emma." },
+    people_process_and_learning: { label: "Personas, procesos y aprendizaje", description: "Selección de personal, procedimientos, aprendizaje y memoria permanente de {assistant}." },
   },
   "it-IT": {
     start_and_control: { label: "Avvio e controllo", description: "Impostazioni personali, panoramica operativa ed elementi che richiedono attenzione." },
@@ -299,7 +299,7 @@ const SECTION_COPY: Record<string, Partial<Record<NavigationSectionId, { label: 
     communication: { label: "Comunicazione", description: "Messaggi in arrivo, cronologia delle comunicazioni, richieste e canali collegati." },
     evidence_and_growth: { label: "Materiali e crescita", description: "Foto, contesto aziendale, settori e contenuto del sito." },
     sales_and_finance: { label: "Vendite e finanze", description: "Catalogo dei servizi, preventivi e fatture." },
-    people_process_and_learning: { label: "Persone, processi e apprendimento", description: "Selezione del personale, procedure, apprendimento e memoria permanente di Emma." },
+    people_process_and_learning: { label: "Persone, processi e apprendimento", description: "Selezione del personale, procedure, apprendimento e memoria permanente di {assistant}." },
   },
 };
 
@@ -415,7 +415,7 @@ export function getNavigationCatalogue(permissions: readonly string[], sectionId
 
 // The prompt form is generated from the same catalogue returned to the
 // Windows companion and web control centre. This prevents a newly added page
-// from being known by one Emma surface but not another.
+// from being known by one {assistant} surface but not another.
 export const FULL_SECRETARY_MENU_TREE = getNavigationCatalogue(
   ["connectors.read", "recruitment.manage", "voice.execute", "audit.read"],
 ).readout;

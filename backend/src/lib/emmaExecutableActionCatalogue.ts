@@ -1,4 +1,4 @@
-// Canonical bridge between Emma's natural-language interpretation and the
+// Canonical bridge between {assistant}'s natural-language interpretation and the
 // application's permission-checked services. The language model may choose
 // only an action listed here and must provide JSON; the owning service still
 // validates every value and tenant-scopes every lookup.
@@ -193,7 +193,7 @@ export const EMMA_NON_DIRECT_ACTIONS = {
   complete_google_photos_oauth: { executionClass: "system", note: "Provider callback completed by Google after authorization." },
   receive_whatsapp_message: { executionClass: "system", note: "Executed only from a verified Meta webhook." },
   sync_whatsapp_sender_contacts: { executionClass: "system", note: "Runs inside the verified WhatsApp webhook transaction." },
-  execute_text_command: { executionClass: "system", note: "Audit wrapper around every Emma command, not a separate user operation." },
+  execute_text_command: { executionClass: "system", note: "Audit wrapper around every {assistant} command, not a separate user operation." },
   prepare_voice_email_deletion: { executionClass: "superseded", note: "Handled by the generic delete_gmail_message reviewed action." },
   confirm_voice_email_deletion: { executionClass: "superseded", note: "Handled by confirm action for delete_gmail_message." },
   cancel_voice_email_deletion: { executionClass: "superseded", note: "Handled by cancel action for delete_gmail_message." },

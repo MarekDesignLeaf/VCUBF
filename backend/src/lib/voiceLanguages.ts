@@ -163,7 +163,7 @@ const SHORT_LANGUAGE_CODES = new Set(["en", "cs", "pl", "fr", "de", "es", "it"])
 /**
  * A language named in full, refusing the bare codes above.
  *
- * For the case where the utterance *is* the answer — Emma asked which variant, and
+ * For the case where the utterance *is* the answer — {assistant} asked which variant, and
  * the reply is just "British" — where there is no verb to confirm that a change was
  * meant at all.
  */
@@ -204,14 +204,14 @@ export function mentionsLanguage(raw: string, language: VoiceLanguage): boolean 
 
 export function languageSwitchMessage(language: VoiceLanguage) {
   const messages: Record<VoiceLanguage, string> = {
-    "en-GB": "Language changed to English. Emma and the Secretary menu now use English.",
-    "en-US": "Language changed to English. Emma and the Secretary menu now use English.",
-    "cs-CZ": "Jazyk jsem změnila na češtinu. Emma i menu Secretary nyní používají češtinu.",
-    "pl-PL": "Zmieniono język na polski. Emma i menu Secretary używają teraz języka polskiego.",
-    "fr-FR": "La langue a été changée en français. Emma et le menu Secretary utilisent maintenant le français.",
-    "de-DE": "Die Sprache wurde auf Deutsch geändert. Emma und das Secretary-Menü verwenden jetzt Deutsch.",
-    "es-ES": "El idioma se ha cambiado a español. Emma y el menú de Secretary ahora usan español.",
-    "it-IT": "La lingua è stata cambiata in italiano. Emma e il menu Secretary ora usano l'italiano.",
+    "en-GB": "Language changed to English. {assistant} and the Secretary menu now use English.",
+    "en-US": "Language changed to English. {assistant} and the Secretary menu now use English.",
+    "cs-CZ": "Jazyk jsem změnila na češtinu. {assistant} i menu Secretary nyní používají češtinu.",
+    "pl-PL": "Zmieniono język na polski. {assistant} i menu Secretary używają teraz języka polskiego.",
+    "fr-FR": "La langue a été changée en français. {assistant} et le menu Secretary utilisent maintenant le français.",
+    "de-DE": "Die Sprache wurde auf Deutsch geändert. {assistant} und das Secretary-Menü verwenden jetzt Deutsch.",
+    "es-ES": "El idioma se ha cambiado a español. {assistant} y el menú de Secretary ahora usan español.",
+    "it-IT": "La lingua è stata cambiata in italiano. {assistant} e il menu Secretary ora usano l'italiano.",
   };
   return messages[language];
 }

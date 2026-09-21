@@ -1,8 +1,10 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type AssistantMemory, type RepeatedActionPattern } from "../api/client";
+import { useAssistantName } from "../assistantName";
 
 export function MemoryModel() {
+  const assistantName = useAssistantName();
   const [memories, setMemories] = useState<AssistantMemory[] | null>(null);
   const [patterns, setPatterns] = useState<RepeatedActionPattern[] | null>(null);
   const [content, setContent] = useState("");
@@ -17,7 +19,7 @@ export function MemoryModel() {
       setMemories(await api.memoryModel.memories("all"));
       setMemoryError(null);
     } catch {
-      setMemoryError("Could not load Emma's persistent memory.");
+      setMemoryError("Could not load {assistant}'s persistent memory.");
     }
   }, []);
 
@@ -38,7 +40,7 @@ export function MemoryModel() {
     try {
       const saved = await api.memoryModel.createMemory(value, scope);
       setContent("");
-      setNotice(saved.duplicate ? "Emma already had this active memory." : "Memory saved. Emma will receive it in future conversations.");
+      setNotice(saved.duplicate ? "{assistant} already had this active memory." : "Memory saved. {assistant} will receive it in future conversations.");
       await loadMemories();
     } catch {
       setMemoryError(scope === "company"
@@ -55,7 +57,7 @@ export function MemoryModel() {
     setNotice(null);
     try {
       await api.memoryModel.archiveMemory(memory.id);
-      setNotice("Memory archived. Emma will no longer use it as active context.");
+      setNotice("Memory archived. {assistant} will no longer use it as active context.");
       await loadMemories();
     } catch {
       setMemoryError("Could not archive the memory.");
@@ -65,19 +67,19 @@ export function MemoryModel() {
   return (
     <div>
       <div className="page-header">
-        <h1>Emma Memory</h1>
+        <h1>{assistantName} memory</h1>
       </div>
 
       <section className="card" style={{ marginBottom: 24 }}>
         <h2>Persistent memory</h2>
         <p className="hint">
-          Emma stores a permanent note only after an explicit “remember that…” command or this form.
+          {assistantName} stores a permanent note only after an explicit “remember that…” command or this form.
           Personal notes are visible only to you. Company notes are shared with your company and require
-          CRM management permission. Archived notes stay visible here but are not sent to Emma.
+          CRM management permission. Archived notes stay visible here but are not sent to {assistantName}.
         </p>
         <form onSubmit={saveMemory}>
           <label>
-            What Emma should remember
+            What {assistantName} should remember
             <textarea
               value={content}
               onChange={(event) => setContent(event.target.value)}

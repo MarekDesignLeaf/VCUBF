@@ -55,7 +55,7 @@ mezeru.
 
 ## Priorita 2 — architektura podle PRODUCTION_ARCHITECTURE.md
 
-6. **Emma Voice Orchestrator (FastAPI + LangGraph) jako oddělená služba** s
+6. **Alfonzo Voice Orchestrator (FastAPI + LangGraph) jako oddělená služba** s
    verzovanými tool kontrakty proti stávajícímu API; Realtime adaptér zůstává
    fallbackem. Předpoklad: zafixovat tool katalog (dnes
    `emmaExecutableActionCatalogue.ts`) jako verzované JSON schéma.

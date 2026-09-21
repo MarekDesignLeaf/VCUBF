@@ -142,9 +142,12 @@ describe("voice assistant interpretation", () => {
       assert.equal(String(url), "https://api.openai.com/v1/audio/transcriptions");
       assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer server-only-test-key");
       const form = init?.body as FormData;
-      // whisper-1, not a gpt-4o transcribe model: those treat the prompt as an
-      // instruction and return it as the transcript when the audio has no speech.
-      assert.equal(form.get("model"), "whisper-1");
+      // gpt-4o-transcribe is the default: it hears short Czech and English
+      // commands measurably better than whisper-1. It does treat the prompt as
+      // an instruction and echo it back when the audio carries no speech, which
+      // is what isPromptEcho() exists to catch, so the vocabulary prompt below
+      // is still asserted.
+      assert.equal(form.get("model"), process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe");
       assert.equal(form.get("language"), "en");
       // Deterministic decoding, so unclear audio is not guessed through.
       assert.equal(form.get("temperature"), "0");
@@ -161,7 +164,7 @@ describe("voice assistant interpretation", () => {
       });
     };
     const result = await transcribeVoiceAudio(Buffer.alloc(48), "en-GB", "Emma");
-    assert.deepEqual(result, { text: "Emma, show contacts.", model: "whisper-1" });
+    assert.deepEqual(result, { text: "Emma, show contacts.", model: process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe" });
   });
 
   it("passes learned vocabulary to the decoder so misheard words improve", async () => {

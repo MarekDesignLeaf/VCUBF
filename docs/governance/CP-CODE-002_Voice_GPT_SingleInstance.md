@@ -1,7 +1,7 @@
-# CP-CODE-002 — Emma Voice v2: exactly one runtime, GPT speech recognition
+# CP-CODE-002 — Alfonzo Voice v2: exactly one runtime, GPT speech recognition
 
 Status: BUILT / TESTED (self-test, backend unit tests, live end-to-end on the Owner's PC) → **DEPLOYED LOCALLY (Owner's PC), APPROVAL_REQUIRED for merge to master**
-Branch: `voice/CP-CODE-002-openai-stt` on top of master `a3472f1` · Owner request (20 Sep 2026): "Emma must not start more than once, and must recognise what I say well — no Picovoice, GPT recognition."
+Branch: `voice/CP-CODE-002-openai-stt` on top of master `a3472f1` · Owner request (20 Sep 2026): "Alfonzo must not start more than once, and must recognise what I say well — no Picovoice, GPT recognition."
 Governing process: SEC-00 §5 (change control), SEC-08 §8 voice pipeline enters the same governed path, SAF: provider keys stay on the backend.
 
 ## 1. What changed
@@ -12,9 +12,9 @@ Governing process: SEC-00 §5 (change control), SEC-08 §8 voice pipeline enters
 
 ## 2. Evidence
 - `python emma_voice_v2.py --self-test` → ok; `--diagnostic` shows `openaiStt.active=true` once the config selects the providers.
-- Live: runtime started by the unified launcher, log `v2 OpenAI (GPT) wake listener started (cs-CZ, Emma)`; a second `--run` launched by hand exited with code 3 and logged `runtime already running`.
+- Live: runtime started by the unified launcher, log `v2 OpenAI (GPT) wake listener started (cs-CZ, Alfonzo)`; a second `--run` launched by hand exited with code 3 and logged `runtime already running`.
 - Recognition: synthetic Czech utterance ("Emmo, ukaž mi faktury po splatnosti za minulý měsíc") through `POST /command/transcribe` → exact transcript with language `cs`; with the account still on `en-GB` the same audio came back Slovak-flavoured — hence the language change above.
-- Found and fixed during rollout: `NotifyIcon.Text` is limited to 63 characters; a longer engine label made `Run-VoiceV2.ps1` throw after starting Python, its `finally` wrote the stop file, and the launcher re-armed every second (the exact "Emma starts again and again" symptom, reproduced and closed).
+- Found and fixed during rollout: `NotifyIcon.Text` is limited to 63 characters; a longer engine label made `Run-VoiceV2.ps1` throw after starting Python, its `finally` wrote the stop file, and the launcher re-armed every second (the exact "Alfonzo starts again and again" symptom, reproduced and closed).
 - Not yet measured: real-microphone accuracy across a day of use, and per-utterance latency (REST round trip ≈ 1–2 s after end of speech). Realtime streaming transcription is the follow-up if latency matters.
 
 ## 3. Conflict analysis
@@ -26,4 +26,4 @@ Governing process: SEC-00 §5 (change control), SEC-08 §8 voice pipeline enters
 `voice-v2.json.before-cp002` and `*.before-cp002` copies in `%LOCALAPPDATA%\VCUBF\Emma\app`; `git checkout master` in the local project and re-run the desktop shortcut.
 
 ## 5. Out of scope / next
-Realtime (streaming) GPT transcription via short-lived backend credential; frontend "Windows Emma" panel showing the STT engine; removing Picovoice/Deepgram code paths once the Owner confirms the GPT path over a week; rebasing PR #1 (CP-CODE-001) onto the 18 master commits pushed today.
+Realtime (streaming) GPT transcription via short-lived backend credential; frontend "Windows Alfonzo" panel showing the STT engine; removing Picovoice/Deepgram code paths once the Owner confirms the GPT path over a week; rebasing PR #1 (CP-CODE-001) onto the 18 master commits pushed today.

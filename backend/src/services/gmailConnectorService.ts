@@ -861,7 +861,7 @@ export async function sendGmailMessageNow(
  * Resolve the Gmail source a business document may be sent from. With an
  * explicit sourceId the source must be enabled with send:messages and
  * authorised; without one, exactly one such source must exist (the same
- * rule Emma applies), otherwise the caller must choose in Connectors.
+ * rule {assistant} applies), otherwise the caller must choose in Connectors.
  */
 export async function resolveSendableGmailSource(user: AuthedUser, sourceId?: string): Promise<ServiceResult<{ id: string; displayName: string }>> {
   if (sourceId) {

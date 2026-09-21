@@ -603,7 +603,7 @@ async function executeEmmaActionDirect(
   // Exhaustive by type: a newly mirrored action cannot compile until its real,
   // permission-checked service path has been implemented here.
   const unimplementedAction: never = request.action;
-  return fail(500, "EMMA_ACTION_NOT_IMPLEMENTED", `Emma action ${unimplementedAction} is not implemented.`);
+  return fail(500, "EMMA_ACTION_NOT_IMPLEMENTED", `{assistant} action ${unimplementedAction} is not implemented.`);
 }
 
 const PENDING_ACTION_TYPE = "emma_universal_action";
@@ -661,7 +661,7 @@ export async function executeEmmaAction(user: AuthedUser, request: EmmaExecutabl
 
 export async function confirmPendingEmmaAction(user: AuthedUser): Promise<ServiceResult<unknown>> {
   const pending = await pendingAction(user);
-  if (!pending) return fail(409, "NO_PENDING_ACTION", "There is no reviewed Emma action waiting for confirmation.");
+  if (!pending) return fail(409, "NO_PENDING_ACTION", "There is no reviewed {assistant} action waiting for confirmation.");
   const request = pending.payload as unknown as EmmaExecutableActionRequest;
   if (!request?.action || !Object.prototype.hasOwnProperty.call(EMMA_EXECUTABLE_ACTIONS, request.action)) {
     await prisma.voicePendingAction.update({ where: { id: pending.id }, data: { status: "failed", payload: Prisma.DbNull, resolvedAt: new Date() } });

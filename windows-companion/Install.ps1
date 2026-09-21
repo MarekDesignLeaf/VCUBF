@@ -24,7 +24,7 @@ foreach($candidate in @('python.exe','py.exe')) {
 if($python) {
   $pythonPrefix=@($python.Prefix)
   & $python.Path @pythonPrefix -m pip install --disable-pip-version-check --quiet -r (Join-Path $source 'requirements.txt')
-  if($LASTEXITCODE -ne 0) { throw 'VCUBF Emma audio dependencies could not be installed.' }
+  if($LASTEXITCODE -ne 0) { throw 'VCUBF Secretary audio dependencies could not be installed.' }
 } else {
   Write-Warning 'Python 3 was not found. Realtime audio will remain unavailable until Python is installed and Install.ps1 is run again.'
 }
@@ -42,10 +42,10 @@ $desktopShortcut.Arguments="-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidd
 $desktopShortcut.WorkingDirectory=$target
 $desktopShortcut.IconLocation="$env:SystemRoot\System32\imageres.dll,15"
 $desktopShortcut.Save()
-Write-Host "VCUBF Emma installed in $target"
+Write-Host "VCUBF Secretary voice installed in $target"
 if($StartNow){
   # Use the same secure launcher as the desktop icon.  On first use it waits
-  # for browser approval before Emma opens the microphone; on later starts it
+  # for browser approval before the runtime opens the microphone; on later starts it
   # reuses the DPAPI-protected device pairing.
   Start-Process -FilePath $shortcut.TargetPath -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $target 'Open-VCUBF.ps1')`"" -WindowStyle Hidden
 }

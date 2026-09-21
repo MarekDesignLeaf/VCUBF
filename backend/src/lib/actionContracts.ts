@@ -25,7 +25,7 @@ export const CHANGE_OWN_PASSWORD_ACTION: ActionContract = {
 
 export const UPDATE_VOICE_PREFERENCES_ACTION: ActionContract = {
   actionName: "update_voice_preferences",
-  purpose: "Store the authenticated user's wake word, Emma speech language, Secretary menu language and availability of continuous listening controls.",
+  purpose: "Store the authenticated user's wake word, {assistant} speech language, Secretary menu language and availability of continuous listening controls.",
   requiredPermission: "authenticated",
   riskLevel: 1,
   confirmationRequired: false,
@@ -35,7 +35,7 @@ export const UPDATE_VOICE_PREFERENCES_ACTION: ActionContract = {
 
 export const APPROVE_DEVICE_PAIRING_ACTION: ActionContract = {
   actionName: "approve_device_pairing",
-  purpose: "Approve a short-lived one-time token handoff from an authenticated browser session to the Windows Emma companion.",
+  purpose: "Approve a short-lived one-time token handoff from an authenticated browser session to the Windows {assistant} companion.",
   requiredPermission: "authenticated",
   riskLevel: 3,
   confirmationRequired: true,
@@ -176,7 +176,7 @@ export const EXECUTE_TEXT_COMMAND_ACTION: ActionContract = {
 
 export const UPDATE_EMMA_COMPANY_POLICY_ACTION: ActionContract = {
   actionName: "update_emma_company_policy",
-  purpose: "Allow a company administrator to choose which read, write, external and connector actions Emma may execute for the company.",
+  purpose: "Allow a company administrator to choose which read, write, external and connector actions {assistant} may execute for the company.",
   requiredPermission: "company.manage",
   riskLevel: 3,
   confirmationRequired: false,
@@ -186,7 +186,7 @@ export const UPDATE_EMMA_COMPANY_POLICY_ACTION: ActionContract = {
 
 export const UPDATE_EMMA_BEHAVIOR_SCENARIO_ACTION: ActionContract = {
   actionName: "update_emma_behavior_scenario",
-  purpose: "Allow a company administrator to define Emma's company-wide conversational style and persona for every new assistant session.",
+  purpose: "Allow a company administrator to define {assistant}'s company-wide conversational style and persona for every new assistant session.",
   requiredPermission: "company.manage",
   riskLevel: 2,
   confirmationRequired: false,
@@ -339,7 +339,7 @@ export const ACCESS_PROFILES: readonly AccessProfile[] = [
   { id: "administrator", label: "Administrator", description: "Full company, user, data, connector and assistant control.", permissions: KNOWN_PERMISSIONS },
   { id: "manager", label: "Manager", description: "Runs day-to-day work and manages non-administrator user accounts.", permissions: ["crm.read", "crm.manage", "users.manage", "voice.execute", "recruitment.manage", "connectors.read"] },
   { id: "office", label: "Office", description: "Works with customers, enquiries, jobs and Secretary assistance.", permissions: ["crm.read", "crm.manage", "voice.execute", "connectors.read"] },
-  { id: "field_worker", label: "Field worker", description: "Views assigned work and uses Emma without company administration access.", permissions: ["crm.read", "voice.execute"] },
+  { id: "field_worker", label: "Field worker", description: "Views assigned work and uses {assistant} without company administration access.", permissions: ["crm.read", "voice.execute"] },
   { id: "viewer", label: "Viewer", description: "Read-only operational access.", permissions: ["crm.read"] },
   { id: "custom", label: "Custom", description: "A bespoke permission set chosen by an administrator.", permissions: [] },
 ];
@@ -488,7 +488,7 @@ export const CANCEL_VOICE_EMAIL_DELETION_ACTION: ActionContract = {
 
 export const PREPARE_VOICE_GMAIL_MESSAGE_ACTION: ActionContract = {
   actionName: "prepare_voice_gmail_message",
-  purpose: "Prepare a short-lived Gmail message review for Emma, with explicit recipient, subject and body fields, before the user gives a separate spoken confirmation to send it.",
+  purpose: "Prepare a short-lived Gmail message review for {assistant}, with explicit recipient, subject and body fields, before the user gives a separate spoken confirmation to send it.",
   requiredPermission: "connectors.manage",
   riskLevel: 2,
   confirmationRequired: true,
@@ -498,7 +498,7 @@ export const PREPARE_VOICE_GMAIL_MESSAGE_ACTION: ActionContract = {
 
 export const CONFIRM_VOICE_GMAIL_MESSAGE_ACTION: ActionContract = {
   actionName: "confirm_voice_gmail_message",
-  purpose: "Use one pending Emma Gmail review exactly once to send the previously reviewed message through the selected authorized Gmail source.",
+  purpose: "Use one pending {assistant} Gmail review exactly once to send the previously reviewed message through the selected authorized Gmail source.",
   requiredPermission: "connectors.manage",
   riskLevel: 3,
   confirmationRequired: true,
@@ -508,7 +508,7 @@ export const CONFIRM_VOICE_GMAIL_MESSAGE_ACTION: ActionContract = {
 
 export const CANCEL_VOICE_GMAIL_MESSAGE_ACTION: ActionContract = {
   actionName: "cancel_voice_gmail_message",
-  purpose: "Cancel the current short-lived Emma Gmail review and remove its message content without sending it.",
+  purpose: "Cancel the current short-lived {assistant} Gmail review and remove its message content without sending it.",
   requiredPermission: "connectors.manage",
   riskLevel: 1,
   confirmationRequired: false,
@@ -961,7 +961,7 @@ export const UPDATE_LEARNING_RULE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "LEARNING_RULE_NOT_FOUND", "VALIDATION_FAILED"],
 };
 
-// Emma's durable memory is distinct from both learned command aliases and
+// {assistant}'s durable memory is distinct from both learned command aliases and
 // automatically detected action patterns. It stores only an explicit user
 // statement, remains visible, and is reversible by archiving.
 export const ASSISTANT_MEMORY_SCOPES = ["personal", "company"] as const;
@@ -969,7 +969,7 @@ export const ASSISTANT_MEMORY_STATUSES = ["active", "archived"] as const;
 
 export const CREATE_ASSISTANT_MEMORY_ACTION: ActionContract = {
   actionName: "create_assistant_memory",
-  purpose: "Store an explicit user-stated note for future Emma conversations without inferring or inventing any missing detail.",
+  purpose: "Store an explicit user-stated note for future {assistant} conversations without inferring or inventing any missing detail.",
   requiredPermission: "voice.execute",
   riskLevel: 1,
   confirmationRequired: false,
@@ -989,7 +989,7 @@ export const RECALL_ASSISTANT_MEMORY_ACTION: ActionContract = {
 
 export const ARCHIVE_ASSISTANT_MEMORY_ACTION: ActionContract = {
   actionName: "archive_assistant_memory",
-  purpose: "Stop using one visible persistent Emma memory while retaining its audit trail.",
+  purpose: "Stop using one visible persistent {assistant} memory while retaining its audit trail.",
   requiredPermission: "voice.execute",
   riskLevel: 1,
   confirmationRequired: false,
@@ -1566,7 +1566,7 @@ export const DELETE_ALL_NOTIFICATIONS_ACTION: ActionContract = {
 
 export const PREPARE_VOICE_NOTIFICATION_DELETION_ACTION: ActionContract = {
   actionName: "prepare_voice_notification_deletion",
-  purpose: "Prepare a short-lived review containing the exact notification keys Emma will hide if the user confirms.",
+  purpose: "Prepare a short-lived review containing the exact notification keys {assistant} will hide if the user confirms.",
   requiredPermission: "crm.manage",
   riskLevel: 2,
   confirmationRequired: true,
@@ -1576,7 +1576,7 @@ export const PREPARE_VOICE_NOTIFICATION_DELETION_ACTION: ActionContract = {
 
 export const CONFIRM_VOICE_NOTIFICATION_DELETION_ACTION: ActionContract = {
   actionName: "confirm_voice_notification_deletion",
-  purpose: "Use one pending Emma review exactly once to hide the previously reviewed notification items.",
+  purpose: "Use one pending {assistant} review exactly once to hide the previously reviewed notification items.",
   requiredPermission: "crm.manage",
   riskLevel: 2,
   confirmationRequired: true,
@@ -1586,7 +1586,7 @@ export const CONFIRM_VOICE_NOTIFICATION_DELETION_ACTION: ActionContract = {
 
 export const CANCEL_VOICE_NOTIFICATION_DELETION_ACTION: ActionContract = {
   actionName: "cancel_voice_notification_deletion",
-  purpose: "Cancel the current short-lived Emma notification-deletion review without hiding anything.",
+  purpose: "Cancel the current short-lived {assistant} notification-deletion review without hiding anything.",
   requiredPermission: "crm.manage",
   riskLevel: 1,
   confirmationRequired: false,

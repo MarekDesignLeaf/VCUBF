@@ -574,7 +574,7 @@ export function parseTextCommand(rawText: string): ParsedCommand {
     return { intent: "execute_action", entities: { action: "get_unpaid_invoices", parameters: {} } };
   }
 
-  // This format is emitted only by Emma's structured interpretation layer.
+  // This format is emitted only by {assistant}'s structured interpretation layer.
   // It is allowlisted and JSON-parsed here; the owning business service still
   // performs the authoritative validation before any mutation.
   const executableAction = parseEmmaExecutableActionCommand(text);
@@ -771,7 +771,7 @@ export function parseTextCommand(rawText: string): ParsedCommand {
 
   if (/^(?:list|show)\s+learning\s+rules?$/i.test(text)) return { intent: "list_learning_rules", entities: {} };
 
-  // Explicit durable Emma memory. This is deliberately separate from the
+  // Explicit durable {assistant} memory. This is deliberately separate from the
   // alias syntax above: arbitrary conversation is never promoted to memory,
   // only a direct "remember that" instruction is. Company scope must also be
   // stated explicitly; the service enforces crm.manage for that wider scope.

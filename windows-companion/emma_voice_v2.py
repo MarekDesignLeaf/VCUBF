@@ -60,7 +60,8 @@ from emma_common import (
 )
 
 
-RUNTIME_NAME = "Emma Voice v2"
+DEFAULT_ASSISTANT_NAME = "Alfonzo"
+RUNTIME_NAME = f"{DEFAULT_ASSISTANT_NAME} Voice v2"
 RATE = 24_000
 NATIVE_WINDOWS_OUTPUT_RATE = 48_000
 CHANNELS = 1
@@ -111,7 +112,7 @@ def default_v2_config() -> dict[str, Any]:
         "version": 2,
         "wake": {
             "provider": "deepgram_vad",
-            "word": "Emma",
+            "word": DEFAULT_ASSISTANT_NAME,
             "deviceName": "",
             "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
             "keywordPath": "",
@@ -400,7 +401,7 @@ def current_wake_profile(config: dict[str, Any]) -> tuple[str, str]:
         # Never silently fall back to English after the application language
         # was changed. Deepgram receives the exact selected BCP-47 language.
         raise RuntimeError("WAKE_LANGUAGE_INVALID")
-    word = str(common.get("WakeWord") or config["wake"].get("word") or "Emma").strip()
+    word = str(common.get("WakeWord") or config["wake"].get("word") or DEFAULT_ASSISTANT_NAME).strip()
     if not word or len(word) > 64:
         raise RuntimeError("WAKE_WORD_INVALID")
     return language, word
@@ -508,17 +509,21 @@ def language_code(language: str, mode: str) -> str:
     return language.split("-", 1)[0].lower() or "en"
 
 
-def localized_runtime_status(language: str, state: str, wake_word: str = "Emma") -> str:
+def localized_runtime_status(language: str, state: str, wake_word: str = DEFAULT_ASSISTANT_NAME) -> str:
     """Text shown in the private live monitor must follow the active language."""
     locale = language.split("-", 1)[0].lower()
+    name_label = wake_word.strip() or DEFAULT_ASSISTANT_NAME
+    # The label is the company's own name for the assistant, so these read as
+    # a product state rather than a sentence about a person: no adjective or
+    # participle here has to agree with the gender of a name chosen later.
     messages = {
-        "cs": {"waiting": f"Emma Voice v2 čeká na oslovení {wake_word}", "active": "Emma Voice v2 je aktivní — nyní mluvte", "thinking": "Emma Voice v2 přemýšlí", "speaking": "Emma Voice v2 mluví", "ended": "Relace Emma Voice v2 skončila", "stopped": "Emma Voice v2 byla zastavena"},
-        "pl": {"waiting": f"Emma Voice v2 czeka na słowo {wake_word}", "active": "Emma Voice v2 jest aktywna — mów teraz", "thinking": "Emma Voice v2 myśli", "speaking": "Emma Voice v2 mówi", "ended": "Sesja Emma Voice v2 zakończona", "stopped": "Emma Voice v2 została zatrzymana"},
-        "fr": {"waiting": f"Emma Voice v2 attend le mot {wake_word}", "active": "Emma Voice v2 est active — parlez maintenant", "thinking": "Emma Voice v2 réfléchit", "speaking": "Emma Voice v2 parle", "ended": "La session Emma Voice v2 est terminée", "stopped": "Emma Voice v2 est arrêtée"},
-        "de": {"waiting": f"Emma Voice v2 wartet auf {wake_word}", "active": "Emma Voice v2 ist aktiv — sprechen Sie jetzt", "thinking": "Emma Voice v2 denkt nach", "speaking": "Emma Voice v2 spricht", "ended": "Die Emma-Voice-v2-Sitzung ist beendet", "stopped": "Emma Voice v2 wurde beendet"},
-        "es": {"waiting": f"Emma Voice v2 espera la palabra {wake_word}", "active": "Emma Voice v2 está activa — hable ahora", "thinking": "Emma Voice v2 está pensando", "speaking": "Emma Voice v2 está hablando", "ended": "La sesión de Emma Voice v2 ha terminado", "stopped": "Emma Voice v2 se ha detenido"},
-        "it": {"waiting": f"Emma Voice v2 attende la parola {wake_word}", "active": "Emma Voice v2 è attiva — parli ora", "thinking": "Emma Voice v2 sta pensando", "speaking": "Emma Voice v2 sta parlando", "ended": "La sessione Emma Voice v2 è terminata", "stopped": "Emma Voice v2 è stata arrestata"},
-        "en": {"waiting": f"Emma Voice v2 is waiting for {wake_word}", "active": "Emma Voice v2 active — speak now", "thinking": "Emma Voice v2 is thinking", "speaking": "Emma Voice v2 is speaking", "ended": "Emma Voice v2 session ended", "stopped": "Emma Voice v2 stopped"},
+        "cs": {"waiting": f"{name_label} Voice v2 čeká na oslovení {wake_word}", "active": f"{name_label} Voice v2 — nyní mluvte", "thinking": f"{name_label} Voice v2 — přemýšlí", "speaking": f"{name_label} Voice v2 — mluví", "ended": f"{name_label} Voice v2 — relace skončila", "stopped": f"{name_label} Voice v2 — zastaveno"},
+        "pl": {"waiting": f"{name_label} Voice v2 czeka na słowo {wake_word}", "active": f"{name_label} Voice v2 — mów teraz", "thinking": f"{name_label} Voice v2 — myśli", "speaking": f"{name_label} Voice v2 — mówi", "ended": f"{name_label} Voice v2 — sesja zakończona", "stopped": f"{name_label} Voice v2 — zatrzymano"},
+        "fr": {"waiting": f"{name_label} Voice v2 attend le mot {wake_word}", "active": f"{name_label} Voice v2 — parlez maintenant", "thinking": f"{name_label} Voice v2 — réflexion", "speaking": f"{name_label} Voice v2 — réponse en cours", "ended": f"{name_label} Voice v2 — session terminée", "stopped": f"{name_label} Voice v2 — arrêté"},
+        "de": {"waiting": f"{name_label} Voice v2 wartet auf {wake_word}", "active": f"{name_label} Voice v2 — sprechen Sie jetzt", "thinking": f"{name_label} Voice v2 — denkt nach", "speaking": f"{name_label} Voice v2 — spricht", "ended": f"{name_label} Voice v2 — Sitzung beendet", "stopped": f"{name_label} Voice v2 — beendet"},
+        "es": {"waiting": f"{name_label} Voice v2 espera la palabra {wake_word}", "active": f"{name_label} Voice v2 — hable ahora", "thinking": f"{name_label} Voice v2 — pensando", "speaking": f"{name_label} Voice v2 — hablando", "ended": f"{name_label} Voice v2 — sesión terminada", "stopped": f"{name_label} Voice v2 — detenido"},
+        "it": {"waiting": f"{name_label} Voice v2 attende la parola {wake_word}", "active": f"{name_label} Voice v2 — parli ora", "thinking": f"{name_label} Voice v2 — sta pensando", "speaking": f"{name_label} Voice v2 — sta parlando", "ended": f"{name_label} Voice v2 — sessione terminata", "stopped": f"{name_label} Voice v2 — arrestato"},
+        "en": {"waiting": f"{name_label} Voice v2 is waiting for {wake_word}", "active": f"{name_label} Voice v2 — speak now", "thinking": f"{name_label} Voice v2 — thinking", "speaking": f"{name_label} Voice v2 — speaking", "ended": f"{name_label} Voice v2 — session ended", "stopped": f"{name_label} Voice v2 — stopped"},
     }
     return messages.get(locale, messages["en"]).get(state, messages["en"].get(state, RUNTIME_NAME))
 

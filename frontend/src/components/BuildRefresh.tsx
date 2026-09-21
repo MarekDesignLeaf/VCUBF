@@ -19,7 +19,7 @@ function loadedAssetPath() {
  * Railway serves the Vite index through an edge cache. A Secretary tab may
  * therefore remain on an older JavaScript bundle after a successful deploy.
  * Compare the loaded bundle with a cache-busted index and replace the current
- * URL once when a newer bundle exists. This keeps Emma's browser action bridge
+ * URL once when a newer bundle exists. This keeps the assistant's browser action bridge
  * on the same release as the backend without interrupting normal navigation.
  */
 export function BuildRefresh() {

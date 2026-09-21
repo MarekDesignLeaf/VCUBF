@@ -1,8 +1,8 @@
-# Emma Voice v2 for Windows
+# Alfonzo Voice v2 for Windows
 
-Voice v2 is the single Windows Emma runtime. It uses:
+Voice v2 is the single Windows Alfonzo runtime. It uses:
 
-- **Picovoice Porcupine** for fully local, low-latency detection of the `Emma`
+- **Picovoice Porcupine** for fully local, low-latency detection of the `Alfonzo`
   wake word, with the former local-VAD/Deepgram path as an automatic fallback;
 - **Qualcomm Whisper Base through ONNX Runtime QNN** for local transcription on
   the Snapdragon Hexagon NPU, with Deepgram Nova-3 as an automatic fallback;
@@ -12,11 +12,11 @@ Voice v2 is the single Windows Emma runtime. It uses:
 
 The V2 runtime keeps the microphone open while it is speaking. Exact output PCM
 is fed to acoustic echo cancellation before the microphone is streamed. A final
-transcript matching Emma's own reply is ignored; a distinct final user
+transcript matching Alfonzo's own reply is ignored; a distinct final user
 transcript interrupts the playback and becomes the next tool request. Audio is
 never written to disk.
 
-With a valid Windows `Emma.ppn` model, wake-word detection runs entirely on the
+With a valid Windows `Alfonzo.ppn` model, wake-word detection runs entirely on the
 PC and no wake audio is uploaded. If the custom model is absent, incompatible,
 or rejected by Picovoice, the runtime returns to the local amplitude gate and
 sends only a detected speech segment to Deepgram to verify the wake word. That
@@ -32,7 +32,7 @@ From `windows-companion` run:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-VoiceV2.ps1
 ```
 
-This removes the legacy Emma runtime, its automatic startup entry and the old
+This removes the legacy Alfonzo runtime, its automatic startup entry and the old
 Voice v2 shortcut. It creates exactly one desktop shortcut named **VCUBF
 Secretary**. That shortcut opens one dedicated Secretary browser window and
 starts Voice v2 for that window only. Closing the Secretary window always stops
@@ -60,9 +60,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-NpuWhisper.ps1
 
 The installer requires a working Qualcomm Hexagon NPU driver, installs the
 official Qualcomm Whisper Windows runtime and selects `stt.provider` =
-`npu_whisper`. The model remains loaded in one child process while Emma runs;
+`npu_whisper`. The model remains loaded in one child process while Alfonzo runs;
 utterance audio stays in memory and is not written to disk. If QNN cannot start,
-Emma records the failure and uses Deepgram instead.
+Alfonzo records the failure and uses Deepgram instead.
 
 Keep API secrets out of JSON. Set Picovoice, Deepgram and ElevenLabs credentials
 as user environment variables, then open a new PowerShell session:
@@ -80,10 +80,10 @@ platform-specific Windows model directly with:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Configure-PicovoiceWake.ps1
 ```
 
-The helper asks Picovoice to train the phrase **Emma**, stores the resulting
-`.ppn` in the private local Emma directory and switches the non-secret configuration to
+The helper asks Picovoice to train the phrase **Alfonzo**, stores the resulting
+`.ppn` in the private local Alfonzo directory and switches the non-secret configuration to
 `picovoice_porcupine`. Restart Secretary from its single desktop icon. If the
-model cannot initialize, Emma logs the cause without the key and automatically
+model cannot initialize, Alfonzo logs the cause without the key and automatically
 uses Deepgram wake verification instead of remaining deaf.
 
 An existing Windows `.ppn` model can instead be imported with
@@ -110,7 +110,7 @@ Check `providers.npuWhisper.effectiveProvider`: `npu_whisper` together with
 `executionProvider: QNNExecutionProvider` confirms NPU transcription is active.
 Voice v2 starts only when the diagnostic reports `"ready": true`.
 
-## Reliability: what Emma refuses to hear
+## Reliability: what Alfonzo refuses to hear
 
 The following guards reduce false commands from silence and recognised noise
 artefacts. They do not prove that every room sound or passing conversation is
@@ -162,7 +162,7 @@ Wake verification is deliberately tolerant and runs even when Deepgram owns
 command transcription. Porcupine remains the detector and
 the NPU only looks for an obvious false positive: the first two spoken tokens
 are compared with the wake word by equality, two-character prefix, single edit
-and consonant skeleton, so "MMO, ukáš klienty" still counts as "Emma". A
+and consonant skeleton, so "MMO, ukáš klienty" still counts as "Alfonzo". A
 low-confidence local transcript never overrules Porcupine; only a confident and
 clearly different one rejects the wake.
 
@@ -173,10 +173,10 @@ at start (2-7 s), then per segment:
 
 | Input | Local decode | Local transcript | Outcome |
 | --- | --- | --- | --- |
-| "Emma, ukaž klienty" | 250 ms | `MMO, ukáš klienty.` | wake accepted (0.72), sent to accurate STT |
-| "Emma, vytvoř novou zakázku…" | 361 ms | `MMO, vytvoš novou zakásku…` | wake accepted (0.64), sent to accurate STT |
-| "Emma, kolik mám nezaplacených faktur" | 311 ms | `MMO, kolik mám nezapracených faktur.` | wake accepted (0.73), sent to accurate STT |
-| "Emma, ukaž dnešní úkoly" | 263 ms | `MMO, ukáždnéšní úkolé.` | wake accepted (0.66), sent to accurate STT |
+| "Alfonzo, ukaž klienty" | 250 ms | `MMO, ukáš klienty.` | wake accepted (0.72), sent to accurate STT |
+| "Alfonzo, vytvoř novou zakázku…" | 361 ms | `MMO, vytvoš novou zakásku…` | wake accepted (0.64), sent to accurate STT |
+| "Alfonzo, kolik mám nezaplacených faktur" | 311 ms | `MMO, kolik mám nezapracených faktur.` | wake accepted (0.73), sent to accurate STT |
+| "Alfonzo, ukaž dnešní úkoly" | 263 ms | `MMO, ukáždnéšní úkolé.` | wake accepted (0.66), sent to accurate STT |
 | White noise | 1 ms | — | ignored by the voice gate |
 | Low rumble | 1 ms | — | ignored by the voice gate |
 | Keyboard clicks | 198 ms | `[MUZIĘ]` | ignored, `SOUND_TAG` |
@@ -210,5 +210,5 @@ installed file, and all 21 tests passed against the updated installed file.
 Voice v2 is the provider layer from the production architecture. It deliberately
 keeps tool execution in the existing Secretary business API so the new speech
 providers cannot bypass validation, audit, confirmation requirements, company
-scope or Emma's capability catalogue. The FastAPI/LangGraph orchestrator remains
+scope or Alfonzo's capability catalogue. The FastAPI/LangGraph orchestrator remains
 the next backend migration stage and will call the same API contracts.

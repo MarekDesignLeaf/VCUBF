@@ -7,7 +7,7 @@ const FALLBACK_ACCESS_PROFILES: AccessProfile[] = [
   { id: "administrator", label: "Administrator", description: "Full company and access control.", permissions: [...KNOWN_PERMISSIONS] },
   { id: "manager", label: "Manager", description: "Runs daily work and non-administrator accounts.", permissions: ["crm.read", "crm.manage", "users.manage", "voice.execute", "recruitment.manage", "connectors.read"] },
   { id: "office", label: "Office", description: "Customer, work and office operations.", permissions: ["crm.read", "crm.manage", "voice.execute", "connectors.read"] },
-  { id: "field_worker", label: "Field worker", description: "Assigned work and Emma support.", permissions: ["crm.read", "voice.execute"] },
+  { id: "field_worker", label: "Field worker", description: "Assigned work and {assistant} support.", permissions: ["crm.read", "voice.execute"] },
   { id: "viewer", label: "Viewer", description: "Read-only operational access.", permissions: ["crm.read"] },
   { id: "custom", label: "Custom", description: "Individual permissions selected below.", permissions: [] },
 ];

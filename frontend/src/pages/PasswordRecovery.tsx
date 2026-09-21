@@ -2,10 +2,12 @@ import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { DesignLeafCredit } from "../components/DesignLeafCredit";
+import { useAssistantName } from "../assistantName";
 
 const passwordHint = "Use at least 12 characters, including lowercase, uppercase and a number.";
 
 export function PasswordRecovery() {
+  const assistantName = useAssistantName();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
@@ -51,7 +53,7 @@ export function PasswordRecovery() {
         <div className="login-introduction-copy">
           <p className="login-eyebrow">SECURE ACCOUNT RECOVERY</p>
           <h1>{hasToken ? "Choose a new password." : "Recover access without losing your work."}</h1>
-          <p>Password recovery invalidates existing sessions, but never deletes company data, contacts, files or Emma transcripts.</p>
+          <p>Password recovery invalidates existing sessions, but never deletes company data, contacts, files or {assistantName} transcripts.</p>
         </div>
         <DesignLeafCredit />
       </section>

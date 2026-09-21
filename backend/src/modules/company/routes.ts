@@ -46,7 +46,7 @@ companyRouter.put("/", requirePermission("company.manage"), async (req, res) => 
 });
 
 companyRouter.get("/emma-policy", requirePermission("company.manage"), async (req, res) => {
-  if (!isAdministrator(req.user!)) return res.status(403).json({ error: "ADMINISTRATOR_REQUIRED", message: "Only a company administrator can view Emma permissions." });
+  if (!isAdministrator(req.user!)) return res.status(403).json({ error: "ADMINISTRATOR_REQUIRED", message: "Only a company administrator can view {assistant} permissions." });
   const policy = await getEmmaPolicy(req.user!);
   if (!policy) return res.status(404).json({ error: "COMPANY_NOT_FOUND" });
   res.set("Cache-Control", "no-store");
@@ -54,7 +54,7 @@ companyRouter.get("/emma-policy", requirePermission("company.manage"), async (re
 });
 
 companyRouter.put("/emma-policy", requirePermission("company.manage"), async (req, res) => {
-  if (!isAdministrator(req.user!)) return res.status(403).json({ error: "ADMINISTRATOR_REQUIRED", message: "Only a company administrator can change Emma permissions." });
+  if (!isAdministrator(req.user!)) return res.status(403).json({ error: "ADMINISTRATOR_REQUIRED", message: "Only a company administrator can change {assistant} permissions." });
   const parsed = updateEmmaPolicySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
   const policy = await updateEmmaPolicy(req.user!, parsed.data.disabled_capabilities);

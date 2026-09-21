@@ -6,6 +6,7 @@ import { BrowserVoiceControl } from "./BrowserVoiceControl";
 import { DesignLeafCredit } from "./DesignLeafCredit";
 import { isAndroidNative } from "../lib/platform";
 import { appLanguage, languageLabel, menuText, type MenuKey } from "../i18n";
+import { useAssistantName, withAssistantName } from "../assistantName";
 
 type NavigationItem = { key: MenuKey; to: string; visible?: boolean };
 type NavigationGroup = { id: string; label: string; items: NavigationItem[] };
@@ -26,7 +27,8 @@ export function Layout() {
   const canManageCompany = user?.permissions?.includes("company.manage") ?? false;
   const isAdministrator = user?.role === "administrator" || user?.role === "admin";
   const language = appLanguage(user?.voiceLanguage);
-  const t = (key: MenuKey) => menuText(language, key);
+  const assistantName = useAssistantName();
+  const t = (key: MenuKey) => withAssistantName(menuText(language, key), assistantName);
 
   const navigationGroups: NavigationGroup[] = [
     {
@@ -175,7 +177,7 @@ export function Layout() {
             <span>Secretary</span>
           </div>
         </header>
-        {user?.permissions?.includes("voice.execute") && <section className="assistant-area" aria-label="Emma assistant controls">
+        {user?.permissions?.includes("voice.execute") && <section className="assistant-area" aria-label={`${assistantName} assistant controls`}>
           {/* One place to type, not two: the voice panel has its own input, and a second
               box below it sending to the same endpoint only asked which one to use. */}
           {isAndroidNative() ? <MobileVoiceControl /> : <BrowserVoiceControl />}

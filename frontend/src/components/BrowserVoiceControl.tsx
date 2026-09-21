@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { DEFAULT_ASSISTANT_NAME } from "../assistantName";
 import { api, type MobileAssistantResponse } from "../api/client";
 import { appLanguage } from "../i18n";
 import { useAuth } from "../context/useAuth";
@@ -322,8 +323,9 @@ function fold(value: string): string {
 /**
  * The wake word as it will actually be said, not only as it was typed.
  *
- * Czech and Polish decline names when addressing someone: "Hej Emma" is spoken "Hej
- * Emmo", and a plain substring search finds neither. Only the last letter of a word may
+ * Czech and Polish decline names when addressing someone: a wake word spoken in
+ * the vocative loses its ending, and a plain substring search finds neither. Only
+ * the last letter of a word may
  * differ or be absent, and only for words long enough that one letter is not most of
  * them — which is what declension does, and no more. Anything looser would make the
  * alias database pointless, and that is what genuine mishearings are for.
@@ -823,7 +825,7 @@ export function BrowserVoiceControl() {
 
   // Neither is hardcoded: the secretary is called whatever the person using her
   // decides, and the word that wakes her need not be her name.
-  const hotword = (user?.voiceWakeWord || "Emma").trim();
+  const hotword = (user?.voiceWakeWord || DEFAULT_ASSISTANT_NAME).trim();
   // At the voice own pace short confirmations sound sleepy, so the default sits
   // above 1.0 and the user can move it.
   const speechRate = user?.voiceSpeechRate ?? 1.15;

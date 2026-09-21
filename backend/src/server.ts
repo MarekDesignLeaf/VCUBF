@@ -41,6 +41,7 @@ import { devicePairingRouter } from "./modules/auth/devicePairing.js";
 import { voiceStateRouter } from "./modules/command/voiceState.js";
 import { companyRouter } from "./modules/company/routes.js";
 import { startConnectorBackgroundSync } from "./services/connectorBackgroundSyncService.js";
+import { ASSISTANT_NAME_TOKEN, assistantNameFor, withAssistantName } from "./lib/assistantName.js";
 
 export function createServer() {
   const app = express();
@@ -66,6 +67,22 @@ export function createServer() {
       if (request.originalUrl.startsWith("/connectors/whatsapp/webhook")) request.rawBody = Buffer.from(buffer);
     },
   }));
+
+  // Interface copy, menu labels and spoken replies hold the assistant's name
+  // as {assistant} so one account setting renames it everywhere, in every
+  // language, without another pass through the source. The substitution is
+  // done once here, on the way out, using the authenticated account's name.
+  // Only that token changes, so a client, job or message named after the
+  // assistant is returned exactly as it was recorded.
+  app.use((req, res, next) => {
+    const sendJson = res.json.bind(res);
+    res.json = (body: unknown) => {
+      const payload = JSON.stringify(body);
+      if (payload === undefined || !payload.includes(ASSISTANT_NAME_TOKEN)) return sendJson(body);
+      return res.type("application/json").send(withAssistantName(payload, assistantNameFor(req.user)));
+    };
+    next();
+  });
 
   app.get("/health", (_req, res) => res.json({
     status: "ok",

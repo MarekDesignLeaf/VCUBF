@@ -14,7 +14,7 @@ For day-to-day operation and current safety limitations, see
 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md).
 
 The authoritative target architecture and staged migration path for the web,
-mobile and Emma voice platform live in
+mobile and Alfonzo voice platform live in
 [`docs/PRODUCTION_ARCHITECTURE.md`](docs/PRODUCTION_ARCHITECTURE.md).
 
 The Windows voice runtime based on Porcupine, Qualcomm NPU Whisper, Deepgram
@@ -25,7 +25,7 @@ fallback and ElevenLabs is documented in [`docs/VOICE_V2_SETUP.md`](docs/VOICE_V
 ```
 backend/            Node.js + TypeScript + Express + Prisma + PostgreSQL (Secretary backend API)
 frontend/           React + TypeScript + Vite (web client — desktop, PWA and Capacitor Android)
-windows-companion/  Windows Emma voice runtimes (Voice v2: Porcupine + NPU Whisper + Deepgram fallback + ElevenLabs; legacy Windows-Speech companion)
+windows-companion/  Windows Alfonzo voice runtimes (Voice v2: Porcupine + NPU Whisper + Deepgram fallback + ElevenLabs; legacy Windows-Speech companion)
 docs/               User guide, connector engine, production architecture, voice v2 setup, Android build
 ```
 
@@ -38,17 +38,21 @@ docs/               User guide, connector engine, production architecture, voice
   and ElevenLabs/OpenAI PCM fallback. Provider choice is preserved during upgrades.
   Native audio and provider behaviour still require a live microphone acceptance run.
 - **Voice commands**: aliases, speech preferences, client confirmation and a read-only
-  unpaid-invoice query use the shared backend. “Kolik mám nezaplacených faktur?” and
-  “How many unpaid invoices do I have?” count issued invoices with remaining balances,
-  including partial payments, excluding drafts, voids and other companies. CRM read
-  permission and company capability policy apply. The backend supplies the spoken count.
+  money query use the shared backend. “Kolik mám nezaplacených faktur?”, “Kdo mi
+  nezaplatil?”, “Who owes us money?” and “How much are we owed?” are one question about
+  the same balances, answered with the count, the outstanding total, the overdue count
+  and total, and the clients holding the largest balances. Issued invoices with a
+  remaining balance count, including partial payments; drafts, voids and other companies
+  do not. No figure is estimated or forecast, and no currency is spoken because the
+  company record does not hold one. CRM read permission and company capability policy
+  apply. The backend supplies every spoken figure.
 - **Learned browser macros**: saved steps and values require a replay preview. Replayed
   UI interactions are not proof of successful business changes; the UI says so explicitly.
   Live browser acceptance remains outstanding.
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 74 test files, including database integration tests and checks that only
+- **Tests**: 75 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -214,15 +218,15 @@ npm run dev                 # http://localhost:5173
   Every call writes its own audit entry recording the raw text, the interpreted intent,
   and the result, in addition to the audit entry the underlying action (e.g.
   `create_client`) writes itself.
-- **Frontend — Emma and keyboard fallback**: the signed-in layout exposes Windows Emma state,
+- **Frontend — Alfonzo and keyboard fallback**: the signed-in layout exposes Windows Alfonzo state,
   saved text conversation transcripts and an optional keyboard command field. Normal voice
   interaction has no browser microphone or Run button; the Windows companion executes an
   activated command automatically through the same deterministic backend parser, permission
   checks and audit trail. VCUBF persists transcript text but never microphone audio.
-- **Windows 11 Emma companion**: `windows-companion/VCUBF-Emma.ps1` is a native
+- **Windows 11 Alfonzo companion**: `windows-companion/VCUBF-Emma.ps1` is a native
   system-tray listener built on the locally installed Windows Speech API. It keeps
   listening when the browser is minimized or closed and detects the per-user wake word
-  (`Emma` by default). A same-phrase utterance is held in memory while the authenticated
+  (`Alfonzo` by default). A same-phrase utterance is held in memory while the authenticated
   backend obtains an accurate transcription; the returned text enters the Realtime assistant
   automatically and the WAV is not stored. The companion supports follow-up speech and
   interruption, speaks responses and stores its API token encrypted for the current Windows
@@ -230,7 +234,7 @@ npm run dev                 # http://localhost:5173
 
 - **Android app and PWA**: `frontend` is installable as a PWA and also contains
   a Capacitor Android project (`frontend/android`). The Android build uses
-  Android speech recognition and text-to-speech for Emma, shares the production
+  Android speech recognition and text-to-speech for Alfonzo, shares the production
   Secretary API and stores text-only mobile conversation history locally. See
   [`docs/ANDROID.md`](docs/ANDROID.md) for build, device-test and release steps.
 
@@ -516,7 +520,7 @@ npm run dev                 # http://localhost:5173
   confirmation; hiding all requires an explicit confirmation even though only reversible
   "seen" markers change. Text
   commands: "list notifications" / "show notifications" / "what needs attention".
-  Emma also supports reviewed deletion in English, Czech and Polish; deleting all first
+  Alfonzo also supports reviewed deletion in English, Czech and Polish; deleting all first
   reports the exact count and requires a separate spoken confirmation.
 - **Frontend — Notifications**: new Notifications page (linked in the sidebar right
   under Dashboard) listing every attention-feed item with a severity badge, type, title,
@@ -851,7 +855,7 @@ granularity, matching the capacity engine underneath it. Employee creation issue
 invitation email — an admin sets the initial temporary password directly and Secretary
 forces the employee to replace it before continuing; this does not use the separate confirmed Gmail send flow. Quotes have no
 "send to client" action — PDF export is manual and status is tracked internally only, even though Gmail can send a separately composed,
-reviewed email through the connector or Emma. Recruitment adverts are
+reviewed email through the connector or Alfonzo. Recruitment adverts are
 drafted text only — there is no job-board connector to place them, no candidate-sourcing
 integration, and no trial-day scheduling tie-in to the calendar module yet; a hired
 candidate must still be turned into an employee account manually. Playbooks are limited
@@ -906,7 +910,7 @@ configurable similarity threshold (the Levenshtein cutoff and phone-normalizatio
 are fixed in code, not a per-company setting). There is also no text-command intent for
 `merge_clients` — the same judgment already applied to `prepare_quote` (real, multi-field
 actions with material consequences stay a dedicated form/API flow, never a one-line
-command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, serving or visual AI review (a `filename` is just a typed-in reference, not a stored file), no image-content recognition or auto-tagging, and no website/social publishing. Metadata-backed candidates and confirmed internal service selections now exist, but they rely only on explicit job/service links, exact tags and human-entered review states; flipping `usableForMarketing` or confirming a service selection never publishes anything anywhere. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. Voice is no longer a browser feature: Windows Emma (Voice v2 — local Porcupine wake word, on-device NPU Whisper transcription with Deepgram fallback, ElevenLabs speech) and the Android app's native recognition are the voice interfaces, and the wake-word listener keeps running while the browser is minimised or closed as long as the companion is running. The default wake word is `Emma` and each user can change it in Account settings. A fully offline natural-language assistant and audio storage remain unavailable by design — transcription can be local, but assistant interpretation still uses a cloud model, and VCUBF never stores microphone audio. The KPI module is a real-data Phase 11 foundation with previous-period trend comparison and service-level accepted-quote value/margin already implemented; reputation and external analytics remain unavailable until their source records or connectors exist, and the KPI module now reads issued invoices and recorded payments, with draft and void invoices excluded. Those statements describe the working copy. In a clean checkout the committed voice baseline above governs instead: provider selection and transcript handling follow the configured runtime rather than a fixed transcript-review step, and invoice-derived KPI analytics are not part of the committed metrics service.
+command, even a confirmed one). The Portfolio and Photo Intelligence Module is metadata-only: there is no actual image file upload, storage, serving or visual AI review (a `filename` is just a typed-in reference, not a stored file), no image-content recognition or auto-tagging, and no website/social publishing. Metadata-backed candidates and confirmed internal service selections now exist, but they rely only on explicit job/service links, exact tags and human-entered review states; flipping `usableForMarketing` or confirming a service selection never publishes anything anywhere. The Basic Website Audit is manual-observation only; automated crawling/link checking, risk-4 publication, post-publication verification/history and a real website connector are still missing. Website content proposals and approval/rejection records now exist, but approved content cannot leave Secretary through this module. Voice is no longer a browser feature: Windows Alfonzo (Voice v2 — local Porcupine wake word, on-device NPU Whisper transcription with Deepgram fallback, ElevenLabs speech) and the Android app's native recognition are the voice interfaces, and the wake-word listener keeps running while the browser is minimised or closed as long as the companion is running. The default wake word is `Alfonzo` and each user can change it in Account settings. The assistant’s name is account data rather than a constant in the source: interface copy, menu labels and spoken replies carry it as the `{assistant}` placeholder, so renaming the assistant on the account renames it on every surface and in every language. A fully offline natural-language assistant and audio storage remain unavailable by design — transcription can be local, but assistant interpretation still uses a cloud model, and VCUBF never stores microphone audio. The KPI module is a real-data Phase 11 foundation with previous-period trend comparison and service-level accepted-quote value/margin already implemented; reputation and external analytics remain unavailable until their source records or connectors exist, and the KPI module now reads issued invoices and recorded payments, with draft and void invoices excluded. Those statements describe the working copy. In a clean checkout the committed voice baseline above governs instead: provider selection and transcript handling follow the configured runtime rather than a fixed transcript-review step, and invoice-derived KPI analytics are not part of the committed metrics service.
 Build order should follow the roadmap in the master documentation (Phase 1 → Phase 2 →
 …), not be improvised per-feature.
 
@@ -921,7 +925,7 @@ Build order should follow the roadmap in the master documentation (Phase 1 → P
   `GOOGLE_DRIVE_PICKER_API_KEY`, `GOOGLE_PHOTOS_OAUTH_CLIENT_ID`, `GOOGLE_PHOTOS_OAUTH_CLIENT_SECRET`,
   `GOOGLE_PHOTOS_OAUTH_REDIRECT_URI`, the WhatsApp Business Cloud API values
   (`WHATSAPP_GRAPH_API_VERSION`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_ACCOUNT_ID`,
-  `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `META_APP_SECRET`), the Emma assistant
+  `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `META_APP_SECRET`), the Alfonzo assistant
   values (`OPENAI_API_KEY`, optionally `OPENAI_REALTIME_MODEL`, `OPENAI_REALTIME_VOICE`,
   `OPENAI_TRANSCRIPTION_MODEL`, `OPENAI_VOICE_MODEL`, `OPENAI_VOICE_TIMEOUT_MS`), optionally the
   local-transcription bridge (`WHISPER_SERVER_URL`, `WHISPER_MODEL_LABEL`), a strong

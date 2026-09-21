@@ -312,7 +312,7 @@ function Stop-LocalRuntime {
 
 function Start-VoiceV2 {
   if(!(Test-Path -LiteralPath $v2Runner) -or !(Test-Path -LiteralPath $v2Runtime)) {
-    throw 'Emma Voice v2 is not installed. Run Install-VoiceV2.ps1 again.'
+    throw 'Voice v2 is not installed. Run Install-VoiceV2.ps1 again.'
   }
   # Exactly one listener: an orphaned runtime from an earlier launcher (or a
   # runner whose Python child outlived it) is stopped before a new one starts.
@@ -404,7 +404,7 @@ try {
   }
   # Local testing authenticates through the passwordless user tile and the
   # loopback-only active-session endpoint. Device pairing belongs only to a
-  # remote deployment; requiring an old paired profile here prevented Emma
+  # remote deployment; requiring an old paired profile here prevented the
   # from starting after a perfectly valid local sign-in.
   $profile = if($localMode) { $null } else { Get-ExistingDeviceProfile $server }
   $pairing = $null
@@ -432,7 +432,7 @@ try {
 
     if($localVoiceStarted -and (!$script:voiceRunnerProcess -or $script:voiceRunnerProcess.HasExited)) {
       # A provider or audio-driver failure must not leave the web page claiming
-      # that Emma is active. Re-arm the same single runtime; the mutex and
+      # that the voice runtime is active. Re-arm the same single runtime; the mutex and
       # Run-VoiceV2 duplicate guard still prevent parallel listeners.
       $localVoiceStarted = $false
     }
@@ -458,7 +458,7 @@ try {
         }
       } catch {
         # The user has not selected an account yet. Keep the browser open and
-        # start Emma on the first successful local sign-in.
+        # start the voice runtime on the first successful local sign-in.
       }
     }
 

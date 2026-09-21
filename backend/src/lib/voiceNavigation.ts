@@ -7,7 +7,7 @@ export const VOICE_PAGE_ROUTES = {
   forgot_password: { path: "/forgot-password", label: "Password Recovery" },
   reset_password: { path: "/reset-password", label: "Set New Password" },
   account: { path: "/account", label: "Account" },
-  emma_permissions: { path: "/emma-permissions", label: "Emma Permissions" },
+  emma_permissions: { path: "/emma-permissions", label: "{assistant} Permissions" },
   notifications: { path: "/notifications", label: "Notifications" },
   data_quality: { path: "/data-quality", label: "Data Quality" },
   metrics: { path: "/metrics", label: "Business Metrics" },
@@ -52,7 +52,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     enquiries: "Zapytania", communication_intake: "Przychodząca komunikacja", communications: "Komunikacja", photos: "Zdjęcia",
     photo_selection: "Wybór zdjęć", business_context: "Kontekst firmy", industries: "Branże", connectors: "Integracje", company: "Firma",
     website_audit: "Audyt strony", website_content: "Treść strony", employees: "Pracownicy", calendar: "Kalendarz", services: "Usługi",
-    quotes: "Oferty", invoices: "Faktury", recruitment: "Rekrutacja", playbooks: "Procedury", learning: "Uczenie", memory_model: "Pamięć Emmy", voice_aliases: "Aliasy głosowe", new_employee: "Nowy pracownik", new_quote: "Nowa oferta",
+    quotes: "Oferty", invoices: "Faktury", recruitment: "Rekrutacja", playbooks: "Procedury", learning: "Uczenie", memory_model: "Pamięć {assistant}", voice_aliases: "Aliasy głosowe", new_employee: "Nowy pracownik", new_quote: "Nowa oferta",
   },
   "cs-CZ": {
     dashboard: "Přehled", setup: "První nastavení", forgot_password: "Obnovení hesla", reset_password: "Nastavit nové heslo",
@@ -61,43 +61,43 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     communication_intake: "Příjem komunikace", communications: "Komunikace", photos: "Fotografie", photo_selection: "Výběr fotografií",
     business_context: "Kontext firmy", industries: "Obory", connectors: "Konektory", company: "Firma", website_audit: "Audit webu",
     website_content: "Obsah webu", employees: "Uživatelé a přístupy", calendar: "Kalendář", services: "Služby", quotes: "Nabídky",
-    invoices: "Faktury", recruitment: "Nábor", playbooks: "Postupy", learning: "Učení", memory_model: "Paměť Emmy", voice_aliases: "Hlasové aliasy", new_employee: "Nový uživatel", new_quote: "Nová nabídka",
+    invoices: "Faktury", recruitment: "Nábor", playbooks: "Postupy", learning: "Učení", memory_model: "Paměť {assistant}", voice_aliases: "Hlasové aliasy", new_employee: "Nový uživatel", new_quote: "Nová nabídka",
   },
   "fr-FR": {
     dashboard: "Tableau de bord", setup: "Configuration initiale", forgot_password: "Récupération du mot de passe", reset_password: "Définir un nouveau mot de passe",
-    account: "Compte", emma_permissions: "Autorisations d’Emma", notifications: "Notifications", data_quality: "Qualité des données", metrics: "Indicateurs de l’entreprise",
+    account: "Compte", emma_permissions: "Autorisations d’{assistant}", notifications: "Notifications", data_quality: "Qualité des données", metrics: "Indicateurs de l’entreprise",
     leads: "Prospects", clients: "Clients", contacts: "Contacts", documents: "Documents", jobs: "Interventions", tasks: "Tâches",
     enquiries: "Demandes", communication_intake: "Réception des communications", communications: "Communications", photos: "Photos",
     photo_selection: "Sélection de photos", business_context: "Contexte de l’entreprise", industries: "Secteurs", connectors: "Connecteurs", company: "Entreprise",
     website_audit: "Audit du site", website_content: "Contenu du site", employees: "Employés", calendar: "Calendrier", services: "Services",
-    quotes: "Devis", invoices: "Factures", recruitment: "Recrutement", playbooks: "Procédures", learning: "Apprentissage", memory_model: "Mémoire d’Emma", voice_aliases: "Alias vocaux", new_employee: "Nouvel employé", new_quote: "Nouveau devis",
+    quotes: "Devis", invoices: "Factures", recruitment: "Recrutement", playbooks: "Procédures", learning: "Apprentissage", memory_model: "Mémoire d’{assistant}", voice_aliases: "Alias vocaux", new_employee: "Nouvel employé", new_quote: "Nouveau devis",
   },
   "de-DE": {
     dashboard: "Übersicht", setup: "Ersteinrichtung", forgot_password: "Passwortwiederherstellung", reset_password: "Neues Passwort festlegen",
-    account: "Konto", emma_permissions: "Emma-Berechtigungen", notifications: "Benachrichtigungen", data_quality: "Datenqualität", metrics: "Unternehmenskennzahlen",
+    account: "Konto", emma_permissions: "{assistant}-Berechtigungen", notifications: "Benachrichtigungen", data_quality: "Datenqualität", metrics: "Unternehmenskennzahlen",
     leads: "Interessenten", clients: "Kunden", contacts: "Kontakte", documents: "Dokumente", jobs: "Aufträge", tasks: "Aufgaben",
     enquiries: "Anfragen", communication_intake: "Kommunikationseingang", communications: "Kommunikation", photos: "Fotos",
     photo_selection: "Fotoauswahl", business_context: "Unternehmenskontext", industries: "Branchen", connectors: "Konnektoren", company: "Unternehmen",
     website_audit: "Website-Audit", website_content: "Website-Inhalte", employees: "Mitarbeiter", calendar: "Kalender", services: "Leistungen",
-    quotes: "Angebote", invoices: "Rechnungen", recruitment: "Personalbeschaffung", playbooks: "Abläufe", learning: "Lernen", memory_model: "Emma-Speicher", voice_aliases: "Sprachaliase", new_employee: "Neuer Mitarbeiter", new_quote: "Neues Angebot",
+    quotes: "Angebote", invoices: "Rechnungen", recruitment: "Personalbeschaffung", playbooks: "Abläufe", learning: "Lernen", memory_model: "{assistant}-Speicher", voice_aliases: "Sprachaliase", new_employee: "Neuer Mitarbeiter", new_quote: "Neues Angebot",
   },
   "es-ES": {
     dashboard: "Panel", setup: "Configuración inicial", forgot_password: "Recuperación de contraseña", reset_password: "Establecer nueva contraseña",
-    account: "Cuenta", emma_permissions: "Permisos de Emma", notifications: "Notificaciones", data_quality: "Calidad de datos", metrics: "Métricas empresariales",
+    account: "Cuenta", emma_permissions: "Permisos de {assistant}", notifications: "Notificaciones", data_quality: "Calidad de datos", metrics: "Métricas empresariales",
     leads: "Clientes potenciales", clients: "Clientes", contacts: "Contactos", documents: "Documentos", jobs: "Trabajos", tasks: "Tareas",
     enquiries: "Consultas", communication_intake: "Entrada de comunicaciones", communications: "Comunicaciones", photos: "Fotos",
     photo_selection: "Selección de fotos", business_context: "Contexto empresarial", industries: "Sectores", connectors: "Conectores", company: "Empresa",
     website_audit: "Auditoría web", website_content: "Contenido web", employees: "Empleados", calendar: "Calendario", services: "Servicios",
-    quotes: "Presupuestos", invoices: "Facturas", recruitment: "Selección de personal", playbooks: "Procedimientos", learning: "Aprendizaje", memory_model: "Memoria de Emma", voice_aliases: "Alias de voz", new_employee: "Nuevo empleado", new_quote: "Nuevo presupuesto",
+    quotes: "Presupuestos", invoices: "Facturas", recruitment: "Selección de personal", playbooks: "Procedimientos", learning: "Aprendizaje", memory_model: "Memoria de {assistant}", voice_aliases: "Alias de voz", new_employee: "Nuevo empleado", new_quote: "Nuevo presupuesto",
   },
   "it-IT": {
     dashboard: "Panoramica", setup: "Configurazione iniziale", forgot_password: "Recupero password", reset_password: "Imposta nuova password",
-    account: "Account", emma_permissions: "Autorizzazioni di Emma", notifications: "Notifiche", data_quality: "Qualità dei dati", metrics: "Metriche aziendali",
+    account: "Account", emma_permissions: "Autorizzazioni di {assistant}", notifications: "Notifiche", data_quality: "Qualità dei dati", metrics: "Metriche aziendali",
     leads: "Potenziali clienti", clients: "Clienti", contacts: "Contatti", documents: "Documenti", jobs: "Lavori", tasks: "Attività",
     enquiries: "Richieste", communication_intake: "Ricezione comunicazioni", communications: "Comunicazioni", photos: "Foto",
     photo_selection: "Selezione foto", business_context: "Contesto aziendale", industries: "Settori", connectors: "Connettori", company: "Azienda",
     website_audit: "Audit del sito", website_content: "Contenuto del sito", employees: "Dipendenti", calendar: "Calendario", services: "Servizi",
-    quotes: "Preventivi", invoices: "Fatture", recruitment: "Selezione del personale", playbooks: "Procedure", learning: "Apprendimento", memory_model: "Memoria di Emma", voice_aliases: "Alias vocali", new_employee: "Nuovo dipendente", new_quote: "Nuovo preventivo",
+    quotes: "Preventivi", invoices: "Fatture", recruitment: "Selezione del personale", playbooks: "Procedure", learning: "Apprendimento", memory_model: "Memoria di {assistant}", voice_aliases: "Alias vocali", new_employee: "Nuovo dipendente", new_quote: "Nuovo preventivo",
   },
 };
 
@@ -241,7 +241,7 @@ for (const [page, definition] of Object.entries(VOICE_PAGE_ROUTES)) {
   PAGE_ALIASES[normalizePageName(definition.label)] = page as VoicePage;
 }
 
-// Every label rendered by the localized Secretary menu is also a valid Emma
+// Every label rendered by the localized Secretary menu is also a valid {assistant}
 // navigation phrase. This keeps visual navigation and speech navigation tied
 // to the same page IDs instead of maintaining two drifting vocabularies.
 for (const labels of Object.values(LOCALIZED_PAGE_LABELS)) {

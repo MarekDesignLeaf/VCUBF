@@ -64,4 +64,4 @@ if(!$SkipTest){
   if($LASTEXITCODE -ne 0){throw 'The Qualcomm NPU transcription test failed.'}
 }
 
-Write-Host 'Qualcomm NPU Whisper is installed and selected for Emma Voice v2. Deepgram remains the automatic fallback.'
+Write-Host 'Qualcomm NPU Whisper is installed and selected for Voice v2. Deepgram remains the automatic fallback.'

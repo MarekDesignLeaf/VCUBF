@@ -4,7 +4,7 @@ import { localTranscriptionUrl } from "./localTranscriptionService.js";
  * Spoken replies in a female voice.
  *
  * The browser can only use voices installed in Windows, and Windows ships no
- * female Czech voice — Emma would be male in Czech no matter what the page did.
+ * female Czech voice — {assistant} would be male in Czech no matter what the page did.
  * The local server has Microsoft's free neural voices instead.
  *
  * Only the reply text leaves the machine. The microphone audio is transcribed
@@ -38,7 +38,7 @@ export function isSpeechConfigured(): boolean {
  * Synthesise one reply, or null when the voice service cannot be reached.
  *
  * Null is not an error path the caller should surface: it means "use the
- * browser voice", which keeps Emma audible.
+ * browser voice", which keeps {assistant} audible.
  */
 export async function speakReply(text: string, language: string, rate = 1): Promise<SpokenReply | null> {
   const base = localTranscriptionUrl();

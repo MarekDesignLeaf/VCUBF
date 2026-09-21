@@ -181,7 +181,7 @@ export function Connectors() {
         };
         writeSetupSession(session);
         currentSources = prepared.items.flatMap((item) => item.source ? [item.source] : []);
-        setNotice(`Emma prepared ${prepared.created.length} new connector source${prepared.created.length === 1 ? "" : "s"}. Continuing setup automatically.`);
+        setNotice(`{assistant} prepared ${prepared.created.length} new connector source${prepared.created.length === 1 ? "" : "s"}. Continuing setup automatically.`);
       }
       if (!session) return;
 
@@ -205,7 +205,7 @@ export function Connectors() {
           session.pending.shift(); writeSetupSession(session); continue;
         }
         if (!source.authorizationConfigured) {
-          setNotice(`Emma prepared ${source.definition.serviceName}. Complete the provider consent page; setup will resume automatically when you return.`);
+          setNotice(`{assistant} prepared ${source.definition.serviceName}. Complete the provider consent page; setup will resume automatically when you return.`);
           writeSetupSession(session);
           const oauth = await api.connectors.startOAuth(source.id);
           window.location.assign(oauth.authorizationUrl);
@@ -243,7 +243,7 @@ export function Connectors() {
       writeSetupSession(null);
       navigate("/connectors", { replace: true });
       setSources(await api.connectors.sources(activeOnly));
-      setNotice(`Emma finished the guided connector setup.${blockerText}`);
+      setNotice(`{assistant} finished the guided connector setup.${blockerText}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Guided connector setup could not continue.");
     } finally {

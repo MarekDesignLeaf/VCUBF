@@ -61,7 +61,7 @@ if(!(Test-Path -LiteralPath $activeConfig)){
 }
 
 # Preserve the selected wake provider. Picovoice is enabled only after its
-# platform-specific Emma model has been imported; Deepgram remains the safe
+# platform-specific wake-word model has been imported; Deepgram remains the safe
 # fallback while that model is absent or invalid.
 $rawConfig=Get-Content -LiteralPath $activeConfig -Raw
 try {
@@ -82,7 +82,7 @@ if(!$voiceConfig.PSObject.Properties['wake']){
 $wake=$voiceConfig.wake
 if(!$wake.PSObject.Properties['provider']){$wake | Add-Member -NotePropertyName provider -NotePropertyValue 'deepgram_vad'}
 elseif($wake.provider -notin @('deepgram_vad','picovoice_porcupine')){$wake.provider='deepgram_vad'}
-if(!$wake.PSObject.Properties['word']){$wake | Add-Member -NotePropertyName word -NotePropertyValue 'Emma'}elseif([string]::IsNullOrWhiteSpace([string]$wake.word)){$wake.word='Emma'}
+if(!$wake.PSObject.Properties['word']){$wake | Add-Member -NotePropertyName word -NotePropertyValue 'Alfonzo'}elseif([string]::IsNullOrWhiteSpace([string]$wake.word)){$wake.word='Alfonzo'}
 if(!$wake.PSObject.Properties['accessKeyEnv']){$wake | Add-Member -NotePropertyName accessKeyEnv -NotePropertyValue 'PICOVOICE_ACCESS_KEY'}
 if(!$wake.PSObject.Properties['keywordPath']){$wake | Add-Member -NotePropertyName keywordPath -NotePropertyValue ''}
 if(!$wake.PSObject.Properties['deviceName']){$wake | Add-Member -NotePropertyName deviceName -NotePropertyValue ''}
@@ -131,7 +131,7 @@ if(!$tts.PSObject.Properties['deviceName']){$tts|Add-Member -NotePropertyName de
 if(!$tts.PSObject.Properties['provider']){$tts|Add-Member -NotePropertyName provider -NotePropertyValue 'elevenlabs'}
 $voiceConfig | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $activeConfig -Encoding UTF8
 
-# The desktop test build runs the browser UI, API and Emma from this checkout.
+# The desktop test build runs the browser UI, API and the voice runtime from this checkout.
 # Keep all three on the same local origin pair so no test command can silently
 # fall through to an older Railway deployment.
 $desktopConfigPath=Join-Path (Split-Path -Parent $target) 'config.json'
@@ -185,7 +185,7 @@ foreach($candidate in @('python.exe','py.exe')) {
 if(!$python){throw 'Python 3 was not found. Install Python, then run Install-VoiceV2.ps1 again.'}
 
 & $python.Path @($python.Prefix) -m pip install --disable-pip-version-check --quiet -r (Join-Path $source 'requirements-v2.txt')
-if($LASTEXITCODE -ne 0){throw 'Emma Voice v2 dependencies could not be installed.'}
+if($LASTEXITCODE -ne 0){throw 'Voice v2 dependencies could not be installed.'}
 
 # Picovoice's native Python DLL currently fails under native Windows ARM64
 # Python. Install a tiny x64 Node sidecar when an x64 Node runtime is already
@@ -207,8 +207,8 @@ $desktopShortcut.IconLocation="$env:SystemRoot\System32\imageres.dll,15"
 $desktopShortcut.Save()
 
 Write-Host "VCUBF Secretary installed in $target"
-Write-Host "The single desktop icon opens Secretary and Emma Voice v2 together. Closing that browser window stops Emma Voice v2."
-Write-Host "Picovoice support is installed. Import a Windows Emma .ppn model with Configure-PicovoiceWake.ps1; Deepgram remains the automatic fallback."
+Write-Host "The single desktop icon opens Secretary and Voice v2 together. Closing that browser window stops Voice v2."
+Write-Host "Picovoice support is installed. Import a Windows wake-word .ppn model with Configure-PicovoiceWake.ps1; Deepgram remains the automatic fallback."
 if($voiceConfig.stt.provider -eq 'npu_whisper'){
   Write-Host "Qualcomm NPU Whisper is selected for transcription; Deepgram remains the automatic fallback."
 }

@@ -9,6 +9,7 @@ import { InitialSetup } from "./pages/InitialSetup";
 import { BuildRefresh } from "./components/BuildRefresh";
 import { LocalizedSurface } from "./components/LocalizedSurface";
 import { useAuth } from "./context/useAuth";
+import { DEFAULT_ASSISTANT_NAME } from "./assistantName";
 import { appLanguage } from "./i18n";
 
 const CompanySettings = lazy(() => import("./pages/CompanySettings").then(({ CompanySettings }) => ({ default: CompanySettings })));
@@ -55,10 +56,11 @@ const VoiceAliases = lazy(() => import("./pages/VoiceAliases").then(({ VoiceAlia
 function ApplicationRoutes() {
   const { user } = useAuth();
   const language = appLanguage(user?.voiceLanguage ?? window.localStorage.getItem("vcubf_last_language"));
+  const assistantName = (user?.assistantName ?? "").trim() || DEFAULT_ASSISTANT_NAME;
 
   return (
     <>
-      <LocalizedSurface language={language} />
+      <LocalizedSurface language={language} assistantName={assistantName} />
       <BrowserRouter>
         <BuildRefresh />
         <Suspense fallback={<div aria-busy="true" className="route-loading" />}>

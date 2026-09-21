@@ -10,7 +10,7 @@ Add-Type -AssemblyName System.Windows.Forms
 
 # A desktop shortcut can outlive a change to a user environment variable.
 # Reload the persisted credentials for this process before Python is launched,
-# so an updated provider key is used on the very next Emma restart.
+# so an updated provider key is used on the very next restart.
 foreach($secretName in @('DEEPGRAM_API_KEY','ELEVENLABS_API_KEY','PICOVOICE_ACCESS_KEY','OPENAI_API_KEY')) {
   $userValue=[Environment]::GetEnvironmentVariable($secretName,'User')
   if($userValue) { Set-Item -Path "Env:$secretName" -Value $userValue }
@@ -18,15 +18,17 @@ foreach($secretName in @('DEEPGRAM_API_KEY','ELEVENLABS_API_KEY','PICOVOICE_ACCE
 
 $app=Split-Path -Parent $PSCommandPath
 $runtime=Join-Path $app 'emma_voice_v2.py'
-if(!(Test-Path -LiteralPath $runtime)){throw 'Emma Voice v2 runtime is missing. Run Install-VoiceV2.ps1 again.'}
+if(!(Test-Path -LiteralPath $runtime)){throw 'The Voice v2 runtime is missing. Run Install-VoiceV2.ps1 again.'}
 
 $emmaRoot=Split-Path -Parent $app
+$assistantName='Alfonzo'
 $desktopConfigPath=Join-Path $emmaRoot 'config.json'
 $nodeCandidates=@()
 if(Test-Path -LiteralPath $desktopConfigPath){
   try{
     $desktopConfig=Get-Content -LiteralPath $desktopConfigPath -Raw|ConvertFrom-Json
     if($desktopConfig.LocalNodePath){$nodeCandidates+=[string]$desktopConfig.LocalNodePath}
+    if($desktopConfig.WakeWord){$assistantName=[string]$desktopConfig.WakeWord}
   }catch{}
 }
 $nodeCandidates+=(Join-Path $env:LOCALAPPDATA 'VCUBF\node-x64\node.exe')
@@ -55,7 +57,7 @@ function Resolve-Python {
 
 $python=Resolve-Python
 if(!$python){
-  [Windows.Forms.MessageBox]::Show('Python 3 is required for Emma Voice v2. Install Python and run Install-VoiceV2.ps1 again.','VCUBF Emma Voice v2','OK','Error')|Out-Null
+  [Windows.Forms.MessageBox]::Show("Python 3 is required for $assistantName Voice v2. Install Python and run Install-VoiceV2.ps1 again.","VCUBF $assistantName Voice v2",'OK','Error')|Out-Null
   exit 1
 }
 
@@ -65,7 +67,7 @@ if($SelfTest){
 }
 
 $diagnosticJson=& $python.Path @($python.Prefix) $runtime --diagnostic
-if($LASTEXITCODE -ne 0){throw 'Emma Voice v2 diagnostic failed.'}
+if($LASTEXITCODE -ne 0){throw 'The Voice v2 diagnostic failed.'}
 $v2Diagnostic=$diagnosticJson|ConvertFrom-Json
 if($Diagnostic){$diagnosticJson;exit 0}
 
@@ -78,7 +80,7 @@ $legacy=@(Get-CimInstance Win32_Process|Where-Object{
   )
 })
 if($legacy){
-  [Windows.Forms.MessageBox]::Show('Emma Voice v1 is active. Stop it from the VCUF Emma tray menu before starting Voice v2. This prevents two microphones or two conversations running at once.','VCUBF Emma Voice v2','OK','Warning')|Out-Null
+  [Windows.Forms.MessageBox]::Show("Voice v1 is active. Stop it from its tray menu before starting Voice v2. This prevents two microphones or two conversations running at once.","VCUBF $assistantName Voice v2",'OK','Warning')|Out-Null
   exit 2
 }
 
@@ -95,11 +97,11 @@ if($alreadyRunning){
 if(!$v2Diagnostic.ready){
   $missing=@()
   if(!$v2Diagnostic.providers.wake.providerConfigured){$missing+='wake-word configuration'}
-  if(!$v2Diagnostic.providers.wake.wakeWordPresent){$missing+='Emma wake word'}
+  if(!$v2Diagnostic.providers.wake.wakeWordPresent){$missing+='wake word'}
   if($v2Diagnostic.providers.wake.requestedProvider -eq 'picovoice_porcupine'){
     if(!$v2Diagnostic.providers.wake.packageInstalled){$missing+='Picovoice package'}
     if(!$v2Diagnostic.providers.wake.picovoiceAccessKeyPresent){$missing+='PICOVOICE_ACCESS_KEY'}
-    if(!$v2Diagnostic.providers.wake.keywordModelPresent){$missing+='Windows Emma .ppn model'}
+    if(!$v2Diagnostic.providers.wake.keywordModelPresent){$missing+='Windows .ppn wake-word model'}
     if(!$v2Diagnostic.providers.wake.picovoiceSettingsValid){$missing+='Picovoice wake-word settings'}
   }elseif(!$v2Diagnostic.providers.wake.vadSettingsValid){$missing+='Deepgram VAD wake-word settings'}
   if(!$v2Diagnostic.providers.npuWhisper.providerConfigured){$missing+='speech-to-text provider'}
@@ -113,7 +115,7 @@ if(!$v2Diagnostic.ready){
   }
   if(!$v2Diagnostic.providers.elevenlabs.apiKeyPresent){$missing+='ELEVENLABS_API_KEY'}
   if(!$v2Diagnostic.providers.elevenlabs.voiceIdPresent){$missing+='ElevenLabs voice ID'}
-  [Windows.Forms.MessageBox]::Show("Voice v2 is installed but not configured. Missing: $($missing -join ', ').`n`nSee docs\\VOICE_V2_SETUP.md in the VCUF project. No microphone session was started.",'VCUBF Emma Voice v2','OK','Information')|Out-Null
+  [Windows.Forms.MessageBox]::Show("Voice v2 is installed but not configured. Missing: $($missing -join ', ').`n`nSee docs\\VOICE_V2_SETUP.md in the VCUF project. No microphone session was started.","VCUBF $assistantName Voice v2",'OK','Information')|Out-Null
   exit 2
 }
 
@@ -139,7 +141,7 @@ $context=New-Object Windows.Forms.ApplicationContext
 $notify=New-Object Windows.Forms.NotifyIcon -Property @{
   Icon=[Drawing.SystemIcons]::Information
   Visible=$true
-  Text="Emma Voice v2 — $wakeEngine / $sttEngine"
+  Text="$assistantName Voice v2 — $wakeEngine / $sttEngine"
   ContextMenuStrip=$menu
 }
 $exit.Add_Click({ $context.ExitThread() })
@@ -147,7 +149,7 @@ $timer=New-Object Windows.Forms.Timer -Property @{Interval=1000}
 $timer.Add_Tick({
   if($process.HasExited){
     if($process.ExitCode -ne 3){
-      $notify.ShowBalloonTip(3000,'Emma Voice v2','Hlasová relace skončila.','Info')
+      $notify.ShowBalloonTip(3000,"$assistantName Voice v2",'Hlasová relace skončila.','Info')
     }
     $context.ExitThread()
   }
@@ -155,7 +157,7 @@ $timer.Add_Tick({
 
 try {
   $timer.Start()
-  $notify.ShowBalloonTip(3000,'Emma Voice v2',"Naslouchá na oslovení Emma přes $wakeEngine. Přepis: $sttEngine. Ikona zde umožňuje bezpečné ukončení.",'Info')
+  $notify.ShowBalloonTip(3000,"$assistantName Voice v2","Naslouchá na oslovení $assistantName přes $wakeEngine. Přepis: $sttEngine. Ikona zde umožňuje bezpečné ukončení.",'Info')
   [Windows.Forms.Application]::Run($context)
 } finally {
   $timer.Stop();$timer.Dispose()

@@ -1,3 +1,4 @@
+import { withAssistantName } from "./assistantName";
 import { appLanguage, menuText, type AppLanguage, type MenuKey } from "./i18n";
 
 const PAGE_MENU_KEYS: Record<string, MenuKey> = {
@@ -8,7 +9,7 @@ const PAGE_MENU_KEYS: Record<string, MenuKey> = {
   "Business Context": "businessContext", Industries: "industries", Connectors: "connectors",
   "Website Audit": "websiteAudit", "Website Content": "websiteContent", Company: "company", Employees: "employees",
   Calendar: "calendar", Services: "services", Quotes: "quotes", Invoices: "invoices", Recruitment: "recruitment",
-  Playbooks: "playbooks", Learning: "learning", "Emma Memory": "emmaMemory",
+  Playbooks: "playbooks", Learning: "learning", "{assistant} memory": "emmaMemory",
 };
 const templateCache = new WeakMap<Record<string, string>, Array<{ pattern: RegExp; translated: string }>>();
 const sentenceSegmentCache = new WeakMap<Record<string, string>, Array<[string, string]>>();
@@ -60,18 +61,33 @@ export async function loadUiCatalogue(language: AppLanguage): Promise<Record<str
   }
 }
 
-export function translateUiPhrase(catalogue: Record<string, string>, language: AppLanguage | string | null | undefined, phrase: string) {
+/** Interface copy holds the assistant's name as {assistant}, so the rendered text
+ *  is matched in that form and the account's name is put back afterwards.
+ *  A phrase that is not the application's own copy matches nothing here and
+ *  is returned untouched, which is what keeps a client or a job named after
+ *  the assistant from being rewritten. */
+function placeholderForm(phrase: string, assistantName: string) {
+  return assistantName ? phrase.replaceAll(assistantName, "{assistant}") : phrase;
+}
+
+export function translateUiPhrase(
+  catalogue: Record<string, string>,
+  language: AppLanguage | string | null | undefined,
+  phrase: string,
+  assistantName = "",
+) {
   const resolved = appLanguage(language);
-  const normalized = phrase.replace(/\s+/g, " ").trim();
+  const spoken = (translated: string) => withAssistantName(translated, assistantName);
+  const normalized = placeholderForm(phrase.replace(/\s+/g, " ").trim(), assistantName);
   if (!normalized) return phrase;
   const menuKey = PAGE_MENU_KEYS[normalized];
-  if (menuKey) return menuText(resolved, menuKey);
+  if (menuKey) return spoken(menuText(resolved, menuKey));
   const exact = catalogue[normalized];
-  if (exact) return exact;
+  if (exact) return spoken(exact);
   for (const template of templateTranslations(catalogue)) {
     const match = normalized.match(template.pattern);
     if (!match) continue;
-    return match.slice(1).reduce(
+    const filled = match.slice(1).reduce(
       (translated, value, index) => {
         const leading = value.match(/^\s*/u)?.[0] ?? "";
         const trailing = value.match(/\s*$/u)?.[0] ?? "";
@@ -85,6 +101,11 @@ export function translateUiPhrase(catalogue: Record<string, string>, language: A
       },
       template.translated,
     );
+    return spoken(filled);
   }
-  return phrase;
+  // Copy that has no catalogue entry, which is every string a component
+  // already renders in the reader's own language, still needs the account's
+  // name put in. Nothing else is touched: only the {assistant} token is
+  // replaced, and business data never contains it.
+  return spoken(phrase);
 }

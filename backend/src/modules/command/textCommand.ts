@@ -21,6 +21,7 @@ import { evaluateEmmaCommand } from "../../services/emmaPolicyService.js";
 import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorService.js";
 import { getPendingEmmaActionName } from "../../services/emmaExecutableActionService.js";
 import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
+import { assistantNameFor } from "../../lib/assistantName.js";
 
 /**
  * The user's voice language as it is right now.
@@ -40,7 +41,7 @@ export const commandRouter = Router();
 
 commandRouter.use(requireAuth);
 
-// Exposes the same authoritative tree used in Emma's prompt. It is read-only
+// Exposes the same authoritative tree used in {assistant}'s prompt. It is read-only
 // and includes page descendants that are not represented by a sidebar link.
 commandRouter.get("/navigation", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission), (req, res) => {
   const navigation = getNavigationCatalogue(req.user!.permissions, undefined, req.user!.voiceLanguage);
@@ -63,7 +64,7 @@ const assistantSchema = commandSchema.extend({
 
 const transcriptionQuerySchema = z.object({
   language: z.string().trim().min(2).max(20).default("en-GB"),
-  wake_word: z.string().trim().min(1).max(80).default("Hej Emma"),
+  wake_word: z.string().trim().min(1).max(80).default("Hej {assistant}"),
 });
 
 type ParsedTextCommand = ReturnType<typeof parseTextCommand>;
@@ -366,7 +367,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
   const user = req.user!;
   // The authenticated user preference is the single language authority.
   // A stale desktop/browser payload must never switch one response back to
-  // English while the menu and the rest of Emma are using another language.
+  // English while the menu and the rest of {assistant} are using another language.
   const language = user.voiceLanguage;
   const alias = await resolveLearningAliases(user, text);
   let command = await resolveUserCommand(user, alias.resolvedText);
@@ -381,6 +382,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
       assistant = await interpretVoiceRequest({
         text: alias.resolvedText,
         userName: user.displayName,
+        assistantName: assistantNameFor(user),
         language,
         history,
         memoryContext,
@@ -487,7 +489,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     errorMessage: response.ok ? undefined : response.error,
   });
   // Once a command has reached the deterministic action engine, its verified
-  // result is the only text Emma may show or speak. The language model's
+  // result is the only text {assistant} may show or speak. The language model's
   // interpretation message can be incomplete, malformed, or claim success
   // before validation has run; never let it override the action result.
   return res.status(response.httpStatus).json({

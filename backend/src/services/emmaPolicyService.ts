@@ -73,7 +73,7 @@ function effectiveDisabledCapabilities(stored: string[]) {
 export const updateEmmaPolicySchema = z.object({
   disabled_capabilities: z.array(z.string()).max(EMMA_CAPABILITIES.length).refine(
     (ids) => new Set(ids).size === ids.length && ids.every((id) => CONFIGURABLE_CAPABILITY_IDS.has(id) || LEGACY_CAPABILITY_IDS.has(id)),
-    "One or more Emma capability IDs are invalid.",
+    "One or more {assistant} capability IDs are invalid.",
   ),
 });
 
@@ -118,7 +118,7 @@ export async function evaluateEmmaCommand(user: AuthedUser, command: ParsedComma
   if (intent === "unrecognized" || SAFE_CANCELLATION_INTENTS.has(intent)) return { allowed: true as const };
   const capabilityIds = capabilityIdsForCommand(command);
   if (!capabilityIds.length || capabilityIds.some((capabilityId) => !CAPABILITY_IDS.has(capabilityId))) {
-    return { allowed: false as const, capabilityId: "unclassified", message: "This Emma action has not been assigned an administrator policy yet." };
+    return { allowed: false as const, capabilityId: "unclassified", message: "This {assistant} action has not been assigned an administrator policy yet." };
   }
   const capabilityId = capabilityIds[0];
   const missingUserPermission = capabilityIds
@@ -145,6 +145,6 @@ export async function evaluateEmmaCommand(user: AuthedUser, command: ParsedComma
     ? `Administrator wyłączył dla Emmy uprawnienie: ${capability.label}.`
     : user.voiceLanguage === "cs-CZ"
       ? `Správce vypnul Emmě oprávnění: ${capability.label}.`
-      : `The administrator has disabled this Emma capability: ${capability.label}.`;
+      : `The administrator has disabled this {assistant} capability: ${capability.label}.`;
   return { allowed: false as const, capabilityId: blockedCapabilityId, message };
 }

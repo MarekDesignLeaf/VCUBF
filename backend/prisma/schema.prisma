@@ -170,11 +170,11 @@ model User {
   permissions         String[]
   // What she is called, shown throughout the interface. Separate from the
   // hotword: she can be named Petra and answer to "hej sekretarko".
-  assistantName       String   @default("Emma") @map("assistant_name")
+  assistantName       String   @default("Alfonzo") @map("assistant_name")
   // How fast she speaks, as a multiplier of the voice's natural pace.
   // 1.15 by default: at 1.0 short confirmations come across as sleepy.
   voiceSpeechRate     Float    @default(1.15) @map("voice_speech_rate")
-  voiceWakeWord       String   @default("Hej Emma") @map("voice_wake_word")
+  voiceWakeWord       String   @default("Hej Alfonzo") @map("voice_wake_word")
   voiceContinuous     Boolean  @default(false) @map("voice_continuous")
   voiceLanguage       String   @default("en-GB") @map("voice_language")
   // Job Allocation and Capacity Management Module — real capacity inputs.
@@ -239,7 +239,7 @@ model PasswordResetToken {
   @@map("password_reset_tokens")
 }
 
-// Current native Emma status for user visibility and control. Only final text
+// Current native the assistant status for user visibility and control. Only final text
 // transcripts and short responses are retained; microphone audio is never
 // stored. One row per user is enough because the Windows companion is a
 // single-instance application for that signed-in Windows account.
@@ -265,7 +265,7 @@ model VoiceDeviceState {
   @@map("voice_device_states")
 }
 
-// Persisted text-only transcript of one activated Emma exchange. Audio bytes
+// Persisted text-only transcript of one activated the assistant exchange. Audio bytes
 // are streamed during Realtime sessions but are never written to these tables.
 model VoiceConversation {
   id        String    @id @default(uuid())
@@ -303,7 +303,7 @@ model VoiceConversationMessage {
   @@map("voice_conversation_messages")
 }
 
-// A short-lived, user-scoped confirmation state for risky Emma actions. The
+// A short-lived, user-scoped confirmation state for risky the assistant actions. The
 // Gmail payload is retained only while the action is pending, then removed as
 // soon as it is sent, cancelled, expires or fails.
 model VoicePendingAction {
@@ -327,7 +327,7 @@ model VoicePendingAction {
   @@map("voice_pending_actions")
 }
 
-// Explicit, durable Emma memory. Conversation transcripts remain a separate,
+// Explicit, durable the assistant memory. Conversation transcripts remain a separate,
 // short-term continuity source: no transcript is promoted into this table
 // unless the user explicitly says "remember that ...". Personal memories are
 // visible only to their owner; company memories are shared and require company
