@@ -131,6 +131,12 @@ def default_v2_config() -> dict[str, Any]:
             "endpointingMs": 250,
             # Deepgram accepts utterance_end_ms from 1000 to 5000 ms.
             "utteranceEndMs": 1_000,
+            # Dictated numbers are spoken in groups with real pauses between
+            # them. While a number is in flight the voice gate waits this long
+            # for the next group instead of the ordinary silence window, and
+            # the parts are joined into one command.
+            "digitSilenceMs": 2_000,
+            "digitJoinMs": 2_000,
             "npu": {
                 "pythonPath": "",
                 "appPath": "",
@@ -965,6 +971,75 @@ def classify_playback_transcript(
     return "normal", heard
 
 
+# The words that mark a dictated number as a telephone number, in the three
+# languages the companion speaks. Digits alone are not enough: "set the price
+# to 1500" must not be held back waiting for more digits.
+PHONE_CUE_WORDS = frozenset({
+    "phone", "telephone", "mobile", "cell", "number",
+    "telefon", "telefonu", "telefonni", "telefonniho", "mobil", "cislo", "cislem",
+    "numer", "numeru", "komorka", "komorke", "telefoniczny",
+})
+
+# Recognisers write dictated digits either as figures or as words.
+SPOKEN_DIGITS = frozenset({
+    "zero", "oh", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    "nula", "jedna", "jeden", "dva", "tri", "ctyri", "pet", "sest", "sedm", "osm", "devet",
+    "dwa", "trzy", "cztery", "piec", "szesc", "siedem", "osiem", "dziewiec",
+})
+
+# A telephone number is at least this many digits in every locale Secretary
+# supports, so a shorter trailing run is still being dictated.
+COMPLETE_NUMBER_DIGITS = 9
+
+
+def number_token_digits(token: str) -> int | None:
+    """Digits carried by one dictated token, or None when it is not a number."""
+    if not token:
+        return None
+    if token.isdigit():
+        return len(token)
+    return 1 if token in SPOKEN_DIGITS else None
+
+
+def trailing_number_digits(text: str) -> int:
+    """Digits in the run of number tokens the utterance ends with."""
+    total = 0
+    for token in reversed(folded_text(text).split()):
+        digits = number_token_digits(token)
+        if digits is None:
+            break
+        total += digits
+    return total
+
+
+def dictated_number_incomplete(text: str) -> bool:
+    """True when the speaker is still part-way through dictating a number.
+
+    Speakers dictate a telephone number in groups with real pauses between
+    them. The voice gate reads such a pause as the end of the utterance, so a
+    command that names a telephone number and then stops inside one is held
+    back until the remaining digits arrive.
+    """
+    tokens = folded_text(text).split()
+    if not any(token in PHONE_CUE_WORDS for token in tokens):
+        return False
+    digits = trailing_number_digits(text)
+    return 0 < digits < COMPLETE_NUMBER_DIGITS
+
+
+def continues_dictated_number(text: str) -> bool:
+    """True when an utterance is nothing but the rest of a dictated number."""
+    tokens = folded_text(text).split()
+    if not tokens:
+        return False
+    return all(number_token_digits(token) is not None for token in tokens)
+
+
+def joined_dictated_number(held: str, addition: str) -> str:
+    """Join two dictated parts of one number without inventing separators."""
+    return f"{held.strip()} {addition.strip()}".strip()
+
+
 def self_test() -> bool:
     defaults = default_v2_config()
     merged = merge_defaults(defaults, {"stt": {"model": "nova-3-test"}})
@@ -996,6 +1071,19 @@ def self_test() -> bool:
         and playback_buffer_self_test()
         and "".join(ElevenLabsPcmTts.chunks("a" * 7_001)) == "a" * 7_001
         and stream_timing_settings(defaults) == (250, 1_000)
+        # A dictated telephone number arrives in groups. A command that stops
+        # inside one waits for the rest; a complete number and an ordinary
+        # number in a command do not wait at all.
+        and dictated_number_incomplete("vytvoř klienta Jan Novák, telefon 724 555")
+        and dictated_number_incomplete("create client Jan Novak, phone seven two four")
+        and not dictated_number_incomplete("vytvoř klienta Jan Novák, telefon 724 555 111")
+        and not dictated_number_incomplete("nastav cenu na 1500")
+        and not dictated_number_incomplete("ukaž klienty")
+        and continues_dictated_number("555 111")
+        and continues_dictated_number("pět pět pět")
+        and not continues_dictated_number("otevři kontakty")
+        and joined_dictated_number("telefon 724", "555 111") == "telefon 724 555 111"
+        and trailing_number_digits("telefon 724 555") == 6
         and companion_is_running(os.getpid())
         and looks_like_self_echo("hello there", "Hello there, how can I help?")
         and not looks_like_self_echo("stop now", "Hello there, how can I help?")
@@ -2260,6 +2348,12 @@ class VoiceSessionV2:
         self.pending_parts: list[str] = []
         self.npu_whisper = npu_whisper
         self.near_end_frames = 0
+        # A command that stops part-way through a dictated telephone number is
+        # held here until the remaining digits arrive, and the voice gate waits
+        # longer for them while it is held.
+        self.number_hold_text = ""
+        self.number_hold_until = 0.0
+        self.number_flush_task: asyncio.Task[None] | None = None
         self.barge_in_candidate_until = 0.0
         self.barge_in_interrupted_until = 0.0
         self.transcript_tasks: set[asyncio.Task[None]] = set()
@@ -2437,10 +2531,67 @@ class VoiceSessionV2:
                 # One failed request must not end the conversation.
                 log(f"v2 OpenAI transcription error: {type(exc).__name__}: {str(exc)[:240]}")
 
+    def digit_timing(self) -> tuple[int, int]:
+        """Silence window while a number is in flight, and the join window, in ms."""
+        stt = self.config.get("stt") or {}
+
+        def value(name: str, default: int) -> int:
+            try:
+                parsed = int(stt.get(name, default))
+            except (TypeError, ValueError):
+                return default
+            return parsed if parsed > 0 else default
+
+        return value("digitSilenceMs", 2_000), value("digitJoinMs", 2_000)
+
+    def number_pending(self) -> bool:
+        return bool(self.number_hold_text) and time.monotonic() < self.number_hold_until
+
+    def clear_number_hold(self) -> None:
+        self.number_hold_text = ""
+        self.number_hold_until = 0.0
+        task = self.number_flush_task
+        self.number_flush_task = None
+        if task and not task.done():
+            task.cancel()
+
+    def hold_dictated_number(self, heard: str) -> None:
+        """Wait for the rest of a number instead of acting on half of one."""
+        join_ms = self.digit_timing()[1]
+        self.number_hold_text = heard
+        self.number_hold_until = time.monotonic() + join_ms / 1_000
+        previous = self.number_flush_task
+        if previous and not previous.done():
+            previous.cancel()
+        self.number_flush_task = asyncio.create_task(self.flush_dictated_number(heard, join_ms))
+        log(f"v2 waiting {join_ms}ms for the rest of a dictated number")
+
+    async def flush_dictated_number(self, heard: str, join_ms: int) -> None:
+        """Run the command as spoken once no further digits arrive."""
+        try:
+            await asyncio.sleep(join_ms / 1_000)
+        except asyncio.CancelledError:
+            return
+        if self.number_hold_text != heard:
+            return
+        self.number_hold_text = ""
+        self.number_hold_until = 0.0
+        self.number_flush_task = None
+        log("v2 no further digits arrived; running the command as spoken")
+        self.start_turn(heard)
+
+    def start_turn(self, heard: str) -> None:
+        if self.turn_task and not self.turn_task.done():
+            self.turn_task.cancel()
+        self.turn_task = asyncio.create_task(self.execute_turn(heard))
+
     async def microphone_segmenter(self, segments: asyncio.Queue[bytes], settings: dict[str, Any], label: str) -> None:
         threshold = int(settings["speechThreshold"])
         pre_roll_frames = max(1, int(settings["preRollMs"]) // INPUT_FRAME_MS)
-        silence_frames_required = max(1, int(settings["silenceMs"]) // INPUT_FRAME_MS)
+        base_silence_frames = max(1, int(settings["silenceMs"]) // INPUT_FRAME_MS)
+        # While a dictated number is still arriving the gate waits longer, so
+        # the groups a speaker separates with a pause stay in one segment.
+        digit_silence_frames = max(base_silence_frames, self.digit_timing()[0] // INPUT_FRAME_MS)
         min_speech_frames = max(1, int(settings["minSpeechMs"]) // INPUT_FRAME_MS)
         max_segment_frames = max(1, int(settings["maxSegmentMs"]) // INPUT_FRAME_MS)
         pre_roll: deque[bytes] = deque(maxlen=pre_roll_frames)
@@ -2479,7 +2630,8 @@ class VoiceSessionV2:
                     silence_frames = 0
                 else:
                     silence_frames += 1
-                reached_end = silence_frames >= silence_frames_required and speech_frames >= min_speech_frames
+                required_silence = digit_silence_frames if self.number_pending() else base_silence_frames
+                reached_end = silence_frames >= required_silence and speech_frames >= min_speech_frames
                 reached_limit = len(active_frames) >= max_segment_frames
                 if reached_end or reached_limit:
                     await segments.put(b"".join(active_frames))
@@ -2627,9 +2779,20 @@ class VoiceSessionV2:
                 await self.update_state("listening", True)
                 self.stop.set()
                 return
-        if self.turn_task and not self.turn_task.done():
-            self.turn_task.cancel()
-        self.turn_task = asyncio.create_task(self.execute_turn(heard))
+        if self.number_pending():
+            if continues_dictated_number(heard):
+                heard = joined_dictated_number(self.number_hold_text, heard)
+                self.clear_number_hold()
+                log("v2 joined the rest of a dictated number onto the held command")
+            else:
+                # Half a telephone number must never reach a record, so the
+                # unfinished command is dropped rather than half-executed.
+                log("v2 dropped a command whose dictated number was never finished")
+                self.clear_number_hold()
+        if dictated_number_incomplete(heard):
+            self.hold_dictated_number(heard)
+            return
+        self.start_turn(heard)
 
     async def execute_turn(self, heard: str) -> None:
         generation = self.generation

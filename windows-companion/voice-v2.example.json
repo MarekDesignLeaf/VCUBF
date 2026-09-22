@@ -20,6 +20,8 @@
     "languageMode": "selected",
     "endpointingMs": 250,
     "utteranceEndMs": 1000,
+    "digitSilenceMs": 2000,
+    "digitJoinMs": 2000,
     "npu": {
       "pythonPath": "",
       "appPath": "",
