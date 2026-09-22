@@ -1,7 +1,7 @@
 {
   "version": 2,
   "wake": {
-    "provider": "deepgram_vad",
+    "provider": "openai_vad",
     "word": "Emma",
     "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
     "keywordPath": "",
@@ -13,9 +13,9 @@
     "maxSegmentMs": 8000
   },
   "stt": {
-    "provider": "deepgram",
-    "fallbackProvider": "deepgram",
-    "apiKeyEnv": "DEEPGRAM_API_KEY",
+    "provider": "openai",
+    "fallbackProvider": "openai",
+    "apiKeyEnv": "OPENAI_API_KEY",
     "model": "nova-3",
     "languageMode": "selected",
     "endpointingMs": 250,

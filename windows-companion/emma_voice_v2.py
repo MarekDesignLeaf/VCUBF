@@ -1,9 +1,9 @@
 """Emma Voice v2 — provider-based Windows voice runtime for VCUF Secretary.
 
-Voice v2 is the only installed Windows listener. When configured, it uses local
-Picovoice Porcupine detection for the wake word (with a Deepgram VAD fallback),
-Qualcomm NPU Whisper STT (with a Deepgram fallback) and ElevenLabs PCM streaming
-TTS, while every business operation still goes through the authenticated,
+Voice v2 is the only installed Windows listener. When configured, it uses
+OpenAI speech-to-text through the authenticated Secretary backend for both the
+wake gate and the command transcript, with ElevenLabs PCM streaming TTS, while
+every business operation still goes through the authenticated,
 permission-checked and audited Secretary API.
 
 No microphone audio is written to disk.  Only final transcript text is sent to
@@ -111,7 +111,7 @@ def default_v2_config() -> dict[str, Any]:
     return {
         "version": 2,
         "wake": {
-            "provider": "deepgram_vad",
+            "provider": "openai_vad",
             "word": DEFAULT_ASSISTANT_NAME,
             "deviceName": "",
             "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
@@ -123,9 +123,9 @@ def default_v2_config() -> dict[str, Any]:
             "maxSegmentMs": 8_000,
         },
         "stt": {
-            "provider": "deepgram",
-            "fallbackProvider": "deepgram",
-            "apiKeyEnv": "DEEPGRAM_API_KEY",
+            "provider": "openai",
+            "fallbackProvider": "openai",
+            "apiKeyEnv": "OPENAI_API_KEY",
             "model": "nova-3",
             "languageMode": "selected",
             "endpointingMs": 250,
@@ -1034,7 +1034,7 @@ def self_test() -> bool:
 def provider_status(config: dict[str, Any]) -> dict[str, Any]:
     stt = config["stt"]
     tts = config["tts"]
-    requested_stt_provider = str(stt.get("provider") or "deepgram").strip()
+    requested_stt_provider = str(stt.get("provider") or "openai").strip()
     try:
         language, wake_word = current_wake_profile(config)
         profile_error = ""
@@ -1056,7 +1056,7 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
         picovoice_error = ""
     except RuntimeError as exc:
         picovoice_key_env, picovoice_keyword_path, picovoice_device_name, picovoice_error = "", "", "", str(exc)
-    requested_wake_provider = str(config["wake"].get("provider") or "deepgram_vad")
+    requested_wake_provider = str(config["wake"].get("provider") or "openai_vad")
     deepgram_wake_ready = bool(wake_word) and not profile_error and not vad_error
     picovoice_wake_ready = (
         bool(wake_word)
