@@ -820,13 +820,16 @@ export function parseTextCommand(rawText: string): ParsedCommand {
   // alias syntax above: arbitrary conversation is never promoted to memory,
   // only a direct "remember that" instruction is. Company scope must also be
   // stated explicitly; the service enforces crm.manage for that wider scope.
-  m = text.match(/^(?:remember\s+for\s+(?:the\s+)?company\s+that|zapamatuj\s+si\s+pro\s+(?:firmu|společnost|spolecnost)\s*,?\s*(?:že|ze))\s+(.+)$/iu);
+  // Dictation drops the conjunction far more often than it drops the verb, so
+  // "že"/"that" is optional. The verb is not: only an explicit instruction is
+  // ever promoted to memory.
+  m = text.match(/^(?:remember\s+for\s+(?:the\s+)?company\s+(?:that\s+)?|zapamatuj\s+si\s+pro\s+(?:firmu|společnost|spolecnost)\s*,?\s*(?:(?:že|ze)\s+)?|zapamiętaj\s+(?:sobie\s+)?dla\s+(?:firmy|spółki|spolki)\s*,?\s*(?:(?:że|ze)\s+)?)(.+)$/iu);
   if (m) return { intent: "create_assistant_memory", entities: { content: m[1].trim(), scope: "company" } };
 
-  m = text.match(/^(?:remember(?:\s+for\s+me)?\s+that|zapamatuj\s+si(?:\s+pro\s+(?:mě|me))?\s*,?\s*(?:že|ze))\s+(.+)$/iu);
+  m = text.match(/^(?:remember(?:\s+for\s+me)?\s+(?:that\s+)?|zapamatuj\s+si(?:\s+pro\s+(?:mě|me))?\s*,?\s*(?:(?:že|ze)\s+)?|zapamiętaj(?:\s+sobie)?\s*,?\s*(?:(?:że|ze)\s+)?)(.+)$/iu);
   if (m) return { intent: "create_assistant_memory", entities: { content: m[1].trim(), scope: "personal" } };
 
-  m = text.match(/^(?:what\s+do\s+you\s+remember|co\s+si\s+(?:pamatuješ|pamatujes)|co\s+(?:máš|mas)\s+v\s+(?:paměti|pameti))(?:\s+(?:about|o)\s+(.+?))?\??$/iu);
+  m = text.match(/^(?:what\s+do\s+you\s+remember|co\s+si\s+(?:pamatuješ|pamatujes)|co\s+(?:máš|mas)\s+v\s+(?:paměti|pameti)|co\s+(?:pamiętasz|pamietasz))(?:\s+(?:about|o)\s+(.+?))?\??$/iu);
   if (m) return { intent: "recall_assistant_memory", entities: { query: m[1]?.trim() } };
 
   // "log call with Jane Smith: discussed timeline, promised quote by Friday"

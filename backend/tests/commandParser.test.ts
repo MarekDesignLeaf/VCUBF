@@ -406,6 +406,44 @@ describe("commandParser", () => {
     });
   });
 
+  it("stores a dictated memory even when the conjunction is not spoken", () => {
+    assert.deepEqual(parseTextCommand("remember the client pays by transfer"), {
+      intent: "create_assistant_memory",
+      entities: { content: "the client pays by transfer", scope: "personal" },
+    });
+    assert.deepEqual(parseTextCommand("zapamatuj si klient platí převodem"), {
+      intent: "create_assistant_memory",
+      entities: { content: "klient platí převodem", scope: "personal" },
+    });
+    assert.deepEqual(parseTextCommand("zapamatuj si pro firmu faktury končí 001"), {
+      intent: "create_assistant_memory",
+      entities: { content: "faktury končí 001", scope: "company" },
+    });
+    assert.deepEqual(parseTextCommand("remember for the company invoices end in 001"), {
+      intent: "create_assistant_memory",
+      entities: { content: "invoices end in 001", scope: "company" },
+    });
+  });
+
+  it("parses Polish memory commands", () => {
+    assert.deepEqual(parseTextCommand("zapamiętaj, że klient płaci przelewem"), {
+      intent: "create_assistant_memory",
+      entities: { content: "klient płaci przelewem", scope: "personal" },
+    });
+    assert.deepEqual(parseTextCommand("zapamiętaj sobie klient płaci przelewem"), {
+      intent: "create_assistant_memory",
+      entities: { content: "klient płaci przelewem", scope: "personal" },
+    });
+    assert.deepEqual(parseTextCommand("zapamiętaj dla firmy faktury kończą się na 001"), {
+      intent: "create_assistant_memory",
+      entities: { content: "faktury kończą się na 001", scope: "company" },
+    });
+    assert.deepEqual(parseTextCommand("co pamiętasz o kliencie?"), {
+      intent: "recall_assistant_memory",
+      entities: { query: "kliencie" },
+    });
+  });
+
   it("parses memory recall commands", () => {
     assert.deepEqual(parseTextCommand("what do you remember about invoice numbers?"), {
       intent: "recall_assistant_memory",
