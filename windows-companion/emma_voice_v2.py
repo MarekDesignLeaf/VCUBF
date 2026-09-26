@@ -1040,7 +1040,8 @@ def self_test() -> bool:
     merged = merge_defaults(defaults, {"stt": {"model": "nova-3-test"}})
     return (
         merged["stt"]["model"] == "nova-3-test"
-        and merged["tts"]["outputFormat"] == "pcm_24000"
+        and merged["tts"]["provider"] == "openai"
+        and merged["tts"]["model"] == "tts-1"
         and language_code("cs-CZ", "selected") == "cs"
         and language_code("cs-CZ", "auto") == "multi"
         and contains_wake_word("Emmo, otevři kontakty", "Emma")
@@ -3025,7 +3026,7 @@ async def run_voice_v2(parent_pid: int = 0, stop_file: str = "") -> None:
             f"{name}.{field}"
             for name, details in status["providers"].items()
             for field, value in details.items()
-            if field in {"apiKeyPresent", "voiceIdPresent", "wakeWordPresent"} and value is False
+            if field in {"apiKeyPresent", "wakeWordPresent"} and value is False
         ]
         if not status["providers"]["wake"]["providerConfigured"]:
             missing.append("wake.providerConfigured")

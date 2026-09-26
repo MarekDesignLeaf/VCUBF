@@ -8,6 +8,9 @@ from test_voice_gate import voice
 
 
 class RuntimeControls(unittest.TestCase):
+    def test_runtime_self_test(self):
+        self.assertTrue(voice.self_test())
+
     def test_playback_rejects_echo_and_accepts_explicit_stop(self):
         self.assertEqual(voice.classify_playback_transcript(
             "Tady jsou klienti", "Tady jsou klienti", "cs-CZ", "Emma", True, True
