@@ -4,7 +4,7 @@ import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import { recordAudit } from "../../lib/audit.js";
-import { APPROVE_DEVICE_PAIRING_ACTION } from "../../lib/actionContracts.js";
+import { APPROVE_DEVICE_PAIRING_ACTION, SIGN_IN_WITH_DEVICE_KEY_ACTION } from "../../lib/actionContracts.js";
 import { frontendUrl } from "../../lib/frontendUrl.js";
 import { requireAuth, signToken } from "../../middleware/auth.js";
 
@@ -60,4 +60,46 @@ devicePairingRouter.post("/token", limiter, async (req,res) => {
   // every 12 hours. Password changes, account disablement and authVersion
   // invalidation still revoke this device token immediately.
   res.json({status:"connected",token:signToken(authUser,user.authVersion,"30d"),user:publicUser(user)});
+});
+
+// A password-free sign-in for the owner's own PC.
+//
+// The PC holds a random secret (DPAPI-protected, never sent anywhere except
+// here); the server holds only its SHA-256 in DESKTOP_DEVICE_KEY_SHA256 and the
+// account it signs in as in DESKTOP_DEVICE_USER_EMAIL. Without both variables
+// the route does not exist (404). Anyone without the key still meets the normal
+// sign-in. Every successful use is audited, and rotating or removing the
+// variable revokes the key immediately.
+const deviceKeySchema = z.object({ key: z.string().min(32).max(200) });
+
+export function deviceKeyConfigured(): boolean {
+  return /^[0-9a-f]{64}$/i.test(process.env.DESKTOP_DEVICE_KEY_SHA256?.trim() ?? "")
+    && Boolean(process.env.DESKTOP_DEVICE_USER_EMAIL?.trim());
+}
+
+devicePairingRouter.post("/key", limiter, async (req, res) => {
+  if (!deviceKeyConfigured()) return res.status(404).json({ error: "NOT_FOUND" });
+  const parsed = deviceKeySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED" });
+  const supplied = Buffer.from(secretHash(parsed.data.key), "hex");
+  const expected = Buffer.from(process.env.DESKTOP_DEVICE_KEY_SHA256!.trim().toLowerCase(), "hex");
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+    return res.status(401).json({ error: "DEVICE_KEY_INVALID" });
+  }
+  const user = await prisma.user.findFirst({
+    where: { email: { equals: process.env.DESKTOP_DEVICE_USER_EMAIL!.trim(), mode: "insensitive" }, isActive: true },
+  });
+  if (!user) return res.status(404).json({ error: "DEVICE_KEY_USER_NOT_FOUND" });
+  await recordAudit({
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: SIGN_IN_WITH_DEVICE_KEY_ACTION.actionName,
+    inputPayload: { method: "device_key" },
+    dataAfter: { tokenLifetime: "30d" },
+    riskLevel: SIGN_IN_WITH_DEVICE_KEY_ACTION.riskLevel,
+    confirmationRequired: false,
+    result: "success",
+  });
+  const authUser = { ...publicUser(user), companyId: user.companyId };
+  res.json({ status: "connected", token: signToken(authUser, user.authVersion, "30d"), user: publicUser(user) });
 });

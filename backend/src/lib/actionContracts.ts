@@ -43,6 +43,16 @@ export const APPROVE_DEVICE_PAIRING_ACTION: ActionContract = {
   possibleErrors: ["VALIDATION_FAILED", "PAIRING_NOT_FOUND", "PAIRING_EXPIRED", "PAIRING_ALREADY_USED"],
 };
 
+export const SIGN_IN_WITH_DEVICE_KEY_ACTION: ActionContract = {
+  actionName: "sign_in_with_device_key",
+  purpose: "Sign the owner's own Windows {assistant} companion in without a password, using a secret key that exists only on that PC and whose hash is configured on the server.",
+  requiredPermission: "device_key",
+  riskLevel: 3,
+  confirmationRequired: false,
+  dataSources: ["user_input", "auth.users", "environment.DESKTOP_DEVICE_KEY_SHA256"],
+  possibleErrors: ["VALIDATION_FAILED", "DEVICE_KEY_INVALID", "DEVICE_KEY_USER_NOT_FOUND"],
+};
+
 export const CREATE_CLIENT_ACTION: ActionContract = {
   actionName: "create_client",
   purpose: "Create a new client record in CRM Core from a verified or manually entered source.",

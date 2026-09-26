@@ -51,6 +51,16 @@ holds a 30-day device token (DPAPI-protected `token.bin`); the approval is
 audited, and a password change or account disablement revokes it. Changing
 the target backend deletes the old token, so the PC pairs again.
 
+**Without any sign-in on the owner's PC.** If `device.key` exists next to
+`config.json` (a random secret, DPAPI-protected for the Windows user), the
+launcher exchanges it at `POST /auth/device/key` for the same 30-day device
+token, and the browser window signs itself in through the existing desktop
+bootstrap — no password and no pairing. The server stores only the key's
+SHA-256 in `DESKTOP_DEVICE_KEY_SHA256` and the account in
+`DESKTOP_DEVICE_USER_EMAIL`; without both the route answers 404. Every use is
+audited (`sign_in_with_device_key`). Changing or removing the variable revokes
+the key at once. Everyone else still meets the normal sign-in.
+
 For testing code from this checkout, install with `-LocalDevelopment`: the
 window, API and voice then use `localhost:5173` / `localhost:4000` and the
 passwordless local test sign-in, and nothing reaches production.
