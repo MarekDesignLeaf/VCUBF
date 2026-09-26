@@ -3,10 +3,7 @@
   "wake": {
     "provider": "openai_vad",
     "word": "Alfonzo",
-    "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
-    "keywordPath": "",
     "deviceName": "",
-    "sensitivity": 0.65,
     "speechThreshold": 450,
     "preRollMs": 600,
     "silenceMs": 1100,
@@ -14,18 +11,9 @@
   },
   "stt": {
     "provider": "openai",
-    "fallbackProvider": "openai",
-    "apiKeyEnv": "OPENAI_API_KEY",
-    "model": "nova-3",
-    "languageMode": "selected",
-    "endpointingMs": 250,
-    "utteranceEndMs": 1000,
     "digitSilenceMs": 2000,
     "digitJoinMs": 2000,
-    "npu": {
-      "pythonPath": "",
-      "appPath": "",
-      "modelSize": "base",
+    "openai": {
       "speechThreshold": 300,
       "preRollMs": 320,
       "silenceMs": 700,

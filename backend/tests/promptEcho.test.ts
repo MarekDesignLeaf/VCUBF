@@ -27,7 +27,6 @@ describe("GPT transcription must not execute its own vocabulary prompt", () => {
 
   it("returns empty text through transcribeVoiceAudio when the model echoes the prompt", async () => {
     process.env.OPENAI_API_KEY = "test-key";
-    delete process.env.WHISPER_SERVER_URL;
     let sentModel = "";
     globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
       const form = init?.body as FormData;

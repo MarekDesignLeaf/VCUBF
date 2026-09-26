@@ -7,7 +7,6 @@ const realFetch = globalThis.fetch;
 /** What the recogniser returns for one utterance, as if from the model. */
 async function transcribed(text: string): Promise<string> {
   process.env.OPENAI_API_KEY = "test-key";
-  delete process.env.WHISPER_SERVER_URL;
   globalThis.fetch = (async () =>
     new Response(JSON.stringify({ text }), {
       status: 200,

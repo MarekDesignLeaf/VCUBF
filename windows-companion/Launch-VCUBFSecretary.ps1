@@ -44,7 +44,6 @@ $configPath = Join-Path $appDir 'config.json'
 $tokenPath = Join-Path $appDir 'token.bin'
 $stopFile = Join-Path $appDir 'voice-v2.stop'
 $v2Runtime = Join-Path $app 'emma_voice_v2.py'
-$npuWhisperSidecar = Join-Path $app 'npu_whisper_sidecar.py'
 $v2Runner = Join-Path $app 'Run-VoiceV2.ps1'
 $localProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
 $localBackendProcess = $null
@@ -132,8 +131,7 @@ function Stop-VoiceV2 {
   Get-CimInstance Win32_Process | Where-Object {
     $_.CommandLine -and (
       $_.CommandLine.IndexOf($v2Runner,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
-      ($_.CommandLine.IndexOf($v2Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -like '*--run*') -or
-      $_.CommandLine.IndexOf($npuWhisperSidecar,[StringComparison]::OrdinalIgnoreCase) -ge 0
+      ($_.CommandLine.IndexOf($v2Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -like '*--run*')
     )
   } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   $script:voiceRunnerProcess = $null

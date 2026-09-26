@@ -47,23 +47,15 @@ if(Test-Path -LiteralPath $logPath) {
     if($line -match '^(?<stamp>\S+)') {
       try { $stamp = ([datetimeoffset]::Parse($matches.stamp)).UtcDateTime } catch {}
     }
-    if($line -match '^(?<stamp>\S+) v2 Picovoice (?:microphone audio confirmed|microphone level): AUDIO (?<rms>\d+) (?<peak>\d+)$') {
-      try {
-        if(([datetimeoffset]::Parse($matches.stamp)).UtcDateTime -gt [datetime]::UtcNow.AddSeconds(-25)) {
-          $recentAudio = $true
-        }
-      } catch {}
-    }
     if($stamp -and $stamp -gt [datetime]::UtcNow.AddSeconds(-35) -and $line -match 'v2 business response completed') {
       $recentBusinessResponses++
     }
-    if($stamp -and $stamp -gt [datetime]::UtcNow.AddSeconds(-60) -and $line -match 'wake word detected and confirmed') {
+    if($stamp -and $stamp -gt [datetime]::UtcNow.AddSeconds(-60) -and $line -match 'wake word detected') {
       $recentWakeActivations++
     }
     if($stamp -and $stamp -gt [datetime]::UtcNow.AddSeconds(-60) -and $line -match 'v2 (?:playback error|audio output error|session failure|microphone error)') {
       $recentRuntimeErrors++
     }
-    if($line -match 'Picovoice sidecar READY \d+ \d+ (?<device>.+)$') { $microphone = $matches.device }
     if($line -match 'v2 OpenAI wake microphone audio (?:confirmed|active): (?<device>.+)$') {
       $microphone = $matches.device
       if($stamp -and $stamp -gt [datetime]::UtcNow.AddSeconds(-25)) { $recentAudio = $true }

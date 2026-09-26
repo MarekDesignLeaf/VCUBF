@@ -23,23 +23,11 @@ if(!(Test-Path -LiteralPath $runtime)){throw 'The Voice v2 runtime is missing. R
 $emmaRoot=Split-Path -Parent $app
 $assistantName='Alfonzo'
 $desktopConfigPath=Join-Path $emmaRoot 'config.json'
-$nodeCandidates=@()
 if(Test-Path -LiteralPath $desktopConfigPath){
   try{
     $desktopConfig=Get-Content -LiteralPath $desktopConfigPath -Raw|ConvertFrom-Json
-    if($desktopConfig.LocalNodePath){$nodeCandidates+=[string]$desktopConfig.LocalNodePath}
     if($desktopConfig.WakeWord){$assistantName=[string]$desktopConfig.WakeWord}
   }catch{}
-}
-$nodeCandidates+=(Join-Path $env:LOCALAPPDATA 'VCUBF\node-x64\node.exe')
-$nodeCandidates+=@(Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue|Select-Object -ExpandProperty Source)
-foreach($candidate in @($nodeCandidates|Select-Object -Unique)){
-  if(!(Test-Path -LiteralPath $candidate)){continue}
-  if((& $candidate -p 'process.arch' 2>$null) -eq 'x64'){
-    $env:PICOVOICE_NODE_PATH=$candidate
-    $env:PICOVOICE_NODE_MODULES=Join-Path $emmaRoot 'picovoice-node\node_modules'
-    break
-  }
 }
 
 function Resolve-Python {
@@ -96,25 +84,10 @@ if($alreadyRunning){
 
 if(!$v2Diagnostic.ready){
   $missing=@()
-  if(!$v2Diagnostic.providers.wake.providerConfigured){$missing+='wake-word configuration'}
   if(!$v2Diagnostic.providers.wake.wakeWordPresent){$missing+='wake word'}
-  if($v2Diagnostic.providers.wake.requestedProvider -eq 'picovoice_porcupine'){
-    if(!$v2Diagnostic.providers.wake.packageInstalled){$missing+='Picovoice package'}
-    if(!$v2Diagnostic.providers.wake.picovoiceAccessKeyPresent){$missing+='PICOVOICE_ACCESS_KEY'}
-    if(!$v2Diagnostic.providers.wake.keywordModelPresent){$missing+='Windows .ppn wake-word model'}
-    if(!$v2Diagnostic.providers.wake.picovoiceSettingsValid){$missing+='Picovoice wake-word settings'}
-  }elseif(!$v2Diagnostic.providers.wake.vadSettingsValid){$missing+='Deepgram VAD wake-word settings'}
-  if(!$v2Diagnostic.providers.npuWhisper.providerConfigured){$missing+='speech-to-text provider'}
-  if($v2Diagnostic.providers.wake.requestedProvider -eq 'openai_vad' -and !$v2Diagnostic.providers.wake.vadSettingsValid){$missing+='wake-word voice-gate settings'}
-  if($v2Diagnostic.providers.npuWhisper.effectiveProvider -eq 'deepgram'){
-    if(!$v2Diagnostic.providers.deepgram.apiKeyPresent){$missing+='DEEPGRAM_API_KEY'}
-    if(!$v2Diagnostic.providers.deepgram.streamTimingValid){$missing+='Deepgram streaming timing (utterance end must be 1000–5000 ms)'}
-  }
-  if($v2Diagnostic.providers.npuWhisper.requestedProvider -eq 'npu_whisper' -and !$v2Diagnostic.providers.npuWhisper.runtimePresent -and !$v2Diagnostic.providers.npuWhisper.fallbackActive){
-    $missing+='Qualcomm NPU Whisper runtime'
-  }
+  if(!$v2Diagnostic.providers.wake.vadSettingsValid){$missing+='wake-word voice-gate settings'}
+  if(!$v2Diagnostic.providers.wake.providerConfigured -and $v2Diagnostic.providers.wake.configurationError){$missing+=[string]$v2Diagnostic.providers.wake.configurationError}
   if(!$v2Diagnostic.providers.openaiTts.apiKeyPresent){$missing+='OPENAI_API_KEY'}
-  if($v2Diagnostic.providers.speech.effectiveProvider -ne 'openai'){$missing+='OpenAI speech configuration'}
   [Windows.Forms.MessageBox]::Show("Voice v2 is installed but not configured. Missing: $($missing -join ', ').`n`nSee docs\\VOICE_V2_SETUP.md in the VCUF project. No microphone session was started.","VCUBF $assistantName Voice v2",'OK','Information')|Out-Null
   exit 2
 }
@@ -124,19 +97,12 @@ $ownerPid=if($OwnerProcessId -gt 0){$OwnerProcessId}else{$PID}
 Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
 $arguments=@($python.Prefix) + @("`"$runtime`"",'--run','--parent-pid',$ownerPid,'--stop-file',"`"$stopFile`"")
 $process=Start-Process -FilePath $python.Path -ArgumentList $arguments -WindowStyle Hidden -PassThru
-$wakeEngine=switch($v2Diagnostic.providers.wake.effectiveProvider){
-  'picovoice_porcupine'{'Picovoice (lokálně)'}
-  'openai_vad'{'GPT (OpenAI)'}
-  default{'Deepgram VAD'}
-}
-$sttEngine=switch($v2Diagnostic.providers.npuWhisper.effectiveProvider){
-  'npu_whisper'{'Qualcomm NPU Whisper'}
-  'openai'{'GPT (OpenAI)'}
-  default{'Deepgram'}
-}
+# Voice runs on OpenAI only: wake, transcription and speech.
+$wakeEngine='GPT (OpenAI)'
+$sttEngine='GPT (OpenAI)'
 
 $menu=New-Object Windows.Forms.ContextMenuStrip
-$exit=$menu.Items.Add('Ukončit Emmu Voice v2')
+$exit=$menu.Items.Add("Ukončit $assistantName Voice v2")
 $context=New-Object Windows.Forms.ApplicationContext
 $notify=New-Object Windows.Forms.NotifyIcon -Property @{
   Icon=[Drawing.SystemIcons]::Information

@@ -17,15 +17,15 @@ The authoritative target architecture and staged migration path for the web,
 mobile and Alfonzo voice platform live in
 [`docs/PRODUCTION_ARCHITECTURE.md`](docs/PRODUCTION_ARCHITECTURE.md).
 
-The Windows voice runtime based on Porcupine, Qualcomm NPU Whisper, Deepgram
-fallback and ElevenLabs is documented in [`docs/VOICE_V2_SETUP.md`](docs/VOICE_V2_SETUP.md).
+The Windows voice runtime, which uses OpenAI only (wake word, transcription and
+speech), is documented in [`docs/VOICE_V2_SETUP.md`](docs/VOICE_V2_SETUP.md).
 
 ## Structure
 
 ```
 backend/            Node.js + TypeScript + Express + Prisma + PostgreSQL (Secretary backend API)
 frontend/           React + TypeScript + Vite (web client — desktop, PWA and Capacitor Android)
-windows-companion/  Windows Alfonzo voice runtimes (Voice v2: Porcupine + NPU Whisper + Deepgram fallback + ElevenLabs; legacy Windows-Speech companion)
+windows-companion/  Windows Alfonzo voice runtimes (Voice v2: OpenAI wake word, transcription and speech; legacy Windows-Speech companion)
 docs/               User guide, connector engine, production architecture, voice v2 setup, Android build
 ```
 
@@ -68,30 +68,19 @@ not certify the unavailable original SEC V9/V10 package or production readiness.
 
 ## Committed voice reliability baseline
 
-The Windows Voice v2 companion uses a configurable acoustic wake provider and
-NPU or Deepgram transcription paths. The NPU sidecar rejects segments marked
-`NO_SPEECH`, bounds decoding by audio duration and returns token confidence.
-Only allowlisted short responses with confidence at least 0.45 may use the
-local transcript directly. Longer commands and uncertain responses use the
-authenticated `/command/transcribe` endpoint. Recognised local noise artefacts
-are discarded before that fallback, and transcript filters run before command
-interpretation. These guards reduce false commands; they do not guarantee that
-every background sound is rejected.
+Voice runs on OpenAI only (since 26 September 2026): the Windows Voice v2
+companion gates the microphone locally by amplitude, sends each utterance to
+the authenticated `/command/transcribe` endpoint, which transcribes it with
+OpenAI (`gpt-4o-transcribe` by default, `temperature: 0`, language-specific
+vocabulary hints), and speaks replies with OpenAI TTS. The browser's
+`/command/speak` voice is OpenAI TTS as well. There is no Picovoice, Deepgram,
+local Whisper or ElevenLabs path and no fallback to one. Transcript filters run
+before command interpretation; they reduce false commands but do not guarantee
+that every background sound is rejected.
 
-Since commit `2e93974`, the backend transcription service defaults to
-`whisper-1`, requests `temperature: 0`, and supplies language-specific
-vocabulary hints with support for optional additional phrases. A configured
-`WHISPER_SERVER_URL` enables the local transcription adapter. These are
-source-verified settings, not proof of live provider accuracy or guaranteed
-bit-for-bit deterministic transcription. The companion still does not include
-the working-copy heartbeat, additional TTS fallback and expanded interruption
-changes. A deployed working copy can therefore differ from a clean checkout.
-
-The focused voice baseline has 21 Python gate/receiver tests and 14 mocked
-backend transcription tests. Their successful execution does not establish
-live microphone, acoustic-wake, cloud-provider, mobile or business-action
-acceptance. See [Voice v2 setup](docs/VOICE_V2_SETUP.md) and the
-[verification note](claude/hlasove-ovladani-2026-09-18.md) for evidence limits.
+Passing the Python and mocked backend voice tests does not establish live
+microphone, cloud-provider, mobile or business-action acceptance. See
+[Voice v2 setup](docs/VOICE_V2_SETUP.md).
 
 Invoice-derived KPI analytics are not included in this committed baseline;
 their implementation and documentation remain part of separate working-copy
@@ -932,8 +921,8 @@ Build order should follow the roadmap in the master documentation (Phase 1 → P
   (`WHATSAPP_GRAPH_API_VERSION`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_ACCOUNT_ID`,
   `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `META_APP_SECRET`), the Alfonzo assistant
   values (`OPENAI_API_KEY`, optionally `OPENAI_REALTIME_MODEL`, `OPENAI_REALTIME_VOICE`,
-  `OPENAI_TRANSCRIPTION_MODEL`, `OPENAI_VOICE_MODEL`, `OPENAI_VOICE_TIMEOUT_MS`), optionally the
-  local-transcription bridge (`WHISPER_SERVER_URL`, `WHISPER_MODEL_LABEL`), a strong
+  `OPENAI_TRANSCRIPTION_MODEL`, `OPENAI_VOICE_MODEL`, `OPENAI_VOICE_TIMEOUT_MS`, `OPENAI_TTS_MODEL`,
+  `OPENAI_TTS_VOICE`), a strong
   `SEED_ADMIN_PASSWORD` before seeding, and a 32-byte base64
   `CONNECTOR_ENCRYPTION_KEY` as environment variables. Optional non-secret controls are
   `CONNECTOR_BACKGROUND_SYNC_ENABLED` (defaults to `true`) and
