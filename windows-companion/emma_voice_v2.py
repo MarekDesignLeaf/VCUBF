@@ -39,6 +39,11 @@ import wave
 from aec_audio_processing import AudioProcessor
 import pyaudio
 
+try:
+    import numpy as np
+except ImportError:  # The pure-Python path below still works, only slower.
+    np = None
+
 from emma_common import (
     APP_DIR,
     LANGUAGE_NAMES,
@@ -69,9 +74,12 @@ AEC_FRAME_BYTES = RATE * SAMPLE_WIDTH * 10 // 1_000
 # 10 ms writes.  Keep WebRTC AEC at its required 10 ms cadence, but submit four
 # AEC frames to the audio device at once and retain enough network jitter
 # buffer to survive normal provider streaming variation.
-PLAYBACK_DEVICE_FRAME_MS = 40
+# 100 ms, not 40: on the HDMI/TV endpoint a 40 ms device buffer left no
+# headroom while the microphone thread and echo cancellation share the CPU,
+# and every missed write was an audible crackle (26 Sep 2026).
+PLAYBACK_DEVICE_FRAME_MS = 100
 PLAYBACK_FRAME_BYTES = RATE * SAMPLE_WIDTH * PLAYBACK_DEVICE_FRAME_MS // 1_000
-PLAYBACK_PREBUFFER_MS = 320
+PLAYBACK_PREBUFFER_MS = 500
 PLAYBACK_PREBUFFER_BYTES = RATE * SAMPLE_WIDTH * PLAYBACK_PREBUFFER_MS // 1_000
 MAX_SESSION_SECONDS = 180
 IDLE_AFTER_RESPONSE_SECONDS = 25
@@ -502,10 +510,20 @@ def upsample_pcm16_2x(raw: bytes) -> bytes:
     Linear interpolation avoids delegating sample-rate conversion to the old
     MME compatibility layer used by the default HDMI/TV endpoint.
     """
-    samples = array("h")
-    samples.frombytes(raw[: len(raw) - (len(raw) % SAMPLE_WIDTH)])
-    if not samples:
+    usable = raw[: len(raw) - (len(raw) % SAMPLE_WIDTH)]
+    if not usable:
         return b""
+    if np is not None:
+        # Vectorised: the per-sample Python loop cost several milliseconds per
+        # frame on this ARM CPU, time the audio device did not have.
+        source = np.frombuffer(usable, dtype="<i2").astype(np.int32)
+        output_np = np.empty(source.size * 2, dtype=np.int32)
+        output_np[0::2] = source
+        output_np[1:-1:2] = (source[:-1] + source[1:]) // 2
+        output_np[-1] = source[-1]
+        return output_np.astype("<i2").tobytes()
+    samples = array("h")
+    samples.frombytes(usable)
     output = array("h", [0]) * (len(samples) * 2)
     for index, sample in enumerate(samples):
         output[index * 2] = sample
@@ -1011,6 +1029,7 @@ class DuplexSpeaker:
         self.recent_output_peak = 0
         self.starvation_count = 0
         self.slow_write_count = 0
+        self.underflow_count = 0
         self.frames_written = 0
         self.thread: threading.Thread | None = None
         self.stream = None
@@ -1061,11 +1080,11 @@ class DuplexSpeaker:
                 self.stream.close()
             except Exception:
                 pass
-        if self.frames_written or self.starvation_count or self.slow_write_count:
+        if self.frames_written or self.starvation_count or self.slow_write_count or self.underflow_count:
             log(
                 "v2 playback summary: "
                 f"frames={self.frames_written}, starvation={self.starvation_count}, "
-                f"slow_writes={self.slow_write_count}"
+                f"slow_writes={self.slow_write_count}, device_underflows={self.underflow_count}"
             )
 
     def _worker(self) -> None:
@@ -1169,7 +1188,14 @@ class DuplexSpeaker:
                 self.recent_output_peak = max(int(self.recent_output_peak * 0.85), peak)
             write_started = time.monotonic()
             device_frame = upsample_pcm16_2x(frame) if output_multiplier == 2 else frame
-            self.stream.write(device_frame, exception_on_underflow=False)
+            try:
+                # Report underflows instead of hiding them: an underflow is
+                # exactly what the listener hears as a crackle.
+                self.stream.write(device_frame, exception_on_underflow=True)
+            except IOError as exc:
+                if exc.errno != getattr(pyaudio, "paOutputUnderflowed", -9980):
+                    raise
+                self.underflow_count += 1
             write_elapsed = time.monotonic() - write_started
             if write_elapsed > (PLAYBACK_DEVICE_FRAME_MS / 1_000) * 2.5:
                 self.slow_write_count += 1
