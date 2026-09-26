@@ -2,7 +2,7 @@
   "version": 2,
   "wake": {
     "provider": "openai_vad",
-    "word": "Emma",
+    "word": "Alfonzo",
     "accessKeyEnv": "PICOVOICE_ACCESS_KEY",
     "keywordPath": "",
     "deviceName": "",

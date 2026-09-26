@@ -2728,7 +2728,7 @@ class VoiceSessionV2:
             # response before that delayed transcript arrives.
             log("v2 ignored delayed transcript matching recent Emma speech")
             return
-        wake_word = str(load_config().get("WakeWord") or "Emma")
+        wake_word = str(load_config().get("WakeWord") or DEFAULT_ASSISTANT_NAME)
         barge_in_capture = time.monotonic() < self.barge_in_interrupted_until
         action, command = classify_playback_transcript(
             heard,
