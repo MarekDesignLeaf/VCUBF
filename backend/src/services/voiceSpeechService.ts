@@ -1,28 +1,17 @@
-import { localTranscriptionUrl } from "./localTranscriptionService.js";
-
 /**
- * Spoken replies in a female voice.
+ * Spoken replies through OpenAI text-to-speech.
  *
  * The browser can only use voices installed in Windows, and Windows ships no
- * female Czech voice — {assistant} would be male in Czech no matter what the page did.
- * The local server has Microsoft's free neural voices instead.
+ * female Czech voice. OpenAI's voices speak every language the app supports,
+ * and voice runs on OpenAI only, so this is the one server-side voice.
  *
- * Only the reply text leaves the machine. The microphone audio is transcribed
- * locally and never goes anywhere.
+ * Only the reply text is sent. Configuration:
+ *   OPENAI_API_KEY    required; without it the browser uses its own voice
+ *   OPENAI_TTS_MODEL  optional, default "tts-1"
+ *   OPENAI_TTS_VOICE  optional, default "nova"
  */
 
-/**
- * Long enough for a paragraph, short enough not to stall a conversation.
- *
- * Synthesis costs about a second per hundred characters, so a reply at the 1200
- * character cap below needs ten seconds on an idle machine and considerably more
- * while the NPU is busy transcribing. Fifteen seconds cut those off and answered
- * 503, which the page reads as "use the browser voice" — so the longest replies,
- * the ones where the good voice matters most, were the ones that never got it.
- *
- * The voice server gives up on its own at 28 s, having retried in between. This
- * sits just past that, so what surfaces is its error rather than this timer.
- */
+/** Long enough for a 1200-character reply, short enough not to stall a conversation. */
 const SPEECH_TIMEOUT_MS = 30_000;
 
 export interface SpokenReply {
@@ -31,28 +20,42 @@ export interface SpokenReply {
 }
 
 export function isSpeechConfigured(): boolean {
-  return localTranscriptionUrl() !== null;
+  return Boolean(process.env.OPENAI_API_KEY?.trim());
+}
+
+/** OpenAI accepts 0.25–4.0; the account setting is a multiplier around 1. */
+function openAiSpeed(rate: number): number {
+  if (!Number.isFinite(rate) || rate <= 0) return 1;
+  return Math.min(4, Math.max(0.25, rate));
 }
 
 /**
- * Synthesise one reply, or null when the voice service cannot be reached.
+ * Synthesise one reply, or null when OpenAI cannot be reached.
  *
  * Null is not an error path the caller should surface: it means "use the
- * browser voice", which keeps {assistant} audible.
+ * browser voice", which keeps {assistant} audible. The language is detected by
+ * OpenAI from the text itself, so it is accepted only to keep the call site
+ * stable.
  */
-export async function speakReply(text: string, language: string, rate = 1): Promise<SpokenReply | null> {
-  const base = localTranscriptionUrl();
+export async function speakReply(text: string, _language: string, rate = 1): Promise<SpokenReply | null> {
+  const key = process.env.OPENAI_API_KEY?.trim();
   const trimmed = text.trim();
-  if (!base || !trimmed) return null;
+  if (!key || !trimmed) return null;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SPEECH_TIMEOUT_MS);
   try {
-    const response = await fetch(`${base}/speak`, {
+    const response = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // Cap the length: a spoken reply that runs for minutes is a bug, not a feature.
-      body: JSON.stringify({ text: trimmed.slice(0, 1200), language, rate }),
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: process.env.OPENAI_TTS_MODEL?.trim() || "tts-1",
+        voice: process.env.OPENAI_TTS_VOICE?.trim() || "nova",
+        // Cap the length: a spoken reply that runs for minutes is a bug, not a feature.
+        input: trimmed.slice(0, 1200),
+        response_format: "mp3",
+        speed: openAiSpeed(rate),
+      }),
       signal: controller.signal,
     });
     if (!response.ok) return null;

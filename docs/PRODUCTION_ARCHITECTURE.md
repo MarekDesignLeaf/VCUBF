@@ -6,10 +6,9 @@ fungující business logiku, audit ani ověřená pravidla Emmy.
 
 ## Stav dodávky k 17. září 2026
 
-Z tohoto dokumentu je již dodáno: lokální wake word Porcupine (s automatickým
-Deepgram fallbackem), lokální přepis na Snapdragon NPU (Qualcomm Whisper přes
-ONNX Runtime QNN, fallback Deepgram Nova-3), streamované TTS ElevenLabs,
-jednotný jazyk rozhraní i Emmy v osmi lokalizacích (en-GB, en-US, cs, pl, fr,
+Z tohoto dokumentu je již dodáno: hlas výhradně přes OpenAI (wake word,
+přepis i řeč; Porcupine, Deepgram, NPU Whisper a ElevenLabs byly 26. 9. 2026
+odstraněny), jednotný jazyk rozhraní i Emmy v osmi lokalizacích (en-GB, en-US, cs, pl, fr,
 de, es, it), vynucený stav aktivace wake wordem, katalog menu s automatickým
 testem úplnosti a Windows runtime Voice v2 (`docs/VOICE_V2_SETUP.md`).
 
@@ -76,8 +75,8 @@ Proto se postupuje po vrstvách:
    verzované HTTP/WebSocket tool kontrakty. Dokud není nasazen, existující
    Realtime adaptér zůstává funkčním přechodovým řešením.
 3. **Poskytovatelé hlasu jsou nahraditelní adaptéry.** Produkční výchozí volby
-   jsou Porcupine pro lokální wake word, Deepgram Nova-3 pro STT a ElevenLabs
-   Turbo nebo Cartesia pro streamované TTS. Žádný z nich nesmí být natvrdo
+   jsou od 26. 9. 2026 výhradně OpenAI: wake word přes přepis OpenAI, STT
+   OpenAI (`gpt-4o-transcribe`) a TTS OpenAI. Žádný z nich nesmí být natvrdo
    zabudován do business logiky ani aktivován bez vlastního klíče a testu.
 4. **Web se migruje na Next.js až při splnění parity.** Do té doby React/Vite
    zůstává produkční webový klient. Přepis je přípustný pouze po automatické
@@ -144,7 +143,7 @@ limity a účtování.
 
 ## Provozní rozhodnutí
 
-Neon, Upstash, Deepgram, ElevenLabs/Cartesia a externí komunikační služby se
+Neon, Upstash a externí komunikační služby se
 aktivují až po dodání příslušných produkčních přístupů. Hosting lze přesunout z
 Railway na Render nebo Coolify + Hetzner samostatným infrastrukturním krokem;
 nesmí být součástí změny hlasové logiky.

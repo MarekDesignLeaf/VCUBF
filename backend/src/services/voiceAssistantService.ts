@@ -1,4 +1,3 @@
-import { isLocalTranscriptionConfigured, transcribeLocally } from "./localTranscriptionService.js";
 import { z } from "zod";
 import { PROGRAM_KNOWLEDGE } from "../lib/programKnowledge.js";
 import { VOICE_LANGUAGES } from "../lib/voiceLanguages.js";
@@ -165,7 +164,7 @@ function isLikelyHallucination(text: string): boolean {
   if (/^[a-z0-9.-]+\.(cz|com|sk|pl|net|org|eu|de|co\.uk)[.!?]?$/.test(lower)) return true;
   // Compared without diacritics: the same invented credit comes back as
   // "vytvořil" or "vytvoril" depending on the recogniser and the language, and
-  // the Windows NPU model drops diacritics more often than the cloud one.
+  // speech models drop diacritics inconsistently.
   const folded = lower.normalize("NFKD").replace(/\p{M}+/gu, "");
   const stock = [
     "titulky vytvoril", "titulky pro vas", "preklad:", "preklad a titulky",
@@ -232,21 +231,8 @@ export async function transcribeVoiceAudio(
   // accuracy win.
   const prompt = buildTranscriptionPrompt(isoLanguage, wakeWord, extraVocabulary);
 
-  // Local first: same model family, no per-minute cost, and the recording
-  // never leaves this machine. Falls through to the hosted API when the
-  // local server is not configured or does not answer, so a stopped server
-  // degrades to paid transcription rather than a dead microphone.
-  if (isLocalTranscriptionConfigured()) {
-    const local = await transcribeLocally(audio, isoLanguage, prompt);
-    if (local) {
-      if (isLikelyHallucination(local.text)) return { text: "", model: local.model };
-      return { text: local.text, model: local.model };
-    }
-  }
-
-  // The hosted API is the fallback, so its key is only required here — where it is
-  // used. Checking it first meant a machine with a working local Whisper server and no
-  // OpenAI key could not transcribe at all, which is the opposite of local-first.
+  // Voice runs on OpenAI only: there is no local recogniser and no other
+  // provider to fall back to.
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
 

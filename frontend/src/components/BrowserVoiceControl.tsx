@@ -521,7 +521,7 @@ function ensureAudioContext(): AudioContext | null {
   try {
     // "playback" rather than the default "interactive": the default asks for the
     // smallest buffer the device will accept, which underruns and crackles whenever the
-    // machine is busy — and this one transcribes speech on the NPU. Measured, it doubles
+    // machine is busy. Measured, it doubles
     // the buffer from 10 ms to 20 ms, and ten milliseconds is not perceptible on a
     // spoken sentence.
     if (!outputContext || outputContext.state === "closed") outputContext = new Ctor({ latencyHint: "playback" });
@@ -943,7 +943,8 @@ export function BrowserVoiceControl() {
   /**
    * Which recogniser is running.
    *
-   * "local" is the microphone, Silero and Whisper on the NPU — the way an assistant is
+   * "local" is the microphone and Silero here, with OpenAI transcription through the
+   * backend — the way an assistant is
    * built. "browser" is Chrome's, kept only for when the model or the microphone cannot
    * be had, because a missing file should cost quality rather than the feature.
    */
@@ -1358,7 +1359,7 @@ export function BrowserVoiceControl() {
     await execute(remainder);
   };
 
-  // --- the local pipeline: our microphone, Silero, Whisper on the NPU ---------
+  // --- the local pipeline: our microphone, Silero, OpenAI transcription -------
   useEffect(() => {
     if (!enabled) { setEngine("starting"); return; }
 

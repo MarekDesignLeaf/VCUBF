@@ -42,9 +42,9 @@ $app = Split-Path -Parent $PSCommandPath
 $appDir = Split-Path -Parent $app
 $configPath = Join-Path $appDir 'config.json'
 $tokenPath = Join-Path $appDir 'token.bin'
+$deviceKeyPath = Join-Path $appDir 'device.key'
 $stopFile = Join-Path $appDir 'voice-v2.stop'
 $v2Runtime = Join-Path $app 'emma_voice_v2.py'
-$npuWhisperSidecar = Join-Path $app 'npu_whisper_sidecar.py'
 $v2Runner = Join-Path $app 'Run-VoiceV2.ps1'
 $localProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
 $localBackendProcess = $null
@@ -105,6 +105,21 @@ function Get-ExistingDeviceProfile([string]$Server) {
   }
 }
 
+# Password-free sign-in for the owner's own PC: device.key is a random secret
+# stored DPAPI-protected for this Windows user; the server knows only its hash.
+function Get-DeviceKeyProfile([string]$Server) {
+  if(!(Test-Path -LiteralPath $deviceKeyPath)) { return $null }
+  try {
+    $key = [Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($deviceKeyPath), $null, [Security.Cryptography.DataProtectionScope]::CurrentUser))
+    $result = Invoke-RestMethod -Method POST -Uri "$Server/auth/device/key" -ContentType 'application/json' -Body (@{ key = $key } | ConvertTo-Json) -TimeoutSec 15
+    if($result.token) {
+      Save-PairedProfile $result $Server
+      return $result.user
+    }
+  } catch {}
+  return $null
+}
+
 function Get-DesktopLoginUrl([string]$Server, [string]$Frontend, [string]$Email) {
   $url = Get-SecretaryUrl "$Frontend/login" $Email
   $token = Get-DeviceToken
@@ -132,8 +147,7 @@ function Stop-VoiceV2 {
   Get-CimInstance Win32_Process | Where-Object {
     $_.CommandLine -and (
       $_.CommandLine.IndexOf($v2Runner,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
-      ($_.CommandLine.IndexOf($v2Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -like '*--run*') -or
-      $_.CommandLine.IndexOf($npuWhisperSidecar,[StringComparison]::OrdinalIgnoreCase) -ge 0
+      ($_.CommandLine.IndexOf($v2Runtime,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -like '*--run*')
     )
   } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   $script:voiceRunnerProcess = $null
@@ -407,6 +421,7 @@ try {
   # remote deployment; requiring an old paired profile here prevented the
   # from starting after a perfectly valid local sign-in.
   $profile = if($localMode) { $null } else { Get-ExistingDeviceProfile $server }
+  if(!$localMode -and !$profile) { $profile = Get-DeviceKeyProfile $server }
   $pairing = $null
   if(!$localMode -and !$profile) {
     try { $pairing = Invoke-RestMethod -Method POST -Uri "$server/auth/device/start" -ContentType 'application/json' -Body '{}' -TimeoutSec 15 } catch {}
