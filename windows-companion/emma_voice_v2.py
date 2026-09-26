@@ -215,7 +215,7 @@ def backend_transcribe_pcm(pcm16: bytes, sample_rate: int, wake_word: str = "") 
         output.writeframes(pcm16)
     config = load_config()
     query = urlencode({"wake_word": wake_word}) if wake_word else ""
-    url = config.get("ServerUrl", "http://localhost:4000").rstrip("/") + "/command/transcribe"
+    url = config.get("ServerUrl", "https://backend-production-7952.up.railway.app").rstrip("/") + "/command/transcribe"
     if query:
         url += "?" + query
     request = urllib.request.Request(

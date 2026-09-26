@@ -1,4 +1,7 @@
-param([switch]$StartNow)
+# Default: the companion works with the live Secretary on Railway, the single
+# source of truth. -LocalDevelopment points it at a backend and frontend run
+# from this checkout instead (localhost:4000 / localhost:5173), for testing code.
+param([switch]$StartNow,[switch]$LocalDevelopment)
 
 $ErrorActionPreference='Stop'
 $source=Split-Path -Parent $PSCommandPath
@@ -45,10 +48,12 @@ Get-CimInstance Win32_Process | Where-Object {
 } | ForEach-Object { Stop-InstallerProcessTree ([int]$_.ProcessId) }
 # Remove only stale local development runtimes from this VCUBF checkout. They
 # otherwise keep ports 4000/5173 occupied after an older launcher was replaced.
-Get-CimInstance Win32_Process | Where-Object {
-  $_.CommandLine -and $_.CommandLine.IndexOf($projectRoot,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-  $_.CommandLine -match '(tsx.*src[\\/]server\.ts|vite.*--host)'
-} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+if($LocalDevelopment){
+  Get-CimInstance Win32_Process | Where-Object {
+    $_.CommandLine -and $_.CommandLine.IndexOf($projectRoot,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+    $_.CommandLine -match '(tsx.*src[\\/]server\.ts|vite.*--host)'
+  } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
 Get-CimInstance Win32_Process | Where-Object {
   $_.CommandLine -and (
     $_.CommandLine.IndexOf($legacyBrowserProfile,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
@@ -124,20 +129,31 @@ $model=if($tts.provider -eq 'openai' -and $tts.model -notlike 'eleven*' -and $tt
 $voiceConfig.tts=[pscustomobject]@{provider='openai';apiKeyEnv='OPENAI_API_KEY';model=$model;voice=$voiceName;deviceName=[string]$tts.deviceName}
 $voiceConfig | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $activeConfig -Encoding UTF8
 
-# The desktop test build runs the browser UI, API and the voice runtime from this checkout.
-# Keep all three on the same local origin pair so no test command can silently
-# fall through to an older Railway deployment.
+# Production (default): the browser UI, API and voice runtime all use the live
+# Secretary on Railway, so every voice command acts on the real business data
+# and connectors. The first start pairs this PC with the signed-in account in
+# the browser (device pairing, 30-day token, audited approval).
+# -LocalDevelopment: all three use this checkout on localhost instead, so no
+# test command can reach production.
+$productionServer='https://backend-production-7952.up.railway.app'
+$productionFrontend='https://frontend-production-ee13.up.railway.app'
 $desktopConfigPath=Join-Path (Split-Path -Parent $target) 'config.json'
 $codexNode=Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
 $localNodePath=if(Test-Path -LiteralPath $codexNode){$codexNode}else{[string](Get-Command 'node.exe' -CommandType Application -ErrorAction SilentlyContinue|Select-Object -ExpandProperty Source -First 1)}
 if(Test-Path -LiteralPath $desktopConfigPath){
   try{$desktopConfig=Get-Content -LiteralPath $desktopConfigPath -Raw|ConvertFrom-Json}catch{$desktopConfig=[pscustomobject]@{}}
 }else{$desktopConfig=[pscustomobject]@{}}
+$previousServer=if($desktopConfig.PSObject.Properties['ServerUrl']){[string]$desktopConfig.ServerUrl}else{''}
+$targetServer=if($LocalDevelopment){'http://localhost:4000'}else{$productionServer}
+if($previousServer -and $previousServer.TrimEnd('/') -ne $targetServer){
+  # A token issued by one backend is not valid on another; pair again.
+  Remove-Item -LiteralPath (Join-Path (Split-Path -Parent $target) 'token.bin') -Force -ErrorAction SilentlyContinue
+}
 foreach($pair in @(
-  @('LocalMode',$true),
+  @('LocalMode',[bool]$LocalDevelopment),
   @('LocalProjectRoot',$projectRoot),
-  @('ServerUrl','http://localhost:4000'),
-  @('FrontendUrl','http://localhost:5173'),
+  @('ServerUrl',$targetServer),
+  @('FrontendUrl',$(if($LocalDevelopment){'http://localhost:5173'}else{$productionFrontend})),
   @('LocalNodePath',$localNodePath)
 )){
   if($desktopConfig.PSObject.Properties[$pair[0]]){$desktopConfig.($pair[0])=$pair[1]}
@@ -146,7 +162,7 @@ foreach($pair in @(
 $desktopConfig|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $desktopConfigPath -Encoding UTF8
 
 $prismaCli=Join-Path $projectRoot 'backend\node_modules\prisma\build\index.js'
-if($localNodePath -and (Test-Path -LiteralPath $prismaCli)){
+if($LocalDevelopment -and $localNodePath -and (Test-Path -LiteralPath $prismaCli)){
   $previousEngineType=$env:PRISMA_CLIENT_ENGINE_TYPE
   $previousErrorAction=$ErrorActionPreference
   try{
@@ -191,6 +207,11 @@ $desktopShortcut.Save()
 Write-Host "VCUBF Secretary installed in $target"
 Write-Host "The single desktop icon opens Secretary and Voice v2 together. Closing that browser window stops Voice v2."
 Write-Host "Voice v2 uses OpenAI for the wake word, transcription and speech."
+if($LocalDevelopment){
+  Write-Host "Local development mode: Secretary and voice use this checkout on localhost:4000 / localhost:5173."
+}else{
+  Write-Host "Secretary and voice use the live system on Railway ($productionServer). The first start asks you to approve this PC in the browser."
+}
 if($StartNow){
   Start-Process -FilePath $desktopShortcut.TargetPath -ArgumentList $desktopShortcut.Arguments -WindowStyle Hidden
 }

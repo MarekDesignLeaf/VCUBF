@@ -26,10 +26,20 @@ if($openAiKey) {
   try { $openAiApiOk = (Invoke-WebRequest -Uri 'https://api.openai.com/v1/models' -Headers @{Authorization="Bearer $openAiKey"} -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 } catch {}
 }
 try {
-  $session = Invoke-RestMethod -Uri "$server/auth/local-test-active-session" -TimeoutSec 3
-  $serverLanguage = [string]$session.user.voiceLanguage
-  if($session.token) {
-    $headers = @{Authorization="Bearer $($session.token)"}
+  if($config.LocalMode -eq $true) {
+    $session = Invoke-RestMethod -Uri "$server/auth/local-test-active-session" -TimeoutSec 3
+    $serverLanguage = [string]$session.user.voiceLanguage
+    $token = [string]$session.token
+  } else {
+    # The live system: use this PC's paired device token.
+    Add-Type -AssemblyName System.Security
+    $protected = [IO.File]::ReadAllBytes((Join-Path $root 'token.bin'))
+    $token = [Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect($protected, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser))
+    $me = Invoke-RestMethod -Uri "$server/auth/me" -Headers @{Authorization="Bearer $token"} -TimeoutSec 10
+    $serverLanguage = [string]$me.voiceLanguage
+  }
+  if($token) {
+    $headers = @{Authorization="Bearer $token"}
     $state = Invoke-RestMethod -Uri "$server/command/voice-state" -Headers $headers -TimeoutSec 3
     $conversations = @(Invoke-RestMethod -Uri "$server/command/voice-conversations?limit=20" -Headers $headers -TimeoutSec 3)
     $activeConversationCount = @($conversations | Where-Object { $_.status -eq 'active' }).Count

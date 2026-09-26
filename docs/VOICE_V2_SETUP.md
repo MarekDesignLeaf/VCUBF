@@ -41,6 +41,20 @@ Secretary**. That shortcut opens one dedicated Secretary browser window and
 starts Voice v2 for that window only. Closing the Secretary window stops Voice
 v2 and any active conversation.
 
+**Which Secretary it talks to.** By default the installer points the browser
+window and Voice v2 at the live Secretary on Railway
+(`https://backend-production-7952.up.railway.app`,
+`https://frontend-production-ee13.up.railway.app`), so voice commands act on
+the real business data and connectors. On the first start the window opens the
+account page with a pairing code: sign in and approve this PC. The PC then
+holds a 30-day device token (DPAPI-protected `token.bin`); the approval is
+audited, and a password change or account disablement revokes it. Changing
+the target backend deletes the old token, so the PC pairs again.
+
+For testing code from this checkout, install with `-LocalDevelopment`: the
+window, API and voice then use `localhost:5173` / `localhost:4000` and the
+passwordless local test sign-in, and nothing reaches production.
+
 When Voice v2 is running, it has an icon in the Windows notification area.
 Right-click it and choose **Ukončit Alfonzo Voice v2** to stop the wake
 listener and any active conversation.
