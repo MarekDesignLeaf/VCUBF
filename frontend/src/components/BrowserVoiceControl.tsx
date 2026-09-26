@@ -4,6 +4,7 @@ import { DEFAULT_ASSISTANT_NAME } from "../assistantName";
 import { api, getToken, refreshLocalSessionToken, type MobileAssistantResponse } from "../api/client";
 import { appLanguage } from "../i18n";
 import { useAuth } from "../context/useAuth";
+import { isDesktopCompanionWindow } from "../lib/platform";
 import { MacroRecorder, replayMacro, type MacroStep } from "../lib/macroRecorder";
 import {
   learningPhrases,
@@ -879,6 +880,9 @@ function createRecogniser(): Recogniser | null {
 }
 
 export function BrowserVoiceControl() {
+  // In the window opened by the desktop launcher Alfonzo on the PC listens and
+  // speaks; this window stays silent so nothing is heard or executed twice.
+  const companionOwnsVoice = isDesktopCompanionWindow();
   const { user, updateUser } = useAuth();
   const navigate = useNavigate();
   const language = appLanguage(user?.voiceLanguage);
@@ -892,7 +896,7 @@ export function BrowserVoiceControl() {
   const speechRate = user?.voiceSpeechRate ?? 1.15;
   const assistantName = (user?.assistantName || hotword).trim();
 
-  const [enabled, setEnabled] = useState(voiceWasEnabled);
+  const [enabled, setEnabled] = useState(() => !companionOwnsVoice && voiceWasEnabled());
   const [status, setStatus] = useState<"idle" | "hearing" | "thinking">("idle");
   const [heard, setHeard] = useState("");
   const [interim, setInterim] = useState("");
@@ -958,7 +962,7 @@ export function BrowserVoiceControl() {
   const namesRef = useRef<string[]>([]);
 
   useEffect(() => { enabledRef.current = enabled; }, [enabled]);
-  useEffect(() => { rememberVoiceEnabled(enabled); }, [enabled]);
+  useEffect(() => { if (!companionOwnsVoice) rememberVoiceEnabled(enabled); }, [enabled, companionOwnsVoice]);
   useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
   useEffect(() => { stageRef.current = learningStage; }, [learningStage]);
   useEffect(() => { stepsRef.current = recordedSteps; }, [recordedSteps]);
@@ -1105,7 +1109,7 @@ export function BrowserVoiceControl() {
   }, [enabled, silence]);
 
   const speak = useCallback((text: string) => {
-    if (!text) return;
+    if (!text || companionOwnsVoice) return;
     currentPlayback?.stop();
     currentPlayback = null;
     try { window.speechSynthesis?.cancel(); } catch { /* not everywhere */ }
@@ -1154,7 +1158,7 @@ export function BrowserVoiceControl() {
         window.speechSynthesis.speak(utterance);
       } catch { /* Speech output is optional. */ }
     })();
-  }, [language, speechRate]);
+  }, [language, speechRate, companionOwnsVoice]);
 
 
   const phrases = learningPhrases(language);
@@ -1676,7 +1680,7 @@ export function BrowserVoiceControl() {
         <span className={`voice-state ${enabled ? "is-live" : ""}`}>{statusLabel}</span>
       </header>
 
-      <button
+      {!companionOwnsVoice && <button
         type="button"
         onClick={() => {
           setError(null);
@@ -1688,7 +1692,7 @@ export function BrowserVoiceControl() {
         disabled={!supported}
       >
         {enabled ? copy.pause(assistantName) : copy.enable(assistantName)}
-      </button>
+      </button>}
 
       {learningStage !== "off" ? (
         <div className="learning-banner">
