@@ -29,6 +29,18 @@ The backend is the source of truth.
 
 The frontend must not contain business logic. It displays state, receives input and confirms actions.
 
+## Voice assistant naming rule
+
+The canonical assistant name is `Alfonzo`.
+
+Use `Alfonzo` in all new user-facing text, documentation, launcher names, scripts and runtime entry points.
+
+Do not introduce new `Emma`, `Ema`, `emma_*` or `VCUBF-Emma` names.
+
+Existing `Emma` names may remain only as legacy compatibility shims for already installed Windows shortcuts, old app data folders, historical migrations or database columns that cannot be renamed without a tested migration.
+
+When old compatibility names are touched, prefer adding an Alfonzo-facing wrapper first, then migrate callers, then remove the legacy name only after installed runtime compatibility is confirmed.
+
 ## Do not rebuild the wrong thing
 
 Do not build a generic chatbot.
