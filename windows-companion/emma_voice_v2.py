@@ -886,7 +886,7 @@ def self_test() -> bool:
         and is_explicit_stop("Přestaň", "cs-CZ")
         and classify_playback_transcript(
             "Né, a nezapisé vytči.",
-            "Kontakt jsem vytvořila.",
+            "Kontakt jsem vytvořil.",
             "cs-CZ",
             "Emma",
             True,

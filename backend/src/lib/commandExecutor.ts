@@ -168,7 +168,7 @@ function connectorSyncMessage(data: unknown, language: string): string {
   const problems = failed.map((item) => connectorProblem(item.connectorKey ?? "", item.status ?? "", czech));
   // Say what to do about it, rather than leaving the user to work it out.
   const where = czech ? " Zapnete ho v Konektorech." : " You can turn it on under Connectors.";
-  const lead = synced ? (czech ? "Synchronizovala jsem " + synced + ". " : "Synced " + synced + ". ") : "";
+  const lead = synced ? (czech ? "Synchronizoval jsem " + synced + ". " : "Synced " + synced + ". ") : "";
   return lead + problems.join(", ") + "." + (failed.length === 1 ? where : "");
 }
 

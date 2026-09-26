@@ -164,7 +164,7 @@ function assistantServiceMessage(language: string, kind: "unavailable" | "unsupp
   const messages: Record<string, Record<typeof kind, string>> = {
     cs: {
       unavailable: "Teď se nemohu spojit s jazykovou službou. Zkuste prosím přímý příkaz.",
-      unsupported: "Požadavku jsem porozuměla, ale tato operace zatím není podporovaná. Zkuste ji prosím říct jako jednu přímou akci.",
+      unsupported: "Požadavku jsem porozuměl, ale tato operace zatím není podporovaná. Zkuste ji prosím říct jako jednu přímou akci.",
     },
     pl: {
       unavailable: "Nie mogę teraz połączyć się z usługą językową. Spróbuj wydać bezpośrednie polecenie.",

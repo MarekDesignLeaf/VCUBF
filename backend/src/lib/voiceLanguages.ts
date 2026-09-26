@@ -206,7 +206,7 @@ export function languageSwitchMessage(language: VoiceLanguage) {
   const messages: Record<VoiceLanguage, string> = {
     "en-GB": "Language changed to English. {assistant} and the Secretary menu now use English.",
     "en-US": "Language changed to English. {assistant} and the Secretary menu now use English.",
-    "cs-CZ": "Jazyk jsem změnila na češtinu. {assistant} i menu Secretary nyní používají češtinu.",
+    "cs-CZ": "Jazyk jsem změnil na češtinu. {assistant} i menu Secretary nyní používají češtinu.",
     "pl-PL": "Zmieniono język na polski. {assistant} i menu Secretary używają teraz języka polskiego.",
     "fr-FR": "La langue a été changée en français. {assistant} et le menu Secretary utilisent maintenant le français.",
     "de-DE": "Die Sprache wurde auf Deutsch geändert. {assistant} und das Secretary-Menü verwenden jetzt Deutsch.",

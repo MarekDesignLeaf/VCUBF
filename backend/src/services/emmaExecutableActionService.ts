@@ -88,7 +88,7 @@ function invoicePreparationMessage(user: AuthedUser, client: Row, issues: string
   const labels = issueLabels[locale] ?? issueLabels.en;
   const warning = issues.length ? ` ${locale === "cs" ? "Upozornění" : locale === "pl" ? "Uwaga" : "Warning"}: ${issues.map((issue) => labels[issue]).join(", ")}.` : "";
   if (locale === "cs") return `Našel jsem klienta ${name} a otevírám novou fakturu s jeho uloženými údaji.${warning}`;
-  if (locale === "pl") return `Znalazłam klienta ${name} i otwieram nową fakturę z jego zapisanymi danymi.${warning}`;
+  if (locale === "pl") return `Znalazłem klienta ${name} i otwieram nową fakturę z jego zapisanymi danymi.${warning}`;
   return `I found ${name} and am opening a new invoice with the saved client details.${warning}`;
 }
 
