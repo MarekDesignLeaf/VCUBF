@@ -24,9 +24,9 @@ Environment:
 | Railway Postgres deploy | Passed | 2026-09-26 | Latest Postgres deployment reports SUCCESS | Volume mounted at `/var/lib/postgresql/data` |
 | GitHub CI | Passed | 2026-09-26 | Latest checked run reports success | Node 22 CI runtime |
 | Production frontend load | Not checked |  |  | Requires opening live URL |
-| Production backend health | Not checked |  |  | Requires live endpoint check |
+| Production backend health | Passed | 2026-09-26 | `curl -i https://backend-production-7952.up.railway.app/health` returned HTTP 200 and JSON `{ "status": "ok", "build": "aaa9fe9da4a5" }` | Confirmed from Windows command prompt by owner |
 | Production login | Not checked |  |  | Requires valid production user |
-| Production database migration | Not checked |  |  | Requires migration status check |
+| Production database migration | Passed | 2026-09-26 | Railway backend logs show 32 migrations found and no pending migrations to apply | Production Postgres connected through Railway internal hostname |
 | Production create client | Not checked |  |  | Use temporary test record |
 | Production create lead | Not checked |  |  | Use temporary test record |
 | Production create job | Not checked |  |  | Use temporary test record |
@@ -86,7 +86,20 @@ Not checked
 Result:
 
 ```text
-Not checked
+Passed 2026-09-26.
+
+Command used:
+
+curl -i https://backend-production-7952.up.railway.app/health
+
+Observed response:
+
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+Server: railway-hikari
+x-railway-edge: lhr1
+
+{"status":"ok","build":"aaa9fe9da4a5"}
 ```
 
 ### 3. Authentication
