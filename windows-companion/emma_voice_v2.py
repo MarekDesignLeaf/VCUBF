@@ -2,7 +2,7 @@
 
 Voice v2 is the only installed Windows listener. When configured, it uses
 OpenAI speech-to-text through the authenticated Secretary backend for both the
-wake gate and the command transcript, with ElevenLabs PCM streaming TTS, while
+wake gate and the command transcript, with OpenAI PCM streaming TTS, while
 every business operation still goes through the authenticated,
 permission-checked and audited Secretary API.
 
@@ -75,7 +75,7 @@ AEC_FRAME_BYTES = RATE * SAMPLE_WIDTH * 10 // 1_000
 # PortAudio's blocking Windows output is not reliable when Python feeds it in
 # 10 ms writes.  Keep WebRTC AEC at its required 10 ms cadence, but submit four
 # AEC frames to the audio device at once and retain enough network jitter
-# buffer to survive normal ElevenLabs streaming variation.
+# buffer to survive normal provider streaming variation.
 PLAYBACK_DEVICE_FRAME_MS = 40
 PLAYBACK_FRAME_BYTES = RATE * SAMPLE_WIDTH * PLAYBACK_DEVICE_FRAME_MS // 1_000
 PLAYBACK_PREBUFFER_MS = 320
@@ -150,15 +150,10 @@ def default_v2_config() -> dict[str, Any]:
         },
         "tts": {
             "provider": "openai",
-            "apiKeyEnv": "ELEVENLABS_API_KEY",
-            "voiceId": "",
-            "model": "eleven_flash_v2_5",
-            "outputFormat": "pcm_24000",
+            "apiKeyEnv": "OPENAI_API_KEY",
+            "model": "tts-1",
+            "voice": "nova",
             "deviceName": "",
-            "fallbackProvider": "openai",
-            "fallbackApiKeyEnv": "OPENAI_API_KEY",
-            "fallbackModel": "tts-1",
-            "fallbackVoice": "nova",
         },
         "session": {
             "followUpSeconds": 25,
@@ -665,7 +660,7 @@ def pcm_levels(raw: bytes) -> tuple[float, int]:
 
 
 def upsample_pcm16_2x(raw: bytes) -> bytes:
-    """Convert ElevenLabs 24 kHz PCM to native 48 kHz Windows PCM.
+    """Convert 24 kHz PCM to native 48 kHz Windows PCM.
 
     Linear interpolation avoids delegating sample-rate conversion to the old
     MME compatibility layer used by the default HDMI/TV endpoint.
@@ -1069,7 +1064,6 @@ def self_test() -> bool:
         and barge_in_thresholds(0, 0) == (750.0, 2_400)
         and barge_in_thresholds(5_000, 16_000) == (1_100.0, 3_200)
         and playback_buffer_self_test()
-        and "".join(ElevenLabsPcmTts.chunks("a" * 7_001)) == "a" * 7_001
         and stream_timing_settings(defaults) == (250, 1_000)
         # A dictated telephone number arrives in groups. A command that stops
         # inside one waits for the rest; a complete number and an ordinary
@@ -1226,21 +1220,15 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
             "fallbackReason": stt_fallback_reason,
             "configurationError": npu_error,
         },
-        "elevenlabs": {
-            "provider": "elevenlabs",
-            "apiKeyPresent": bool(environment_value(str(tts["apiKeyEnv"]))),
-            "voiceIdPresent": configured_value(tts.get("voiceId")),
-            "model": tts["model"],
-            "outputFormat": tts["outputFormat"],
-        },
-        "openaiTtsFallback": {
-            "provider": str(tts.get("fallbackProvider") or "openai"),
-            "apiKeyPresent": bool(environment_value(str(tts.get("fallbackApiKeyEnv") or "OPENAI_API_KEY"))),
-            "model": str(tts.get("fallbackModel") or "tts-1"),
-            "voice": str(tts.get("fallbackVoice") or "nova"),
+        "openaiTts": {
+            "provider": "openai",
+            "apiKeyPresent": bool(environment_value("OPENAI_API_KEY")),
+            "model": str(tts.get("model") or "tts-1"),
+            "voice": str(tts.get("voice") or "nova"),
         },
         "speech": {
             "requestedProvider": str(tts.get("provider") or "openai"),
+            "effectiveProvider": "openai" if tts.get("provider", "openai") == "openai" else "",
         },
         "openaiStt": {
             "provider": "openai",
@@ -1257,10 +1245,8 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
             configured["wake"]["effectiveProvider"] != "deepgram_vad"
             or configured["deepgram"]["apiKeyPresent"]
         )
-        and (
-            (configured["elevenlabs"]["apiKeyPresent"] and configured["elevenlabs"]["voiceIdPresent"])
-            or configured["openaiTtsFallback"]["apiKeyPresent"]
-        )
+        and configured["speech"]["effectiveProvider"] == "openai"
+        and configured["openaiTts"]["apiKeyPresent"]
     )
     return {"runtime": RUNTIME_NAME, "ready": ready, "providers": configured}
 
@@ -1455,100 +1441,15 @@ class DuplexSpeaker:
             self.last_output_at = time.monotonic()
 
 
-class ElevenLabsPcmTts:
-    def __init__(self, config: dict[str, Any]):
-        self.api_key = environment_value(str(config["apiKeyEnv"]))
-        self.voice_id = str(config["voiceId"]).strip()
-        self.model = str(config["model"]).strip()
-        self.output_format = str(config["outputFormat"]).strip()
-
-    @staticmethod
-    def chunks(text: str, limit: int = 3_500) -> list[str]:
-        remaining = text.strip()
-        result: list[str] = []
-        while len(remaining) > limit:
-            split_at = max(
-                remaining.rfind(". ", 0, limit),
-                remaining.rfind("! ", 0, limit),
-                remaining.rfind("? ", 0, limit),
-                remaining.rfind("\n", 0, limit),
-                remaining.rfind(" ", 0, limit),
-            )
-            if split_at < limit // 2:
-                split_at = limit
-            else:
-                split_at += 1
-            result.append(remaining[:split_at].strip())
-            remaining = remaining[split_at:].strip()
-        if remaining:
-            result.append(remaining)
-        return result
-
-    def stream(self, text: str, language: str, speaker: DuplexSpeaker, generation: int, current_generation: callable) -> None:
-        if not self.api_key or not self.voice_id:
-            raise RuntimeError("ELEVENLABS_NOT_CONFIGURED")
-        request_started = time.monotonic()
-        first_audio_logged = False
-        rendered_audio = bytearray()
-        audio_limit_reached = False
-        query = urlencode({"output_format": self.output_format, "enable_logging": "false"})
-        for text_chunk in self.chunks(text):
-            if current_generation() != generation:
-                return
-            request = urllib.request.Request(
-                f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}/stream?{query}",
-                data=json.dumps({
-                    "text": text_chunk,
-                    "model_id": self.model,
-                    "language_code": language.split("-", 1)[0].lower(),
-                }).encode("utf-8"),
-                method="POST",
-                headers={"xi-api-key": self.api_key, "Content-Type": "application/json", "Accept": "audio/pcm"},
-            )
-            with urllib.request.urlopen(request, timeout=15) as response:
-                read_available = getattr(response, "read1", response.read)
-                while current_generation() == generation:
-                    # `HTTPResponse.read(n)` may wait for all n bytes. `read1`
-                    # returns currently available PCM sooner and lets the
-                    # playback thread maintain a continuous jitter buffer.
-                    chunk = read_available(PLAYBACK_FRAME_BYTES * 8)
-                    if not chunk:
-                        break
-                    if not first_audio_logged:
-                        first_audio_logged = True
-                        log(f"v2 TTS first PCM received in {int((time.monotonic() - request_started) * 1_000)}ms")
-                    remaining = MAX_TTS_PCM_BYTES - len(rendered_audio)
-                    if remaining <= 0:
-                        audio_limit_reached = True
-                        break
-                    rendered_audio.extend(chunk[:remaining])
-                    if len(chunk) > remaining or len(rendered_audio) >= MAX_TTS_PCM_BYTES:
-                        audio_limit_reached = True
-                        break
-            if audio_limit_reached:
-                log(f"v2 TTS provider output capped at {MAX_TTS_AUDIO_SECONDS}s")
-                break
-        if current_generation() == generation:
-            if not rendered_audio:
-                raise RuntimeError("ELEVENLABS_EMPTY_AUDIO")
-            # ElevenLabs returns several seconds of PCM in a few hundred
-            # milliseconds. Queue it as one continuous buffer so network and
-            # Python scheduling cannot create audible boundaries.
-            speaker.enqueue(bytes(rendered_audio))
-            speaker.finish()
-            log(
-                "v2 TTS ready for uninterrupted playback in "
-                f"{int((time.monotonic() - request_started) * 1_000)}ms; bytes={len(rendered_audio)}"
-            )
-
-
 class OpenAIPcmTts:
-    """24 kHz PCM fallback using the OpenAI Audio Speech endpoint."""
+    """OpenAI-only 24 kHz PCM speech; failures never switch providers."""
 
     def __init__(self, config: dict[str, Any]):
-        self.api_key = environment_value(str(config.get("fallbackApiKeyEnv") or "OPENAI_API_KEY"))
-        self.model = str(config.get("fallbackModel") or "tts-1").strip()
-        self.voice = str(config.get("fallbackVoice") or "nova").strip()
+        if config.get("provider", "openai") != "openai":
+            raise RuntimeError("OPENAI_TTS_REQUIRED")
+        self.api_key = environment_value("OPENAI_API_KEY")
+        self.model = str(config.get("model") or "tts-1").strip()
+        self.voice = str(config.get("voice") or "nova").strip()
 
     def stream(self, text: str, language: str, speaker: DuplexSpeaker, generation: int, current_generation: callable) -> None:
         if not self.api_key:
@@ -1587,37 +1488,9 @@ class OpenAIPcmTts:
         speaker.enqueue(bytes(rendered_audio))
         speaker.finish()
         log(
-            "v2 OpenAI TTS fallback ready for uninterrupted playback in "
+            "v2 OpenAI TTS ready for uninterrupted playback in "
             f"{int((time.monotonic() - request_started) * 1_000)}ms; bytes={len(rendered_audio)}"
         )
-
-
-class ResilientPcmTts:
-    """Use one speaker pipeline and fail over before any PCM is queued."""
-
-    def __init__(self, config: dict[str, Any]):
-        requested = str(config.get("provider") or "elevenlabs").strip().lower()
-        if requested == "openai":
-            self.primary = OpenAIPcmTts(config)
-            self.fallback = ElevenLabsPcmTts(config)
-            self.primary_name = "OpenAI"
-            self.fallback_name = "ElevenLabs"
-        else:
-            self.primary = ElevenLabsPcmTts(config)
-            self.fallback = OpenAIPcmTts(config)
-            self.primary_name = "ElevenLabs"
-            self.fallback_name = "OpenAI"
-
-    def stream(self, text: str, language: str, speaker: DuplexSpeaker, generation: int, current_generation: callable) -> None:
-        try:
-            self.primary.stream(text, language, speaker, generation, current_generation)
-            return
-        except urllib.error.HTTPError as exc:
-            log(f"v2 {self.primary_name} TTS unavailable ({exc.code}); switching to {self.fallback_name}")
-        except (OSError, urllib.error.URLError, RuntimeError) as exc:
-            log(f"v2 {self.primary_name} TTS unavailable ({type(exc).__name__}); switching to {self.fallback_name}")
-        if current_generation() == generation:
-            self.fallback.stream(text, language, speaker, generation, current_generation)
 
 
 class NpuWhisperClient:
@@ -1962,6 +1835,9 @@ class OpenAIWakeWord:
                 if not audio_ready.is_set():
                     audio_ready.set()
                     log(f"v2 OpenAI wake microphone audio confirmed: {input_device_name}")
+                if time.monotonic() - getattr(self, "last_audio_log", 0.0) >= 10.0:
+                    self.last_audio_log = time.monotonic()
+                    log(f"v2 OpenAI wake microphone audio active: {input_device_name}")
                 if heartbeat.paused.is_set():
                     pre_roll.clear()
                     active = []
@@ -2336,7 +2212,7 @@ class VoiceSessionV2:
         self.aec.set_stream_format(RATE, CHANNELS, RATE, CHANNELS)
         self.aec.set_reverse_stream_format(RATE, CHANNELS)
         self.speaker = DuplexSpeaker(self.audio, self.aec, self.aec_lock, config)
-        self.tts = ResilientPcmTts(config["tts"])
+        self.tts = OpenAIPcmTts(config["tts"])
         self.transcript = TranscriptStore()
         self.stop = asyncio.Event()
         self.turn_task: asyncio.Task | None = None

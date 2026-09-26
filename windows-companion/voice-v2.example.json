@@ -35,15 +35,10 @@
   },
   "tts": {
     "provider": "openai",
-    "apiKeyEnv": "ELEVENLABS_API_KEY",
-    "voiceId": "SET_YOUR_ELEVENLABS_VOICE_ID",
-    "model": "eleven_flash_v2_5",
-    "outputFormat": "pcm_24000",
-    "deviceName": "",
-    "fallbackProvider": "openai",
-    "fallbackApiKeyEnv": "OPENAI_API_KEY",
-    "fallbackModel": "tts-1",
-    "fallbackVoice": "nova"
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "model": "tts-1",
+    "voice": "nova",
+    "deviceName": ""
   },
   "session": {
     "followUpSeconds": 25,

@@ -11,7 +11,7 @@ Add-Type -AssemblyName System.Windows.Forms
 # A desktop shortcut can outlive a change to a user environment variable.
 # Reload the persisted credentials for this process before Python is launched,
 # so an updated provider key is used on the very next restart.
-foreach($secretName in @('DEEPGRAM_API_KEY','ELEVENLABS_API_KEY','PICOVOICE_ACCESS_KEY','OPENAI_API_KEY')) {
+foreach($secretName in @('OPENAI_API_KEY')) {
   $userValue=[Environment]::GetEnvironmentVariable($secretName,'User')
   if($userValue) { Set-Item -Path "Env:$secretName" -Value $userValue }
 }
@@ -113,8 +113,8 @@ if(!$v2Diagnostic.ready){
   if($v2Diagnostic.providers.npuWhisper.requestedProvider -eq 'npu_whisper' -and !$v2Diagnostic.providers.npuWhisper.runtimePresent -and !$v2Diagnostic.providers.npuWhisper.fallbackActive){
     $missing+='Qualcomm NPU Whisper runtime'
   }
-  if(!$v2Diagnostic.providers.elevenlabs.apiKeyPresent){$missing+='ELEVENLABS_API_KEY'}
-  if(!$v2Diagnostic.providers.elevenlabs.voiceIdPresent){$missing+='ElevenLabs voice ID'}
+  if(!$v2Diagnostic.providers.openaiTts.apiKeyPresent){$missing+='OPENAI_API_KEY'}
+  if($v2Diagnostic.providers.speech.effectiveProvider -ne 'openai'){$missing+='OpenAI speech configuration'}
   [Windows.Forms.MessageBox]::Show("Voice v2 is installed but not configured. Missing: $($missing -join ', ').`n`nSee docs\\VOICE_V2_SETUP.md in the VCUF project. No microphone session was started.","VCUBF $assistantName Voice v2",'OK','Information')|Out-Null
   exit 2
 }

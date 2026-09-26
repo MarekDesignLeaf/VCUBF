@@ -25,17 +25,34 @@ class RuntimeControls(unittest.TestCase):
             "Emma ukaž klienty", "jiná odpověď", "cs-CZ", "Emma", True, False
         ), ("command", "ukaž klienty"))
 
-    def test_fallback_only_runs_for_current_generation(self):
-        tts = voice.ResilientPcmTts.__new__(voice.ResilientPcmTts)
-        tts.primary_name, tts.fallback_name = "primary", "fallback"
-        tts.primary = Mock()
-        tts.primary.stream.side_effect = OSError("offline")
-        tts.fallback = Mock()
-        with patch.object(voice, "log"):
-            tts.stream("Hello", "en-GB", Mock(), 1, lambda: 2)
-            tts.fallback.stream.assert_not_called()
-            tts.stream("Hello", "en-GB", Mock(), 1, lambda: 1)
-            tts.fallback.stream.assert_called_once()
+    def test_openai_failure_never_switches_provider(self):
+        with patch.object(voice, "environment_value", return_value="test-key"):
+            tts = voice.OpenAIPcmTts({"provider": "openai", "model": "tts-1", "voice": "nova"})
+        speaker = Mock()
+        with patch.object(voice.urllib.request, "urlopen", side_effect=OSError("offline")) as request:
+            with self.assertRaises(OSError):
+                tts.stream("Hello", "en-GB", speaker, 1, lambda: 1)
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(request.call_args.args[0].full_url, "https://api.openai.com/v1/audio/speech")
+        speaker.enqueue.assert_not_called()
+
+    def test_other_speech_provider_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "OPENAI_TTS_REQUIRED"):
+            voice.OpenAIPcmTts({"provider": "unsupported"})
+
+    def test_openai_pcm_reaches_speaker(self):
+        with patch.object(voice, "environment_value", return_value="test-key"):
+            tts = voice.OpenAIPcmTts({"provider": "openai", "model": "tts-1", "voice": "nova"})
+        response = Mock()
+        response.read1.side_effect = [b"\x00\x00" * 100, b""]
+        context = Mock()
+        context.__enter__ = Mock(return_value=response)
+        context.__exit__ = Mock(return_value=False)
+        speaker = Mock()
+        with patch.object(voice.urllib.request, "urlopen", return_value=context), patch.object(voice, "log"):
+            tts.stream("Hello", "en-GB", speaker, 1, lambda: 1)
+        speaker.enqueue.assert_called_once_with(b"\x00\x00" * 100)
+        speaker.finish.assert_called_once()
 
     def test_heartbeat_does_not_report_listening_before_audio_ready(self):
         heartbeat = voice.ListeningStateHeartbeat(audio_ready=threading.Event())

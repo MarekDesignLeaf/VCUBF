@@ -9,8 +9,9 @@ $voice = @(Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pyt
   Where-Object { $_.CommandLine -like '*emma_voice_v2.py*--run*' })
 $backendOk = $false
 $frontendOk = $false
-$elevenLabsOk = $false
-$openAiTtsFallbackOk = $false
+$openAiApiOk = $false
+$voiceConfig = Get-Content -LiteralPath (Join-Path $root 'voice-v2.json') -Raw | ConvertFrom-Json
+$openAiSelected = $voiceConfig.tts.provider -eq 'openai'
 $state = $null
 $activeConversationCount = -1
 $serverLanguage = ''
@@ -20,13 +21,9 @@ $serverLanguage = ''
 # 127.0.0.1.
 try { $backendOk = (Invoke-WebRequest -Uri "$server/health" -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 } catch {}
 try { $frontendOk = (Invoke-WebRequest -Uri "$frontend/" -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 } catch {}
-$elevenLabsKey = [Environment]::GetEnvironmentVariable('ELEVENLABS_API_KEY','User')
-if($elevenLabsKey) {
-  try { $elevenLabsOk = (Invoke-WebRequest -Uri 'https://api.elevenlabs.io/v1/user' -Headers @{'xi-api-key'=$elevenLabsKey} -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 } catch {}
-}
 $openAiKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY','User')
 if($openAiKey) {
-  try { $openAiTtsFallbackOk = (Invoke-WebRequest -Uri 'https://api.openai.com/v1/models' -Headers @{Authorization="Bearer $openAiKey"} -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 } catch {}
+  try { $openAiApiOk = (Invoke-WebRequest -Uri 'https://api.openai.com/v1/models' -Headers @{Authorization="Bearer $openAiKey"} -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 } catch {}
 }
 try {
   $session = Invoke-RestMethod -Uri "$server/auth/local-test-active-session" -TimeoutSec 3
@@ -67,6 +64,10 @@ if(Test-Path -LiteralPath $logPath) {
       $recentRuntimeErrors++
     }
     if($line -match 'Picovoice sidecar READY \d+ \d+ (?<device>.+)$') { $microphone = $matches.device }
+    if($line -match 'v2 OpenAI wake microphone audio (?:confirmed|active): (?<device>.+)$') {
+      $microphone = $matches.device
+      if($stamp -and $stamp -gt [datetime]::UtcNow.AddSeconds(-25)) { $recentAudio = $true }
+    }
   }
 }
 $possibleSelfReplyLoop = $recentBusinessResponses -ge 5
@@ -76,12 +77,12 @@ if($state -and $state.heartbeatAt) {
   $heartbeatFresh = ([datetimeoffset]$state.heartbeatAt).UtcDateTime -gt [datetime]::UtcNow.AddSeconds(-12)
 }
 $result = [ordered]@{
-  healthy = $backendOk -and $frontendOk -and ($elevenLabsOk -or $openAiTtsFallbackOk) -and $voice.Count -eq 1 -and $recentAudio -and $heartbeatFresh -and $state.listening -and ([string]$config.Language -eq $serverLanguage) -and !$possibleSelfReplyLoop -and !$possibleWakeLoop -and $recentRuntimeErrors -eq 0 -and $activeConversationCount -le 1
+  healthy = $backendOk -and $frontendOk -and $openAiSelected -and $openAiApiOk -and $voice.Count -eq 1 -and $recentAudio -and $heartbeatFresh -and $state.listening -and ([string]$config.Language -eq $serverLanguage) -and !$possibleSelfReplyLoop -and !$possibleWakeLoop -and $recentRuntimeErrors -eq 0 -and $activeConversationCount -ge 0 -and $activeConversationCount -le 1
   backend = $backendOk
   frontend = $frontendOk
-  elevenLabs = $elevenLabsOk
-  openAiTtsFallback = $openAiTtsFallbackOk
-  effectiveSpeechProvider = if($elevenLabsOk){'elevenlabs'}elseif($openAiTtsFallbackOk){'openai'}else{'unavailable'}
+  openAiApi = $openAiApiOk
+  configuredSpeechProvider = [string]$voiceConfig.tts.provider
+  effectiveSpeechProvider = if($openAiSelected -and $openAiApiOk){'openai'}else{'unavailable'}
   voiceProcessCount = $voice.Count
   microphone = $microphone
   recentMicrophoneAudio = $recentAudio

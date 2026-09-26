@@ -80,8 +80,8 @@ if(!$voiceConfig.PSObject.Properties['wake']){
   $voiceConfig | Add-Member -NotePropertyName wake -NotePropertyValue ([pscustomobject]@{})
 }
 $wake=$voiceConfig.wake
-if(!$wake.PSObject.Properties['provider']){$wake | Add-Member -NotePropertyName provider -NotePropertyValue 'deepgram_vad'}
-elseif($wake.provider -notin @('deepgram_vad','picovoice_porcupine')){$wake.provider='deepgram_vad'}
+if(!$wake.PSObject.Properties['provider']){$wake | Add-Member -NotePropertyName provider -NotePropertyValue 'openai_vad'}
+elseif($wake.provider -notin @('openai_vad','deepgram_vad','picovoice_porcupine')){$wake.provider='openai_vad'}
 if(!$wake.PSObject.Properties['word']){$wake | Add-Member -NotePropertyName word -NotePropertyValue 'Alfonzo'}elseif([string]::IsNullOrWhiteSpace([string]$wake.word)){$wake.word='Alfonzo'}
 if(!$wake.PSObject.Properties['accessKeyEnv']){$wake | Add-Member -NotePropertyName accessKeyEnv -NotePropertyValue 'PICOVOICE_ACCESS_KEY'}
 if(!$wake.PSObject.Properties['keywordPath']){$wake | Add-Member -NotePropertyName keywordPath -NotePropertyValue ''}
@@ -98,13 +98,10 @@ if(!$voiceConfig.PSObject.Properties['stt']){
   $voiceConfig | Add-Member -NotePropertyName stt -NotePropertyValue ([pscustomobject]@{})
 }
 $stt=$voiceConfig.stt
-if(!$stt.PSObject.Properties['provider']){$stt|Add-Member -NotePropertyName provider -NotePropertyValue 'deepgram'}
-elseif($stt.provider -notin @('deepgram','npu_whisper')){$stt.provider='deepgram'}
-# Production command STT uses the selected-language streaming recognizer for
-# accurate dictated numbers and immediate interruption. Qualcomm NPU remains
-# installed and is used privately to verify Picovoice wake detections.
-$stt.provider='deepgram'
-if(!$stt.PSObject.Properties['fallbackProvider']){$stt|Add-Member -NotePropertyName fallbackProvider -NotePropertyValue 'deepgram'}
+if(!$stt.PSObject.Properties['provider']){$stt|Add-Member -NotePropertyName provider -NotePropertyValue 'openai'}
+elseif($stt.provider -notin @('openai','deepgram','npu_whisper')){$stt.provider='openai'}
+# Preserve the selected supported STT provider during upgrades.
+if(!$stt.PSObject.Properties['fallbackProvider']){$stt|Add-Member -NotePropertyName fallbackProvider -NotePropertyValue 'openai'}
 if(!$stt.PSObject.Properties['endpointingMs']){$stt | Add-Member -NotePropertyName endpointingMs -NotePropertyValue 250}
 if(!$stt.PSObject.Properties['utteranceEndMs']){
   $stt | Add-Member -NotePropertyName utteranceEndMs -NotePropertyValue 1000
@@ -126,9 +123,10 @@ if(!$voiceConfig.PSObject.Properties['tts']){
 }
 $tts=$voiceConfig.tts
 if(!$tts.PSObject.Properties['deviceName']){$tts|Add-Member -NotePropertyName deviceName -NotePropertyValue ''}
-# Preserve the user's provider choice on upgrades. A provider outage on one
-# installation must not overwrite speech settings for every installation.
-if(!$tts.PSObject.Properties['provider']){$tts|Add-Member -NotePropertyName provider -NotePropertyValue 'elevenlabs'}
+# OpenAI is the only speech-output provider. Migrate old provider fields.
+$voiceName=if($tts.voice){[string]$tts.voice}elseif($tts.fallbackVoice){[string]$tts.fallbackVoice}else{'nova'}
+$model=if($tts.provider -eq 'openai' -and $tts.model -notlike 'eleven*' -and $tts.model){[string]$tts.model}elseif($tts.fallbackModel){[string]$tts.fallbackModel}else{'tts-1'}
+$voiceConfig.tts=[pscustomobject]@{provider='openai';apiKeyEnv='OPENAI_API_KEY';model=$model;voice=$voiceName;deviceName=[string]$tts.deviceName}
 $voiceConfig | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $activeConfig -Encoding UTF8
 
 # The desktop test build runs the browser UI, API and the voice runtime from this checkout.
