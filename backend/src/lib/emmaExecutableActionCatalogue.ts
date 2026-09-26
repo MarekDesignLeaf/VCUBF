@@ -189,6 +189,7 @@ export const EMMA_EXECUTABLE_ACTION_GUIDE = Object.entries(EMMA_EXECUTABLE_ACTIO
 // flows must stay in their owning UI/system boundary.
 export const EMMA_NON_DIRECT_ACTIONS = {
   approve_device_pairing: { executionClass: "interactive", note: "Requires the one-time pairing token in the authenticated browser." },
+  sign_in_with_device_key: { executionClass: "system", note: "Owner-PC sign-in with a secret device key; never a voice or chat action." },
   change_own_password: { executionClass: "interactive", note: "Passwords are entered in the account form and are never spoken or stored in transcripts." },
   create_employee: { executionClass: "interactive", note: "Initial employee passwords remain in the administrator form and are never spoken." },
   reset_employee_password: { executionClass: "interactive", note: "Temporary passwords remain in the administrator form and are never spoken." },
