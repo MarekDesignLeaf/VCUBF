@@ -60,16 +60,11 @@ export async function speakReply(text: string, _language: string, rate = 1): Pro
   const key = process.env.OPENAI_API_KEY?.trim();
   const trimmed = text.trim().slice(0, MAX_SPOKEN_REPLY);
   if (!key || !trimmed) return null;
-  // MP3 frames concatenate cleanly, so the pieces play back as one reply.
-  const parts: Buffer[] = [];
-  let contentType = "audio/mpeg";
-  for (const chunk of speechChunks(trimmed)) {
-    const spoken = await speakChunk(key, chunk, rate);
-    if (!spoken) return null;
-    parts.push(spoken.audio);
-    contentType = spoken.contentType;
-  }
-  return parts.length ? { audio: Buffer.concat(parts), contentType } : null;
+  // The pieces are synthesised together, so a long reply waits about as long as
+  // its longest piece; MP3 frames concatenate cleanly, so they play as one reply.
+  const spoken = await Promise.all(speechChunks(trimmed).map((chunk) => speakChunk(key, chunk, rate)));
+  if (!spoken.length || spoken.some((piece) => !piece)) return null;
+  return { audio: Buffer.concat(spoken.map((piece) => piece!.audio)), contentType: spoken[0]!.contentType };
 }
 
 async function speakChunk(key: string, trimmed: string, rate: number): Promise<SpokenReply | null> {
