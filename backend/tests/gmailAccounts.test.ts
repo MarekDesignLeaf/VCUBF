@@ -283,6 +283,7 @@ describe("Choosing the sending account", () => {
     for (const [spoken, expected] of [
       ["z firemního účtu", "b"], ["pracovní", "b"], ["designleaf", "b"], ["MAREK@designleaf.co.uk", "b"],
       ["z osobního", "p"], ["soukromého mailu", "p"], ["from my personal account", "p"], ["Osobní Gmail", "p"],
+      ["konta prywatnego", "p"], ["z konta firmowego", "b"],
     ] as const) {
       const choice = chooseGmailSendingAccount([business, personal], spoken);
       assert.ok(choice.ok && choice.source.id === expected, `${spoken} → ${expected}`);
