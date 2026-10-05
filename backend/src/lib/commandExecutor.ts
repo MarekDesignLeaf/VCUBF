@@ -26,7 +26,8 @@ import * as voicePreferenceService from "../services/voicePreferenceService.js";
 import * as googleCalendarConnectorService from "../services/googleCalendarConnectorService.js";
 import { buildCommandUiAction, completedVoiceCommandMessage, openingVoiceLabelMessage, openingVoicePageMessage, type CommandUiAction } from "./voiceNavigation.js";
 import { getNavigationCatalogue } from "./navigationCatalogue.js";
-import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction } from "../services/emmaExecutableActionService.js";
+import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction, getPendingEmmaActionName } from "../services/emmaExecutableActionService.js";
+import { spokenCancelled, spokenCompleted, spokenError, spokenOutcome, spokenReview } from "./spokenActionMessages.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -197,6 +198,9 @@ export async function dispatchParsedCommand(
 
     case "execute_action": {
       const result = await executeEmmaAction(user, command.entities);
+      const action = command.entities.action;
+      // A review is spoken in full — who, what exactly, when — in the user's
+      // language, so the yes that follows is given to something actually heard.
       response = result.ok
         ? {
             intent: command.intent,
@@ -206,7 +210,8 @@ export async function dispatchParsedCommand(
             data: result.data,
             message: typeof (result.data as { message?: unknown })?.message === "string"
               ? (result.data as { message: string }).message
-              : `Completed ${command.entities.action.replaceAll("_", " ")}.`,
+              : spokenOutcome(action, result.data as Record<string, unknown>, user.voiceLanguage)
+                ?? `Completed ${action.replaceAll("_", " ")}.`,
           }
         : {
             intent: command.intent,
@@ -214,20 +219,26 @@ export async function dispatchParsedCommand(
             ok: false,
             httpStatus: result.httpStatus,
             error: result.error,
-            message: result.message,
+            message: (result.error === "CONFIRMATION_REQUIRED"
+              ? spokenReview(action, result.extra?.preview as Record<string, unknown> | undefined, user.voiceLanguage)
+              : spokenError(result.error, result.extra, user.voiceLanguage)) ?? result.message,
             data: result.extra,
           };
       break;
     }
     case "confirm_execute_action":
     case "cancel_execute_action": {
+      const pendingAction = command.intent === "confirm_execute_action" ? await getPendingEmmaActionName(user) : undefined;
       const result = command.intent === "confirm_execute_action"
         ? await confirmPendingEmmaAction(user)
         : await cancelPendingEmmaAction(user);
       response = result.ok
         ? { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: result.httpStatus, data: result.data,
-            message: command.intent === "confirm_execute_action" ? "The reviewed action was completed." : "The reviewed action was cancelled." }
-        : { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: result.httpStatus, error: result.error, message: result.message, data: result.extra };
+            message: command.intent === "confirm_execute_action"
+              ? spokenOutcome(pendingAction, result.data as Record<string, unknown>, user.voiceLanguage) ?? spokenCompleted(user.voiceLanguage)
+              : spokenCancelled(user.voiceLanguage) }
+        : { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: result.httpStatus, error: result.error,
+            message: spokenError(result.error, result.extra, user.voiceLanguage) ?? result.message, data: result.extra };
       break;
     }
     case "create_client": {
