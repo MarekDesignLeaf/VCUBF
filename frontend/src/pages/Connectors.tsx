@@ -302,6 +302,22 @@ export function Connectors() {
     }
   }
 
+  // Google can withdraw a stored grant (a password change, a revoked app,
+  // an expired grant). The source then fails with OAUTH_PROVIDER_REJECTED and the
+  // only cure is a fresh consent, so every authorised Google source offers one.
+  function reauthorizeLabel(key: string) {
+    if (key === "gmail") return <>Reauthorize Gmail</>;
+    if (key === "google_contacts") return <>Reauthorize Contacts</>;
+    if (key === "google_calendar") return <>Reauthorize Google Calendar</>;
+    if (key === "google_photos") return <>Reauthorize Google Photos</>;
+    return <>Reauthorize Google Drive</>;
+  }
+
+  async function reauthorize(source: ConnectorSource) {
+    if (!window.confirm("Ask Google for this permission again? The source pauses until Google approves it and you enable it again. Its settings and synchronised data are kept.")) return;
+    await authorize(source);
+  }
+
   async function enableCalendarWriting(source: ConnectorSource) {
     if (!window.confirm("Allow Secretary to create, move and cancel events in Google Calendar? The source will be disabled and Google will ask you to approve calendar event access. Every change is shown for review and needs a separate confirmation; nobody else is emailed.")) return;
     setError(null);
@@ -611,9 +627,7 @@ export function Connectors() {
                     {source.connectorKey === "google_calendar" && !source.configuredScopes.includes("write:events") ? (
                       <button className="secondary" onClick={() => enableCalendarWriting(source)} disabled={busySourceId === source.id}>Allow calendar writing</button>
                     ) : null}
-                    {source.connectorKey === "google_calendar" && source.configuredScopes.includes("write:events") && !source.isEnabled ? (
-                      <button className="secondary" onClick={() => authorize(source)} disabled={busySourceId === source.id}>Reauthorize Google Calendar</button>
-                    ) : null}
+
                     {source.connectorKey === "google_drive" && source.isEnabled ? <button onClick={() => openDrivePicker(source)} disabled={busySourceId === source.id}>Select Drive images</button> : null}
                     {source.connectorKey === "google_drive" ? <button className="secondary" onClick={() => loadDriveImages(source)}>Review Drive images</button> : null}
                     {source.connectorKey === "google_photos" && source.isEnabled ? <button onClick={() => openGooglePhotosPicker(source)} disabled={busySourceId === source.id}>Select Google Photos</button> : null}
@@ -622,8 +636,8 @@ export function Connectors() {
                     {source.connectorKey === "gmail" && !source.configuredScopes.includes("delete:messages") ? (
                       <button className="secondary" onClick={() => enableGmailDeletion(source)} disabled={busySourceId === source.id}>Enable email deletion</button>
                     ) : null}
-                    {source.connectorKey === "gmail" && source.configuredScopes.includes("delete:messages") && !source.isEnabled ? (
-                      <button className="secondary" onClick={() => authorize(source)} disabled={busySourceId === source.id}>Reauthorize Gmail</button>
+                    {source.connectorKey !== "whatsapp_business" && source.authorizationConfigured ? (
+                      <button className="secondary" onClick={() => reauthorize(source)} disabled={busySourceId === source.id}>{reauthorizeLabel(source.connectorKey)}</button>
                     ) : null}
                     {source.connectorKey === "whatsapp_business" && source.isEnabled && source.configuredScopes.includes("send:messages") ? <button onClick={() => setComposeSourceId(source.id)}>Write WhatsApp</button> : null}
                     {source.authorizationConfigured ? (

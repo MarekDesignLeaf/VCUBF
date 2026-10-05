@@ -5,7 +5,7 @@ import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { EXECUTE_TEXT_COMMAND_ACTION } from "../../lib/actionContracts.js";
 import { prisma } from "../../db.js";
-import { speakReply } from "../../services/voiceSpeechService.js";
+import { MAX_SPOKEN_REPLY, speakReply } from "../../services/voiceSpeechService.js";
 
 /**
  * POST /command/speak — audio for one of {assistant}'s replies.
@@ -18,7 +18,7 @@ export const voiceSpeechRouter = Router();
 voiceSpeechRouter.use(requireAuth);
 
 const speakSchema = z.object({
-  text: z.string().trim().min(1).max(1200),
+  text: z.string().trim().min(1).max(MAX_SPOKEN_REPLY),
   language: z.string().trim().max(20).optional(),
 });
 
