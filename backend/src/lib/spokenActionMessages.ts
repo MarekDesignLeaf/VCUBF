@@ -18,9 +18,10 @@ function locale(language: string): Locale {
   return code === "cs" || code === "pl" ? code : "en";
 }
 
-function quote(text: unknown, max = 400) {
+/** Context only (the message being answered) may be shortened. */
+function quote(text: unknown, max?: number) {
   const value = String(text ?? "").replace(/\s+/g, " ").trim();
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+  return max !== undefined && value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
 const CS_ON_DAY = ["v neděli", "v pondělí", "v úterý", "ve středu", "ve čtvrtek", "v pátek", "v sobotu"];
@@ -41,10 +42,36 @@ function spokenDay(date: string, timeZone: string | undefined, lang: Locale) {
   return `on ${new Intl.DateTimeFormat("en-GB", { weekday: "long", timeZone: "UTC" }).format(value)} ${monthDay}`;
 }
 
+// "od čtvrtka 3. ledna do pátku 4. ledna": in a range the weekday follows od/do.
+const CS_FROM_TO = ["neděle", "pondělí", "úterý", "středy", "čtvrtka", "pátku", "soboty"];
+const PL_FROM_TO = ["niedzieli", "poniedziałku", "wtorku", "środy", "czwartku", "piątku", "soboty"];
+
+function rangeDay(date: string, lang: Locale) {
+  const [year, month, day] = date.split("-").map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day));
+  const monthDay = new Intl.DateTimeFormat(lang === "cs" ? "cs-CZ" : lang === "pl" ? "pl-PL" : "en-GB", { day: "numeric", month: "long", timeZone: "UTC" }).format(value);
+  if (lang === "cs") return `${CS_FROM_TO[value.getUTCDay()]} ${monthDay}`;
+  if (lang === "pl") return `${PL_FROM_TO[value.getUTCDay()]} ${monthDay}`;
+  return `${new Intl.DateTimeFormat("en-GB", { weekday: "long", timeZone: "UTC" }).format(value)} ${monthDay}`;
+}
+
 function spokenSlot(slot: Row | undefined, timeZone: string | undefined, lang: Locale) {
   if (!slot?.date) return "";
   const day = spokenDay(slot.date, timeZone, lang);
-  if (slot.allDay) return lang === "cs" ? `na celý den ${day}` : lang === "pl" ? `na cały dzień ${day}` : `all day ${day}`;
+  if (slot.allDay) {
+    if (slot.lastDate && slot.lastDate !== slot.date) {
+      const first = rangeDay(slot.date, lang);
+      const last = rangeDay(slot.lastDate, lang);
+      return lang === "cs" ? `na celé dny od ${first} do ${last}` : lang === "pl" ? `na całe dni od ${first} do ${last}` : `all day from ${first} to ${last}`;
+    }
+    return lang === "cs" ? `na celý den ${day}` : lang === "pl" ? `na cały dzień ${day}` : `all day ${day}`;
+  }
+  // An event that ends on a later day says so; "from 22:00 to 01:00" alone would hide a day.
+  if (slot.endDate && slot.endDate !== slot.date) {
+    const first = rangeDay(slot.date, lang);
+    const last = rangeDay(slot.endDate, lang);
+    return lang === "cs" ? `od ${first} ${slot.start} do ${last} ${slot.end}` : lang === "pl" ? `od ${first} ${slot.start} do ${last} ${slot.end}` : `from ${first} at ${slot.start} to ${last} at ${slot.end}`;
+  }
   return lang === "cs" ? `${day} od ${slot.start} do ${slot.end}` : lang === "pl" ? `${day} od ${slot.start} do ${slot.end}` : `${day} from ${slot.start} to ${slot.end}`;
 }
 
@@ -89,32 +116,40 @@ export function spokenReview(action: string, preview: Row | undefined, language:
       if (lang === "pl") return `Wyślę na WhatsApp na numer ${preview.to}${how}: „${quote(preview.body)}”. Czy mam ją wysłać?`;
       return `I will send a WhatsApp message to ${preview.to}${how}: “${quote(preview.body)}”. Shall I send it?`;
     }
+    case "send_email": {
+      const recipients = (Array.isArray(preview.to) ? preview.to : [preview.to]).filter(Boolean).join(", ");
+      const copies = [...(Array.isArray(preview.cc) ? preview.cc : []), ...(Array.isArray(preview.bcc) ? preview.bcc : [])].filter(Boolean);
+      const how = preview.sentIn ? ` ${spokenLanguage(preview.sentIn, lang)}` : "";
+      if (lang === "cs") return `Pošlu e-mail na ${recipients}${copies.length ? ` (v kopii ${copies.join(", ")})` : ""}${how}. Předmět: „${quote(preview.subject)}“. Text: „${quote(preview.body)}“. Mám ho odeslat?`;
+      if (lang === "pl") return `Wyślę e-mail do ${recipients}${copies.length ? ` (w kopii ${copies.join(", ")})` : ""}${how}. Temat: „${quote(preview.subject)}”. Treść: „${quote(preview.body)}”. Czy mam go wysłać?`;
+      return `I will email ${recipients}${copies.length ? ` (copying ${copies.join(", ")})` : ""}${how}. Subject: “${quote(preview.subject)}”. Text: “${quote(preview.body)}”. Shall I send it?`;
+    }
     case "create_calendar_event": {
       const when = spokenSlot(preview, preview.timeZone, lang);
       const assumed = preview.durationAssumed
         ? (lang === "cs" ? " Délku jste neřekl, počítám hodinu." : lang === "pl" ? " Nie podano długości, liczę godzinę." : " No length was given, so I have allowed one hour.")
         : "";
       const clash = clashSentence(preview.clashes, lang);
-      if (lang === "cs") return `Zapíšu „${quote(preview.title, 160)}“ ${when}.${assumed}${clash} Mám to zapsat?`;
-      if (lang === "pl") return `Zapiszę „${quote(preview.title, 160)}” ${when}.${assumed}${clash} Czy mam to zapisać?`;
-      return `I will put “${quote(preview.title, 160)}” in the calendar ${when}.${assumed}${clash} Shall I add it?`;
+      if (lang === "cs") return `Zapíšu „${quote(preview.title)}“ ${when}.${assumed}${clash} Mám to zapsat?`;
+      if (lang === "pl") return `Zapiszę „${quote(preview.title)}” ${when}.${assumed}${clash} Czy mam to zapisać?`;
+      return `I will put “${quote(preview.title)}” in the calendar ${when}.${assumed}${clash} Shall I add it?`;
     }
     case "move_calendar_event": {
       const from = spokenSlot(preview.from, preview.timeZone, lang);
       const to = spokenSlot(preview.to, preview.timeZone, lang);
       const clash = clashSentence(preview.clashes, lang);
-      if (lang === "cs") return `Přesunu „${quote(preview.title, 160)}“. Teď: ${from}. Nově: ${to}.${clash} Mám ji přesunout?`;
-      if (lang === "pl") return `Przeniosę „${quote(preview.title, 160)}”. Teraz: ${from}. Nowy termin: ${to}.${clash} Czy mam przenieść?`;
-      return `I will move “${quote(preview.title, 160)}”. Now: ${from}. New time: ${to}.${clash} Shall I move it?`;
+      if (lang === "cs") return `Přesunu „${quote(preview.title)}“. Teď: ${from}. Nově: ${to}.${clash} Mám ji přesunout?`;
+      if (lang === "pl") return `Przeniosę „${quote(preview.title)}”. Teraz: ${from}. Nowy termin: ${to}.${clash} Czy mam przenieść?`;
+      return `I will move “${quote(preview.title)}”. Now: ${from}. New time: ${to}.${clash} Shall I move it?`;
     }
     case "cancel_calendar_event": {
       const when = preview.when ? ` ${spokenSlot(preview.when, preview.timeZone, lang)}` : "";
       const others = preview.attendeeCount
         ? (lang === "cs" ? " Ostatní účastníci upozorněni nebudou." : lang === "pl" ? " Pozostali uczestnicy nie zostaną powiadomieni." : " The other attendees will not be notified.")
         : "";
-      if (lang === "cs") return `Zruším „${quote(preview.title, 160)}“${when}.${others} Mám ji zrušit?`;
-      if (lang === "pl") return `Odwołam „${quote(preview.title, 160)}”${when}.${others} Czy mam odwołać?`;
-      return `I will cancel “${quote(preview.title, 160)}”${when}.${others} Shall I cancel it?`;
+      if (lang === "cs") return `Zruším „${quote(preview.title)}“${when}.${others} Mám ji zrušit?`;
+      if (lang === "pl") return `Odwołam „${quote(preview.title)}”${when}.${others} Czy mam odwołać?`;
+      return `I will cancel “${quote(preview.title)}”${when}.${others} Shall I cancel it?`;
     }
     default:
       return undefined;
@@ -128,6 +163,8 @@ export function spokenOutcome(action: string | undefined, data: Row | undefined,
     case "reply_whatsapp":
     case "send_whatsapp":
       return lang === "cs" ? "Zpráva je odeslaná." : lang === "pl" ? "Wiadomość została wysłana." : "The message has been sent.";
+    case "send_email":
+      return lang === "cs" ? "E-mail je odeslaný." : lang === "pl" ? "E-mail został wysłany." : "The email has been sent.";
     case "create_calendar_event":
       if (data?.alreadyCreated) return lang === "cs" ? "Tahle událost už v kalendáři je, druhou jsem nezapsal." : lang === "pl" ? "To wydarzenie już jest w kalendarzu, drugiego nie dodałem." : "That event is already in the calendar; I did not add a second one.";
       return lang === "cs" ? "Zapsáno do kalendáře." : lang === "pl" ? "Zapisane w kalendarzu." : "It is in the calendar.";
@@ -217,4 +254,53 @@ export function spokenCancelled(language: string) {
 export function spokenCompleted(language: string) {
   const lang = locale(language);
   return lang === "cs" ? "Hotovo." : lang === "pl" ? "Gotowe." : "The reviewed action was completed.";
+}
+
+function ago(at: Date, now: Date, lang: Locale) {
+  const minutes = Math.max(0, Math.round((now.getTime() - at.getTime()) / 60_000));
+  if (minutes < 60) return lang === "cs" ? "před chvílí" : lang === "pl" ? "przed chwilą" : "just now";
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) {
+    if (lang === "cs") return hours === 1 ? "před hodinou" : `před ${hours} hodinami`;
+    if (lang === "pl") return hours === 1 ? "godzinę temu" : `${hours} ${hours % 10 >= 2 && hours % 10 <= 4 && (hours < 12 || hours > 14) ? "godziny" : "godzin"} temu`;
+    return hours === 1 ? "an hour ago" : `${hours} hours ago`;
+  }
+  const days = Math.round(hours / 24);
+  if (lang === "cs") return days === 1 ? "včera" : `před ${days} dny`;
+  if (lang === "pl") return days === 1 ? "wczoraj" : `${days} dni temu`;
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+/** Reads the newest received messages aloud: who, when, what, and whether it was answered. */
+export function spokenChannelMessages(
+  channel: "email" | "whatsapp",
+  result: { items: Array<{ sender: string; text: string; receivedAt: Date; replied?: boolean }>; unansweredToday: number },
+  language: string,
+  now = new Date(),
+): string {
+  const lang = locale(language);
+  const name = channel === "whatsapp" ? "WhatsApp" : (lang === "en" ? "email" : "e-mail");
+  if (!result.items.length) {
+    return lang === "cs" ? `Na ${name === "WhatsApp" ? "WhatsAppu" : "e-mailu"} nejsou žádné přijaté zprávy.`
+      : lang === "pl" ? `Brak odebranych wiadomości ${name === "WhatsApp" ? "na WhatsAppie" : "e-mail"}.`
+        : `There are no received ${name} messages.`;
+  }
+  const lines = result.items.map((item, index) => {
+    const answered = item.replied === undefined ? ""
+      : item.replied ? (lang === "cs" ? " Odpovězeno." : lang === "pl" ? " Odpowiedziano." : " Answered.")
+        : (lang === "cs" ? " Bez odpovědi." : lang === "pl" ? " Bez odpowiedzi." : " Not answered.");
+    return `${index + 1}. ${item.sender}, ${ago(item.receivedAt, now, lang)}: „${quote(item.text, 160)}“.${answered}`;
+  });
+  const head = lang === "cs" ? `Poslední zprávy ${channel === "whatsapp" ? "na WhatsAppu" : "v e-mailu"}:`
+    : lang === "pl" ? `Ostatnie wiadomości ${channel === "whatsapp" ? "na WhatsAppie" : "e-mail"}:`
+      : `Latest ${name} messages:`;
+  const unanswered = channel === "whatsapp" && result.unansweredToday
+    ? (lang === "cs" ? ` Za posledních 24 hodin zůstává bez odpovědi ${result.unansweredToday}.`
+      : lang === "pl" ? ` W ciągu ostatnich 24 godzin bez odpowiedzi: ${result.unansweredToday}.`
+        : ` ${result.unansweredToday} from the last 24 hours are not answered.`)
+    : "";
+  const hint = channel === "whatsapp"
+    ? (lang === "cs" ? " Odpovědět můžete třeba: odpověz Honzovi, že…" : lang === "pl" ? " Możesz odpowiedzieć na przykład: odpowiedz Janowi, że…" : " You can reply, for example: reply to John that…")
+    : "";
+  return `${head} ${lines.join(" ")}${unanswered}${hint}`;
 }

@@ -123,6 +123,11 @@ function spokenAmount(voiceLanguage: string) {
   return (value: number) => formatter.format(value);
 }
 
+const SPOKEN_MESSAGE_LANGUAGE = "en-GB";
+function englishByDefault(parameters: Record<string, unknown>, confirmed: boolean) {
+  return confirmed || parameters.send_in !== undefined ? {} : { send_in: SPOKEN_MESSAGE_LANGUAGE };
+}
+
 function without(parameters: Record<string, unknown>, ...keys: string[]) {
   return Object.fromEntries(Object.entries(parameters).filter(([key]) => !keys.includes(key)));
 }
@@ -516,13 +521,16 @@ async function executeEmmaActionDirect(
       const source = await connectorSource(user, "gmail");
       return source.ok ? gmailConnectorService.createGmailDraftMessage(user, source.data.id, p) : source;
     }
+    // Spoken messages leave in English unless another language is named: the
+    // owner dictates in Czech and his customers read English. The English is
+    // made before the review, so the yes approves the words that will be sent.
     case "send_email": {
       const source = await connectorSource(user, "gmail");
-      return source.ok ? gmailConnectorService.sendGmailMessageNow(user, source.data.id, { ...p, confirmed }) : source;
+      return source.ok ? gmailConnectorService.sendGmailMessageNow(user, source.data.id, { ...p, ...englishByDefault(p, confirmed), confirmed }) : source;
     }
     case "send_whatsapp": {
       const source = await connectorSource(user, "whatsapp_business");
-      return source.ok ? whatsappBusinessConnectorService.sendWhatsAppMessage(user, source.data.id, { ...p, confirmed }) : source;
+      return source.ok ? whatsappBusinessConnectorService.sendWhatsAppMessage(user, source.data.id, { ...p, ...englishByDefault(p, confirmed), confirmed }) : source;
     }
     case "create_calendar_event":
       return googleCalendarWriteService.createCalendarEvent(user, { ...p, confirmed });

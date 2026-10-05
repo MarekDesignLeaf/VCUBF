@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { spokenError, spokenOutcome, spokenReview } from "../src/lib/spokenActionMessages.js";
+import { spokenChannelMessages, spokenError, spokenOutcome, spokenReview } from "../src/lib/spokenActionMessages.js";
 import { addDays, localDateTime } from "../src/lib/spokenDate.js";
 
 // A review is only a review if the person hears what will happen. These
@@ -44,6 +44,21 @@ describe("Spoken reviews", () => {
     assert.equal(spoken, "I will move “Návštěva u Dvořáků”. Now: on Thursday 3 January from 10:00 to 11:30. New time: on Thursday 3 January from 14:00 to 15:30. Shall I move it?");
   });
 
+  it("never shortens the words that will actually be sent", () => {
+    const long = "Hello, ".repeat(120).trim();
+    assert.ok(spokenReview("send_whatsapp", { to: "+447700900111", body: long }, "en-GB")!.includes(long));
+    const email = spokenReview("send_email", { to: ["jan@example.com"], subject: "Quote", body: long, sentIn: "English (United Kingdom)" }, "cs-CZ")!;
+    assert.ok(email.includes(long));
+    assert.match(email, /^Pošlu e-mail na jan@example\.com anglicky\. Předmět: „Quote“\./);
+  });
+
+  it("says when an event ends on a later day, and the last day of a multi-day event", () => {
+    const overnight = spokenReview("create_calendar_event", { title: "Noční práce", date: "2030-01-03", allDay: false, start: "22:00", end: "01:00", endDate: "2030-01-04", timeZone: ZONE }, "cs-CZ")!;
+    assert.equal(overnight, "Zapíšu „Noční práce“ od čtvrtka 3. ledna 22:00 do pátku 4. ledna 01:00. Mám to zapsat?");
+    const holiday = spokenReview("cancel_calendar_event", { title: "Dovolená", when: { date: "2030-01-07", lastDate: "2030-01-11", allDay: true }, timeZone: ZONE }, "en-GB")!;
+    assert.equal(holiday, "I will cancel “Dovolená” all day from Monday 7 January to Friday 11 January. Shall I cancel it?");
+  });
+
   it("says what happened after the yes, and refuses in plain words", () => {
     assert.equal(spokenOutcome("reply_whatsapp", {}, "cs-CZ"), "Zpráva je odeslaná.");
     assert.equal(spokenOutcome("create_calendar_event", { alreadyCreated: true }, "cs-CZ"), "Tahle událost už v kalendáři je, druhou jsem nezapsal.");
@@ -55,3 +70,18 @@ describe("Spoken reviews", () => {
 });
 
 function spokenEscape(value: string) { return value.replace(/ /g, " "); }
+
+describe("Reading received messages aloud", () => {
+  it("reads the newest messages with sender, age, text and whether they were answered", () => {
+    const now = new Date("2026-10-05T20:00:00Z");
+    const spoken = spokenChannelMessages("whatsapp", {
+      items: [
+        { sender: "Honza Novák", text: "What time will you arrive?", receivedAt: new Date("2026-10-05T18:00:00Z"), replied: true },
+        { sender: "+447700900222", text: "Thanks for the quote.", receivedAt: new Date("2026-10-04T19:00:00Z"), replied: false },
+      ],
+      unansweredToday: 1,
+    }, "cs-CZ", now);
+    assert.equal(spoken, "Poslední zprávy na WhatsAppu: 1. Honza Novák, před 2 hodinami: „What time will you arrive?“. Odpovězeno. 2. +447700900222, včera: „Thanks for the quote.“. Bez odpovědi. Za posledních 24 hodin zůstává bez odpovědi 1. Odpovědět můžete třeba: odpověz Honzovi, že…");
+    assert.equal(spokenChannelMessages("whatsapp", { items: [], unansweredToday: 0 }, "en-GB"), "There are no received WhatsApp messages.");
+  });
+});
