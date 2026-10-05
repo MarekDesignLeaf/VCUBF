@@ -162,11 +162,15 @@ function slotFromGoogle(event: GoogleCalendarEvent, timeZone: string): Slot | un
 }
 
 function slotSummary(slot: Slot, language: string) {
+  // An all-day event's end date is exclusive; the review names the last day it covers.
+  const lastDate = slot.allDay ? addDays(slot.endDate, -1) : slot.endDate;
   return {
     allDay: slot.allDay,
     date: slot.date,
     weekday: weekdayName(slot.date, language),
-    ...(slot.allDay ? {} : { start: slot.time, end: slot.endTime, ...(slot.endDate !== slot.date ? { endDate: slot.endDate } : {}) }),
+    ...(slot.allDay
+      ? (lastDate > slot.date ? { lastDate } : {})
+      : { start: slot.time, end: slot.endTime, ...(slot.endDate !== slot.date ? { endDate: slot.endDate } : {}) }),
   };
 }
 

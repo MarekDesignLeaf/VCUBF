@@ -44,6 +44,21 @@ describe("Spoken reviews", () => {
     assert.equal(spoken, "I will move “Návštěva u Dvořáků”. Now: on Thursday 3 January from 10:00 to 11:30. New time: on Thursday 3 January from 14:00 to 15:30. Shall I move it?");
   });
 
+  it("never shortens the words that will actually be sent", () => {
+    const long = "Hello, ".repeat(120).trim();
+    assert.ok(spokenReview("send_whatsapp", { to: "+447700900111", body: long }, "en-GB")!.includes(long));
+    const email = spokenReview("send_email", { to: ["jan@example.com"], subject: "Quote", body: long, sentIn: "English (United Kingdom)" }, "cs-CZ")!;
+    assert.ok(email.includes(long));
+    assert.match(email, /^Pošlu e-mail na jan@example\.com anglicky\. Předmět: „Quote“\./);
+  });
+
+  it("says when an event ends on a later day, and the last day of a multi-day event", () => {
+    const overnight = spokenReview("create_calendar_event", { title: "Noční práce", date: "2030-01-03", allDay: false, start: "22:00", end: "01:00", endDate: "2030-01-04", timeZone: ZONE }, "cs-CZ")!;
+    assert.equal(overnight, "Zapíšu „Noční práce“ od čtvrtka 3. ledna 22:00 do pátku 4. ledna 01:00. Mám to zapsat?");
+    const holiday = spokenReview("cancel_calendar_event", { title: "Dovolená", when: { date: "2030-01-07", lastDate: "2030-01-11", allDay: true }, timeZone: ZONE }, "en-GB")!;
+    assert.equal(holiday, "I will cancel “Dovolená” all day from Monday 7 January to Friday 11 January. Shall I cancel it?");
+  });
+
   it("says what happened after the yes, and refuses in plain words", () => {
     assert.equal(spokenOutcome("reply_whatsapp", {}, "cs-CZ"), "Zpráva je odeslaná.");
     assert.equal(spokenOutcome("create_calendar_event", { alreadyCreated: true }, "cs-CZ"), "Tahle událost už v kalendáři je, druhou jsem nezapsal.");
