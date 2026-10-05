@@ -36,6 +36,7 @@ import * as connectorService from "./connectorService.js";
 import * as gmailConnectorService from "./gmailConnectorService.js";
 import * as googleContactsConnectorService from "./googleContactsConnectorService.js";
 import * as googleCalendarConnectorService from "./googleCalendarConnectorService.js";
+import * as googleCalendarWriteService from "./googleCalendarWriteService.js";
 import * as googleDriveConnectorService from "./googleDriveConnectorService.js";
 import * as googlePhotosConnectorService from "./googlePhotosConnectorService.js";
 import * as whatsappBusinessConnectorService from "./whatsappBusinessConnectorService.js";
@@ -523,6 +524,12 @@ async function executeEmmaActionDirect(
       const source = await connectorSource(user, "whatsapp_business");
       return source.ok ? whatsappBusinessConnectorService.sendWhatsAppMessage(user, source.data.id, { ...p, confirmed }) : source;
     }
+    case "create_calendar_event":
+      return googleCalendarWriteService.createCalendarEvent(user, { ...p, confirmed });
+    case "move_calendar_event":
+      return googleCalendarWriteService.moveCalendarEvent(user, { ...p, confirmed });
+    case "cancel_calendar_event":
+      return googleCalendarWriteService.cancelCalendarEvent(user, { ...p, confirmed });
     case "reply_whatsapp": {
       const source = await connectorSource(user, "whatsapp_business");
       return source.ok ? whatsappBusinessConnectorService.replyToWhatsAppMessage(user, source.data.id, { ...p, confirmed }) : source;

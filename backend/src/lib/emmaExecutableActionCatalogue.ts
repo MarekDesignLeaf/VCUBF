@@ -93,6 +93,12 @@ export const EMMA_EXECUTABLE_ACTIONS = {
   // Answers one received message: the recipient is its sender, never a number
   // taken from speech. Sent in English unless send_in names another language.
   reply_whatsapp: { capabilityAction: "reply_whatsapp_message", fields: "sender_or_message, body, send_in?", confirmation: "service_preview" },
+  // Calendar writes. Dates and times are passed as spoken ("zítra", "v pátek",
+  // "6. října"; 24-hour times); the backend resolves them in the calendar's time
+  // zone and reads them back for confirmation.
+  create_calendar_event: { capabilityAction: "create_google_calendar_event", fields: "title, date, time?, end_time?, duration_minutes?, location?, description?", confirmation: "service_preview" },
+  move_calendar_event: { capabilityAction: "move_google_calendar_event", fields: "event, on_date?, new_date?, new_time?", confirmation: "service_preview" },
+  cancel_calendar_event: { capabilityAction: "cancel_google_calendar_event", fields: "event, on_date?", confirmation: "service_preview" },
   delete_gmail_message: { capabilityAction: "delete_gmail_intake", fields: "sender_or_message", confirmation: "service_preview" },
   import_google_contact: { capabilityAction: "import_google_contact", fields: "external_contact_id", confirmation: "service_preview" },
   create_google_photos_picker: { capabilityAction: "create_google_photos_picker_session", fields: "", confirmation: "none" },
@@ -173,6 +179,7 @@ export const EMMA_EXECUTABLE_ACTION_PAGES: Record<EmmaExecutableActionName, stri
   update_connector_source: "connectors", disable_connector_source: "connectors", enable_connector_source: "connectors",
   create_gmail_draft: "connectors", delete_gmail_message: "connectors", import_google_contact: "connectors",
   send_email: "connectors", send_whatsapp: "connectors", reply_whatsapp: "communication_intake",
+  create_calendar_event: "calendar", move_calendar_event: "calendar", cancel_calendar_event: "calendar",
   create_google_photos_picker: "photo_selection", stage_google_photos: "photo_selection", register_google_photos_photo: "photos",
   stage_google_drive_images: "photo_selection", register_google_drive_photo: "photos", find_photos_for_service: "photo_selection",
   select_photos_for_service: "photo_selection", update_employee: "employees",

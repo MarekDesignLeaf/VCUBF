@@ -12,6 +12,9 @@ import {
   IMPORT_GOOGLE_CONTACT_ACTION,
   REGISTER_GOOGLE_DRIVE_PHOTO_ACTION,
   REGISTER_GOOGLE_PHOTOS_PHOTO_ACTION,
+  CANCEL_GOOGLE_CALENDAR_EVENT_ACTION,
+  CREATE_GOOGLE_CALENDAR_EVENT_ACTION,
+  MOVE_GOOGLE_CALENDAR_EVENT_ACTION,
   REPLY_WHATSAPP_MESSAGE_ACTION,
   SEND_WHATSAPP_MESSAGE_ACTION,
   UPDATE_CONNECTOR_SOURCE_ACTION,
@@ -22,6 +25,7 @@ import * as connectorService from "../../services/connectorService.js";
 import * as gmailConnectorService from "../../services/gmailConnectorService.js";
 import * as googleContactsConnectorService from "../../services/googleContactsConnectorService.js";
 import * as googleCalendarConnectorService from "../../services/googleCalendarConnectorService.js";
+import * as googleCalendarWriteService from "../../services/googleCalendarWriteService.js";
 import * as googleDriveConnectorService from "../../services/googleDriveConnectorService.js";
 import * as googlePhotosConnectorService from "../../services/googlePhotosConnectorService.js";
 import * as whatsappBusinessConnectorService from "../../services/whatsappBusinessConnectorService.js";
@@ -201,6 +205,20 @@ connectorsRouter.post(
     res.status(result.httpStatus).json(result.data);
   }
 );
+
+// Calendar writes go to the one Google Calendar connection allowed to write;
+// each answers CONFIRMATION_REQUIRED with a review until it is confirmed.
+for (const [path, action, handler] of [
+  ["/calendar/events", CREATE_GOOGLE_CALENDAR_EVENT_ACTION, googleCalendarWriteService.createCalendarEvent],
+  ["/calendar/events/move", MOVE_GOOGLE_CALENDAR_EVENT_ACTION, googleCalendarWriteService.moveCalendarEvent],
+  ["/calendar/events/cancel", CANCEL_GOOGLE_CALENDAR_EVENT_ACTION, googleCalendarWriteService.cancelCalendarEvent],
+] as const) {
+  connectorsRouter.post(path, requirePermission(action.requiredPermission), async (req, res) => {
+    const result = await handler(req.user!, req.body);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  });
+}
 
 connectorsRouter.post(
   "/sources/:id/whatsapp/messages/reply",
