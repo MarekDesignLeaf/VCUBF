@@ -2,6 +2,11 @@ export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.reado
 export const GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 export const GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
+// Non-sensitive: lets a send-only source learn which Google account it is.
+export const GOOGLE_USERINFO_EMAIL_SCOPE = "https://www.googleapis.com/auth/userinfo.email";
+const GOOGLE_USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo";
+// Scopes accepted by users.getProfile; gmail.send alone is not among them.
+const GMAIL_PROFILE_SCOPES: string[] = [GMAIL_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE];
 const GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GOOGLE_REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
@@ -162,11 +167,23 @@ export function gmailProviderScopes(logicalScopes: string[]) {
     if (logicalScopes.includes("write:drafts")) requested.add(GMAIL_COMPOSE_SCOPE);
     if (logicalScopes.includes("send:messages") && !requested.has(GMAIL_COMPOSE_SCOPE)) requested.add(GMAIL_SEND_SCOPE);
   }
+  // Every source must be able to say which Google account it is (two
+  // mailboxes can be connected, and one must not be connected twice). A
+  // send-only grant cannot read the Gmail profile, so it also asks for the
+  // account's email address and nothing more.
+  if (requested.size && ![...requested].some((scope) => GMAIL_PROFILE_SCOPES.includes(scope))) requested.add(GOOGLE_USERINFO_EMAIL_SCOPE);
   return [...requested];
 }
 
+// Google may add "openid" to an identity grant; it gives no access of its own.
+function meaningfulScopes(scopes: string[]) {
+  return scopes.filter((scope) => scope !== "openid");
+}
+
 function sameScopes(actual: string[], expected: string[]) {
-  return actual.length === expected.length && actual.every((scope) => expected.includes(scope));
+  const granted = meaningfulScopes(actual);
+  const wanted = meaningfulScopes(expected);
+  return granted.length === wanted.length && granted.every((scope) => wanted.includes(scope));
 }
 
 function credentialFromTokenResponse(
@@ -405,6 +422,16 @@ export async function getGmailMessage(accessToken: string, id: string) {
 
 export async function getGmailProfile(accessToken: string) {
   return gmailJson<GmailProfile>(new URL(GMAIL_PROFILE_ENDPOINT), accessToken);
+}
+
+/** The Google account a credential belongs to, using whichever granted scope can tell. */
+export async function getGmailAccountEmail(accessToken: string, grantedScopes: string[]): Promise<string | undefined> {
+  if (grantedScopes.some((scope) => GMAIL_PROFILE_SCOPES.includes(scope))) return (await getGmailProfile(accessToken)).emailAddress;
+  if (grantedScopes.includes(GOOGLE_USERINFO_EMAIL_SCOPE)) {
+    const info = await gmailJson<{ email?: string; email_verified?: boolean }>(new URL(GOOGLE_USERINFO_ENDPOINT), accessToken);
+    return info.email_verified === false ? undefined : info.email;
+  }
+  return undefined;
 }
 
 export async function listGmailHistory(

@@ -1134,6 +1134,8 @@ export async function dispatchParsedCommand(
 
     case "prepare_gmail_message": {
       const result = await voiceGmailService.prepareVoiceGmailMessage(user, command.entities);
+      // The review is read in full, naming the account it will leave from, so
+      // the yes is given to something actually heard.
       response = {
         intent: command.intent,
         interpreted: command.entities,
@@ -1141,7 +1143,9 @@ export async function dispatchParsedCommand(
         httpStatus: result.httpStatus,
         data: result.ok ? result.data : undefined,
         error: result.ok ? undefined : result.error,
-        message: result.ok ? (result.data as { message?: string }).message : result.message,
+        message: result.ok
+          ? spokenReview("send_email", (result.data as { preview?: Record<string, unknown> }).preview, user.voiceLanguage) ?? (result.data as { message?: string }).message
+          : spokenError(result.error, result.extra, user.voiceLanguage) ?? result.message,
       };
       break;
     }

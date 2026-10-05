@@ -49,8 +49,8 @@ function sameWord(spoken: string, name: string) {
 // Owners call the same account by its purpose in either language: the
 // "Business Gmail" source is "firemní" when spoken in Czech.
 const SAME_MEANING = [
-  ["business", "company", "work", "office", "firemni", "firma", "firmy", "pracovni", "kancelar"],
-  ["personal", "private", "home", "osobni", "soukromy", "soukrome", "domaci"],
+  ["business", "company", "work", "office", "firemni", "firma", "firmy", "pracovni", "kancelar", "firmowy", "firmowe", "sluzbowy", "sluzbowe"],
+  ["personal", "private", "home", "osobni", "soukromy", "soukrome", "domaci", "prywatny", "prywatne", "osobisty", "osobiste", "domowy"],
 ];
 
 function meaning(word: string) {
