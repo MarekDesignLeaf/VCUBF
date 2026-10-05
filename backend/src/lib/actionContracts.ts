@@ -566,6 +566,21 @@ export const SEND_WHATSAPP_MESSAGE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_CONFIGURATION_MISSING", "CONFIRMATION_REQUIRED", "CONNECTOR_AUTHORIZATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
 };
 
+// A reply is bound to one received message: the recipient is that message's
+// sender, never a number the speaker supplies, and the text is quoted under the
+// customer's own message in their WhatsApp thread. Like any send it is reviewed
+// and confirmed first; the reviewed text is already in the language it will be
+// sent in (English unless another language is named).
+export const REPLY_WHATSAPP_MESSAGE_ACTION: ActionContract = {
+  actionName: "reply_whatsapp_message",
+  purpose: "Reply on WhatsApp to the sender of one received message, quoting it, only after the user reviews the recipient, the original message and the final reply text and confirms the external action.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["crm.communication_intakes", "connector_sources", "meta.whatsapp_messages"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_CONFIGURATION_MISSING", "WHATSAPP_MESSAGE_NOT_FOUND", "AMBIGUOUS_REFERENCE", "WHATSAPP_REPLY_WINDOW_CLOSED", "TRANSLATION_NOT_CONFIGURED", "TRANSLATION_FAILED", "TRANSLATION_LANGUAGE_UNKNOWN", "TRANSLATION_AFTER_APPROVAL", "CONFIRMATION_REQUIRED", "CONNECTOR_AUTHORIZATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "PROVIDER_RESPONSE_INVALID"],
+};
+
 export const DISCONNECT_WHATSAPP_SOURCE_ACTION: ActionContract = {
   actionName: "disconnect_whatsapp_source",
   purpose: "Disable the local WhatsApp Business source after confirmation without exposing or deleting deployment secrets.",

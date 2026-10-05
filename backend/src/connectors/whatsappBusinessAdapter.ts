@@ -11,6 +11,7 @@ export class WhatsAppBusinessAdapterError extends Error {
       | "RATE_LIMITED"
       | "PROVIDER_UNAVAILABLE"
       | "PROVIDER_RESPONSE_INVALID"
+      | "WHATSAPP_REPLY_WINDOW_CLOSED"
       | "WEBHOOK_VERIFICATION_FAILED"
       | "WEBHOOK_SIGNATURE_INVALID",
     message: string = code
@@ -207,7 +208,23 @@ export function parseWhatsAppWebhook(payload: unknown) {
   return { messages, statuses };
 }
 
-export async function sendWhatsAppText(input: { to: string; body: string }) {
+// Meta's error code for a free-form message sent more than 24 hours after the
+// customer last wrote. Outside that window WhatsApp accepts only pre-approved
+// template messages, which this connector does not send.
+const META_REENGAGEMENT_ERROR_CODE = 131047;
+
+async function metaErrorCode(response: Response): Promise<number | undefined> {
+  try {
+    const payload = record(await response.json());
+    const error = record(payload?.error);
+    const code = Number(error?.code);
+    return Number.isFinite(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function sendWhatsAppText(input: { to: string; body: string; replyToMessageId?: string }) {
   const config = whatsAppConfig();
   let response: Response;
   try {
@@ -218,6 +235,8 @@ export async function sendWhatsAppText(input: { to: string; body: string }) {
         messaging_product: "whatsapp",
         recipient_type: "individual",
         to: input.to.replace(/^\+/, ""),
+        // A reply quotes the customer's message in their WhatsApp thread.
+        ...(input.replyToMessageId ? { context: { message_id: input.replyToMessageId } } : {}),
         type: "text",
         text: { preview_url: false, body: input.body },
       }),
@@ -226,6 +245,9 @@ export async function sendWhatsAppText(input: { to: string; body: string }) {
     throw new WhatsAppBusinessAdapterError("PROVIDER_UNAVAILABLE");
   }
   if (!response.ok) {
+    if (response.status === 400 && await metaErrorCode(response) === META_REENGAGEMENT_ERROR_CODE) {
+      throw new WhatsAppBusinessAdapterError("WHATSAPP_REPLY_WINDOW_CLOSED", "WhatsApp accepts a free-form message only within 24 hours of the customer's last message.");
+    }
     if (response.status === 401) throw new WhatsAppBusinessAdapterError("CONNECTOR_AUTHORIZATION_REQUIRED");
     if (response.status === 403) throw new WhatsAppBusinessAdapterError("SCOPE_DENIED");
     if (response.status === 429) throw new WhatsAppBusinessAdapterError("RATE_LIMITED");
