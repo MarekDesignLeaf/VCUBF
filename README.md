@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 34 mounted route groups, 52 Prisma models, 141 Action Contracts,
+- **Backend**: 34 mounted route groups, 52 Prisma models, 142 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,
@@ -67,13 +67,21 @@ docs/               User guide, connector engine, production architecture, voice
   refused and nobody else is emailed. Needs the Google Calendar source to be re-authorised
   once with “Allow calendar writing”. Covered by mocked tests (`googleCalendarWrite.test.ts`);
   live Google acceptance is outstanding.
+- **Two Gmail accounts**: a company mailbox and a personal one can be connected as two
+  Gmail sources. Each records the Google account it was authorised as (read from the
+  Gmail profile; Google's account chooser is always shown), the same mailbox cannot be
+  connected twice, and both are read. One is the default sender (the first connected, or
+  the one chosen with “Make default sender”); “pošli to z osobního účtu” sends from the
+  other. The review names the sending account and the yes is bound to it. Covered by
+  mocked tests (`gmailAccounts.test.ts`); live authorisation of the second account is
+  outstanding.
 - **Learned browser macros**: saved steps and values require a replay preview. Replayed
   UI interactions are not proof of successful business changes; the UI says so explicitly.
   Live browser acceptance remains outstanding.
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 83 test files, including database integration tests and checks that only
+- **Tests**: 84 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.

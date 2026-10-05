@@ -101,6 +101,11 @@ model ConnectorSource {
   syncCursor          String?   @map("sync_cursor")
   syncPageToken       String?   @map("sync_page_token")
   lastFullSyncAt      DateTime? @map("last_full_sync_at")
+  // Gmail only: the Google account this source was authorised as, read from
+  // the Gmail profile after OAuth, and whether it is the company's default
+  // sender. Setting a default clears the others in the same transaction.
+  accountEmail        String?   @map("account_email")
+  isDefaultSender     Boolean   @default(false) @map("is_default_sender")
   createdBy           String?   @map("created_by")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")

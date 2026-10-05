@@ -8,6 +8,7 @@ import {
   REGISTER_CONNECTOR_SOURCE_ACTION,
   START_GMAIL_OAUTH_ACTION,
   SEND_GMAIL_MESSAGE_ACTION,
+  SET_DEFAULT_GMAIL_SENDER_ACTION,
   SYNC_GMAIL_MESSAGES_ACTION,
   IMPORT_GOOGLE_CONTACT_ACTION,
   REGISTER_GOOGLE_DRIVE_PHOTO_ACTION,
@@ -191,6 +192,17 @@ connectorsRouter.post(
   requirePermission(SEND_GMAIL_MESSAGE_ACTION.requiredPermission),
   async (req, res) => {
     const result = await gmailConnectorService.sendGmailMessageNow(req.user!, req.params.id, req.body);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
+// Which of several connected Gmail accounts sends when nobody names one.
+connectorsRouter.post(
+  "/sources/:id/gmail/default-sender",
+  requirePermission(SET_DEFAULT_GMAIL_SENDER_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await gmailConnectorService.setDefaultGmailSender(req.user!, req.params.id);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
   }

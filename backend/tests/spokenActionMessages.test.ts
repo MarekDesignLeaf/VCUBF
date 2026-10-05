@@ -97,6 +97,16 @@ describe("Long reviews are heard in full", () => {
     assert.ok(chunks.slice(0, -1).every((chunk) => chunk.endsWith(".")), "pieces end at sentence ends");
   });
 
+  it("names the account an email leaves from, and asks when that is unclear", () => {
+    const spoken = spokenReview("send_email", { fromAccount: "marek@designleaf.co.uk", to: ["jan@example.com"], subject: "Quote", body: "Hello.", sentIn: "English (United Kingdom)" }, "cs-CZ")!;
+    assert.equal(spoken, "Pošlu z účtu marek@designleaf.co.uk e-mail na jan@example.com anglicky. Předmět: „Quote“. Text: „Hello.“. Mám ho odeslat?");
+    assert.equal(
+      spokenError("AMBIGUOUS_GMAIL_SOURCE", { accounts: ["Business Gmail (marek@designleaf.co.uk)", "Osobní Gmail (marek.private@gmail.com)"] }, "cs-CZ"),
+      "Mám připojených víc e-mailových účtů: Business Gmail (marek@designleaf.co.uk), Osobní Gmail (marek.private@gmail.com). Řekněte, ze kterého mám poslat, nebo v Konektorech nastavte výchozí účet pro odesílání.",
+    );
+    assert.equal(spokenOutcome("set_default_email_account", { accountEmail: "marek@designleaf.co.uk" }, "cs-CZ"), "E-maily teď budu posílat z účtu marek@designleaf.co.uk, pokud neřeknete jiný.");
+  });
+
   it("says copy and blind copy separately", () => {
     const spoken = spokenReview("send_email", { to: ["a@example.com"], cc: ["b@example.com"], bcc: ["c@example.com"], subject: "S", body: "B" }, "cs-CZ")!;
     assert.equal(spoken, "Pošlu e-mail na a@example.com, v kopii b@example.com, ve skryté kopii c@example.com. Předmět: „S“. Text: „B“. Mám ho odeslat?");

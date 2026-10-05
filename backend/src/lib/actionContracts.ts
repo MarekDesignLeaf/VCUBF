@@ -418,12 +418,12 @@ export const START_GMAIL_OAUTH_ACTION: ActionContract = {
 
 export const COMPLETE_GMAIL_OAUTH_ACTION: ActionContract = {
   actionName: "complete_gmail_oauth",
-  purpose: "Validate one-time OAuth state, exchange Google's authorization code, verify Gmail read-only scope and store only encrypted provider tokens.",
+  purpose: "Validate one-time OAuth state, exchange Google's authorization code, verify the granted Gmail scopes, record which Google account was authorised (refusing one already connected as another source) and store only encrypted provider tokens.",
   requiredPermission: "connectors.manage",
   riskLevel: 2,
   confirmationRequired: false,
-  dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials"],
-  possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED", "CONNECTOR_CONFIGURATION_MISSING"],
+  dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials", "gmail.profile"],
+  possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED", "CONNECTOR_CONFIGURATION_MISSING", "GMAIL_ACCOUNT_ALREADY_CONNECTED"],
 };
 
 export const SYNC_GMAIL_MESSAGES_ACTION: ActionContract = {
@@ -453,7 +453,17 @@ export const SEND_GMAIL_MESSAGE_ACTION: ActionContract = {
   riskLevel: 3,
   confirmationRequired: true,
   dataSources: ["connector_sources", "connector_credentials", "gmail.messages"],
-  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "CONFIRMATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "GMAIL_ACCOUNT_NOT_FOUND", "AMBIGUOUS_GMAIL_SOURCE", "CONFIRMATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
+};
+
+export const SET_DEFAULT_GMAIL_SENDER_ACTION: ActionContract = {
+  actionName: "set_default_gmail_sender",
+  purpose: "Choose which connected Gmail account sends email when the user does not name one. Internal setting with no external effect; the previous default is audited so the change can be reversed.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["connector_sources"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "GMAIL_ACCOUNT_NOT_FOUND", "AMBIGUOUS_GMAIL_SOURCE"],
 };
 
 export const DELETE_GMAIL_INTAKE_ACTION: ActionContract = {

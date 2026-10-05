@@ -36,10 +36,12 @@ import {
   DISCONNECT_GMAIL_SOURCE_ACTION,
   START_GMAIL_OAUTH_ACTION,
   SEND_GMAIL_MESSAGE_ACTION,
+  SET_DEFAULT_GMAIL_SENDER_ACTION,
   SYNC_GMAIL_MESSAGES_ACTION,
   type ActionContract,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import { chooseGmailSendingAccount, gmailAccountLabel } from "../lib/gmailAccountChoice.js";
 import { frontendUrl } from "../lib/frontendUrl.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
@@ -246,6 +248,30 @@ export async function completeGmailOAuth(rawInput: unknown): Promise<ServiceResu
       oauthState.source.configuredScopes,
       existingRefreshToken
     );
+    // Which Google account was chosen on Google's screen. Read from the
+    // profile, never assumed: a source re-authorised as another account must
+    // not keep the old address. Unknown (send-only scopes) is stored as unknown.
+    const accountEmail = await authorisedAccountEmail(credential.accessToken);
+    if (accountEmail) {
+      const twin = await prisma.connectorSource.findFirst({
+        where: {
+          companyId: oauthState.companyId,
+          connectorKey: "gmail",
+          isActive: true,
+          id: { not: oauthState.sourceId },
+          accountEmail: { equals: accountEmail, mode: "insensitive" },
+        },
+        select: { displayName: true },
+      });
+      if (twin) {
+        // The same mailbox twice would import every message twice.
+        await auditFailure(COMPLETE_GMAIL_OAUTH_ACTION, oauthState, oauthState.sourceId, "GMAIL_ACCOUNT_ALREADY_CONNECTED");
+        return fail(409, "GMAIL_ACCOUNT_ALREADY_CONNECTED", `${accountEmail} is already connected as ${twin.displayName}. Authorize this source again and choose the other Google account.`);
+      }
+    }
+    const otherDefaults = await prisma.connectorSource.count({
+      where: { companyId: oauthState.companyId, connectorKey: "gmail", isActive: true, isDefaultSender: true, id: { not: oauthState.sourceId } },
+    });
     const encrypted = encryptConnectorPayload(credential, credentialContext(oauthState.companyId, oauthState.sourceId));
     await prisma.$transaction([
       prisma.connectorCredential.upsert({
@@ -267,6 +293,10 @@ export async function completeGmailOAuth(rawInput: unknown): Promise<ServiceResu
           syncCursor: null,
           syncPageToken: null,
           lastFullSyncAt: null,
+          accountEmail,
+          // The first account the company connects sends by default; a later
+          // one never takes that over silently.
+          ...(otherDefaults === 0 ? { isDefaultSender: true } : {}),
         },
       }),
     ]);
@@ -275,7 +305,7 @@ export async function completeGmailOAuth(rawInput: unknown): Promise<ServiceResu
       userId: oauthState.userId,
       actionName: COMPLETE_GMAIL_OAUTH_ACTION.actionName,
       inputPayload: { sourceId: oauthState.sourceId },
-      dataAfter: { sourceId: oauthState.sourceId, provider: "gmail", scopeVerified: true, encrypted: true },
+      dataAfter: { sourceId: oauthState.sourceId, provider: "gmail", scopeVerified: true, encrypted: true, accountEmail, defaultSender: otherDefaults === 0 },
       riskLevel: COMPLETE_GMAIL_OAUTH_ACTION.riskLevel,
       result: "success",
     });
@@ -289,6 +319,15 @@ export async function completeGmailOAuth(rawInput: unknown): Promise<ServiceResu
       result.ok ? "CONNECTOR_INTERNAL_ERROR" : result.error
     );
     return result;
+  }
+}
+
+async function authorisedAccountEmail(accessToken: string) {
+  try {
+    const parsed = gmailAddressSchema.safeParse((await getGmailProfile(accessToken)).emailAddress);
+    return parsed.success ? parsed.data.toLowerCase() : null;
+  } catch {
+    return null;
   }
 }
 
@@ -842,7 +881,9 @@ export async function sendGmailMessageNow(
     }
   }
   const preview = {
-    sourceId, provider: "gmail", ...message,
+    sourceId, provider: "gmail",
+    fromAccount: lookup.source.accountEmail ?? lookup.source.displayName,
+    ...message,
     ...(translation ? { sentIn: translation.languageLabel, dictated: translation.original } : {}),
   };
   if (!parsed.data.confirmed) {
@@ -890,16 +931,19 @@ export async function sendGmailMessageNow(
   }
 }
 
+export type SendableGmailSource = { id: string; displayName: string; accountEmail: string | null };
+
 /**
- * Resolve the Gmail source a business document may be sent from. With an
- * explicit sourceId the source must be enabled with send:messages and
- * authorised; without one, exactly one such source must exist (the same
- * rule {assistant} applies), otherwise the caller must choose in Connectors.
+ * Resolve the Gmail source a message may be sent from. With an explicit
+ * sourceId the source must be enabled with send:messages and authorised.
+ * Without one, the account the user named ("from the business account",
+ * an address) is used; failing a name, the only sendable account, else the
+ * company's default sender. Otherwise the caller must choose.
  */
-export async function resolveSendableGmailSource(user: AuthedUser, sourceId?: string): Promise<ServiceResult<{ id: string; displayName: string }>> {
+export async function resolveSendableGmailSource(user: AuthedUser, sourceId?: string, from?: string): Promise<ServiceResult<SendableGmailSource>> {
   if (sourceId) {
     const lookup = await gmailWriteSource(user, sourceId, "send:messages");
-    return lookup.ok ? ok(200, { id: lookup.source.id, displayName: lookup.source.displayName }) : lookup.failure;
+    return lookup.ok ? ok(200, { id: lookup.source.id, displayName: lookup.source.displayName, accountEmail: lookup.source.accountEmail }) : lookup.failure;
   }
   const sources = await prisma.connectorSource.findMany({
     where: { companyId: user.companyId, connectorKey: "gmail", isActive: true },
@@ -913,10 +957,66 @@ export async function resolveSendableGmailSource(user: AuthedUser, sourceId?: st
   if (canSend.length === 0) return fail(409, "CONNECTOR_SCOPE_REQUIRED", "No enabled Gmail source has permission to send email.");
   const authorised = canSend.filter((source) => Boolean(source.credential));
   if (authorised.length === 0) return fail(409, "CONNECTOR_AUTHORIZATION_REQUIRED", "Gmail needs to be authorized again before sending.");
-  if (authorised.length > 1) {
-    return fail(409, "AMBIGUOUS_GMAIL_SOURCE", "More than one Gmail account can send email; choose one.", { sourceNames: authorised.map((source) => source.displayName), sourceIds: authorised.map((source) => source.id) });
+  const choice = chooseGmailSendingAccount(authorised, from);
+  if (!choice.ok) {
+    const accounts = choice.candidates.map(gmailAccountLabel);
+    return fail(409, choice.error, choice.error === "GMAIL_ACCOUNT_NOT_FOUND"
+      ? `No connected Gmail account matches “${from}”. Connected: ${accounts.join(", ")}.`
+      : "More than one Gmail account can send email; name one, or choose a default sender in Connectors.", {
+      accounts,
+      sourceNames: choice.candidates.map((source) => source.displayName),
+      sourceIds: choice.candidates.map((source) => source.id),
+    });
   }
-  return ok(200, { id: authorised[0].id, displayName: authorised[0].displayName });
+  return ok(200, { id: choice.source.id, displayName: choice.source.displayName, accountEmail: choice.source.accountEmail });
+}
+
+/**
+ * Make one connected Gmail account the company's default sender: the account
+ * used when nobody names another. Internal setting, audited, no external
+ * effect; the previous default is recorded so the change can be reversed.
+ */
+export async function setDefaultGmailSender(user: AuthedUser, sourceId: string): Promise<ServiceResult<SendableGmailSource & { previousDefaultSourceId: string | null }>> {
+  if (!user.permissions.includes(SET_DEFAULT_GMAIL_SENDER_ACTION.requiredPermission)) {
+    await auditFailure(SET_DEFAULT_GMAIL_SENDER_ACTION, user, sourceId, "MISSING_PERMISSION");
+    return fail(403, "MISSING_PERMISSION");
+  }
+  const source = await prisma.connectorSource.findFirst({
+    where: { id: sourceId, companyId: user.companyId, connectorKey: "gmail", isActive: true },
+    select: { id: true, displayName: true, accountEmail: true, configuredScopes: true },
+  });
+  if (!source) {
+    await auditFailure(SET_DEFAULT_GMAIL_SENDER_ACTION, user, sourceId, "CONNECTOR_SOURCE_NOT_FOUND");
+    return fail(404, "CONNECTOR_SOURCE_NOT_FOUND");
+  }
+  if (!source.configuredScopes.includes("send:messages")) {
+    await auditFailure(SET_DEFAULT_GMAIL_SENDER_ACTION, user, sourceId, "CONNECTOR_SCOPE_REQUIRED");
+    return fail(409, "CONNECTOR_SCOPE_REQUIRED", "This Gmail source is not allowed to send email. Add Send email to its scopes first.");
+  }
+  const previous = await prisma.$transaction(async (tx) => {
+    const before = await tx.connectorSource.findFirst({
+      where: { companyId: user.companyId, connectorKey: "gmail", isDefaultSender: true, id: { not: source.id } },
+      select: { id: true },
+    });
+    await tx.connectorSource.updateMany({
+      where: { companyId: user.companyId, connectorKey: "gmail", isDefaultSender: true, id: { not: source.id } },
+      data: { isDefaultSender: false },
+    });
+    await tx.connectorSource.update({ where: { id: source.id }, data: { isDefaultSender: true } });
+    return before?.id ?? null;
+  });
+  const result = { id: source.id, displayName: source.displayName, accountEmail: source.accountEmail, previousDefaultSourceId: previous };
+  await recordAudit({
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: SET_DEFAULT_GMAIL_SENDER_ACTION.actionName,
+    inputPayload: { sourceId },
+    dataBefore: { defaultSourceId: previous },
+    dataAfter: { defaultSourceId: source.id, accountEmail: source.accountEmail },
+    riskLevel: SET_DEFAULT_GMAIL_SENDER_ACTION.riskLevel,
+    result: "success",
+  });
+  return ok(200, result);
 }
 
 /**

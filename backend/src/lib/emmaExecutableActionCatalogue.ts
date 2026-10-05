@@ -88,7 +88,10 @@ export const EMMA_EXECUTABLE_ACTIONS = {
   // send_in lets a message be dictated in one language and sent in another.
   // The translation is made before the preview, so what is read back for
   // approval is the text that will actually be sent.
-  send_email: { capabilityAction: "send_gmail_message", fields: "to[], subject, body, send_in?, cc?, bcc?", confirmation: "service_preview" },
+  // from names the sending account when two Gmail accounts are connected
+  // ("firemní", "osobní", an address); without it the default sender is used.
+  send_email: { capabilityAction: "send_gmail_message", fields: "to[], subject, body, from?, send_in?, cc?, bcc?", confirmation: "service_preview" },
+  set_default_email_account: { capabilityAction: "set_default_gmail_sender", fields: "account", confirmation: "none" },
   send_whatsapp: { capabilityAction: "send_whatsapp_message", fields: "to, body, send_in?", confirmation: "service_preview" },
   // Answers one received message: the recipient is its sender, never a number
   // taken from speech. Sent in English unless send_in names another language.
@@ -178,7 +181,7 @@ export const EMMA_EXECUTABLE_ACTION_PAGES: Record<EmmaExecutableActionName, stri
   disconnect_google_photos: "connectors", disconnect_whatsapp: "connectors",
   update_connector_source: "connectors", disable_connector_source: "connectors", enable_connector_source: "connectors",
   create_gmail_draft: "connectors", delete_gmail_message: "connectors", import_google_contact: "connectors",
-  send_email: "connectors", send_whatsapp: "connectors", reply_whatsapp: "communication_intake",
+  send_email: "connectors", set_default_email_account: "connectors", send_whatsapp: "connectors", reply_whatsapp: "communication_intake",
   create_calendar_event: "calendar", move_calendar_event: "calendar", cancel_calendar_event: "calendar",
   create_google_photos_picker: "photo_selection", stage_google_photos: "photo_selection", register_google_photos_photo: "photos",
   stage_google_drive_images: "photo_selection", register_google_drive_photo: "photos", find_photos_for_service: "photo_selection",

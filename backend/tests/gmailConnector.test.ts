@@ -76,7 +76,7 @@ describe("Gmail read-only connector", () => {
     assert.equal(authorizationUrl.searchParams.get("scope"), GMAIL_READONLY_SCOPE);
     assert.equal(authorizationUrl.searchParams.get("access_type"), "offline");
     assert.equal(authorizationUrl.searchParams.has("include_granted_scopes"), false);
-    assert.equal(authorizationUrl.searchParams.get("prompt"), "consent");
+    assert.equal(authorizationUrl.searchParams.get("prompt"), "consent select_account");
     assert.ok(oauthState.length >= 40);
 
     const storedState = await prisma.connectorOAuthState.findFirstOrThrow({ where: { sourceId } });

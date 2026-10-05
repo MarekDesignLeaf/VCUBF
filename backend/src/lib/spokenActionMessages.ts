@@ -123,9 +123,11 @@ export function spokenReview(action: string, preview: Row | undefined, language:
       const cc = list(preview.cc);
       const bcc = list(preview.bcc);
       const how = preview.sentIn ? ` ${spokenLanguage(preview.sentIn, lang)}` : "";
-      if (lang === "cs") return `Pošlu e-mail na ${recipients}${cc ? `, v kopii ${cc}` : ""}${bcc ? `, ve skryté kopii ${bcc}` : ""}${how}. Předmět: „${quote(preview.subject)}“. Text: „${quote(preview.body)}“. Mám ho odeslat?`;
-      if (lang === "pl") return `Wyślę e-mail do ${recipients}${cc ? `, w kopii ${cc}` : ""}${bcc ? `, w ukrytej kopii ${bcc}` : ""}${how}. Temat: „${quote(preview.subject)}”. Treść: „${quote(preview.body)}”. Czy mam go wysłać?`;
-      return `I will email ${recipients}${cc ? `, copying ${cc}` : ""}${bcc ? `, blind-copying ${bcc}` : ""}${how}. Subject: “${quote(preview.subject)}”. Text: “${quote(preview.body)}”. Shall I send it?`;
+      // With two mailboxes connected the owner hears which one it leaves from.
+      const from = typeof preview.fromAccount === "string" && preview.fromAccount ? preview.fromAccount : "";
+      if (lang === "cs") return `Pošlu${from ? ` z účtu ${from}` : ""} e-mail na ${recipients}${cc ? `, v kopii ${cc}` : ""}${bcc ? `, ve skryté kopii ${bcc}` : ""}${how}. Předmět: „${quote(preview.subject)}“. Text: „${quote(preview.body)}“. Mám ho odeslat?`;
+      if (lang === "pl") return `Wyślę${from ? ` z konta ${from}` : ""} e-mail do ${recipients}${cc ? `, w kopii ${cc}` : ""}${bcc ? `, w ukrytej kopii ${bcc}` : ""}${how}. Temat: „${quote(preview.subject)}”. Treść: „${quote(preview.body)}”. Czy mam go wysłać?`;
+      return `I will email ${recipients}${cc ? `, copying ${cc}` : ""}${bcc ? `, blind-copying ${bcc}` : ""}${from ? `, from ${from}` : ""}${how}. Subject: “${quote(preview.subject)}”. Text: “${quote(preview.body)}”. Shall I send it?`;
     }
     case "create_calendar_event": {
       const when = spokenSlot(preview, preview.timeZone, lang);
@@ -175,6 +177,11 @@ export function spokenOutcome(action: string | undefined, data: Row | undefined,
       return lang === "cs" ? "Událost je přesunutá." : lang === "pl" ? "Wydarzenie zostało przeniesione." : "The event has been moved.";
     case "cancel_calendar_event":
       return lang === "cs" ? "Událost je zrušená." : lang === "pl" ? "Wydarzenie zostało odwołane." : "The event has been cancelled.";
+    case "set_default_email_account": {
+      const account = data?.accountEmail || data?.displayName;
+      if (!account) return undefined;
+      return lang === "cs" ? `E-maily teď budu posílat z účtu ${account}, pokud neřeknete jiný.` : lang === "pl" ? `E-maile będę teraz wysyłać z konta ${account}, chyba że wskażesz inne.` : `Email will now go from ${account} unless you name another account.`;
+    }
     default:
       return undefined;
   }
@@ -184,6 +191,7 @@ export function spokenOutcome(action: string | undefined, data: Row | undefined,
 export function spokenError(error: string | undefined, extra: Row | undefined, language: string): string | undefined {
   const lang = locale(language);
   const candidates = Array.isArray(extra?.candidates) ? (extra!.candidates as string[]).slice(0, 4).join(", ") : "";
+  const accounts = Array.isArray(extra?.accounts) ? (extra!.accounts as string[]).slice(0, 4).join(", ") : "";
   const messages: Record<string, Record<Locale, string>> = {
     WHATSAPP_REPLY_WINDOW_CLOSED: {
       cs: "Tenhle zákazník psal před víc než 24 hodinami. WhatsApp teď dovolí jen schválenou šablonu a tu zatím neposílám. Zavolejte mu nebo pošlete e-mail.",
@@ -199,6 +207,16 @@ export function spokenError(error: string | undefined, extra: Row | undefined, l
       cs: `Na to sedí víc možností${candidates ? `: ${candidates}` : ""}. Řekněte prosím přesněji, kterou myslíte.`,
       pl: `Pasuje kilka możliwości${candidates ? `: ${candidates}` : ""}. Powiedz dokładniej, o którą chodzi.`,
       en: `More than one matches${candidates ? `: ${candidates}` : ""}. Please say which one you mean.`,
+    },
+    GMAIL_ACCOUNT_NOT_FOUND: {
+      cs: `Takový e-mailový účet připojený nemám.${accounts ? ` Připojené jsou: ${accounts}.` : ""} Řekněte, ze kterého mám poslat.`,
+      pl: `Nie mam podłączonego takiego konta e-mail.${accounts ? ` Podłączone są: ${accounts}.` : ""} Powiedz, z którego mam wysłać.`,
+      en: `No connected email account matches that.${accounts ? ` Connected: ${accounts}.` : ""} Say which one to send from.`,
+    },
+    AMBIGUOUS_GMAIL_SOURCE: {
+      cs: `Mám připojených víc e-mailových účtů${accounts ? `: ${accounts}` : ""}. Řekněte, ze kterého mám poslat, nebo v Konektorech nastavte výchozí účet pro odesílání.`,
+      pl: `Mam podłączonych kilka kont e-mail${accounts ? `: ${accounts}` : ""}. Powiedz, z którego mam wysłać, albo ustaw konto domyślne w Konektorach.`,
+      en: `More than one email account is connected${accounts ? `: ${accounts}` : ""}. Say which one to send from, or choose a default sender on the Connectors page.`,
     },
     CALENDAR_WRITE_NOT_AUTHORIZED: {
       cs: "Kalendář je zatím připojený jen pro čtení. V Konektorech zvolte Povolit zápis do kalendáře a potvrďte to u Googlu.",

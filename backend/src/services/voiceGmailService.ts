@@ -8,6 +8,7 @@ import {
   type ActionContract,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import { chooseGmailSendingAccount, gmailAccountLabel } from "../lib/gmailAccountChoice.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -83,12 +84,16 @@ async function eligibleGmailSource(user: AuthedUser) {
   if (authorised.length === 0) {
     return fail(409, "CONNECTOR_AUTHORIZATION_REQUIRED", "Gmail needs to be authorized again before {assistant} can send email.");
   }
-  if (authorised.length > 1) {
-    return fail(409, "AMBIGUOUS_GMAIL_SOURCE", "More than one Gmail account can send email. Leave one enabled in Connectors before sending through {assistant}.", {
-      sourceNames: authorised.map((source) => source.displayName),
+  // With two accounts connected the default sender is used; with no default
+  // the owner is asked to choose one rather than {assistant} picking.
+  const choice = chooseGmailSendingAccount(authorised);
+  if (!choice.ok) {
+    return fail(409, "AMBIGUOUS_GMAIL_SOURCE", "More than one Gmail account can send email. Choose the default sender in Connectors.", {
+      accounts: choice.candidates.map(gmailAccountLabel),
+      sourceNames: choice.candidates.map((source) => source.displayName),
     });
   }
-  return ok(200, authorised[0]);
+  return ok(200, choice.source);
 }
 
 function messageFromPayload(payload: unknown): GmailMessage | undefined {
@@ -162,7 +167,7 @@ export async function prepareVoiceGmailMessage(user: AuthedUser, rawInput: unkno
   return ok(202, {
     confirmationRequired: true,
     expiresAt: expiresAt.toISOString(),
-    preview: parsed.data,
+    preview: { ...parsed.data, fromAccount: sourceResult.data.accountEmail ?? sourceResult.data.displayName },
     message: "I prepared the email for review. I will send it only after your explicit confirmation.",
   });
 }

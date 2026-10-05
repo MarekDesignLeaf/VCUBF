@@ -377,6 +377,10 @@ export interface ConnectorSource {
   lastSyncStatus?: string | null;
   lastErrorCode?: string | null;
   lastFullSyncAt?: string | null;
+  /** Gmail: the Google account this source was authorised as, when known. */
+  accountEmail?: string | null;
+  /** Gmail: sends when nobody names another account. */
+  isDefaultSender?: boolean;
   credentialReferenceConfigured: boolean;
   configurationAvailable: boolean;
   authorizationConfigured: boolean;
@@ -1870,6 +1874,8 @@ export const api = {
       }),
     startOAuth: (id: string) =>
       request<ConnectorOAuthStart>(`/connectors/sources/${id}/oauth/start`, { method: "POST", body: "{}" }),
+    setDefaultSender: (id: string) =>
+      request<{ id: string; displayName: string; accountEmail: string | null }>(`/connectors/sources/${id}/gmail/default-sender`, { method: "POST", body: "{}" }),
     syncSource: (
       id: string,
       data: { max_results?: number; query?: string; page_token?: string; full_sync?: boolean } = {}
