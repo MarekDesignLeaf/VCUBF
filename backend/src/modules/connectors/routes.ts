@@ -12,6 +12,7 @@ import {
   IMPORT_GOOGLE_CONTACT_ACTION,
   REGISTER_GOOGLE_DRIVE_PHOTO_ACTION,
   REGISTER_GOOGLE_PHOTOS_PHOTO_ACTION,
+  REPLY_WHATSAPP_MESSAGE_ACTION,
   SEND_WHATSAPP_MESSAGE_ACTION,
   UPDATE_CONNECTOR_SOURCE_ACTION,
 } from "../../lib/actionContracts.js";
@@ -196,6 +197,16 @@ connectorsRouter.post(
   requirePermission(SEND_WHATSAPP_MESSAGE_ACTION.requiredPermission),
   async (req, res) => {
     const result = await whatsappBusinessConnectorService.sendWhatsAppMessage(req.user!, req.params.id, req.body);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
+connectorsRouter.post(
+  "/sources/:id/whatsapp/messages/reply",
+  requirePermission(REPLY_WHATSAPP_MESSAGE_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await whatsappBusinessConnectorService.replyToWhatsAppMessage(req.user!, req.params.id, req.body);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
   }

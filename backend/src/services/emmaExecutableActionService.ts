@@ -523,6 +523,10 @@ async function executeEmmaActionDirect(
       const source = await connectorSource(user, "whatsapp_business");
       return source.ok ? whatsappBusinessConnectorService.sendWhatsAppMessage(user, source.data.id, { ...p, confirmed }) : source;
     }
+    case "reply_whatsapp": {
+      const source = await connectorSource(user, "whatsapp_business");
+      return source.ok ? whatsappBusinessConnectorService.replyToWhatsAppMessage(user, source.data.id, { ...p, confirmed }) : source;
+    }
     case "delete_gmail_message": {
       const intake = await intakeByReference(user, stringValue(p, "sender_or_message"));
       return intake.ok ? gmailConnectorService.deleteGmailIntake(user, intake.data.id, { confirmed }) : intake;

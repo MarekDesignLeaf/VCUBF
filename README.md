@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 34 mounted route groups, 52 Prisma models, 137 Action Contracts,
+- **Backend**: 34 mounted route groups, 52 Prisma models, 138 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,
@@ -51,13 +51,21 @@ docs/               User guide, connector engine, production architecture, voice
   do not. No figure is estimated or forecast, and no currency is spoken because the
   company record does not hold one. CRM read permission and company capability policy
   apply. The backend supplies every spoken figure.
+- **WhatsApp replies**: “Odpověz Honzovi na WhatsApp, že přijedeme v pondělí” answers
+  that sender's latest received message (or “last” for the newest from anyone). The
+  recipient is always the message's sender, never a spoken number; the reply quotes the
+  customer's message and is written in English unless another language is named. The
+  English is read back for confirmation and the yes sends exactly that text once. Replies
+  more than 24 hours after the customer last wrote are refused, because WhatsApp then
+  accepts only approved templates, which Secretary does not send yet. Covered by mocked
+  tests (`whatsappReply.test.ts`); a live Meta send is not yet accepted.
 - **Learned browser macros**: saved steps and values require a replay preview. Replayed
   UI interactions are not proof of successful business changes; the UI says so explicitly.
   Live browser acceptance remains outstanding.
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 80 test files, including database integration tests and checks that only
+- **Tests**: 81 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
