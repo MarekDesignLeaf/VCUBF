@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 34 mounted route groups, 52 Prisma models, 138 Action Contracts,
+- **Backend**: 34 mounted route groups, 52 Prisma models, 141 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,
@@ -59,13 +59,21 @@ docs/               User guide, connector engine, production architecture, voice
   more than 24 hours after the customer last wrote are refused, because WhatsApp then
   accepts only approved templates, which Secretary does not send yet. Covered by mocked
   tests (`whatsappReply.test.ts`); a live Meta send is not yet accepted.
+- **Calendar writing**: “Zapiš mi zítra v osm prohlídku zahrady”, “Přesuň návštěvu u
+  Dvořáků na čtrnáctou”, “Zruš zítřejší kontrolu závlahy”. Spoken days are resolved by the
+  backend in the calendar's time zone and read back with time, length and clashes before
+  anything is written; the yes writes exactly that, a repeated yes cannot create a second
+  event, and an event changed in Google after the review is left alone. Recurring events are
+  refused and nobody else is emailed. Needs the Google Calendar source to be re-authorised
+  once with “Allow calendar writing”. Covered by mocked tests (`googleCalendarWrite.test.ts`);
+  live Google acceptance is outstanding.
 - **Learned browser macros**: saved steps and values require a replay preview. Replayed
   UI interactions are not proof of successful business changes; the UI says so explicitly.
   Live browser acceptance remains outstanding.
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 81 test files, including database integration tests and checks that only
+- **Tests**: 82 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -761,7 +769,8 @@ npm run dev                 # http://localhost:5173
   expired-cursor fallback, idempotent Communication Intake provenance and confirmation-gated
   provider revocation/disconnect. Google Contacts adds exact `contacts.readonly` OAuth,
   full-to-incremental People API sync, review staging, confirmation-gated CRM import and
-  deletion isolation. Google Calendar adds exact `calendar.readonly` OAuth, per-calendar
+  deletion isolation. Google Calendar adds exact `calendar.readonly` OAuth (plus `calendar.events` when
+  `write:events` is configured, for reviewed create/move/cancel of one event), per-calendar
   incremental event staging and HTTP 410 recovery without changing jobs or tasks. Google Drive uses
   non-sensitive per-file `drive.file` access through Google Picker, stages metadata only for explicitly selected
   images and requires confirmation before creating an internal Portfolio Photo reference. Google Photos uses a

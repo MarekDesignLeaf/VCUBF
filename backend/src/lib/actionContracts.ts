@@ -642,12 +642,12 @@ export const DISCONNECT_GOOGLE_CONTACTS_SOURCE_ACTION: ActionContract = {
 };
 
 export const START_GOOGLE_CALENDAR_OAUTH_ACTION: ActionContract = {
-  actionName: "start_google_calendar_oauth", purpose: "Start Google Calendar read-only OAuth with a one-time state.",
+  actionName: "start_google_calendar_oauth", purpose: "Start Google Calendar OAuth with a one-time state for exactly the configured access: read-only, or read plus event writing when write:events is configured.",
   requiredPermission: "connectors.manage", riskLevel: 1, confirmationRequired: false,
   dataSources: ["connector_sources", "server_configuration"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_CONFIGURATION_MISSING"],
 };
 export const COMPLETE_GOOGLE_CALENDAR_OAUTH_ACTION: ActionContract = {
-  actionName: "complete_google_calendar_oauth", purpose: "Verify exact calendar.readonly scope and store only encrypted Google tokens.",
+  actionName: "complete_google_calendar_oauth", purpose: "Verify that Google granted exactly the requested calendar scopes (calendar.readonly, plus calendar.events for write:events) and store only encrypted Google tokens.",
   requiredPermission: "connectors.manage", riskLevel: 2, confirmationRequired: false,
   dataSources: ["connector_oauth_states", "google_oauth", "connector_credentials"], possibleErrors: ["MISSING_PERMISSION", "OAUTH_STATE_INVALID", "OAUTH_STATE_EXPIRED", "OAUTH_PROVIDER_REJECTED", "SCOPE_DENIED"],
 };
@@ -660,6 +660,33 @@ export const DISCONNECT_GOOGLE_CALENDAR_SOURCE_ACTION: ActionContract = {
   actionName: "disconnect_google_calendar_source", purpose: "After confirmation revoke Google authorization and clear local sync state while retaining staged events.",
   requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: true,
   dataSources: ["connector_sources", "connector_credentials", "google_oauth"], possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONFIRMATION_REQUIRED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"],
+};
+// Calendar writes. Each is reviewed first: the dates the person said are
+// resolved in the calendar's own time zone and read back, clashes with events
+// already in the calendar are listed, and the yes writes exactly that. Nobody
+// else is emailed (sendUpdates=none). Moving or cancelling binds to the
+// event's etag at review, so an event changed in the meantime is not touched.
+const CALENDAR_WRITE_ERRORS = ["MISSING_PERMISSION", "VALIDATION_FAILED", "GOOGLE_CALENDAR_NOT_CONFIGURED", "CALENDAR_WRITE_NOT_AUTHORIZED", "AMBIGUOUS_CALENDAR_SOURCE", "CALENDAR_SYNC_REQUIRED", "CALENDAR_TIME_ZONE_UNKNOWN", "CALENDAR_DATE_NOT_UNDERSTOOD", "CALENDAR_TIME_NOT_UNDERSTOOD", "CALENDAR_DATE_IN_PAST", "CONFIRMATION_REQUIRED", "CONNECTOR_AUTHORIZATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "PROVIDER_RESPONSE_INVALID"];
+export const CREATE_GOOGLE_CALENDAR_EVENT_ACTION: ActionContract = {
+  actionName: "create_google_calendar_event",
+  purpose: "Create one event in the primary Google calendar after the user reviews the resolved date, time, duration and any clashes and confirms; a retried confirmation never creates a second event.",
+  requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: true,
+  dataSources: ["connector_sources", "connector_credentials", "google_calendar", "external_calendar_events"],
+  possibleErrors: [...CALENDAR_WRITE_ERRORS, "CALENDAR_EVENT_ALREADY_EXISTS"],
+};
+export const MOVE_GOOGLE_CALENDAR_EVENT_ACTION: ActionContract = {
+  actionName: "move_google_calendar_event",
+  purpose: "Move one existing non-recurring Google calendar event to a new date or time, keeping its length, after the user reviews the old and new time and confirms.",
+  requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: true,
+  dataSources: ["connector_sources", "connector_credentials", "google_calendar", "external_calendar_events"],
+  possibleErrors: [...CALENDAR_WRITE_ERRORS, "CALENDAR_EVENT_NOT_FOUND", "AMBIGUOUS_REFERENCE", "CALENDAR_RECURRING_NOT_SUPPORTED", "CALENDAR_EVENT_CHANGED"],
+};
+export const CANCEL_GOOGLE_CALENDAR_EVENT_ACTION: ActionContract = {
+  actionName: "cancel_google_calendar_event",
+  purpose: "Cancel (delete) one existing non-recurring Google calendar event after the user reviews which event it is and confirms.",
+  requiredPermission: "connectors.manage", riskLevel: 3, confirmationRequired: true,
+  dataSources: ["connector_sources", "connector_credentials", "google_calendar", "external_calendar_events"],
+  possibleErrors: [...CALENDAR_WRITE_ERRORS, "CALENDAR_EVENT_NOT_FOUND", "AMBIGUOUS_REFERENCE", "CALENDAR_RECURRING_NOT_SUPPORTED", "CALENDAR_EVENT_CHANGED"],
 };
 export const START_GOOGLE_DRIVE_OAUTH_ACTION: ActionContract = {
   actionName: "start_google_drive_oauth", purpose: "Start per-file Google Drive OAuth for explicitly selected images.", requiredPermission: "connectors.manage", riskLevel: 1, confirmationRequired: false,

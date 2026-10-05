@@ -82,7 +82,9 @@ function enableImpact(source: ConnectorSource) {
   return source.connectorKey === "google_contacts"
     ? "Enable read-only Google Contacts access? Synchronisation will stage contact previews but will not create CRM contacts."
     : source.connectorKey === "google_calendar"
-      ? "Enable read-only Google Calendar access? Synchronisation will stage event previews but will not change jobs, tasks or capacity."
+      ? source.configuredScopes.includes("write:events")
+        ? "Enable Google Calendar with event writing? Synchronisation stages event previews; creating, moving or cancelling an event always shows a review first and needs a separate confirmation. Nobody else is emailed."
+        : "Enable read-only Google Calendar access? Synchronisation will stage event previews but will not change jobs, tasks or capacity."
       : source.connectorKey === "whatsapp_business"
         ? "Enable WhatsApp Business? Signed inbound messages and sender contacts will be synchronised automatically. A new valid number becomes a CRM contact only when no active match exists; existing contacts are linked but never overwritten. Every outgoing message still needs a separate confirmation."
         : source.connectorKey === "google_drive"
@@ -111,7 +113,7 @@ export function Connectors() {
       : new URLSearchParams(window.location.search).get("google_contacts") === "connected"
         ? "Google Contacts authorization completed. Review the read-only access and enable the source before synchronising."
         : new URLSearchParams(window.location.search).get("google_calendar") === "connected"
-          ? "Google Calendar authorization completed. Review the read-only access and enable the source before synchronising."
+          ? "Google Calendar authorization completed. Review the access and enable the source before synchronising."
           : new URLSearchParams(window.location.search).get("google_drive") === "connected"
             ? "Google Drive authorization completed. Enable the source, then explicitly select image files."
             : new URLSearchParams(window.location.search).get("google_photos") === "connected"
@@ -296,6 +298,24 @@ export function Connectors() {
       window.location.assign(result.authorizationUrl);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not prepare Gmail deletion access.");
+      setBusySourceId(null);
+    }
+  }
+
+  async function enableCalendarWriting(source: ConnectorSource) {
+    if (!window.confirm("Allow Secretary to create, move and cancel events in Google Calendar? The source will be disabled and Google will ask you to approve calendar event access. Every change is shown for review and needs a separate confirmation; nobody else is emailed.")) return;
+    setError(null);
+    setNotice(null);
+    setBusySourceId(source.id);
+    try {
+      if (source.isEnabled) await api.connectors.disableSource(source.id);
+      await api.connectors.updateSource(source.id, {
+        configured_scopes: [...new Set([...source.configuredScopes, "write:events"])],
+      });
+      const result = await api.connectors.startOAuth(source.id);
+      window.location.assign(result.authorizationUrl);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not prepare calendar writing access.");
       setBusySourceId(null);
     }
   }
@@ -514,7 +534,7 @@ export function Connectors() {
         ) : null}
       </div>
       <p className="hint">
-        Enabled Gmail (with read access), Contacts and Calendar sources synchronise automatically in the background. Sync now is an optional immediate refresh. Gmail can read mail, create drafts and send only after confirmation. Contacts and Calendar are read-only. Google Drive uses per-file access; Google Photos opens its own picker for exact user-selected photos. WhatsApp imports signed inbound webhooks, synchronises valid sender contacts without overwriting CRM data, and confirms every send.
+        Enabled Gmail (with read access), Contacts and Calendar sources synchronise automatically in the background. Sync now is an optional immediate refresh. Gmail can read mail, create drafts and send only after confirmation. Contacts are read-only. Calendar is read-only until you choose Allow calendar writing; then events can be created, moved or cancelled, each after a review and confirmation. Google Drive uses per-file access; Google Photos opens its own picker for exact user-selected photos. WhatsApp imports signed inbound webhooks, synchronises valid sender contacts without overwriting CRM data, and confirms every send.
         Never paste an OAuth token, client secret or password here.
       </p>
 
@@ -588,6 +608,12 @@ export function Connectors() {
                       </button>
                     ) : null}
                     {source.connectorKey === "google_calendar" ? <button className="secondary" onClick={() => showExternalEvents(source)}>Review events</button> : null}
+                    {source.connectorKey === "google_calendar" && !source.configuredScopes.includes("write:events") ? (
+                      <button className="secondary" onClick={() => enableCalendarWriting(source)} disabled={busySourceId === source.id}>Allow calendar writing</button>
+                    ) : null}
+                    {source.connectorKey === "google_calendar" && source.configuredScopes.includes("write:events") && !source.isEnabled ? (
+                      <button className="secondary" onClick={() => authorize(source)} disabled={busySourceId === source.id}>Reauthorize Google Calendar</button>
+                    ) : null}
                     {source.connectorKey === "google_drive" && source.isEnabled ? <button onClick={() => openDrivePicker(source)} disabled={busySourceId === source.id}>Select Drive images</button> : null}
                     {source.connectorKey === "google_drive" ? <button className="secondary" onClick={() => loadDriveImages(source)}>Review Drive images</button> : null}
                     {source.connectorKey === "google_photos" && source.isEnabled ? <button onClick={() => openGooglePhotosPicker(source)} disabled={busySourceId === source.id}>Select Google Photos</button> : null}
