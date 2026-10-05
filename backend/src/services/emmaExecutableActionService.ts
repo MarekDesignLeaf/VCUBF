@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { isValidPhoneNumberFormat } from "../lib/contactNormalization.js";
 import { fail, ok, type ServiceResult } from "./result.js";
+import { gmailAccountLabel, matchGmailAccounts } from "../lib/gmailAccountChoice.js";
 import * as clientService from "./clientService.js";
 import * as jobService from "./jobService.js";
 import * as taskService from "./taskService.js";
@@ -130,6 +131,13 @@ function englishByDefault(parameters: Record<string, unknown>, confirmed: boolea
 
 function without(parameters: Record<string, unknown>, ...keys: string[]) {
   return Object.fromEntries(Object.entries(parameters).filter(([key]) => !keys.includes(key)));
+}
+
+function bindToSendingAccount(result: ServiceResult<unknown>, sourceId: string): ServiceResult<unknown> {
+  if (result.ok || result.error !== "CONFIRMATION_REQUIRED") return result;
+  const reviewed = result.extra?.confirmInput;
+  if (!reviewed || typeof reviewed !== "object" || Array.isArray(reviewed)) return result;
+  return { ...result, extra: { ...result.extra, confirmInput: { ...(reviewed as Record<string, unknown>), from_source_id: sourceId } } };
 }
 
 async function executeEmmaActionDirect(
@@ -476,9 +484,23 @@ async function executeEmmaActionDirect(
       if (request.action === "start_google_drive_oauth") return googleDriveConnectorService.startGoogleDriveOAuth(user, source.data.id);
       return googlePhotosConnectorService.startGooglePhotosOAuth(user, source.data.id);
     }
+    // Every enabled Gmail account is read, not only the first one.
     case "sync_gmail": {
-      const source = await connectorSource(user, "gmail");
-      return source.ok ? gmailConnectorService.syncGmailMessages(user, source.data.id, { max_results: p.max_results ?? 25 }) : source;
+      const sources = (await connectorService.listConnectorSources(user, true))
+        .filter((source) => source.connectorKey === "gmail" && source.isEnabled);
+      if (sources.length <= 1) {
+        const source = await connectorSource(user, "gmail");
+        return source.ok ? gmailConnectorService.syncGmailMessages(user, source.data.id, { max_results: p.max_results ?? 25 }) : source;
+      }
+      const accounts: Array<Record<string, unknown>> = [];
+      for (const source of sources) {
+        const result = await gmailConnectorService.syncGmailMessages(user, source.id, { max_results: p.max_results ?? 25 });
+        accounts.push({ sourceId: source.id, account: gmailAccountLabel(source), ok: result.ok, ...(result.ok ? { result: result.data } : { error: result.error }) });
+      }
+      const synced = accounts.filter((account) => account.ok);
+      if (!synced.length) return fail(502, String(accounts[0].error ?? "PROVIDER_UNAVAILABLE"), "No Gmail account could be synchronised.", { accounts });
+      const importedCount = synced.reduce((sum, account) => sum + Number((account.result as { importedCount?: number } | undefined)?.importedCount ?? 0), 0);
+      return ok(200, { accounts, importedCount, failures: accounts.length - synced.length });
     }
     case "sync_google_contacts": {
       const source = await connectorSource(user, "google_contacts");
@@ -524,9 +546,32 @@ async function executeEmmaActionDirect(
     // Spoken messages leave in English unless another language is named: the
     // owner dictates in Czech and his customers read English. The English is
     // made before the review, so the yes approves the words that will be sent.
+    // Two Gmail accounts: the account is the one named in "from", else the
+    // default sender. The review names it, and the yes is bound to that exact
+    // account — confirming can never send from a different mailbox.
     case "send_email": {
-      const source = await connectorSource(user, "gmail");
-      return source.ok ? gmailConnectorService.sendGmailMessageNow(user, source.data.id, { ...p, ...englishByDefault(p, confirmed), confirmed }) : source;
+      const bound = confirmed ? stringValue(p, "from_source_id") : undefined;
+      const source = await gmailConnectorService.resolveSendableGmailSource(user, bound, bound ? undefined : stringValue(p, "from"));
+      if (!source.ok) return source;
+      const message = without(p, "from", "from_source_id");
+      const result = await gmailConnectorService.sendGmailMessageNow(user, source.data.id, { ...message, ...englishByDefault(p, confirmed), confirmed });
+      return bindToSendingAccount(result, source.data.id);
+    }
+    case "set_default_email_account": {
+      const account = stringValue(p, "account");
+      if (!account) return fail(400, "VALIDATION_FAILED", "account is required.");
+      const sources = await prisma.connectorSource.findMany({
+        where: { companyId: user.companyId, connectorKey: "gmail", isActive: true },
+        select: { id: true, displayName: true, accountEmail: true, isDefaultSender: true },
+        orderBy: { displayName: "asc" },
+      });
+      const named = matchGmailAccounts(sources, account);
+      if (named.length !== 1) {
+        return fail(409, named.length ? "AMBIGUOUS_GMAIL_SOURCE" : "GMAIL_ACCOUNT_NOT_FOUND", `Connected Gmail accounts: ${sources.map(gmailAccountLabel).join(", ") || "none"}.`, {
+          accounts: (named.length ? named : sources).map(gmailAccountLabel),
+        });
+      }
+      return gmailConnectorService.setDefaultGmailSender(user, named[0].id);
     }
     case "send_whatsapp": {
       const source = await connectorSource(user, "whatsapp_business");

@@ -99,8 +99,14 @@ export async function syncConnectors(user: AuthedUser, target: ConnectorSetupTar
   const sources = await connectorService.listConnectorSources(user, true);
   const results: Array<Record<string, unknown>> = [];
 
-  for (const connectorKey of keys) {
-    const source = sources.find((item) => item.connectorKey === connectorKey && item.isEnabled);
+  // A company may connect two mailboxes of the same kind (a company Gmail and
+  // a personal one): each enabled source is synchronised, not just the first.
+  type SyncTarget = { connectorKey: (typeof keys)[number]; source: (typeof sources)[number] | undefined };
+  const targets = keys.flatMap((connectorKey): SyncTarget[] => {
+    const enabled = sources.filter((item) => item.connectorKey === connectorKey && item.isEnabled);
+    return enabled.length ? enabled.map((source) => ({ connectorKey, source })) : [{ connectorKey, source: undefined }];
+  });
+  for (const { connectorKey, source } of targets) {
     if (!source) {
       results.push({ connectorKey, ok: false, status: "not_enabled" });
       continue;

@@ -231,7 +231,9 @@ export function buildGmailAuthorizationUrl(state: string, logicalScopes: string[
     response_type: "code",
     scope: providerScopes.join(" "),
     access_type: "offline",
-    prompt: "consent",
+    // Always show Google's account chooser: with two mailboxes connected, a
+    // browser already signed in to one must still let the owner pick the other.
+    prompt: "consent select_account",
     state,
   }).toString();
   return url.toString();

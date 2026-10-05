@@ -271,6 +271,21 @@ export function Connectors() {
     }
   }
 
+  // With two Gmail accounts connected, one sends when nobody names the other.
+  async function makeDefaultSender(source: ConnectorSource) {
+    setError(null);
+    setNotice(null);
+    setBusySourceId(source.id);
+    try {
+      await api.connectors.setDefaultSender(source.id);
+      await loadSources();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not change the default email account.");
+    } finally {
+      setBusySourceId(null);
+    }
+  }
+
   async function authorize(source: ConnectorSource) {
     setError(null);
     setNotice(null);
@@ -592,7 +607,11 @@ export function Connectors() {
           <tbody>
             {sources.map((source) => (
               <tr key={source.id}>
-                <td><strong>{source.displayName}</strong><div className="hint">{source.definition.serviceName}</div></td>
+                <td>
+                  <strong>{source.displayName}</strong><div className="hint">{source.definition.serviceName}</div>
+                  {source.accountEmail ? <div className="hint">{source.accountEmail}</div> : null}
+                  {source.connectorKey === "gmail" && source.isDefaultSender ? <div className="hint"><strong>Default sender</strong></div> : null}
+                </td>
                 <td>{source.serviceType.replaceAll("_", " ")}</td>
                 <td>{source.configuredScopes.length ? source.configuredScopes.join(", ") : "None configured"}</td>
                 <td>{source.configurationAvailable ? "Ready" : "Missing protected credentials"}</td>
@@ -633,6 +652,9 @@ export function Connectors() {
                     {source.connectorKey === "google_photos" && source.isEnabled ? <button onClick={() => openGooglePhotosPicker(source)} disabled={busySourceId === source.id}>Select Google Photos</button> : null}
                     {source.connectorKey === "google_photos" ? <button className="secondary" onClick={() => loadGooglePhotosItems(source)}>Review Google Photos</button> : null}
                     {source.connectorKey === "gmail" && source.isEnabled && source.configuredScopes.some(scope => scope === "write:drafts" || scope === "send:messages") ? <button onClick={() => setComposeSourceId(source.id)}>Write email</button> : null}
+                    {source.connectorKey === "gmail" && !source.isDefaultSender && source.configuredScopes.includes("send:messages") ? (
+                      <button className="secondary" onClick={() => makeDefaultSender(source)} disabled={busySourceId === source.id}>Make default sender</button>
+                    ) : null}
                     {source.connectorKey === "gmail" && !source.configuredScopes.includes("delete:messages") ? (
                       <button className="secondary" onClick={() => enableGmailDeletion(source)} disabled={busySourceId === source.id}>Enable email deletion</button>
                     ) : null}
@@ -817,7 +839,7 @@ function MessageComposer({
 
   return <section className="card" style={{ marginTop: 20 }}>
     <div className="page-header"><h2>{isGmail ? "Write email" : "Write WhatsApp"}</h2><button className="secondary" onClick={onClose}>Close</button></div>
-    <p className="hint">Source: {source.displayName}. Nothing is sent until you review the final message and confirm it.</p>
+    <p className="hint">Source: {source.displayName}{source.accountEmail ? ` (${source.accountEmail})` : ""}. Nothing is sent until you review the final message and confirm it.</p>
     <div className="inline-form">
       <label>{isGmail ? "To (comma-separated emails)" : "Recipient (UK or international number)"}<input type={isGmail ? "text" : "tel"} inputMode={isGmail ? undefined : "tel"} autoComplete={isGmail ? "off" : "tel"} maxLength={isGmail ? undefined : 40} title={isGmail ? undefined : "Use a UK number such as 07700 900123 or an international number beginning with +"} value={to} onChange={event => setTo(event.target.value)} placeholder={isGmail ? "customer@example.com" : "+44 7700 900123"} /></label>
       {isGmail ? <>
@@ -886,6 +908,7 @@ function RegisterSourceForm({
       </select>
       <input placeholder="Source display name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required />
       <p className="hint">Google credentials are added through OAuth. WhatsApp credentials stay in protected server configuration and are never entered here.</p>
+      <p className="hint">A second Gmail account is a second Gmail source with its own name, for example Personal Gmail. When Google asks, choose the other Google account. Both are read; email is sent from the default sender unless you name the other account.</p>
       <fieldset>
         <legend>Logical scopes</legend>
         {definition.logicalScopes.map((scope) => (
