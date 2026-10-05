@@ -90,7 +90,9 @@ export type ParsedCommand =
   | { intent: "list_channel_messages"; entities: { channel: "email" | "whatsapp" } }
   | {
       intent: "prepare_gmail_message";
-      entities: { to: string[]; cc: string[]; bcc: string[]; subject: string; body: string };
+      // from: the sending account as the user named it ("personal",
+      // "z osobního účtu"), present only when named.
+      entities: { to: string[]; cc: string[]; bcc: string[]; subject: string; body: string; from?: string };
     }
   | { intent: "confirm_gmail_message"; entities: Record<string, never> }
   | { intent: "cancel_gmail_message"; entities: Record<string, never> }
@@ -204,25 +206,47 @@ function parseEmailAddresses(raw: string) {
     .filter(Boolean);
 }
 
+// With two Gmail accounts connected the user may name the sending one. It is
+// recognised only in explicit positions — before the recipients ("send email
+// from my personal account to …", "pošli e-mail z osobního účtu na …"), right
+// after them ("… to jane@example.com from personal; …") or as its own section
+// ("; from personal", "; z účtu osobní") — never guessed out of the body. The
+// review always names the account, so a qualifier left inside the body is
+// heard before anything is sent.
+function recipientsAndAccount(raw: string): { to: string[]; from?: string } {
+  const named = raw.match(/^(.*@[^\s,;]+)\s*,?\s+(?:from|ze|z|z\s+konta)\s+(.+)$/iu);
+  return named ? { to: parseEmailAddresses(named[1]), from: named[2].trim() } : { to: parseEmailAddresses(raw) };
+}
+
+function gmailEntities(input: { to: string[]; cc: string[]; bcc: string[]; subject: string; body: string; from?: string }) {
+  const { from, ...message } = input;
+  return { intent: "prepare_gmail_message" as const, entities: from ? { ...message, from } : message };
+}
+
 function parseGmailMessageCommand(text: string): Extract<ParsedCommand, { intent: "prepare_gmail_message" }> | undefined {
-  const prefix = text.match(/^(?:(?:send|write|compose)\s+(?:an?\s+)?(?:email|mail)\s+to|(?:pošli|posli|odešli|odesli|napiš|napis)\s+(?:e-?mail|mail)\s+(?:na|pro)|(?:wyślij|wyslij|napisz)\s+(?:e-?mail|mail)\s+(?:do|na))\s*:?\s*(.+)$/iu);
-  if (!prefix) return undefined;
-  const rest = prefix[1].trim();
+  const prefix = text.match(/^(?:(?:send|write|compose)\s+(?:an?\s+)?(?:email|mail)\s+(?:from\s+(?<fromEn>.+?)\s+)?to|(?:pošli|posli|odešli|odesli|napiš|napis)\s+(?:(?:z|ze)\s+(?<fromCsBefore>.+?)\s+)?(?:e-?mail|mail)\s+(?:(?:z|ze)\s+(?<fromCs>.+?)\s+)?(?:na|pro)|(?:wyślij|wyslij|napisz)\s+(?:e-?mail|mail)\s+(?:z\s+(?:konta\s+)?(?<fromPl>.+?)\s+)?(?:do|na))\s*:?\s*(?<rest>.+)$/iu);
+  if (!prefix?.groups) return undefined;
+  const rest = prefix.groups.rest.trim();
+  const namedFirst = [prefix.groups.fromEn, prefix.groups.fromCsBefore, prefix.groups.fromCs, prefix.groups.fromPl].find((value) => value?.trim())?.trim();
 
   // A natural spoken form is often transcribed with commas. It intentionally
   // supports only To, Subject and Body; the semicolon form below also permits
   // CC and BCC without confusing commas inside the message body.
   const commaForm = rest.match(/^(.+?)\s*,\s*(?:subject|předmět|predmet|temat)\s*:?\s*(.+?)\s*,\s*(?:body|message|zpráva|zprava|text|treść|tresc|wiadomość|wiadomosc)\s*:?\s*(.+)$/iu);
   if (commaForm) {
-    const to = parseEmailAddresses(commaForm[1]);
+    const recipients = recipientsAndAccount(commaForm[1]);
     const subject = commaForm[2].trim();
     const body = commaForm[3].trim();
-    if (to.length && subject && body) return { intent: "prepare_gmail_message", entities: { to, cc: [], bcc: [], subject, body } };
+    if (recipients.to.length && subject && body) {
+      return gmailEntities({ to: recipients.to, cc: [], bcc: [], subject, body, from: namedFirst ?? recipients.from });
+    }
     return undefined;
   }
 
   const sections = rest.split(/\s*;\s*/);
-  const to = parseEmailAddresses(sections.shift() ?? "");
+  const recipients = recipientsAndAccount(sections.shift() ?? "");
+  const to = recipients.to;
+  let from = namedFirst ?? recipients.from;
   let cc: string[] = [];
   let bcc: string[] = [];
   let subject = "";
@@ -239,6 +263,11 @@ function parseGmailMessageCommand(text: string): Extract<ParsedCommand, { intent
       bcc = parseEmailAddresses(match[1]);
       continue;
     }
+    match = section.match(/^(?:from|sender|account|z\s+[uú]čtu|z\s+uctu|[uú]čet|ucet|odes[ií]latel|z\s+konta|konto|nadawca)\s*:?\s*(.+)$/iu);
+    if (match) {
+      from = match[1].trim();
+      continue;
+    }
     match = section.match(/^(?:subject|předmět|predmet|temat)\s*:?\s*(.+)$/iu);
     if (match) {
       subject = match[1].trim();
@@ -251,7 +280,7 @@ function parseGmailMessageCommand(text: string): Extract<ParsedCommand, { intent
     }
   }
   if (!to.length || !subject || !body) return undefined;
-  return { intent: "prepare_gmail_message", entities: { to, cc, bcc, subject, body } };
+  return gmailEntities({ to, cc, bcc, subject, body, from });
 }
 
 function parseVoiceLanguageCommand(text: string): Extract<ParsedCommand, { intent: "set_voice_language" }> | undefined {

@@ -136,6 +136,7 @@ function auditInterpreted(command: ParsedTextCommand, interpreted: unknown) {
       bccCount: command.entities.bcc.length,
       subjectLength: command.entities.subject.length,
       bodyLength: command.entities.body.length,
+      sendingAccountNamed: Boolean(command.entities.from),
     };
   }
   if (command.intent === "prepare_whatsapp_message") {

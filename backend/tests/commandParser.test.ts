@@ -177,6 +177,25 @@ describe("commandParser", () => {
     });
   });
 
+  it("keeps a named sending account out of the message, and never takes it from the body", () => {
+    const named = (text: string) => {
+      const parsed = parseTextCommand(text);
+      return parsed.intent === "prepare_gmail_message" ? parsed.entities : undefined;
+    };
+    assert.deepEqual(named("send email from my personal account to jane@example.com; subject Hi; body Hello."),
+      { to: ["jane@example.com"], cc: [], bcc: [], subject: "Hi", body: "Hello.", from: "my personal account" });
+    assert.equal(named("send email to jane@example.com from personal; subject Hi; body Hello.")?.from, "personal");
+    assert.equal(named("send email to jane@example.com; from: personal; subject Hi; body Hello.")?.from, "personal");
+    assert.equal(named("pošli e-mail z osobního účtu na jane@example.com; předmět Ahoj; zpráva Dobrý den.")?.from, "osobního účtu");
+    assert.equal(named("pošli z firemního mailu e-mail na jane@example.com; předmět Ahoj; zpráva Dobrý den.")?.from, "firemního mailu");
+    assert.equal(named("pošli e-mail na jane@example.com; z účtu: osobní; předmět Ahoj; zpráva Dobrý den.")?.from, "osobní");
+    assert.equal(named("pošli e-mail na jane@example.com, z osobního, předmět Ahoj, zpráva Dobrý den.")?.from, "osobního");
+    assert.equal(named("wyślij e-mail z konta prywatnego do jane@example.com; temat Hej; treść Cześć.")?.from, "prywatnego");
+    const inBody = named("send email to jane@example.com; subject Hi; body Hello, from my personal account.");
+    assert.equal(inBody?.from, undefined);
+    assert.equal(inBody?.body, "Hello, from my personal account.");
+  });
+
   it("parses language changes in English, Czech and Polish", () => {
     assert.deepEqual(parseTextCommand("set language cs-CZ"), { intent: "set_voice_language", entities: { language: "cs-CZ" } });
     assert.deepEqual(parseTextCommand("switch language to Polish"), { intent: "set_voice_language", entities: { language: "pl-PL" } });

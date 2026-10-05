@@ -652,7 +652,7 @@ export function Connectors() {
                     {source.connectorKey === "google_photos" && source.isEnabled ? <button onClick={() => openGooglePhotosPicker(source)} disabled={busySourceId === source.id}>Select Google Photos</button> : null}
                     {source.connectorKey === "google_photos" ? <button className="secondary" onClick={() => loadGooglePhotosItems(source)}>Review Google Photos</button> : null}
                     {source.connectorKey === "gmail" && source.isEnabled && source.configuredScopes.some(scope => scope === "write:drafts" || scope === "send:messages") ? <button onClick={() => setComposeSourceId(source.id)}>Write email</button> : null}
-                    {source.connectorKey === "gmail" && !source.isDefaultSender && source.configuredScopes.includes("send:messages") ? (
+                    {source.connectorKey === "gmail" && !source.isDefaultSender && source.isEnabled && source.authorizationConfigured && source.configuredScopes.includes("send:messages") ? (
                       <button className="secondary" onClick={() => makeDefaultSender(source)} disabled={busySourceId === source.id}>Make default sender</button>
                     ) : null}
                     {source.connectorKey === "gmail" && !source.configuredScopes.includes("delete:messages") ? (

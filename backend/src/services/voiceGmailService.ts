@@ -63,7 +63,7 @@ async function expirePendingMessages(user: AuthedUser, now = new Date()) {
   });
 }
 
-async function eligibleGmailSource(user: AuthedUser) {
+async function eligibleGmailSource(user: AuthedUser, from?: string) {
   const sources = await prisma.connectorSource.findMany({
     where: { companyId: user.companyId, connectorKey: "gmail", isActive: true },
     include: { credential: { select: { sourceId: true } } },
@@ -84,12 +84,15 @@ async function eligibleGmailSource(user: AuthedUser) {
   if (authorised.length === 0) {
     return fail(409, "CONNECTOR_AUTHORIZATION_REQUIRED", "Gmail needs to be authorized again before {assistant} can send email.");
   }
-  // With two accounts connected the default sender is used; with no default
-  // the owner is asked to choose one rather than {assistant} picking.
-  const choice = chooseGmailSendingAccount(authorised);
+  // The account the user named, else the only one, else the default sender;
+  // otherwise the owner is asked to choose rather than {assistant} picking.
+  const choice = chooseGmailSendingAccount(authorised, from);
   if (!choice.ok) {
-    return fail(409, "AMBIGUOUS_GMAIL_SOURCE", "More than one Gmail account can send email. Choose the default sender in Connectors.", {
-      accounts: choice.candidates.map(gmailAccountLabel),
+    const accounts = choice.candidates.map(gmailAccountLabel);
+    return fail(409, choice.error, choice.error === "GMAIL_ACCOUNT_NOT_FOUND"
+      ? `No connected Gmail account matches “${from}”. Connected: ${accounts.join(", ")}.`
+      : "More than one Gmail account can send email. Name one, or choose the default sender in Connectors.", {
+      accounts,
       sourceNames: choice.candidates.map((source) => source.displayName),
     });
   }
@@ -123,13 +126,15 @@ export async function prepareVoiceGmailMessage(user: AuthedUser, rawInput: unkno
     await recordFailure(user, PREPARE_VOICE_GMAIL_MESSAGE_ACTION, "MISSING_PERMISSION");
     return fail(403, "MISSING_PERMISSION", "Connector management permission is required to send email.");
   }
-  const parsed = createGmailDraftSchema.safeParse(rawInput);
+  // The named account is not part of the message itself.
+  const { from, ...message } = (rawInput && typeof rawInput === "object" && !Array.isArray(rawInput) ? rawInput : {}) as Record<string, unknown>;
+  const parsed = createGmailDraftSchema.safeParse(message);
   if (!parsed.success) {
     await recordFailure(user, PREPARE_VOICE_GMAIL_MESSAGE_ACTION, "VALIDATION_FAILED");
     return fail(400, "VALIDATION_FAILED", "I need a valid recipient email address, a one-line subject and a message body.");
   }
 
-  const sourceResult = await eligibleGmailSource(user);
+  const sourceResult = await eligibleGmailSource(user, typeof from === "string" && from.trim() ? from : undefined);
   if (!sourceResult.ok) {
     await recordFailure(user, PREPARE_VOICE_GMAIL_MESSAGE_ACTION, sourceResult.error);
     return sourceResult;
