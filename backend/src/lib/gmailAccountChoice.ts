@@ -24,6 +24,7 @@ const FILLER = new Set([
   "z", "ze", "od", "s", "from", "the", "my", "muj", "meho", "mym", "moje",
   "ucet", "uctu", "uctem", "ucty", "account", "mailbox", "schranka", "schranky",
   "email", "e", "mail", "mailu", "emailu", "adresa", "adresy", "adresou", "address",
+  "konto", "konta", "kontem", "koncie", "skrzynka", "skrzynki", "mojego",
 ]);
 
 function plain(value: string) {

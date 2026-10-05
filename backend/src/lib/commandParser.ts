@@ -214,7 +214,8 @@ function parseEmailAddresses(raw: string) {
 // review always names the account, so a qualifier left inside the body is
 // heard before anything is sent.
 function recipientsAndAccount(raw: string): { to: string[]; from?: string } {
-  const named = raw.match(/^(.*@[^\s,;]+)\s*,?\s+(?:from|ze|z|z\s+konta)\s+(.+)$/iu);
+  // Longer forms first: "z konta prywatnego" names "prywatnego", not "konta".
+  const named = raw.match(/^(.*@[^\s,;]+)\s*,?\s+(?:from|z\s+konta|ze|z)\s+(.+)$/iu);
   return named ? { to: parseEmailAddresses(named[1]), from: named[2].trim() } : { to: parseEmailAddresses(raw) };
 }
 

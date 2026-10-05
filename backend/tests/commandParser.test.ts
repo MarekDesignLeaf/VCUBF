@@ -191,6 +191,7 @@ describe("commandParser", () => {
     assert.equal(named("pošli e-mail na jane@example.com; z účtu: osobní; předmět Ahoj; zpráva Dobrý den.")?.from, "osobní");
     assert.equal(named("pošli e-mail na jane@example.com, z osobního, předmět Ahoj, zpráva Dobrý den.")?.from, "osobního");
     assert.equal(named("wyślij e-mail z konta prywatnego do jane@example.com; temat Hej; treść Cześć.")?.from, "prywatnego");
+    assert.equal(named("wyślij e-mail do jane@example.com z konta prywatnego; temat Hej; treść Cześć.")?.from, "prywatnego");
     const inBody = named("send email to jane@example.com; subject Hi; body Hello, from my personal account.");
     assert.equal(inBody?.from, undefined);
     assert.equal(inBody?.body, "Hello, from my personal account.");
