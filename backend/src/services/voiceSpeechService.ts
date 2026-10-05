@@ -11,8 +11,27 @@
  *   OPENAI_TTS_VOICE  optional, default "nova"
  */
 
-/** Long enough for a 1200-character reply, short enough not to stall a conversation. */
+/** Per synthesised piece: long enough for one full OpenAI request. */
 const SPEECH_TIMEOUT_MS = 30_000;
+/** OpenAI accepts at most 4096 characters per request; stay under it. */
+const MAX_CHUNK = 3800;
+/** A review must be heard in full before its yes, so long replies are split, not cut. */
+export const MAX_SPOKEN_REPLY = 20_000;
+
+/** Splits at sentence ends (or spaces) so every piece fits one TTS request. */
+export function speechChunks(text: string, max = MAX_CHUNK): string[] {
+  const chunks: string[] = [];
+  let rest = text.trim();
+  while (rest.length > max) {
+    const window = rest.slice(0, max);
+    const sentenceEnd = Math.max(window.lastIndexOf(". "), window.lastIndexOf("? "), window.lastIndexOf("! "), window.lastIndexOf("“ "), window.lastIndexOf("” "));
+    const cut = sentenceEnd > max * 0.5 ? sentenceEnd + 1 : (window.lastIndexOf(" ") > max * 0.5 ? window.lastIndexOf(" ") : max);
+    chunks.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) chunks.push(rest);
+  return chunks;
+}
 
 export interface SpokenReply {
   audio: Buffer;
@@ -39,9 +58,21 @@ function openAiSpeed(rate: number): number {
  */
 export async function speakReply(text: string, _language: string, rate = 1): Promise<SpokenReply | null> {
   const key = process.env.OPENAI_API_KEY?.trim();
-  const trimmed = text.trim();
+  const trimmed = text.trim().slice(0, MAX_SPOKEN_REPLY);
   if (!key || !trimmed) return null;
+  // MP3 frames concatenate cleanly, so the pieces play back as one reply.
+  const parts: Buffer[] = [];
+  let contentType = "audio/mpeg";
+  for (const chunk of speechChunks(trimmed)) {
+    const spoken = await speakChunk(key, chunk, rate);
+    if (!spoken) return null;
+    parts.push(spoken.audio);
+    contentType = spoken.contentType;
+  }
+  return parts.length ? { audio: Buffer.concat(parts), contentType } : null;
+}
 
+async function speakChunk(key: string, trimmed: string, rate: number): Promise<SpokenReply | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SPEECH_TIMEOUT_MS);
   try {
@@ -51,8 +82,7 @@ export async function speakReply(text: string, _language: string, rate = 1): Pro
       body: JSON.stringify({
         model: process.env.OPENAI_TTS_MODEL?.trim() || "tts-1",
         voice: process.env.OPENAI_TTS_VOICE?.trim() || "nova",
-        // Cap the length: a spoken reply that runs for minutes is a bug, not a feature.
-        input: trimmed.slice(0, 1200),
+        input: trimmed,
         response_format: "mp3",
         speed: openAiSpeed(rate),
       }),

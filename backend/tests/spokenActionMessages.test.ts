@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { spokenChannelMessages, spokenError, spokenOutcome, spokenReview } from "../src/lib/spokenActionMessages.js";
 import { addDays, localDateTime } from "../src/lib/spokenDate.js";
+import { speechChunks } from "../src/services/voiceSpeechService.js";
 
 // A review is only a review if the person hears what will happen. These
 // sentences are what Alfonzo says before the yes: who, the exact words or the
@@ -83,5 +84,21 @@ describe("Reading received messages aloud", () => {
     }, "cs-CZ", now);
     assert.equal(spoken, "Poslední zprávy na WhatsAppu: 1. Honza Novák, před 2 hodinami: „What time will you arrive?“. Odpovězeno. 2. +447700900222, včera: „Thanks for the quote.“. Bez odpovědi. Za posledních 24 hodin zůstává bez odpovědi 1. Odpovědět můžete třeba: odpověz Honzovi, že…");
     assert.equal(spokenChannelMessages("whatsapp", { items: [], unansweredToday: 0 }, "en-GB"), "There are no received WhatsApp messages.");
+  });
+});
+
+describe("Long reviews are heard in full", () => {
+  it("splits a long reply at sentence ends into pieces the voice service accepts, losing nothing", () => {
+    const text = Array.from({ length: 300 }, (_, index) => `Sentence number ${index} of the reviewed message.`).join(" ");
+    const chunks = speechChunks(text);
+    assert.ok(chunks.length > 1);
+    for (const chunk of chunks) assert.ok(chunk.length <= 3800, `chunk of ${chunk.length}`);
+    assert.equal(chunks.join(" "), text, "every word is still spoken, in order");
+    assert.ok(chunks.slice(0, -1).every((chunk) => chunk.endsWith(".")), "pieces end at sentence ends");
+  });
+
+  it("says copy and blind copy separately", () => {
+    const spoken = spokenReview("send_email", { to: ["a@example.com"], cc: ["b@example.com"], bcc: ["c@example.com"], subject: "S", body: "B" }, "cs-CZ")!;
+    assert.equal(spoken, "Pošlu e-mail na a@example.com, v kopii b@example.com, ve skryté kopii c@example.com. Předmět: „S“. Text: „B“. Mám ho odeslat?");
   });
 });

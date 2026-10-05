@@ -118,11 +118,14 @@ export function spokenReview(action: string, preview: Row | undefined, language:
     }
     case "send_email": {
       const recipients = (Array.isArray(preview.to) ? preview.to : [preview.to]).filter(Boolean).join(", ");
-      const copies = [...(Array.isArray(preview.cc) ? preview.cc : []), ...(Array.isArray(preview.bcc) ? preview.bcc : [])].filter(Boolean);
+      // Copy and blind copy are said separately: one is visible to everyone, the other is not.
+      const list = (value: unknown) => (Array.isArray(value) ? value : value ? [value] : []).filter(Boolean).join(", ");
+      const cc = list(preview.cc);
+      const bcc = list(preview.bcc);
       const how = preview.sentIn ? ` ${spokenLanguage(preview.sentIn, lang)}` : "";
-      if (lang === "cs") return `Pošlu e-mail na ${recipients}${copies.length ? ` (v kopii ${copies.join(", ")})` : ""}${how}. Předmět: „${quote(preview.subject)}“. Text: „${quote(preview.body)}“. Mám ho odeslat?`;
-      if (lang === "pl") return `Wyślę e-mail do ${recipients}${copies.length ? ` (w kopii ${copies.join(", ")})` : ""}${how}. Temat: „${quote(preview.subject)}”. Treść: „${quote(preview.body)}”. Czy mam go wysłać?`;
-      return `I will email ${recipients}${copies.length ? ` (copying ${copies.join(", ")})` : ""}${how}. Subject: “${quote(preview.subject)}”. Text: “${quote(preview.body)}”. Shall I send it?`;
+      if (lang === "cs") return `Pošlu e-mail na ${recipients}${cc ? `, v kopii ${cc}` : ""}${bcc ? `, ve skryté kopii ${bcc}` : ""}${how}. Předmět: „${quote(preview.subject)}“. Text: „${quote(preview.body)}“. Mám ho odeslat?`;
+      if (lang === "pl") return `Wyślę e-mail do ${recipients}${cc ? `, w kopii ${cc}` : ""}${bcc ? `, w ukrytej kopii ${bcc}` : ""}${how}. Temat: „${quote(preview.subject)}”. Treść: „${quote(preview.body)}”. Czy mam go wysłać?`;
+      return `I will email ${recipients}${cc ? `, copying ${cc}` : ""}${bcc ? `, blind-copying ${bcc}` : ""}${how}. Subject: “${quote(preview.subject)}”. Text: “${quote(preview.body)}”. Shall I send it?`;
     }
     case "create_calendar_event": {
       const when = spokenSlot(preview, preview.timeZone, lang);
