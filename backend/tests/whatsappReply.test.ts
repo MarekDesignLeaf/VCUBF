@@ -162,6 +162,16 @@ describe("Replying to a received WhatsApp message", () => {
     assert.equal(sends.length, 1);
   });
 
+  it("reads the newest WhatsApp messages aloud, newest first, saying which were answered", async () => {
+    await received({ phone: "+447700900111", name: "Honza Novák", text: "Old question", hoursAgo: 30, wamid: "wamid.R1" });
+    const answered = await received({ phone: "+447700900222", name: "Petra Dvořáková", text: "Newest question", hoursAgo: 1, wamid: "wamid.R2" });
+    await prisma.communicationIntake.update({ where: { id: answered.id }, data: { sourceMetadata: { replies: [{ messageId: "wamid.SENT", sentAt: new Date().toISOString() }] } } });
+    const heard = await speak("show whatsapp messages");
+    assert.equal(heard.body.intent, "list_channel_messages", JSON.stringify(heard.body));
+    assert.match(heard.body.message, /^Latest WhatsApp messages: 1\. Petra Dvořáková, an hour ago: „Newest question“\. Answered\. 2\. Honza Novák, yesterday: „Old question“\. Not answered\./);
+    assert.equal(heard.body.data.items.length, 2);
+  });
+
   it("'last' answers the most recent message from anyone", async () => {
     await received({ phone: "+447700900111", name: "Honza Novák", text: "Older message", hoursAgo: 5, wamid: "wamid.OLD" });
     await received({ phone: "+447700900222", name: "Petra Dvořáková", text: "Newest message", hoursAgo: 1, wamid: "wamid.NEW" });

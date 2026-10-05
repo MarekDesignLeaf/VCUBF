@@ -255,3 +255,52 @@ export function spokenCompleted(language: string) {
   const lang = locale(language);
   return lang === "cs" ? "Hotovo." : lang === "pl" ? "Gotowe." : "The reviewed action was completed.";
 }
+
+function ago(at: Date, now: Date, lang: Locale) {
+  const minutes = Math.max(0, Math.round((now.getTime() - at.getTime()) / 60_000));
+  if (minutes < 60) return lang === "cs" ? "před chvílí" : lang === "pl" ? "przed chwilą" : "just now";
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) {
+    if (lang === "cs") return hours === 1 ? "před hodinou" : `před ${hours} hodinami`;
+    if (lang === "pl") return hours === 1 ? "godzinę temu" : `${hours} ${hours % 10 >= 2 && hours % 10 <= 4 && (hours < 12 || hours > 14) ? "godziny" : "godzin"} temu`;
+    return hours === 1 ? "an hour ago" : `${hours} hours ago`;
+  }
+  const days = Math.round(hours / 24);
+  if (lang === "cs") return days === 1 ? "včera" : `před ${days} dny`;
+  if (lang === "pl") return days === 1 ? "wczoraj" : `${days} dni temu`;
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+/** Reads the newest received messages aloud: who, when, what, and whether it was answered. */
+export function spokenChannelMessages(
+  channel: "email" | "whatsapp",
+  result: { items: Array<{ sender: string; text: string; receivedAt: Date; replied?: boolean }>; unansweredToday: number },
+  language: string,
+  now = new Date(),
+): string {
+  const lang = locale(language);
+  const name = channel === "whatsapp" ? "WhatsApp" : (lang === "en" ? "email" : "e-mail");
+  if (!result.items.length) {
+    return lang === "cs" ? `Na ${name === "WhatsApp" ? "WhatsAppu" : "e-mailu"} nejsou žádné přijaté zprávy.`
+      : lang === "pl" ? `Brak odebranych wiadomości ${name === "WhatsApp" ? "na WhatsAppie" : "e-mail"}.`
+        : `There are no received ${name} messages.`;
+  }
+  const lines = result.items.map((item, index) => {
+    const answered = item.replied === undefined ? ""
+      : item.replied ? (lang === "cs" ? " Odpovězeno." : lang === "pl" ? " Odpowiedziano." : " Answered.")
+        : (lang === "cs" ? " Bez odpovědi." : lang === "pl" ? " Bez odpowiedzi." : " Not answered.");
+    return `${index + 1}. ${item.sender}, ${ago(item.receivedAt, now, lang)}: „${quote(item.text, 160)}“.${answered}`;
+  });
+  const head = lang === "cs" ? `Poslední zprávy ${channel === "whatsapp" ? "na WhatsAppu" : "v e-mailu"}:`
+    : lang === "pl" ? `Ostatnie wiadomości ${channel === "whatsapp" ? "na WhatsAppie" : "e-mail"}:`
+      : `Latest ${name} messages:`;
+  const unanswered = channel === "whatsapp" && result.unansweredToday
+    ? (lang === "cs" ? ` Za posledních 24 hodin zůstává bez odpovědi ${result.unansweredToday}.`
+      : lang === "pl" ? ` W ciągu ostatnich 24 godzin bez odpowiedzi: ${result.unansweredToday}.`
+        : ` ${result.unansweredToday} from the last 24 hours are not answered.`)
+    : "";
+  const hint = channel === "whatsapp"
+    ? (lang === "cs" ? " Odpovědět můžete třeba: odpověz Honzovi, že…" : lang === "pl" ? " Możesz odpowiedzieć na przykład: odpowiedz Janowi, że…" : " You can reply, for example: reply to John that…")
+    : "";
+  return `${head} ${lines.join(" ")}${unanswered}${hint}`;
+}

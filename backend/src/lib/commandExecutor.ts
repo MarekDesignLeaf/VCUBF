@@ -27,7 +27,7 @@ import * as googleCalendarConnectorService from "../services/googleCalendarConne
 import { buildCommandUiAction, completedVoiceCommandMessage, openingVoiceLabelMessage, openingVoicePageMessage, type CommandUiAction } from "./voiceNavigation.js";
 import { getNavigationCatalogue } from "./navigationCatalogue.js";
 import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction, getPendingEmmaActionName } from "../services/emmaExecutableActionService.js";
-import { spokenCancelled, spokenCompleted, spokenError, spokenOutcome, spokenReview } from "./spokenActionMessages.js";
+import { spokenCancelled, spokenChannelMessages, spokenCompleted, spokenError, spokenOutcome, spokenReview } from "./spokenActionMessages.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -1122,8 +1122,13 @@ export async function dispatchParsedCommand(
     }
 
     case "list_channel_messages": {
-      const data = await communicationService.listEnquiries(user, { resolution: "all", channel: command.entities.channel });
-      response = { intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data };
+      // Read aloud: the newest few, who sent them, when, and whether they were
+      // answered — not the whole unresolved backlog, oldest first.
+      const recent = await communicationService.recentChannelMessages(user, command.entities.channel, 5);
+      response = {
+        intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data: recent,
+        message: spokenChannelMessages(command.entities.channel, recent, user.voiceLanguage),
+      };
       break;
     }
 
