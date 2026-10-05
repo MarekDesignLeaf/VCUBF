@@ -50,4 +50,23 @@ describe("Spoken replies use OpenAI text-to-speech only", () => {
     assert.equal(await speakReply("Hello", "en-GB"), null);
     assert.deepEqual(calls, ["https://api.openai.com/v1/audio/speech"]);
   });
+
+  it("speaks a long review in full: every piece synthesised and joined in order", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    const inputs: string[] = [];
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      const piece = String(JSON.parse(String(init?.body)).input);
+      inputs.push(piece);
+      // Answer the later pieces first: the joined audio must still follow the text order.
+      await new Promise((resolve) => setTimeout(resolve, inputs.length === 1 ? 20 : 0));
+      return new Response(new TextEncoder().encode(`[${piece.slice(0, 12)}]`), { status: 200, headers: { "content-type": "audio/mpeg" } });
+    }) as typeof fetch;
+    const text = Array.from({ length: 300 }, (_, index) => `Sentence ${String(index).padStart(3, "0")} of the review.`).join(" ");
+    const spoken = await speakReply(text, "en-GB");
+    assert.ok(inputs.length > 1, "split into several requests");
+    assert.ok(inputs.every((piece) => piece.length <= 3800));
+    assert.equal(inputs.slice().sort((a, b) => text.indexOf(a) - text.indexOf(b)).join(" "), text, "nothing is lost");
+    const audio = new TextDecoder().decode(spoken!.audio);
+    assert.ok(audio.startsWith("[Sentence 000"), "the first piece plays first");
+  });
 });

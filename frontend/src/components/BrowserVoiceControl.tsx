@@ -585,7 +585,18 @@ async function authorizedVoiceFetch(url: string, init: RequestInit & { headers: 
  * before a sample is played, so its real length is known up front and there is no
  * decoding left to fall behind during playback.
  */
-async function playNeuralVoice(text: string, language: string): Promise<Playback | null> {
+// Bumped by every new reply and by every interruption, so audio that arrives
+// for a reply that has since been silenced or replaced is never played.
+let speechGeneration = 0;
+
+/**
+ * While a reply is still being synthesised the microphone stays held: a long
+ * review can take several seconds to arrive, and a "yes" heard in that gap
+ * would approve something the person has not yet heard.
+ */
+const PENDING_SPEECH_HOLD_MS = 120_000;
+
+async function playNeuralVoice(text: string, language: string, generation = speechGeneration): Promise<Playback | null> {
   try {
     const context = ensureAudioContext();
     if (!context) return null;
@@ -602,6 +613,7 @@ async function playNeuralVoice(text: string, language: string): Promise<Playback
     const decoded = await context.decodeAudioData(encoded);
     const buffer = withLeadIn(context, decoded);
 
+    if (generation !== speechGeneration) return null;
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(context.destination);
@@ -1068,6 +1080,7 @@ export function BrowserVoiceControl() {
    * captured a moment ago can still carry her voice.
    */
   const silence = useCallback(() => {
+    speechGeneration += 1;
     currentPlayback?.stop();
     currentPlayback = null;
     try { window.speechSynthesis?.cancel(); } catch { /* not everywhere */ }
@@ -1114,17 +1127,22 @@ export function BrowserVoiceControl() {
     currentPlayback = null;
     try { window.speechSynthesis?.cancel(); } catch { /* not everywhere */ }
 
-    // Hold the recogniser off while the reply plays, or the assistant hears
-    // herself and answers her own answer.
-    speakingUntil.current = Date.now() + 3000;
-    echoGuardUntil.current = Date.now() + 3000 + ECHO_TAIL_MS;
+    // Hold the recogniser off while the reply is fetched and while it plays, or
+    // the assistant hears herself — or hears a "yes" before the review has been
+    // heard. The hold is replaced by the real length once the audio arrives.
+    const generation = ++speechGeneration;
+    speakingUntil.current = Date.now() + PENDING_SPEECH_HOLD_MS;
+    echoGuardUntil.current = Date.now() + PENDING_SPEECH_HOLD_MS + ECHO_TAIL_MS;
     // Fresh for every reply: the residue depends on volume, distance and the room.
     echoFloor.current = 0;
     calibrateUntil.current = Date.now() + BARGE_IN_CALIBRATE_MS;
     spokenText.current = [text, ...spokenText.current].slice(0, 3);
 
     void (async () => {
-      const audio = await playNeuralVoice(text, language);
+      const audio = await playNeuralVoice(text, language, generation);
+      // Silenced or replaced while the audio was on its way: the newer state
+      // already owns the guards.
+      if (generation !== speechGeneration) return;
       if (audio) {
         // The real length, known before playback starts rather than guessed from
         // metadata that may not have arrived yet.
@@ -1137,7 +1155,11 @@ export function BrowserVoiceControl() {
         });
         return;
       }
-      if (!("speechSynthesis" in window)) return;
+      if (!("speechSynthesis" in window)) {
+        speakingUntil.current = 0;
+        echoGuardUntil.current = Date.now() + ECHO_TAIL_MS;
+        return;
+      }
       try {
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = language;
