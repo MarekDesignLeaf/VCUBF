@@ -807,6 +807,11 @@ interface VoiceDetector {
 
 interface VoiceDetectorOptions {
   model?: "v5" | "legacy";
+  positiveSpeechThreshold?: number;
+  negativeSpeechThreshold?: number;
+  redemptionMs?: number;
+  preSpeechPadMs?: number;
+  minSpeechMs?: number;
   onSpeechStart?: () => void;
   onSpeechEnd?: (audio: Float32Array) => void;
   onVADMisfire?: () => void;
@@ -1449,6 +1454,17 @@ export function BrowserVoiceControl() {
           // The model and worklet are found from the script's own URL in /vad/, and the
           // runtime's WebAssembly path is set in index.html.
           model: "v5",
+          // The library's defaults (speech below 0.25 ends, 1.4 s of it to be
+          // sure, 0.8 s kept before) let room noise hold a recording open: in
+          // production a single "Alfonzo" arrived as 5.3 s of audio and a short
+          // command as 6–8 s, so every request waited seconds for the sentence
+          // to "end" and then paid to transcribe the silence. Ending on 0.9 s
+          // below 0.35 still keeps normal pauses inside one sentence.
+          positiveSpeechThreshold: 0.45,
+          negativeSpeechThreshold: 0.35,
+          redemptionMs: 900,
+          preSpeechPadMs: 400,
+          minSpeechMs: 300,
           onFrameProcessed: (_probabilities, frame) => {
             lastEventAt.current = Date.now();
             let sum = 0;
