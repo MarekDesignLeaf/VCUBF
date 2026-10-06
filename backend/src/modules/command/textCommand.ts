@@ -22,6 +22,7 @@ import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorServic
 import { getPendingEmmaActionName } from "../../services/emmaExecutableActionService.js";
 import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
 import { assistantNameFor } from "../../lib/assistantName.js";
+import { isPolishWhileOtherLanguageActive, polishNotActiveMessage } from "../../lib/activeLanguage.js";
 
 /**
  * The user's voice language as it is right now.
@@ -68,6 +69,29 @@ const transcriptionQuerySchema = z.object({
 });
 
 type ParsedTextCommand = ReturnType<typeof parseTextCommand>;
+
+/**
+ * A Polish sentence while another language is switched on: nothing is parsed,
+ * interpreted or executed. Only a language switch gets through, so the owner
+ * can always change the language he is heard in.
+ */
+async function refuseInactiveLanguage(user: AuthedUser, text: string, inputMethod: string): Promise<string | undefined> {
+  const active = await currentVoiceLanguage(user);
+  if (!isPolishWhileOtherLanguageActive(text, active)) return undefined;
+  if (parseTextCommand(text).intent === "set_voice_language") return undefined;
+  await recordAudit({
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: "reject_inactive_language_input",
+    interpretedIntent: "unrecognized",
+    inputPayload: { text: auditAssistantInput(text), inputMethod, activeLanguage: active },
+    riskLevel: 0,
+    confirmationRequired: false,
+    result: "rejected",
+    errorMessage: "LANGUAGE_NOT_ACTIVE",
+  });
+  return polishNotActiveMessage(active);
+}
 
 async function resolveUserCommand(user: AuthedUser, text: string): Promise<ParsedTextCommand> {
   const parsed = parseTextCommand(text);
@@ -371,6 +395,8 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
   // English while the menu and the rest of {assistant} are using another language.
   const language = user.voiceLanguage;
   const alias = await resolveLearningAliases(user, text);
+  const notActive = await refuseInactiveLanguage(user, alias.resolvedText, input_method);
+  if (notActive) return res.json({ ok: true, kind: "clarification", error: "LANGUAGE_NOT_ACTIVE", actionExecuted: false, message: notActive });
   let command = await resolveUserCommand(user, alias.resolvedText);
   let assistant: Awaited<ReturnType<typeof interpretVoiceRequest>> | undefined;
 
@@ -520,6 +546,10 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
   const user = req.user!;
 
   const alias = await resolveLearningAliases(user, text);
+  const notActive = await refuseInactiveLanguage(user, alias.resolvedText, input_method);
+  if (notActive) {
+    return res.status(422).json({ intent: "unrecognized", interpreted: {}, ok: false, error: "LANGUAGE_NOT_ACTIVE", message: notActive });
+  }
   const command = await resolveUserCommand(user, alias.resolvedText);
 
   const policyBlock = await blockedByEmmaPolicy(user, command);

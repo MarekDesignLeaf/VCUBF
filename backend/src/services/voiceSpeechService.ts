@@ -67,7 +67,37 @@ export async function speakReply(text: string, _language: string, rate = 1): Pro
   return { audio: Buffer.concat(spoken.map((piece) => piece!.audio)), contentType: spoken[0]!.contentType };
 }
 
+// Short replies repeat ("Ano?", "Hotovo.", "Zpráva je odeslaná."). Each one
+// cost a full OpenAI round trip — one to two seconds before {assistant} could
+// answer to her name. The same words in the same voice are the same audio, so
+// they are kept in memory and answered at once the next time.
+const CACHEABLE_TEXT = 160;
+const CACHE_ENTRIES = 200;
+const spokenCache = new Map<string, SpokenReply>();
+
+function cacheKey(text: string, rate: number) {
+  return [process.env.OPENAI_TTS_MODEL?.trim() || "tts-1", process.env.OPENAI_TTS_VOICE?.trim() || "nova", openAiSpeed(rate), text].join("\u0000");
+}
+
 async function speakChunk(key: string, trimmed: string, rate: number): Promise<SpokenReply | null> {
+  const cacheable = trimmed.length <= CACHEABLE_TEXT;
+  const id = cacheable ? cacheKey(trimmed, rate) : "";
+  const cached = cacheable ? spokenCache.get(id) : undefined;
+  if (cached) {
+    // Most recently used goes last, so the oldest is the one dropped.
+    spokenCache.delete(id);
+    spokenCache.set(id, cached);
+    return cached;
+  }
+  const spoken = await synthesise(key, trimmed, rate);
+  if (spoken && cacheable) {
+    spokenCache.set(id, spoken);
+    if (spokenCache.size > CACHE_ENTRIES) spokenCache.delete(spokenCache.keys().next().value!);
+  }
+  return spoken;
+}
+
+async function synthesise(key: string, trimmed: string, rate: number): Promise<SpokenReply | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SPEECH_TIMEOUT_MS);
   try {

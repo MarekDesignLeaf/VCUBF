@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../src/lib/commandParser.js";
 import { EMMA_EXECUTABLE_ACTION_GUIDE } from "../src/lib/emmaExecutableActionCatalogue.js";
+import { isPolishWhileOtherLanguageActive, readsAsPolish } from "../src/lib/activeLanguage.js";
 import { VOICE_PAGE_ROUTES } from "../src/lib/voiceNavigation.js";
 import { buildCommandUiAction } from "../src/lib/voiceNavigation.js";
 
@@ -177,6 +178,18 @@ describe("commandParser", () => {
     });
   });
 
+  it("tells Polish from Czech and English, so Czech mode does not act on Polish", () => {
+    for (const polish of ["usuń wszystkie powiadomienia", "pokaż jutrzejsze spotkania", "wyslij email do jan@example.com", "potwierdzam", "przełącz na czeski"]) {
+      assert.equal(readsAsPolish(polish), true, polish);
+    }
+    for (const other of ["vytvoř klienta Paweł Nowak", "create client Paweł Nowak", "posli email na jan@example.com; predmet Ahoj; zprava Dobry den", "Přečti poslední zprávy WhatsApp.", "co mám zítra v kalendáři", "show tomorrow's calendar"]) {
+      assert.equal(readsAsPolish(other), false, other);
+    }
+    assert.equal(isPolishWhileOtherLanguageActive("usuń wszystkie powiadomienia", "cs-CZ"), true);
+    assert.equal(isPolishWhileOtherLanguageActive("usuń wszystkie powiadomienia", "en-GB"), true);
+    assert.equal(isPolishWhileOtherLanguageActive("usuń wszystkie powiadomienia", "pl-PL"), false, "Polish is understood once it is switched on");
+  });
+
   it("keeps a named sending account out of the message, and never takes it from the body", () => {
     const named = (text: string) => {
       const parsed = parseTextCommand(text);
@@ -190,7 +203,6 @@ describe("commandParser", () => {
     assert.equal(named("pošli z firemního mailu e-mail na jane@example.com; předmět Ahoj; zpráva Dobrý den.")?.from, "firemního mailu");
     assert.equal(named("pošli e-mail na jane@example.com; z účtu: osobní; předmět Ahoj; zpráva Dobrý den.")?.from, "osobní");
     assert.equal(named("pošli e-mail na jane@example.com, z osobního, předmět Ahoj, zpráva Dobrý den.")?.from, "osobního");
-    assert.equal(named("wyślij e-mail z konta prywatnego do jane@example.com; temat Hej; treść Cześć.")?.from, "prywatnego");
     const inBody = named("send email to jane@example.com; subject Hi; body Hello, from my personal account.");
     assert.equal(inBody?.from, undefined);
     assert.equal(inBody?.body, "Hello, from my personal account.");

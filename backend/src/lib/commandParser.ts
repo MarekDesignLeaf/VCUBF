@@ -214,7 +214,7 @@ function parseEmailAddresses(raw: string) {
 // review always names the account, so a qualifier left inside the body is
 // heard before anything is sent.
 function recipientsAndAccount(raw: string): { to: string[]; from?: string } {
-  const named = raw.match(/^(.*@[^\s,;]+)\s*,?\s+(?:from|ze|z|z\s+konta)\s+(.+)$/iu);
+  const named = raw.match(/^(.*@[^\s,;]+)\s*,?\s+(?:from|ze|z)\s+(.+)$/iu);
   return named ? { to: parseEmailAddresses(named[1]), from: named[2].trim() } : { to: parseEmailAddresses(raw) };
 }
 
@@ -224,10 +224,10 @@ function gmailEntities(input: { to: string[]; cc: string[]; bcc: string[]; subje
 }
 
 function parseGmailMessageCommand(text: string): Extract<ParsedCommand, { intent: "prepare_gmail_message" }> | undefined {
-  const prefix = text.match(/^(?:(?:send|write|compose)\s+(?:an?\s+)?(?:email|mail)\s+(?:from\s+(?<fromEn>.+?)\s+)?to|(?:pošli|posli|odešli|odesli|napiš|napis)\s+(?:(?:z|ze)\s+(?<fromCsBefore>.+?)\s+)?(?:e-?mail|mail)\s+(?:(?:z|ze)\s+(?<fromCs>.+?)\s+)?(?:na|pro)|(?:wyślij|wyslij|napisz)\s+(?:e-?mail|mail)\s+(?:z\s+(?:konta\s+)?(?<fromPl>.+?)\s+)?(?:do|na))\s*:?\s*(?<rest>.+)$/iu);
+  const prefix = text.match(/^(?:(?:send|write|compose)\s+(?:an?\s+)?(?:email|mail)\s+(?:from\s+(?<fromEn>.+?)\s+)?to|(?:pošli|posli|odešli|odesli|napiš|napis)\s+(?:(?:z|ze)\s+(?<fromCsBefore>.+?)\s+)?(?:e-?mail|mail)\s+(?:(?:z|ze)\s+(?<fromCs>.+?)\s+)?(?:na|pro)|(?:wyślij|wyslij|napisz)\s+(?:e-?mail|mail)\s+(?:do|na))\s*:?\s*(?<rest>.+)$/iu);
   if (!prefix?.groups) return undefined;
   const rest = prefix.groups.rest.trim();
-  const namedFirst = [prefix.groups.fromEn, prefix.groups.fromCsBefore, prefix.groups.fromCs, prefix.groups.fromPl].find((value) => value?.trim())?.trim();
+  const namedFirst = [prefix.groups.fromEn, prefix.groups.fromCsBefore, prefix.groups.fromCs].find((value) => value?.trim())?.trim();
 
   // A natural spoken form is often transcribed with commas. It intentionally
   // supports only To, Subject and Body; the semicolon form below also permits
@@ -263,7 +263,7 @@ function parseGmailMessageCommand(text: string): Extract<ParsedCommand, { intent
       bcc = parseEmailAddresses(match[1]);
       continue;
     }
-    match = section.match(/^(?:from|sender|account|z\s+[uú]čtu|z\s+uctu|[uú]čet|ucet|odes[ií]latel|z\s+konta|konto|nadawca)\s*:?\s*(.+)$/iu);
+    match = section.match(/^(?:from|sender|account|z\s+[uú]čtu|z\s+uctu|[uú]čet|ucet|odes[ií]latel)\s*:?\s*(.+)$/iu);
     if (match) {
       from = match[1].trim();
       continue;

@@ -165,10 +165,10 @@ function copyFor(language: string): Copy {
       learningStop: "Cancel teaching",
     },
     cs: {
-      title: (n) => `${n} v tomto počítači`, listening: "Naslouchá", paused: "Pozastavena",
+      title: (n) => `${n} v tomto počítači`, listening: "Naslouchá", paused: "Pozastaven",
       thinking: "Přemýšlí", hearing: "Slyším vás…",
       enable: (n) => `Zapnout ${n}`, pause: (n) => `Pozastavit ${n}`,
-      heard: "Slyšela", answered: "Odpověděla",
+      heard: "Slyšel", answered: "Odpověděl",
       hint: (w) => `Řekněte „${w}“ a potom příkaz. Řeč se rozpoznává průběžně, jak mluvíte.`,
       micDenied: "Přístup k mikrofonu byl odmítnut. Povolte ho a zapněte naslouchání znovu.",
       unsupported: "Tento prohlížeč neumí rozpoznávat řeč. Použijte Edge nebo Chrome.",
@@ -967,7 +967,7 @@ export function BrowserVoiceControl() {
   const [engine, setEngine] = useState<"starting" | "local" | "browser">("starting");
   const lastEventAt = useRef(0);
   const recogniser = useRef<Recogniser | null>(null);
-  const handleFinal = useRef<(text: string) => Promise<void>>(async () => {});
+  const handleFinal = useRef<(text: string, heardAt?: number) => Promise<void>>(async () => {});
   const recorder = useRef(new MacroRecorder());
   const stageRef = useRef<typeof learningStage>("off");
   const stepsRef = useRef<MacroStep[]>([]);
@@ -1351,11 +1351,14 @@ export function BrowserVoiceControl() {
   }, [appendTurn, copy.completed, copy.connectionError, copy.failed, extendConversation, language, learningVoice, navigate, speak, updateUser]);
 
   // One finished sentence from the recogniser.
-  handleFinal.current = async (spoken: string) => {
+  handleFinal.current = async (spoken: string, heardAt = Date.now()) => {
     const text = spoken.trim();
     if (!text) return;
 
-    const alreadyActive = Date.now() <= activeUntil.current;
+    // Judged by when the sentence was spoken, not by when its transcript came
+    // back: a slow transcription used to arrive just after the window closed,
+    // and a command given in time was ignored as "not addressed".
+    const alreadyActive = heardAt <= activeUntil.current;
     const hit = findHotword(text, hotword, aliasesRef.current);
 
     // Log everything, addressed or not: a hotword that is never recognised has
@@ -1392,7 +1395,7 @@ export function BrowserVoiceControl() {
     let cancelled = false;
     let vad: VoiceDetector | null = null;
 
-    const transcribe = async (audio: Float32Array) => {
+    const transcribe = async (audio: Float32Array, heardAt: number) => {
       // The library resamples to 16 kHz and writes the RIFF header; nothing here does
       // arithmetic on the samples.
       const wav = window.vad!.utils.encodeWAV(audio);
@@ -1425,7 +1428,7 @@ export function BrowserVoiceControl() {
           lastPhraseAt: Date.now(),
         }));
         // Silence and hallucinations come back empty; nothing was said, so nothing runs.
-        if (heard) void handleFinal.current(heard);
+        if (heard) void handleFinal.current(heard, heardAt);
       } catch {
         setRecogniserState((current) => ({
           ...current, status: "error", error: "transcription-unreachable", errorCount: current.errorCount + 1,
@@ -1460,7 +1463,7 @@ export function BrowserVoiceControl() {
             // The echo guard, applied to the audio rather than to a transcript: what was
             // captured while she was speaking is thrown away before anything reads it.
             if (Date.now() < echoGuardUntil.current) return;
-            void transcribe(audio);
+            void transcribe(audio, Date.now());
           },
         });
       } catch {

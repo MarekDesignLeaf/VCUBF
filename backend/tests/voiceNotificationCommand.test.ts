@@ -41,7 +41,26 @@ describe("Emma notification deletion", () => {
     await prisma.$disconnect();
   });
 
-  it("previews Polish voice deletion, waits for confirmation, then hides only reviewed notifications", async () => {
+  it("does not act on Polish while Czech is switched on", async () => {
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "cs-CZ" } });
+    const refused = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ text: "usuń wszystkie powiadomienia", input_method: "voice_transcript" });
+    assert.equal(refused.status, 422);
+    assert.equal(refused.body.error, "LANGUAGE_NOT_ACTIVE");
+    assert.match(refused.body.message, /^Teď mluvím česky a polsky nerozumím\./);
+    assert.equal(await prisma.voicePendingAction.count({ where: { actionType: "delete_all_notifications" } }), 0, "nothing was prepared");
+    const assistant = await request(app)
+      .post("/command/assistant")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ text: "usuń wszystkie powiadomienia", input_method: "voice_transcript", history: [] });
+    assert.equal(assistant.body.error, "LANGUAGE_NOT_ACTIVE", "and it is not handed to the language model either");
+    assert.equal(assistant.body.actionExecuted, false);
+  });
+
+  it("previews Polish voice deletion once Polish is switched on, waits for confirmation, then hides only reviewed notifications", async () => {
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "pl-PL" } });
     const beforeFeed = await request(app).get("/notifications").set("Authorization", `Bearer ${token}`);
     const reviewedKeys = beforeFeed.body.map((item: { key: string }) => item.key);
     assert.ok(reviewedKeys.includes(`follow_up:${communicationId}`));
@@ -78,6 +97,7 @@ describe("Emma notification deletion", () => {
     });
     assert.equal(pending.status, "completed");
     assert.equal(pending.payload, null);
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "en-GB" } });
   });
 
   it("supports deleting and restoring one notification through the UI API", async () => {
