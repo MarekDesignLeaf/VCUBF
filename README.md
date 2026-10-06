@@ -41,7 +41,9 @@ docs/               User guide, connector engine, production architecture, voice
   command means. Its coverage is measured per language by `voiceLanguageCoverage.test.ts`,
   which keeps the same commands in English and Czech and fails if either falls. A command
   the parser does not know still works, through the model, at the cost of a round trip and
-  one more place to be misheard.
+  one more place to be misheard. The language switched on is the language that is
+  understood: with Czech or English on, a Polish sentence is neither parsed nor sent to
+  the model, and Alfonzo says how to switch; only the switch itself is always heard.
 - **Voice commands**: aliases, speech preferences, client confirmation and a read-only
   money query use the shared backend. “Kolik mám nezaplacených faktur?”, “Kdo mi
   nezaplatil?”, “Who owes us money?” and “How much are we owed?” are one question about

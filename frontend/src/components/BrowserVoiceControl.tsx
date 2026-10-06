@@ -55,6 +55,18 @@ const STALE_AFTER_MS = 30_000;
 
 /** How long the assistant keeps taking commands without being named again. */
 const ACTIVE_WINDOW_MS = 20_000;
+
+/**
+ * The longest a single recording may run.
+ *
+ * Continuous sound that reads as speech — a television, a radio, people talking
+ * — can hold the detector in "speaking" for ever. Nothing is then sent, and
+ * {assistant} stops reacting with no visible fault (seen in production on
+ * 6 October: no request for 18 minutes after one reply). At the limit the
+ * recording is closed and sent as it is, and listening starts afresh. Long
+ * enough for a dictated message, short enough to recover from a noisy room.
+ */
+const MAX_UTTERANCE_MS = 20_000;
 const CONVERSATION_CAP_MS = 90_000;
 
 type RecogniserState = {
@@ -165,10 +177,10 @@ function copyFor(language: string): Copy {
       learningStop: "Cancel teaching",
     },
     cs: {
-      title: (n) => `${n} v tomto počítači`, listening: "Naslouchá", paused: "Pozastavena",
+      title: (n) => `${n} v tomto počítači`, listening: "Naslouchá", paused: "Pozastaven",
       thinking: "Přemýšlí", hearing: "Slyším vás…",
       enable: (n) => `Zapnout ${n}`, pause: (n) => `Pozastavit ${n}`,
-      heard: "Slyšela", answered: "Odpověděla",
+      heard: "Slyšel", answered: "Odpověděl",
       hint: (w) => `Řekněte „${w}“ a potom příkaz. Řeč se rozpoznává průběžně, jak mluvíte.`,
       micDenied: "Přístup k mikrofonu byl odmítnut. Povolte ho a zapněte naslouchání znovu.",
       unsupported: "Tento prohlížeč neumí rozpoznávat řeč. Použijte Edge nebo Chrome.",
@@ -807,6 +819,12 @@ interface VoiceDetector {
 
 interface VoiceDetectorOptions {
   model?: "v5" | "legacy";
+  positiveSpeechThreshold?: number;
+  negativeSpeechThreshold?: number;
+  redemptionMs?: number;
+  preSpeechPadMs?: number;
+  minSpeechMs?: number;
+  submitUserSpeechOnPause?: boolean;
   onSpeechStart?: () => void;
   onSpeechEnd?: (audio: Float32Array) => void;
   onVADMisfire?: () => void;
@@ -967,7 +985,7 @@ export function BrowserVoiceControl() {
   const [engine, setEngine] = useState<"starting" | "local" | "browser">("starting");
   const lastEventAt = useRef(0);
   const recogniser = useRef<Recogniser | null>(null);
-  const handleFinal = useRef<(text: string) => Promise<void>>(async () => {});
+  const handleFinal = useRef<(text: string, heardAt?: number) => Promise<void>>(async () => {});
   const recorder = useRef(new MacroRecorder());
   const stageRef = useRef<typeof learningStage>("off");
   const stepsRef = useRef<MacroStep[]>([]);
@@ -1351,11 +1369,14 @@ export function BrowserVoiceControl() {
   }, [appendTurn, copy.completed, copy.connectionError, copy.failed, extendConversation, language, learningVoice, navigate, speak, updateUser]);
 
   // One finished sentence from the recogniser.
-  handleFinal.current = async (spoken: string) => {
+  handleFinal.current = async (spoken: string, heardAt = Date.now()) => {
     const text = spoken.trim();
     if (!text) return;
 
-    const alreadyActive = Date.now() <= activeUntil.current;
+    // Judged by when the sentence was spoken, not by when its transcript came
+    // back: a slow transcription used to arrive just after the window closed,
+    // and a command given in time was ignored as "not addressed".
+    const alreadyActive = heardAt <= activeUntil.current;
     const hit = findHotword(text, hotword, aliasesRef.current);
 
     // Log everything, addressed or not: a hotword that is never recognised has
@@ -1391,8 +1412,20 @@ export function BrowserVoiceControl() {
 
     let cancelled = false;
     let vad: VoiceDetector | null = null;
+    let speechStartedAt = 0;
+    let closing = false;
+    const lengthLimit = window.setInterval(() => {
+      if (!vad || closing || !speechStartedAt || Date.now() - speechStartedAt < MAX_UTTERANCE_MS) return;
+      closing = true;
+      speechStartedAt = 0;
+      const detector = vad;
+      void (async () => {
+        try { await detector.pause(); await detector.start(); } catch { /* the watchdog restarts a dead detector */ }
+        finally { closing = false; }
+      })();
+    }, 500);
 
-    const transcribe = async (audio: Float32Array) => {
+    const transcribe = async (audio: Float32Array, heardAt: number) => {
       // The library resamples to 16 kHz and writes the RIFF header; nothing here does
       // arithmetic on the samples.
       const wav = window.vad!.utils.encodeWAV(audio);
@@ -1425,7 +1458,7 @@ export function BrowserVoiceControl() {
           lastPhraseAt: Date.now(),
         }));
         // Silence and hallucinations come back empty; nothing was said, so nothing runs.
-        if (heard) void handleFinal.current(heard);
+        if (heard) void handleFinal.current(heard, heardAt);
       } catch {
         setRecogniserState((current) => ({
           ...current, status: "error", error: "transcription-unreachable", errorCount: current.errorCount + 1,
@@ -1446,21 +1479,35 @@ export function BrowserVoiceControl() {
           // The model and worklet are found from the script's own URL in /vad/, and the
           // runtime's WebAssembly path is set in index.html.
           model: "v5",
+          // The library's defaults (speech below 0.25 ends, 1.4 s of it to be
+          // sure, 0.8 s kept before) let room noise hold a recording open: in
+          // production a single "Alfonzo" arrived as 5.3 s of audio and a short
+          // command as 6–8 s, so every request waited seconds for the sentence
+          // to "end" and then paid to transcribe the silence. Ending on 0.9 s
+          // below 0.35 still keeps normal pauses inside one sentence.
+          positiveSpeechThreshold: 0.45,
+          negativeSpeechThreshold: 0.35,
+          redemptionMs: 900,
+          preSpeechPadMs: 400,
+          minSpeechMs: 300,
+          // Closing an over-long recording (below) keeps what was heard.
+          submitUserSpeechOnPause: true,
           onFrameProcessed: (_probabilities, frame) => {
             lastEventAt.current = Date.now();
             let sum = 0;
             for (let index = 0; index < frame.length; index += 1) sum += frame[index] * frame[index];
             micLevel.current = Math.min(1, Math.sqrt(Math.sqrt(sum / frame.length)) * 2.6);
           },
-          onSpeechStart: () => { setStatus("hearing"); },
-          onVADMisfire: () => { setStatus((current) => (current === "hearing" ? "idle" : current)); },
+          onSpeechStart: () => { speechStartedAt = Date.now(); setStatus("hearing"); },
+          onVADMisfire: () => { speechStartedAt = 0; setStatus((current) => (current === "hearing" ? "idle" : current)); },
           onSpeechEnd: (audio) => {
+            speechStartedAt = 0;
             setStatus((current) => (current === "hearing" ? "idle" : current));
-            if (!hasMicrophoneRef.current) return;
+            if (cancelled || !hasMicrophoneRef.current) return;
             // The echo guard, applied to the audio rather than to a transcript: what was
             // captured while she was speaking is thrown away before anything reads it.
             if (Date.now() < echoGuardUntil.current) return;
-            void transcribe(audio);
+            void transcribe(audio, Date.now());
           },
         });
       } catch {
@@ -1479,6 +1526,7 @@ export function BrowserVoiceControl() {
 
     return () => {
       cancelled = true;
+      window.clearInterval(lengthLimit);
       void vad?.destroy();
     };
   }, [enabled, hotword, language]);

@@ -111,7 +111,8 @@ describe("Emma connector commands", () => {
     assert.equal(response.body.data.items[0].summary, "Site visit");
   });
 
-  it("previews and explicitly confirms a Polish WhatsApp voice request", async () => {
+  it("previews and explicitly confirms a Polish WhatsApp voice request once Polish is switched on", async () => {
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "pl-PL" } });
     let sends = 0;
     globalThis.fetch = async (input, init) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
@@ -142,5 +143,6 @@ describe("Emma connector commands", () => {
     assert.equal(confirmed.body.intent, "confirm_whatsapp_message");
     assert.equal(confirmed.body.data.messageId, "wamid.test");
     assert.equal(sends, 1);
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "en-GB" } });
   });
 });
