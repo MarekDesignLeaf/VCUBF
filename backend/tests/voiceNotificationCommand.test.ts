@@ -47,7 +47,8 @@ describe("Emma notification deletion", () => {
       .post("/command/text")
       .set("Authorization", `Bearer ${token}`)
       .send({ text: "usuń wszystkie powiadomienia", input_method: "voice_transcript" });
-    assert.equal(refused.status, 422);
+    assert.equal(refused.status, 200, "an explanation, not a failure, so every client speaks it");
+    assert.equal(refused.body.ok, false);
     assert.equal(refused.body.error, "LANGUAGE_NOT_ACTIVE");
     assert.match(refused.body.message, /^Teď mluvím česky a polsky nerozumím\./);
     assert.equal(await prisma.voicePendingAction.count({ where: { actionType: "delete_all_notifications" } }), 0, "nothing was prepared");

@@ -4,34 +4,51 @@
 // Polish is understood only after switching to it ("přepni na polštinu"); the
 // switch itself is always heard, in any language.
 //
-// Recognition is deliberately narrow. A sentence reads as Polish only when it
-// carries a word that exists in Polish and not in Czech or English, and has no
-// letter that only Czech uses. A Polish name inside a Czech or English command
-// ("vytvoř klienta Paweł Nowak", "create client Paweł Nowak") is not Polish.
+// The language is read from the command, not from the names inside it. A
+// sentence reads as Polish when its command words are Polish: the first word
+// (among the first six) that is either a Polish command word or carries a
+// letter only Czech uses decides. Capitalised words after the first are names
+// and are skipped, so "zmień email kontaktu Dvořák" is Polish, while
+// "vytvoř klienta Paweł Nowak" and "change email for contact Alice Nie" are not.
 
 // Letters Czech has and Polish does not. Polish "ż" and "ź" are different
 // characters from Czech "ž"; "ó" belongs to both and is not listed.
 const CZECH_ONLY_LETTERS = /[áéíúůýčďěňřšťž]/iu;
 
-// Folded to plain ASCII (ł → l, accents removed). Function words, verbs and
-// nouns used in commands; none of them is a Czech or English word.
+// Folded to plain ASCII (ł → l, accents removed). Every Polish command word
+// the deterministic parser accepts, plus Polish question and function words a
+// spoken request starts with. None of them is a Czech or English word (Czech
+// "chce", "nastav", "obnov", "synchronizuj", "tak" and "mam" are left out).
 const POLISH_WORDS = new Set([
-  "czy", "sie", "nie", "mnie", "jestem", "ile", "dla", "oraz", "teraz", "gdzie", "kiedy", "ktory", "ktora", "ktore", "ktorego",
-  "dzisiaj", "jutro", "wczoraj", "pojutrze", "jutrzejsze", "dzisiejsze", "dzien", "prosze", "dziekuje", "dzieki",
-  "wyslij", "pokaz", "napisz", "przelacz", "zmien", "ustaw", "wlacz", "wylacz", "zrob", "usun", "otworz", "przejdz",
-  "sprawdz", "przeczytaj", "odswiez", "potwierdzam", "potwierdz", "anuluj", "przerwij", "dodaj", "utworz", "skasuj",
-  "wszystkie", "wszystko", "wiadomosc", "wiadomosci", "wiadomoscia", "tresc", "poczta", "poczte", "poczty",
-  "kalendarz", "kalendarzu", "spotkanie", "spotkania", "wydarzenie", "wydarzenia", "zlecenie", "zlecenia",
-  "zadanie", "zadania", "klientow", "powiadomienia", "powiadomienie", "jezyk", "jezyka", "polsku",
+  // verbs the parser accepts
+  "pokaz", "pokazac", "wyswietl", "przeczytaj", "sprawdz", "otworz", "przejdz", "wyslij", "napisz", "usun", "skasuj",
+  "wyczysc", "zarchiwizuj", "zmien", "przelacz", "ustaw", "wlacz", "wylacz", "uruchom", "polacz", "skonfiguruj",
+  "nakonfiguruj", "zsynchronizuj", "odswiez", "potwierdzam", "potwierdz", "anuluj", "przerwij", "utworz", "dodaj",
+  "zapamietaj", "pamietasz", "poprosze", "prosze", "usuwanie", "zrob", "zadzwon", "zaplanuj", "przenies", "odwolaj",
+  // question and function words
+  "jakie", "jaki", "ktore", "ktory", "ktora", "czy", "ile", "gdzie", "kiedy", "kto", "teraz", "mnie", "sie",
+  "nie", "jest", "jestem", "dla", "oraz", "dziekuje",
+  // days and things a request is about
+  "dzisiaj", "dzis", "jutro", "wczoraj", "pojutrze", "jutrzejsze", "dzisiejsze", "najblizsze", "wszystkie",
+  "wszystkich", "wiadomosc", "wiadomosci", "powiadomienia", "powiadomien", "poczta", "poczte", "kalendarz",
+  "kalendarzu", "spotkanie", "spotkania", "wydarzenie", "wydarzenia", "zlecenie", "zlecenia", "zadanie", "zadania",
+  "klientow", "jezyk", "jezyka", "polsku",
 ]);
+
+const COMMAND_WORDS_CHECKED = 6;
 
 function folded(text: string) {
   return text.toLocaleLowerCase("pl").replace(/ł/g, "l").normalize("NFD").replace(/\p{Diacritic}/gu, "");
 }
 
 export function readsAsPolish(text: string): boolean {
-  if (CZECH_ONLY_LETTERS.test(text)) return false;
-  return folded(text).split(/[^a-z]+/).some((word) => POLISH_WORDS.has(word));
+  const words = text.trim().split(/[\s,.;:!?„“”"'()]+/u).filter(Boolean).slice(0, COMMAND_WORDS_CHECKED);
+  for (const [index, word] of words.entries()) {
+    if (index > 0 && /^\p{Lu}/u.test(word)) continue;
+    if (CZECH_ONLY_LETTERS.test(word)) return false;
+    if (POLISH_WORDS.has(folded(word))) return true;
+  }
+  return false;
 }
 
 /** True when the sentence is Polish and Polish is not the language switched on. */

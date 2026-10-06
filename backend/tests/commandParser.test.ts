@@ -185,6 +185,15 @@ describe("commandParser", () => {
     for (const other of ["vytvoř klienta Paweł Nowak", "create client Paweł Nowak", "posli email na jan@example.com; predmet Ahoj; zprava Dobry den", "Přečti poslední zprávy WhatsApp.", "co mám zítra v kalendáři", "show tomorrow's calendar"]) {
       assert.equal(readsAsPolish(other), false, other);
     }
+    // The command decides, not the names inside it.
+    assert.equal(readsAsPolish("zmień email kontaktu Dvořák na new@example.com"), true, "a Czech name does not hide a Polish command");
+    assert.equal(readsAsPolish("change email for contact Alice Nie to new@example.com"), false, "a Polish-looking surname does not make English Polish");
+    assert.equal(readsAsPolish("zarchiwizuj klienta Jan Kowalski"), true, "every Polish verb the parser accepts is known");
+    assert.equal(readsAsPolish("jaka je predpoved na zitra"), false, "Czech typed without accents stays Czech");
+    // Every Polish phrase the parser accepts is recognised as Polish.
+    for (const phrase of ["usuń klienta Jane Brown", "potwierdź usunięcie wszystkich powiadomień", "anuluj usunięcie wszystkich powiadomień", "odśwież pocztę", "otwórz oferty", "zapamiętaj dla firmy faktury kończą się na 001", "co pamiętasz o kliencie?", "jakie mam jutro wydarzenia w kalendarzu", "potwierdź WhatsApp"]) {
+      assert.equal(readsAsPolish(phrase), true, phrase);
+    }
     assert.equal(isPolishWhileOtherLanguageActive("usuń wszystkie powiadomienia", "cs-CZ"), true);
     assert.equal(isPolishWhileOtherLanguageActive("usuń wszystkie powiadomienia", "en-GB"), true);
     assert.equal(isPolishWhileOtherLanguageActive("usuń wszystkie powiadomienia", "pl-PL"), false, "Polish is understood once it is switched on");

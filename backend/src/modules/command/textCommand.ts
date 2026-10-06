@@ -394,9 +394,11 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
   // A stale desktop/browser payload must never switch one response back to
   // English while the menu and the rest of {assistant} are using another language.
   const language = user.voiceLanguage;
-  const alias = await resolveLearningAliases(user, text);
-  const notActive = await refuseInactiveLanguage(user, alias.resolvedText, input_method);
+  // The sentence as spoken decides the language: a learned alias must not turn
+  // a Polish sentence into an English command while Czech is switched on.
+  const notActive = await refuseInactiveLanguage(user, text, input_method);
   if (notActive) return res.json({ ok: true, kind: "clarification", error: "LANGUAGE_NOT_ACTIVE", actionExecuted: false, message: notActive });
+  const alias = await resolveLearningAliases(user, text);
   let command = await resolveUserCommand(user, alias.resolvedText);
   let assistant: Awaited<ReturnType<typeof interpretVoiceRequest>> | undefined;
 
@@ -545,11 +547,15 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
   const { text, input_method } = parsedBody.data;
   const user = req.user!;
 
-  const alias = await resolveLearningAliases(user, text);
-  const notActive = await refuseInactiveLanguage(user, alias.resolvedText, input_method);
+  // Checked on the sentence as spoken, before learned aliases. Answered as an
+  // ordinary reply (200), so every client — the browser command bar and the
+  // Windows companion — shows and speaks the explanation instead of a generic
+  // failure.
+  const notActive = await refuseInactiveLanguage(user, text, input_method);
   if (notActive) {
-    return res.status(422).json({ intent: "unrecognized", interpreted: {}, ok: false, error: "LANGUAGE_NOT_ACTIVE", message: notActive });
+    return res.json({ intent: "unrecognized", kind: "clarification", interpreted: {}, ok: false, error: "LANGUAGE_NOT_ACTIVE", message: notActive });
   }
+  const alias = await resolveLearningAliases(user, text);
   const command = await resolveUserCommand(user, alias.resolvedText);
 
   const policyBlock = await blockedByEmmaPolicy(user, command);
