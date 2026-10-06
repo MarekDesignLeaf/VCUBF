@@ -5,7 +5,7 @@ import { prisma } from "../../db.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { recordAudit } from "../../lib/audit.js";
 import { EXECUTE_TEXT_COMMAND_ACTION } from "../../lib/actionContracts.js";
-import { isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../../lib/commandParser.js";
+import { CANONICAL_COMMAND, isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../../lib/commandParser.js";
 import { dispatchParsedCommand, type CommandResponse } from "../../lib/commandExecutor.js";
 import { resolveLearningAliases } from "../../services/learningService.js";
 import { addressedAs, aliasVocabulary } from "../../services/voiceAliasService.js";
@@ -22,7 +22,6 @@ import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorServic
 import { getPendingEmmaActionName } from "../../services/emmaExecutableActionService.js";
 import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
 import { assistantNameFor } from "../../lib/assistantName.js";
-import { isPolishWhileOtherLanguageActive, polishNotActiveMessage } from "../../lib/activeLanguage.js";
 
 /**
  * The user's voice language as it is right now.
@@ -71,30 +70,13 @@ const transcriptionQuerySchema = z.object({
 type ParsedTextCommand = ReturnType<typeof parseTextCommand>;
 
 /**
- * A Polish sentence while another language is switched on: nothing is parsed,
- * interpreted or executed. Only a language switch gets through, so the owner
- * can always change the language he is heard in.
+ * The command a sentence states. `reader` is the language switched on for
+ * what the user said, or CANONICAL_COMMAND for what the language model wrote:
+ * a sentence is read only with that language's grammar, so with Czech on a
+ * Polish sentence is not understood.
  */
-async function refuseInactiveLanguage(user: AuthedUser, text: string, inputMethod: string): Promise<string | undefined> {
-  const active = await currentVoiceLanguage(user);
-  if (!isPolishWhileOtherLanguageActive(text, active)) return undefined;
-  if (parseTextCommand(text).intent === "set_voice_language") return undefined;
-  await recordAudit({
-    companyId: user.companyId,
-    userId: user.id,
-    actionName: "reject_inactive_language_input",
-    interpretedIntent: "unrecognized",
-    inputPayload: { text: auditAssistantInput(text), inputMethod, activeLanguage: active },
-    riskLevel: 0,
-    confirmationRequired: false,
-    result: "rejected",
-    errorMessage: "LANGUAGE_NOT_ACTIVE",
-  });
-  return polishNotActiveMessage(active);
-}
-
-async function resolveUserCommand(user: AuthedUser, text: string): Promise<ParsedTextCommand> {
-  const parsed = parseTextCommand(text);
+async function resolveUserCommand(user: AuthedUser, text: string, reader: string): Promise<ParsedTextCommand> {
+  const parsed = parseTextCommand(text, reader);
   if (parsed.intent !== "unrecognized") return parsed;
   const [clientCreatePending, gmailPending, whatsappPending, notificationDeletionPending, pendingEmmaAction] = await Promise.all([
     hasPendingVoiceClientCreation(user),
@@ -132,8 +114,8 @@ async function resolveUserCommand(user: AuthedUser, text: string): Promise<Parse
   ];
   const active = pendingActions.filter((candidate) => candidate.pending);
   if (active.length !== 1) return parsed;
-  if (isGmailConfirmationPhrase(text)) return active[0].confirm;
-  if (isGmailCancellationPhrase(text)) return active[0].cancel;
+  if (isGmailConfirmationPhrase(text, reader)) return active[0].confirm;
+  if (isGmailCancellationPhrase(text, reader)) return active[0].cancel;
   return parsed;
 }
 
@@ -189,7 +171,7 @@ function assistantServiceMessage(language: string, kind: "unavailable" | "unsupp
   const messages: Record<string, Record<typeof kind, string>> = {
     cs: {
       unavailable: "Teď se nemohu spojit s jazykovou službou. Zkuste prosím přímý příkaz.",
-      unsupported: "Požadavku jsem porozuměla, ale tato operace zatím není podporovaná. Zkuste ji prosím říct jako jednu přímou akci.",
+      unsupported: "Požadavku jsem porozuměl, ale tato operace zatím není podporovaná. Zkuste ji prosím říct jako jednu přímou akci.",
     },
     pl: {
       unavailable: "Nie mogę teraz połączyć się z usługą językową. Spróbuj wydać bezpośrednie polecenie.",
@@ -395,9 +377,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
   // English while the menu and the rest of {assistant} are using another language.
   const language = user.voiceLanguage;
   const alias = await resolveLearningAliases(user, text);
-  const notActive = await refuseInactiveLanguage(user, alias.resolvedText, input_method);
-  if (notActive) return res.json({ ok: true, kind: "clarification", error: "LANGUAGE_NOT_ACTIVE", actionExecuted: false, message: notActive });
-  let command = await resolveUserCommand(user, alias.resolvedText);
+  let command = await resolveUserCommand(user, alias.resolvedText, language);
   let assistant: Awaited<ReturnType<typeof interpretVoiceRequest>> | undefined;
 
   if (command.intent === "unrecognized") {
@@ -443,7 +423,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
         message: safeNonActionAssistantMessage(assistant.message, language),
       });
     }
-    command = await resolveUserCommand(user, assistant.canonical_command);
+    command = await resolveUserCommand(user, assistant.canonical_command, CANONICAL_COMMAND);
     if (command.intent === "unrecognized") {
       // The user hears "not supported yet" while the command the model
       // actually produced disappears. Recording it is what tells the
@@ -546,11 +526,7 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
   const user = req.user!;
 
   const alias = await resolveLearningAliases(user, text);
-  const notActive = await refuseInactiveLanguage(user, alias.resolvedText, input_method);
-  if (notActive) {
-    return res.status(422).json({ intent: "unrecognized", interpreted: {}, ok: false, error: "LANGUAGE_NOT_ACTIVE", message: notActive });
-  }
-  const command = await resolveUserCommand(user, alias.resolvedText);
+  const command = await resolveUserCommand(user, alias.resolvedText, user.voiceLanguage);
 
   const policyBlock = await blockedByEmmaPolicy(user, command);
   if (policyBlock) return res.status(403).json({

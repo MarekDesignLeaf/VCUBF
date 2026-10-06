@@ -2,7 +2,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
 import { CREATE_PLAYBOOK_ACTION, UPDATE_PLAYBOOK_ACTION, RUN_PLAYBOOK_ACTION } from "../lib/actionContracts.js";
-import { parseTextCommand } from "../lib/commandParser.js";
+import { parseStoredCommand } from "../lib/commandParser.js";
 import { dispatchParsedCommand, type CommandResponse } from "../lib/commandExecutor.js";
 import { resolveLearningAliases } from "./learningService.js";
 import type { AuthedUser } from "../middleware/auth.js";
@@ -245,7 +245,7 @@ export async function runPlaybook(user: AuthedUser, playbookId: string, rawInput
   const preview = resolved.map((r) => ({
     template: r.template,
     resolvedText: r.text,
-    interpretedIntent: parseTextCommand(r.text).intent,
+    interpretedIntent: parseStoredCommand(r.text).intent,
   }));
 
   if (!data.confirmed) {
@@ -268,7 +268,7 @@ export async function runPlaybook(user: AuthedUser, playbookId: string, rawInput
   const stepResults: StepResult[] = [];
   let overallOk = true;
   for (const step of resolved) {
-    const command = parseTextCommand(step.text);
+    const command = parseStoredCommand(step.text);
     const result: CommandResponse = await dispatchParsedCommand(user, command, { confirmedWorkflow: true });
     stepResults.push({
       template: step.template,

@@ -103,9 +103,16 @@ describe("Two Gmail accounts", () => {
     await prisma.voicePendingAction.deleteMany({});
   });
 
-  afterEach(() => { globalThis.fetch = originalFetch; });
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "en-GB" } });
+  });
 
   after(restore);
+
+  // The account is named in the language switched on; Czech words are read
+  // only with Czech on.
+  const inCzech = () => prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "cs-CZ" } });
 
   it("records the authorised account, makes the first one the default sender and refuses the same mailbox twice", async () => {
     const business = await authorise(businessId, "access-business", "Marek@DesignLeaf.co.uk");
@@ -145,12 +152,13 @@ describe("Two Gmail accounts", () => {
     const changed = await request(app).post(`/connectors/sources/${personalId}/gmail/default-sender`).set("Authorization", `Bearer ${token}`).send({});
     assert.equal(changed.status, 200, JSON.stringify(changed.body));
     stubGoogle();
-    const confirmed = await speak("ano");
+    const confirmed = await speak("yes");
     assert.equal(confirmed.body.ok, true, JSON.stringify(confirmed.body));
     assert.deepEqual(sentWith, ["Bearer access-business"]);
   });
 
   it("sends from the account the owner names, in Czech word forms", async () => {
+    await inCzech();
     await request(app).post(`/connectors/sources/${businessId}/gmail/default-sender`).set("Authorization", `Bearer ${token}`).send({});
     stubGoogle();
     const asked = await sendEmail({ from: "z osobního účtu" });
@@ -176,6 +184,7 @@ describe("Two Gmail accounts", () => {
   });
 
   it("changes the default sender by voice and audits the previous default", async () => {
+    await inCzech();
     await prisma.connectorSource.update({ where: { id: personalId }, data: { isDefaultSender: true } });
     const said = await speak(`voice action set_default_email_account ${JSON.stringify({ account: "firemní" })}`);
     assert.equal(said.body.ok, true, JSON.stringify(said.body));
@@ -279,27 +288,31 @@ describe("Choosing the sending account", () => {
   const business = { id: "b", displayName: "Business Gmail", accountEmail: "marek@designleaf.co.uk", isDefaultSender: true };
   const personal = { id: "p", displayName: "Osobní Gmail", accountEmail: "marek.private@gmail.com", isDefaultSender: false };
 
-  it("understands the account by purpose, address or name, in either language", () => {
-    for (const [spoken, expected] of [
-      ["z firemního účtu", "b"], ["pracovní", "b"], ["designleaf", "b"], ["MAREK@designleaf.co.uk", "b"],
-      ["z osobního", "p"], ["soukromého mailu", "p"], ["from my personal account", "p"], ["Osobní Gmail", "p"],
+  it("understands the account by purpose, address or name, in the language switched on", () => {
+    for (const [spoken, language, expected] of [
+      ["z firemního účtu", "cs-CZ", "b"], ["pracovní", "cs-CZ", "b"], ["designleaf", "cs-CZ", "b"], ["MAREK@designleaf.co.uk", "en-GB", "b"],
+      ["z osobního", "cs-CZ", "p"], ["soukromého mailu", "cs-CZ", "p"], ["from my personal account", "en-GB", "p"], ["Osobní Gmail", "en-GB", "p"],
+      ["z konta prywatnego", "pl-PL", "p"], ["firmowe", "pl-PL", "b"],
     ] as const) {
-      const choice = chooseGmailSendingAccount([business, personal], spoken);
-      assert.ok(choice.ok && choice.source.id === expected, `${spoken} → ${expected}`);
+      const choice = chooseGmailSendingAccount([business, personal], spoken, language);
+      assert.ok(choice.ok && choice.source.id === expected, `${spoken} (${language}) → ${expected}`);
     }
+    // Polish words are not read with Czech on, nor Czech ones with Polish on.
+    assert.equal(chooseGmailSendingAccount([business, personal], "z konta prywatnego", "cs-CZ").ok, false);
+    assert.equal(chooseGmailSendingAccount([business, personal], "z osobního účtu", "pl-PL").ok, false);
   });
 
   it("does not mistake an address ending for a name", () => {
-    assert.deepEqual(matchGmailAccounts([{ ...personal, displayName: "Home" }], "company"), [], "“company” is not the “.com” of an address");
+    assert.deepEqual(matchGmailAccounts([{ ...personal, displayName: "Home" }], "company", "en-GB"), [], "“company” is not the “.com” of an address");
   });
 
   it("uses the only account, else the default, else asks", () => {
-    const only = chooseGmailSendingAccount([personal]);
+    const only = chooseGmailSendingAccount([personal], undefined, "cs-CZ");
     assert.ok(only.ok && only.reason === "only");
-    const byDefault = chooseGmailSendingAccount([business, personal]);
+    const byDefault = chooseGmailSendingAccount([business, personal], undefined, "cs-CZ");
     assert.ok(byDefault.ok && byDefault.source.id === "b" && byDefault.reason === "default");
-    assert.equal(chooseGmailSendingAccount([{ ...business, isDefaultSender: false }, personal]).ok, false);
-    const both = chooseGmailSendingAccount([business, personal], "gmail");
+    assert.equal(chooseGmailSendingAccount([{ ...business, isDefaultSender: false }, personal], undefined, "cs-CZ").ok, false);
+    const both = chooseGmailSendingAccount([business, personal], "gmail", "cs-CZ");
     assert.ok(!both.ok && both.error === "AMBIGUOUS_GMAIL_SOURCE", "a word both accounts share is not a choice");
   });
 });

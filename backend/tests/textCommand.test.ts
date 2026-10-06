@@ -153,10 +153,11 @@ describe("command/text", () => {
   });
 
   it("changes Emma and Secretary menu language through a voice command", async () => {
+    // Said in English, the language the test user starts in.
     const res = await request(app)
       .post("/command/text")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ text: "změň jazyk na češtinu", input_method: "voice_transcript" });
+      .send({ text: "switch language to Czech", input_method: "voice_transcript" });
     assert.equal(res.status, 200);
     assert.equal(res.body.intent, "set_voice_language");
     assert.equal(res.body.data.voiceLanguage, "cs-CZ");

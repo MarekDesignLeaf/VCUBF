@@ -67,6 +67,22 @@ const ACTIVE_WINDOW_MS = 20_000;
  * enough for a dictated message, short enough to recover from a noisy room.
  */
 const MAX_UTTERANCE_MS = 20_000;
+
+// Sentences are acted on in the order they were spoken, one after another. A
+// request whose connection hangs must not hold up every sentence after it, so
+// each step has a limit and the queue moves on when it is reached.
+const TRANSCRIBE_LIMIT_MS = 15_000;
+const HANDLE_LIMIT_MS = 30_000;
+
+function withinLimit<T>(work: Promise<T>, fallback: T, limitMs: number): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(() => resolve(fallback), limitMs);
+    work.then(
+      (value) => { window.clearTimeout(timer); resolve(value); },
+      () => { window.clearTimeout(timer); resolve(fallback); },
+    );
+  });
+}
 const CONVERSATION_CAP_MS = 90_000;
 
 type RecogniserState = {
@@ -985,7 +1001,7 @@ export function BrowserVoiceControl() {
   const [engine, setEngine] = useState<"starting" | "local" | "browser">("starting");
   const lastEventAt = useRef(0);
   const recogniser = useRef<Recogniser | null>(null);
-  const handleFinal = useRef<(text: string, heardAt?: number) => Promise<void>>(async () => {});
+  const handleFinal = useRef<(text: string, spokenAt?: number) => Promise<void>>(async () => {});
   const recorder = useRef(new MacroRecorder());
   const stageRef = useRef<typeof learningStage>("off");
   const stepsRef = useRef<MacroStep[]>([]);
@@ -1369,14 +1385,18 @@ export function BrowserVoiceControl() {
   }, [appendTurn, copy.completed, copy.connectionError, copy.failed, extendConversation, language, learningVoice, navigate, speak, updateUser]);
 
   // One finished sentence from the recogniser.
-  handleFinal.current = async (spoken: string, heardAt = Date.now()) => {
+  handleFinal.current = async (spoken: string, spokenAt = Date.now()) => {
     const text = spoken.trim();
     if (!text) return;
 
-    // Judged by when the sentence was spoken, not by when its transcript came
-    // back: a slow transcription used to arrive just after the window closed,
-    // and a command given in time was ignored as "not addressed".
-    const alreadyActive = heardAt <= activeUntil.current;
+    // Judged by when the sentence began, not by when its transcript came back:
+    // a slow transcription used to arrive just after the window closed, and a
+    // command given in time was ignored as "not addressed". The start, not the
+    // end, so a long dictation closed at the recording limit still counts.
+    // Sentences are handled strictly in the order they were spoken (see
+    // transcribe), so a later "Alfonzo" can never open the window for an
+    // earlier, unaddressed sentence.
+    const alreadyActive = spokenAt <= activeUntil.current;
     const hit = findHotword(text, hotword, aliasesRef.current);
 
     // Log everything, addressed or not: a hotword that is never recognised has
@@ -1417,15 +1437,28 @@ export function BrowserVoiceControl() {
     const lengthLimit = window.setInterval(() => {
       if (!vad || closing || !speechStartedAt || Date.now() - speechStartedAt < MAX_UTTERANCE_MS) return;
       closing = true;
-      speechStartedAt = 0;
       const detector = vad;
       void (async () => {
+        // Closing submits the recording through onSpeechEnd, which still needs
+        // to know when it began; it is cleared there, or here if nothing came.
         try { await detector.pause(); await detector.start(); } catch { /* the watchdog restarts a dead detector */ }
-        finally { closing = false; }
+        finally { closing = false; speechStartedAt = 0; }
       })();
     }, 500);
 
-    const transcribe = async (audio: Float32Array, heardAt: number) => {
+    // Transcriptions run side by side, but their sentences are acted on one at
+    // a time in the order they were spoken. Out of order, an unaddressed
+    // remark could be judged after a later "Alfonzo" had opened the window.
+    let inOrder: Promise<void> = Promise.resolve();
+    const transcribe = (audio: Float32Array, spokenAt: number) => {
+      const heard = transcribeOne(audio);
+      inOrder = inOrder.then(async () => {
+        const text = await withinLimit(heard, "", TRANSCRIBE_LIMIT_MS);
+        if (text && !cancelled) await withinLimit(handleFinal.current(text, spokenAt), undefined, HANDLE_LIMIT_MS);
+      }).catch(() => { /* one failed sentence must not block the ones after it */ });
+    };
+
+    const transcribeOne = async (audio: Float32Array): Promise<string> => {
       // The library resamples to 16 kHz and writes the RIFF header; nothing here does
       // arithmetic on the samples.
       const wav = window.vad!.utils.encodeWAV(audio);
@@ -1435,6 +1468,7 @@ export function BrowserVoiceControl() {
           method: "POST",
           headers: { "Content-Type": "audio/wav" },
           body: wav,
+          signal: AbortSignal.timeout(TRANSCRIBE_LIMIT_MS),
         });
         if (!response.ok) {
           setRecogniserState((current) => ({
@@ -1445,7 +1479,7 @@ export function BrowserVoiceControl() {
               : response.status === 503 ? "transcription-unavailable" : `http-${response.status}`,
             errorCount: current.errorCount + 1,
           }));
-          return;
+          return "";
         }
         const payload = (await response.json()) as { text?: string };
         const heard = (payload.text ?? "").trim();
@@ -1458,11 +1492,12 @@ export function BrowserVoiceControl() {
           lastPhraseAt: Date.now(),
         }));
         // Silence and hallucinations come back empty; nothing was said, so nothing runs.
-        if (heard) void handleFinal.current(heard, heardAt);
+        return heard;
       } catch {
         setRecogniserState((current) => ({
           ...current, status: "error", error: "transcription-unreachable", errorCount: current.errorCount + 1,
         }));
+        return "";
       }
     };
 
@@ -1501,13 +1536,14 @@ export function BrowserVoiceControl() {
           onSpeechStart: () => { speechStartedAt = Date.now(); setStatus("hearing"); },
           onVADMisfire: () => { speechStartedAt = 0; setStatus((current) => (current === "hearing" ? "idle" : current)); },
           onSpeechEnd: (audio) => {
+            const spokenAt = speechStartedAt || Date.now();
             speechStartedAt = 0;
             setStatus((current) => (current === "hearing" ? "idle" : current));
             if (cancelled || !hasMicrophoneRef.current) return;
             // The echo guard, applied to the audio rather than to a transcript: what was
             // captured while she was speaking is thrown away before anything reads it.
             if (Date.now() < echoGuardUntil.current) return;
-            void transcribe(audio, Date.now());
+            transcribe(audio, spokenAt);
           },
         });
       } catch {

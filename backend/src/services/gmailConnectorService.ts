@@ -959,7 +959,7 @@ export async function resolveSendableGmailSource(user: AuthedUser, sourceId?: st
   if (canSend.length === 0) return fail(409, "CONNECTOR_SCOPE_REQUIRED", "No enabled Gmail source has permission to send email.");
   const authorised = canSend.filter((source) => Boolean(source.credential));
   if (authorised.length === 0) return fail(409, "CONNECTOR_AUTHORIZATION_REQUIRED", "Gmail needs to be authorized again before sending.");
-  const choice = chooseGmailSendingAccount(authorised, from);
+  const choice = chooseGmailSendingAccount(authorised, from, user.voiceLanguage);
   if (!choice.ok) {
     const accounts = choice.candidates.map(gmailAccountLabel);
     return fail(409, choice.error, choice.error === "GMAIL_ACCOUNT_NOT_FOUND"

@@ -174,6 +174,21 @@ function connectorSyncMessage(data: unknown, language: string): string {
 }
 
 
+// Said in the language switched on, with an example in that language: only its
+// commands are understood, so an example in another one would not work.
+function notUnderstoodMessage(language: string) {
+  const messages: Record<string, string> = {
+    en: "Could not understand that command. Try: \"create client Jane Smith, email jane@example.com\".",
+    cs: "Tomu příkazu nerozumím. Zkuste například: „vytvoř klienta Jan Novák, email jan@example.com“.",
+    pl: "Nie rozumiem tego polecenia. Spróbuj na przykład: „dodaj kontakt Jan Kowalski, telefon 500 100 200”.",
+    fr: "Je ne comprends pas cette commande.",
+    de: "Diesen Befehl verstehe ich nicht.",
+    es: "No entiendo esa orden.",
+    it: "Non capisco questo comando.",
+  };
+  return messages[language.slice(0, 2).toLowerCase()] ?? messages.en;
+}
+
 export async function dispatchParsedCommand(
   user: AuthedUser,
   command: ParsedCommand,
@@ -1337,7 +1352,7 @@ export async function dispatchParsedCommand(
         ok: false,
         httpStatus: 422,
         error: "UNSUPPORTED_ACTION",
-        message: "Could not understand that command. Try: \"create client Jane Smith, email jane@example.com\".",
+        message: notUnderstoodMessage(user.voiceLanguage),
       };
     }
   }

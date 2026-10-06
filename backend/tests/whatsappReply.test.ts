@@ -143,7 +143,7 @@ describe("Replying to a received WhatsApp message", () => {
     assert.equal(typeof waiting.parameters.intake_id, "string");
 
     stubProviders({ translation: "THIS SECOND TRANSLATION MUST NEVER BE SENT" });
-    const confirmed = await speak("ano");
+    const confirmed = await speak("yes");
     assert.equal(confirmed.body.ok, true, JSON.stringify(confirmed.body));
     assert.equal(sends.length, 1, "exactly one message leaves");
     assert.equal(sends[0].to, "447700900111");
@@ -157,7 +157,7 @@ describe("Replying to a received WhatsApp message", () => {
     assert.equal(replies[0].messageId, "wamid.SENT1");
     assert.equal(replies[0].body, TRANSLATED);
 
-    const again = await speak("ano");
+    const again = await speak("yes");
     assert.notEqual(again.body.ok, true, "a second yes must not send the reply again");
     assert.equal(sends.length, 1);
   });

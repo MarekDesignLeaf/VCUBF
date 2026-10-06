@@ -565,7 +565,7 @@ async function executeEmmaActionDirect(
         select: { id: true, displayName: true, accountEmail: true, isDefaultSender: true },
         orderBy: { displayName: "asc" },
       });
-      const named = matchGmailAccounts(sources, account);
+      const named = matchGmailAccounts(sources, account, user.voiceLanguage);
       if (named.length !== 1) {
         return fail(409, named.length ? "AMBIGUOUS_GMAIL_SOURCE" : "GMAIL_ACCOUNT_NOT_FOUND", `Connected Gmail accounts: ${sources.map(gmailAccountLabel).join(", ") || "none"}.`, {
           accounts: (named.length ? named : sources).map(gmailAccountLabel),

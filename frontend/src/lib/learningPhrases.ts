@@ -58,22 +58,22 @@ const CZECH_SPEECH: LearningSpeech = {
     `Tento příkaz neznám: ${phrase}. Pokud mě ho chcete naučit, řekněte „Naučit příkaz“.`,
   started: "Začínám nahrávat. Proveďte, co potřebujete, a potom řekněte „Konec učení“.",
   stopped: (steps) => `Nahrávání ukončeno, mám ${steps} kroků. Jak se má tento příkaz jmenovat?`,
-  nothingRecorded: "Nic jsem nezaznamenala, takže není co uložit.",
+  nothingRecorded: "Nic jsem nezaznamenal, takže není co uložit.",
   askNames: "Řekněte jeden nebo dva názvy tohoto příkazu.",
   repeatNames: (names) =>
     `Rozumím: ${names.join(" a ")}. Mám to takto uložit? Řekněte „Ulož“.`,
   alreadyKnown: (existing, added) =>
     `Tento postup už znám pod názvem ${existing.join(" a ")}.`
-    + (added.length ? ` Přidala jsem k němu ${added.join(" a ")}.` : ""),
+    + (added.length ? ` Přidal jsem k němu ${added.join(" a ")}.` : ""),
   nameTaken: (name, usedBy) =>
-    `Název ${name} už patří příkazu ${usedBy}, ten jsem nechala být.`,
+    `Název ${name} už patří příkazu ${usedBy}, ten jsem nechal být.`,
   saved: (names) => `Uloženo. Příště řekněte ${names.join(" nebo ")}.`,
-  cancelled: "Učení zrušeno, nic jsem neuložila.",
+  cancelled: "Učení zrušeno, nic jsem neuložil.",
   saveFailed: "Uložení se nepodařilo.",
   running: (name) => `Provádím ${name}.`,
   replayed: "Kroky byly přehrány. Ověřte výsledek na stránce; změna dat zatím není potvrzená.",
   reviewReplay: "Přehrát tyto uložené kroky a hodnoty? Mohou změnit data nebo odeslat formulář.",
-  runFailed: (label) => `Zastavila jsem se u kroku ${label}. Stránka se pravděpodobně změnila.`,
+  runFailed: (label) => `Zastavil jsem se u kroku ${label}. Stránka se pravděpodobně změnila.`,
 };
 
 const ENGLISH_SPEECH: LearningSpeech = {
