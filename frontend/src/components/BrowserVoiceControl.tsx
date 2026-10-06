@@ -55,6 +55,18 @@ const STALE_AFTER_MS = 30_000;
 
 /** How long the assistant keeps taking commands without being named again. */
 const ACTIVE_WINDOW_MS = 20_000;
+
+/**
+ * The longest a single recording may run.
+ *
+ * Continuous sound that reads as speech — a television, a radio, people talking
+ * — can hold the detector in "speaking" for ever. Nothing is then sent, and
+ * {assistant} stops reacting with no visible fault (seen in production on
+ * 6 October: no request for 18 minutes after one reply). At the limit the
+ * recording is closed and sent as it is, and listening starts afresh. Long
+ * enough for a dictated message, short enough to recover from a noisy room.
+ */
+const MAX_UTTERANCE_MS = 20_000;
 const CONVERSATION_CAP_MS = 90_000;
 
 type RecogniserState = {
@@ -812,6 +824,7 @@ interface VoiceDetectorOptions {
   redemptionMs?: number;
   preSpeechPadMs?: number;
   minSpeechMs?: number;
+  submitUserSpeechOnPause?: boolean;
   onSpeechStart?: () => void;
   onSpeechEnd?: (audio: Float32Array) => void;
   onVADMisfire?: () => void;
@@ -1399,6 +1412,18 @@ export function BrowserVoiceControl() {
 
     let cancelled = false;
     let vad: VoiceDetector | null = null;
+    let speechStartedAt = 0;
+    let closing = false;
+    const lengthLimit = window.setInterval(() => {
+      if (!vad || closing || !speechStartedAt || Date.now() - speechStartedAt < MAX_UTTERANCE_MS) return;
+      closing = true;
+      speechStartedAt = 0;
+      const detector = vad;
+      void (async () => {
+        try { await detector.pause(); await detector.start(); } catch { /* the watchdog restarts a dead detector */ }
+        finally { closing = false; }
+      })();
+    }, 500);
 
     const transcribe = async (audio: Float32Array, heardAt: number) => {
       // The library resamples to 16 kHz and writes the RIFF header; nothing here does
@@ -1465,17 +1490,20 @@ export function BrowserVoiceControl() {
           redemptionMs: 900,
           preSpeechPadMs: 400,
           minSpeechMs: 300,
+          // Closing an over-long recording (below) keeps what was heard.
+          submitUserSpeechOnPause: true,
           onFrameProcessed: (_probabilities, frame) => {
             lastEventAt.current = Date.now();
             let sum = 0;
             for (let index = 0; index < frame.length; index += 1) sum += frame[index] * frame[index];
             micLevel.current = Math.min(1, Math.sqrt(Math.sqrt(sum / frame.length)) * 2.6);
           },
-          onSpeechStart: () => { setStatus("hearing"); },
-          onVADMisfire: () => { setStatus((current) => (current === "hearing" ? "idle" : current)); },
+          onSpeechStart: () => { speechStartedAt = Date.now(); setStatus("hearing"); },
+          onVADMisfire: () => { speechStartedAt = 0; setStatus((current) => (current === "hearing" ? "idle" : current)); },
           onSpeechEnd: (audio) => {
+            speechStartedAt = 0;
             setStatus((current) => (current === "hearing" ? "idle" : current));
-            if (!hasMicrophoneRef.current) return;
+            if (cancelled || !hasMicrophoneRef.current) return;
             // The echo guard, applied to the audio rather than to a transcript: what was
             // captured while she was speaking is thrown away before anything reads it.
             if (Date.now() < echoGuardUntil.current) return;
@@ -1498,6 +1526,7 @@ export function BrowserVoiceControl() {
 
     return () => {
       cancelled = true;
+      window.clearInterval(lengthLimit);
       void vad?.destroy();
     };
   }, [enabled, hotword, language]);
