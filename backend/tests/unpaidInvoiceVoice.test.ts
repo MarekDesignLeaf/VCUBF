@@ -17,7 +17,8 @@ describe("Unpaid invoice voice query", () => {
     const { company, admin, worker } = await seedCompanyAndAdmin();
     companyId = company.id;
     await prisma.user.update({ where: { id: admin.id }, data: { voiceLanguage: "cs-CZ" } });
-    await prisma.user.update({ where: { id: worker.id }, data: { permissions: ["voice.execute"] } });
+    // Both ask in Czech, so Czech is the language switched on for both.
+    await prisma.user.update({ where: { id: worker.id }, data: { permissions: ["voice.execute"], voiceLanguage: "cs-CZ" } });
     token = (await request(app).post("/auth/login").send({ email: admin.email, password: "Password123!" })).body.token;
     workerToken = (await request(app).post("/auth/login").send({ email: worker.email, password: "Password123!" })).body.token;
     const client = await prisma.client.create({ data: { companyId, displayName: "Invoice voice fixture" } });
