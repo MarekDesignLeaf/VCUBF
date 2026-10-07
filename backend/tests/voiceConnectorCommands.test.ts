@@ -137,6 +137,8 @@ describe("Emma connector commands", () => {
     assert.equal(preview.status, 202);
     assert.equal(preview.body.intent, "prepare_whatsapp_message");
     assert.equal(preview.body.data.confirmationRequired, true);
+    // The review is read back in full, in the language that is on.
+    assert.match(preview.body.message, /^Wyślę na WhatsApp na numer \+?447700900123: „Dzień dobry”\. Czy mam ją wysłać\?$/, JSON.stringify(preview.body));
 
     const confirmed = await request(app)
       .post("/command/assistant")

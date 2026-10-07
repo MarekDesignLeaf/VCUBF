@@ -316,6 +316,13 @@ describe("Replying to a received email", () => {
     assert.equal(again.body.data.preview.alreadySent?.minutesAgo, 0, JSON.stringify(again.body.data?.preview));
     assert.match(again.body.message, /Note: I already sent exactly this a moment ago\. Shall I send it\?$/);
 
+    // If the note on the email could not be written after the reply left, the
+    // audit still recognises it.
+    await prisma.voicePendingAction.deleteMany({});
+    await prisma.communicationIntake.update({ where: { id: email.id }, data: { sourceMetadata: { provider: "gmail", labelIds: ["INBOX"], messageId: "<again@mail.example.com>", references: null, fromAddresses: 1 } } });
+    const noNote = await replyAction({ sender_or_message: "Jan", body: "Přijedeme v pondělí v osm." });
+    assert.equal(noNote.body.data.preview.alreadySent?.minutesAgo, 0, "found through the audit");
+
     await prisma.voicePendingAction.deleteMany({});
     stubProviders({ translation: "A different answer." });
     const different = await replyAction({ sender_or_message: "Jan", body: "Něco jiného." });

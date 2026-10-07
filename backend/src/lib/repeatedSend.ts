@@ -44,20 +44,29 @@ function alreadySent(sentAt: Date, now: number): AlreadySent {
   return { sentAt: sentAt.toISOString(), minutesAgo: Math.max(0, Math.floor((now - sentAt.getTime()) / 60_000)) };
 }
 
-/** The latest successful audited send of exactly this message within the window. */
+/**
+ * The latest successful audited send of exactly this message within the
+ * window. Matched in the database, so every send in the window is searched,
+ * however many there were.
+ */
 export async function recentAuditedSend(companyId: string, actionName: string, fingerprint: string, now = Date.now()): Promise<AlreadySent | null> {
-  const recent = await prisma.auditLog.findMany({
-    where: { companyId, actionName, result: "success", createdAt: { gte: new Date(now - REPEAT_WINDOW_MS) } },
+  const match = await prisma.auditLog.findFirst({
+    where: {
+      companyId,
+      actionName,
+      result: "success",
+      createdAt: { gte: new Date(now - REPEAT_WINDOW_MS) },
+      dataAfter: { path: ["contentFingerprint"], equals: fingerprint },
+    },
     orderBy: { createdAt: "desc" },
-    select: { createdAt: true, dataAfter: true },
-    take: 50,
-  });
-  const match = recent.find((row) => {
-    const after = row.dataAfter;
-    return Boolean(after && typeof after === "object" && !Array.isArray(after)
-      && (after as Record<string, unknown>).contentFingerprint === fingerprint);
+    select: { createdAt: true },
   });
   return match ? alreadySent(match.createdAt, now) : null;
+}
+
+/** A reply is "the same" when it answers the same received message with the same words. */
+export function replyFingerprint(intakeId: string, body: string): string {
+  return sendFingerprint({ recipients: [`reply-to:${intakeId}`], body });
 }
 
 /**
@@ -80,6 +89,16 @@ export function recentReply(sourceMetadata: unknown, body: string, now = Date.no
     if (!latest || at > latest) latest = at;
   }
   return latest ? alreadySent(latest, now) : null;
+}
+
+/**
+ * A reply already sent: from the replies kept on the message it answers, or,
+ * if keeping that note failed after the reply left, from the audit, which
+ * records every successful reply with its fingerprint.
+ */
+export async function recentReplyOrAudited(companyId: string, actionName: string, intake: { id: string; sourceMetadata: unknown }, body: string, now = Date.now()): Promise<AlreadySent | null> {
+  return recentReply(intake.sourceMetadata, body, now)
+    ?? await recentAuditedSend(companyId, actionName, replyFingerprint(intake.id, body), now);
 }
 
 /** The review's note, spread into a preview: present only when there is something to say. */
