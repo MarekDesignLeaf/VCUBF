@@ -236,6 +236,17 @@ export function spokenError(error: string | undefined, extra: Row | undefined, l
   const candidates = Array.isArray(extra?.candidates) ? (extra!.candidates as string[]).slice(0, 4).join(", ") : "";
   const accounts = Array.isArray(extra?.accounts) ? (extra!.accounts as string[]).slice(0, 4).join(", ") : "";
   const messages: Record<string, Record<Locale, string>> = {
+    // Nothing leaves untranslated: a message promised in English is not sent in Czech.
+    TRANSLATION_FAILED: {
+      cs: "Zprávu se teď nepodařilo přeložit do angličtiny, takže jsem nic nepřipravil ani neodeslal. Zkuste to prosím znovu.",
+      pl: "Nie udało się teraz przetłumaczyć wiadomości na angielski, więc niczego nie przygotowałem ani nie wysłałem. Spróbuj ponownie.",
+      en: "The message could not be translated just now, so nothing was prepared or sent. Please try again.",
+    },
+    TRANSLATION_NOT_CONFIGURED: {
+      cs: "Překlad není nastavený, takže zprávu v angličtině připravit nemůžu a nic jsem neodeslal.",
+      pl: "Tłumaczenie nie jest skonfigurowane, więc nie mogę przygotować wiadomości po angielsku i niczego nie wysłałem.",
+      en: "Translation is not set up, so I cannot prepare the message in English, and nothing was sent.",
+    },
     WHATSAPP_REPLY_WINDOW_CLOSED: {
       cs: "Tenhle zákazník psal před víc než 24 hodinami. WhatsApp teď dovolí jen schválenou šablonu a tu zatím neposílám. Zavolejte mu nebo pošlete e-mail.",
       pl: "Ten klient pisał ponad 24 godziny temu. WhatsApp pozwala teraz tylko na zatwierdzony szablon, którego jeszcze nie wysyłam. Zadzwoń lub wyślij e-mail.",

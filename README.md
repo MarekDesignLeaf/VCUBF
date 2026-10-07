@@ -92,6 +92,12 @@ docs/               User guide, connector engine, production architecture, voice
   addresses, is refused before the review. Written in English unless another language is named, read back before the yes, and the
   yes sends exactly that text once. Covered by mocked tests (`emailReply.test.ts`); a live
   Gmail send is not yet accepted.
+- **Spoken messages leave in English**: an email or WhatsApp message dictated in Czech or
+  Polish, by the model or by the fixed phrasing (“pošli e-mail na …; předmět …; text …”,
+  “pošli whatsapp na … zpráva …”), is translated before the review; the English is read
+  back with what was said kept beside it, and the yes sends that English without
+  translating again. With English switched on the text is sent as dictated. If the
+  translation cannot be made nothing is prepared or sent. Covered by mocked tests.
 - **Repeated sends**: a review of an email, a WhatsApp message or a reply says when exactly
   the same text went to the same recipients in the last 30 minutes (“I already sent exactly
   this 3 minutes ago”), so a request that got no answer in time is not sent twice
