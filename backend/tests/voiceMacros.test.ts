@@ -103,6 +103,35 @@ describe("Commands taught by doing them", () => {
     assert.equal(found!.matchedName, "nová zakázka pro klienta");
   });
 
+  it("answers two simultaneous saves of one recording without storing it twice", async () => {
+    // The window gives up waiting after ten seconds and offers "save" again
+    // while the first request may still be running in Secretary.
+    const quote = [
+      { kind: "navigate" as const, target: "/quotes", label: "Nabídky" },
+      { kind: "click" as const, target: "button[data-action=new-quote]", label: "Nová nabídka" },
+    ];
+    const both = await Promise.all([
+      saveMacro(user, { steps: quote, names: ["nová nabídka"] }),
+      saveMacro(user, { steps: quote, names: ["nová nabídka"] }),
+    ]);
+    assert.ok(both.every(Boolean), "neither save fails");
+    assert.equal(both[0]!.macroId, both[1]!.macroId);
+    assert.equal(await prisma.voiceMacro.count({ where: { fingerprint: fingerprintSteps(quote) } }), 1);
+    assert.equal(await prisma.voiceMacroName.count({ where: { macroId: both[0]!.macroId } }), 1);
+    // Whichever stored it, each answer can tell the user what to say next time.
+    for (const outcome of both) {
+      assert.ok([...outcome!.addedNames, ...outcome!.existingNames].includes("nová nabídka"), JSON.stringify(outcome));
+      // "Already known as" is said only with a name to say.
+      if (outcome!.alreadyKnown) assert.ok(outcome!.existingNames.length > 0, JSON.stringify(outcome));
+    }
+    assert.deepEqual(both.flatMap((outcome) => outcome!.takenNames), [], "its own name is not reported as taken");
+
+    const again = await saveMacro(user, { steps: quote, names: ["nová nabídka"] });
+    assert.equal(again!.alreadyKnown, true);
+    assert.deepEqual(again!.existingNames, ["nová nabídka"], "a repeat says what it is already called");
+    assert.deepEqual(again!.addedNames, []);
+  });
+
   it("refuses a recording with no steps or no name", async () => {
     assert.equal(await saveMacro(user, { steps: [], names: ["nic"] }), null);
     assert.equal(await saveMacro(user, { steps: jobForNovak, names: [] }), null);
