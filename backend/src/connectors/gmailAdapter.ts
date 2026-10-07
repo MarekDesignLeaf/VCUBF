@@ -125,6 +125,15 @@ export interface ParsedGmailMessage {
   externalThreadId: string | null;
   senderName: string | null;
   senderEmail: string | null;
+  /**
+   * How many addresses the From line names. senderEmail keeps only the first,
+   * so a reply checks this to refuse a From line that names several.
+   */
+  senderAddressCount: number;
+  /** The message's own Message-ID, which a reply names in In-Reply-To. */
+  messageIdHeader: string | null;
+  /** The conversation so far (References), compacted to what a reply keeps. */
+  references: string | null;
   messageText: string;
   receivedAt: Date;
 }
@@ -371,15 +380,44 @@ function messageIdList(value: string | null | undefined) {
   return (value ?? "").split(/\s+/).filter((id) => /^<[\x21-\x3B\x3D\x3F-\x7E]+@[\x21-\x3B\x3D\x3F-\x7E]+>$/.test(id));
 }
 
+/** The one valid Message-ID in a header value, or null. */
+export function validMessageId(value: string | null | undefined): string | null {
+  const ids = messageIdList(value?.trim());
+  return ids.length === 1 ? ids[0] : null;
+}
+
+// A long chain keeps its first message and the latest ones, as the mail
+// standard recommends, so a stored or written References stays short.
+function keptReferences(ids: string[]) {
+  return ids.length > 10 ? [ids[0], ...ids.slice(-9)] : ids;
+}
+
+/** References as a reply will use it: valid Message-IDs only, at most ten. */
+export function compactReferences(value: string | null | undefined): string | null {
+  const kept = keptReferences(messageIdList(value));
+  return kept.length ? kept.join(" ") : null;
+}
+
+/**
+ * How many mailboxes an address header names. Quoted display names and
+ * comments may contain commas and "@", so they are removed before counting.
+ * A semicolon is not a separator in a valid header, but some mail programs
+ * write one, so it counts as one: a doubtful line is refused, not answered.
+ */
+export function mailboxCount(value: string | null | undefined): number {
+  const plain = (value ?? "")
+    .replace(/"(?:[^"\\]|\\.)*"/g, "\"\"")
+    .replace(/\([^()]*\)/g, " ");
+  return plain.split(/[,;]/).filter((part) => /[^\s<>@,;:]+@[^\s<>@,;:]+/.test(part)).length;
+}
+
 function replyHeaders(reply: GmailReplyContext | undefined) {
   const original = messageIdList(reply?.messageId)[0];
   if (!original) return [];
   // References carries the conversation so far and ends with the message
-  // being answered. A long chain keeps its first message and the latest ones,
-  // as the mail standard recommends.
+  // being answered.
   const earlier = messageIdList(reply?.references).filter((id) => id !== original);
-  const kept = earlier.length > 10 ? [earlier[0], ...earlier.slice(-9)] : earlier;
-  const references = [...kept, original];
+  const references = [...keptReferences(earlier), original];
   return [`In-Reply-To: ${original}`, `References: ${references.join(" ")}`];
 }
 
@@ -459,12 +497,13 @@ export async function getGmailMessage(accessToken: string, id: string) {
 export async function getGmailReplyHeaders(accessToken: string, id: string) {
   const url = new URL(`${GMAIL_MESSAGES_ENDPOINT}/${encodeURIComponent(id)}`);
   url.searchParams.set("format", "metadata");
-  for (const name of ["Message-ID", "References", "Subject"]) url.searchParams.append("metadataHeaders", name);
+  for (const name of ["Message-ID", "References", "Subject", "From"]) url.searchParams.append("metadataHeaders", name);
   const message = await gmailJson<GmailMessage>(url, accessToken, "message");
   return {
     messageId: header(message.payload, "Message-ID") || null,
     references: header(message.payload, "References") || null,
     subject: header(message.payload, "Subject") || null,
+    senderAddressCount: mailboxCount(header(message.payload, "From")),
     threadId: message.threadId ?? null,
   };
 }
@@ -561,7 +600,8 @@ function sender(value: string) {
 
 export function parseGmailMessage(message: GmailMessage): ParsedGmailMessage {
   if (!message.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
-  const from = sender(header(message.payload, "From"));
+  const fromHeader = header(message.payload, "From");
+  const from = sender(fromHeader);
   const subject = header(message.payload, "Subject");
   const plain = bodies(message.payload, "text/plain").join("\n\n").trim();
   const html = bodies(message.payload, "text/html").map(stripHtml).join("\n\n").trim();
@@ -576,6 +616,9 @@ export function parseGmailMessage(message: GmailMessage): ParsedGmailMessage {
     externalThreadId: message.threadId ?? null,
     senderName: from.senderName,
     senderEmail: from.senderEmail,
+    senderAddressCount: mailboxCount(fromHeader),
+    messageIdHeader: validMessageId(header(message.payload, "Message-ID")),
+    references: compactReferences(header(message.payload, "References")),
     messageText: combined.slice(0, MAX_IMPORTED_MESSAGE_CHARS),
     receivedAt: Number.isNaN(receivedAt.getTime()) ? new Date() : receivedAt,
   };

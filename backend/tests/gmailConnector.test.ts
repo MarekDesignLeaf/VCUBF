@@ -182,6 +182,8 @@ describe("Gmail read-only connector", () => {
           mimeType: "text/plain",
           headers: [
             { name: "From", value: "Customer One <customer@example.com>" },
+            { name: "Message-ID", value: "<message-1@mail.example.com>" },
+            { name: "References", value: "<message-0@mail.example.com>" },
             { name: "Subject", value: "Kitchen quote" },
             { name: "Date", value: "Thu, 1 Jan 2026 10:00:00 +0000" },
           ],
@@ -213,7 +215,13 @@ describe("Gmail read-only connector", () => {
     assert.equal(intake.senderName, "Customer One");
     assert.equal(intake.messageText, "Subject: Kitchen quote\n\nHello from Gmail");
     assert.equal(intake.sourceReference, `gmail:${sourceId}:message-1`);
-    assert.deepEqual(intake.sourceMetadata, { provider: "gmail", labelIds: ["INBOX", "UNREAD"] });
+    assert.deepEqual(intake.sourceMetadata, {
+      provider: "gmail",
+      labelIds: ["INBOX", "UNREAD"],
+      messageId: "<message-1@mail.example.com>",
+      references: "<message-0@mail.example.com>",
+      fromAddresses: 1,
+    }, "a later reply needs these even if the original is deleted");
     assert.equal(await prisma.communicationIntake.count({ where: { connectorSourceId: sourceId } }), 1);
 
     const audit = await prisma.auditLog.findFirstOrThrow({

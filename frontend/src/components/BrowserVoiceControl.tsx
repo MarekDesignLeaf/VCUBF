@@ -452,6 +452,30 @@ function isMaleVoice(voice: SpeechSynthesisVoice): boolean {
   return nameWords(voice).some((word) => word === "male" || MALE_VOICE_NAMES.has(word));
 }
 
+/** How long the first fallback reply waits for the system voices to load. */
+const VOICES_WAIT_MS = 1_500;
+
+/**
+ * The system voices. Chrome loads them asynchronously: until "voiceschanged"
+ * fires the list can be empty, and an utterance spoken then gets the default
+ * voice, which may be a woman's. An empty list is therefore waited for,
+ * briefly; after that the reply is spoken with whatever there is.
+ */
+function systemVoices(): Promise<SpeechSynthesisVoice[]> {
+  const synthesis = window.speechSynthesis;
+  const loaded = synthesis.getVoices();
+  if (loaded.length > 0) return Promise.resolve(loaded);
+  return new Promise((resolve) => {
+    const done = () => {
+      window.clearTimeout(timer);
+      synthesis.removeEventListener("voiceschanged", done);
+      resolve(synthesis.getVoices());
+    };
+    const timer = window.setTimeout(done, VOICES_WAIT_MS);
+    synthesis.addEventListener("voiceschanged", done);
+  });
+}
+
 /**
  * A voice in the requested language, preferring a man's: {assistant} is a man.
  * A voice known to be male comes first, then one not known to be female.
@@ -459,8 +483,7 @@ function isMaleVoice(voice: SpeechSynthesisVoice): boolean {
  * far worse than the wrong voice, so a woman's voice is used only when the
  * language has nothing else.
  */
-function pickVoice(language: string): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
+function pickVoice(language: string, voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
   if (voices.length === 0) return null;
   const base = language.slice(0, 2).toLowerCase();
   const sameLanguage = voices.filter((voice) => voice.lang.slice(0, 2).toLowerCase() === base);
@@ -1205,9 +1228,12 @@ export function BrowserVoiceControl() {
         return;
       }
       try {
+        const voices = await systemVoices();
+        // Silenced or replaced while the voices were loading.
+        if (generation !== speechGeneration) return;
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = language;
-        const voice = pickVoice(language);
+        const voice = pickVoice(language, voices);
         if (voice) utterance.voice = voice;
         utterance.rate = speechRate;
         // Roughly three words a second, so the hold lasts about as long as this

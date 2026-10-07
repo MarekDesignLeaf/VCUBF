@@ -216,6 +216,11 @@ export function spokenError(error: string | undefined, extra: Row | undefined, l
       pl: "Adres nadawcy tego e-maila nie jest jednym poprawnym adresem, więc nie odpowiem stąd. Odpowiedz bezpośrednio w Gmailu.",
       en: "The sender's address on this email is not one valid address, so I will not reply to it from here. Please reply in Gmail.",
     },
+    EMAIL_THREAD_UNAVAILABLE: {
+      cs: "Původní e-mail už nejde přečíst, takže by odpověď přišla jako nový e-mail, ne jako odpověď. Odpovězte prosím přímo v Gmailu.",
+      pl: "Oryginalnego e-maila nie da się już odczytać, więc odpowiedź dotarłaby jako nowy e-mail, a nie jako odpowiedź. Odpowiedz bezpośrednio w Gmailu.",
+      en: "The original email can no longer be read, so the reply would arrive as a new email rather than an answer. Please reply in Gmail.",
+    },
     EMAIL_MESSAGE_NOT_FOUND: {
       cs: "Takový přijatý e-mail jsem nenašel.",
       pl: "Nie znalazłem takiego odebranego e-maila.",

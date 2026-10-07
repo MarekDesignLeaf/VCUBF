@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import request from "supertest";
-import { buildGmailMimeMessage, gmailProviderScopes } from "../src/connectors/gmailAdapter.js";
+import { buildGmailMimeMessage, compactReferences, gmailProviderScopes, mailboxCount, parseGmailMessage } from "../src/connectors/gmailAdapter.js";
 import { prisma } from "../src/db.js";
 import { createServer } from "../src/server.js";
 import { resetDb, seedCompanyAndAdmin } from "./setup.js";
@@ -28,13 +28,14 @@ let personalId = "";
 let readOnlyId = "";
 let sent: Array<{ authorization: string; raw: string; threadId?: string }> = [];
 let translationRequests = 0;
+let originalReads = 0;
 
 function url(input: string | URL | Request) {
   return typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 }
 
 /** Google and OpenAI as the reply needs them; every send is recorded. */
-function stubProviders(options: { accessToken?: string; profileEmail?: string; scopes?: string[]; translation?: string; originalGone?: boolean } = {}) {
+function stubProviders(options: { accessToken?: string; profileEmail?: string; scopes?: string[]; translation?: string; originalGone?: boolean; originalFrom?: string } = {}) {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const target = url(input);
     if (target === "https://oauth2.googleapis.com/token") {
@@ -57,6 +58,7 @@ function stubProviders(options: { accessToken?: string; profileEmail?: string; s
       return Response.json({ id: `sent-${sent.length}`, threadId: body.threadId ?? "new-thread" });
     }
     if (/\/users\/me\/messages\/gm-/.test(target)) {
+      originalReads += 1;
       if (options.originalGone) return new Response("not found", { status: 404 });
       return Response.json({
         id: "gm-jan-2",
@@ -65,6 +67,7 @@ function stubProviders(options: { accessToken?: string; profileEmail?: string; s
           { name: "Message-ID", value: "<orig-2@mail.example.com>" },
           { name: "References", value: "<orig-1@mail.example.com>" },
           { name: "Subject", value: "Nabídka na plot" },
+          { name: "From", value: options.originalFrom ?? "\"Novák, Jan\" <jan@example.com>" },
         ] },
       });
     }
@@ -90,7 +93,7 @@ async function source(name: string, scopes: string[], accessToken: string, profi
   return created.body.id as string;
 }
 
-async function received(input: { sourceId: string; id: string; thread: string; name: string | null; email: string; subject: string; text: string; hoursAgo: number; companyId?: string }) {
+async function received(input: { sourceId: string; id: string; thread: string; name: string | null; email: string; subject: string; text: string; hoursAgo: number; companyId?: string; kept?: Record<string, unknown> }) {
   const company = await prisma.user.findUniqueOrThrow({ where: { id: adminId }, select: { companyId: true } });
   return prisma.communicationIntake.create({
     data: {
@@ -104,7 +107,8 @@ async function received(input: { sourceId: string; id: string; thread: string; n
       messageText: `Subject: ${input.subject}\n\n${input.text}`,
       receivedAt: new Date(Date.now() - input.hoursAgo * 60 * 60 * 1000),
       sourceReference: `gmail:${input.sourceId}:${input.id}`,
-      sourceMetadata: { provider: "gmail", labelIds: ["INBOX"] },
+      // Without "kept", as an email imported before the import kept its reply headers.
+      sourceMetadata: { provider: "gmail", labelIds: ["INBOX"], ...input.kept },
       createdBy: adminId,
     },
   });
@@ -137,6 +141,7 @@ describe("Replying to a received email", () => {
     await prisma.communicationIntake.deleteMany({});
     sent = [];
     translationRequests = 0;
+    originalReads = 0;
   });
 
   afterEach(() => { globalThis.fetch = originalFetch; });
@@ -242,16 +247,59 @@ describe("Replying to a received email", () => {
     assert.equal(sent.length, 0);
   });
 
-  it("still replies to the right person and thread when the original can no longer be read", async () => {
+  it("refuses, before the review, a reply that could not join the conversation", async () => {
+    // Imported before the import kept the reply headers, and since deleted.
     const email = await received({ sourceId: businessId, id: "gm-gone", thread: "thread-gone", name: "Jan Novák", email: "jan@example.com", subject: "Plot", text: "Hi.", hoursAgo: 1 });
+    stubProviders({ accessToken: "access-business", originalGone: true });
+    const asked = await replyAction({ sender_or_message: "Jan", body: "Děkuji." });
+    assert.equal(asked.body.error, "EMAIL_THREAD_UNAVAILABLE", JSON.stringify(asked.body));
+    assert.equal(await prisma.voicePendingAction.count({ where: { status: "pending" } }), 0, "no yes is asked for");
+    assert.equal(translationRequests, 0);
+
+    const confirmed = await request(app).post("/connectors/gmail/messages/reply").set("Authorization", `Bearer ${token}`)
+      .send({ intake_id: email.id, body: "Thank you.", confirmed: true });
+    assert.equal(confirmed.status, 409, JSON.stringify(confirmed.body));
+    assert.equal(confirmed.body.error, "EMAIL_THREAD_UNAVAILABLE");
+    assert.equal(sent.length, 0, "never sent as a new email that looks like an answer");
+    const refusal = await prisma.auditLog.findFirstOrThrow({ where: { actionName: "reply_gmail_message", errorMessage: "EMAIL_THREAD_UNAVAILABLE", confirmed: true } });
+    assert.equal(refusal.result, "rejected");
+  });
+
+  it("answers from the headers kept at import, even after the original is gone", async () => {
+    const email = await received({
+      sourceId: businessId, id: "gm-kept", thread: "thread-kept", name: "Jan Novák", email: "jan@example.com", subject: "Plot", text: "Hi.", hoursAgo: 1,
+      kept: { messageId: "<kept-2@mail.example.com>", references: "<kept-1@mail.example.com>", fromAddresses: 1 },
+    });
     stubProviders({ accessToken: "access-business", originalGone: true });
     const done = await request(app).post("/connectors/gmail/messages/reply").set("Authorization", `Bearer ${token}`)
       .send({ intake_id: email.id, body: "Thank you.", confirmed: true });
     assert.equal(done.status, 200, JSON.stringify(done.body));
+    assert.equal(originalReads, 0, "nothing had to be read from Gmail");
     assert.equal(sent.length, 1);
-    assert.equal(sent[0].threadId, "thread-gone");
-    assert.match(sent[0].raw, /^To: jan@example\.com\r\n/m);
-    assert.doesNotMatch(sent[0].raw, /In-Reply-To/);
+    assert.equal(sent[0].threadId, "thread-kept");
+    assert.match(sent[0].raw, /^In-Reply-To: <kept-2@mail\.example\.com>\r\n/m);
+    assert.match(sent[0].raw, /^References: <kept-1@mail\.example\.com> <kept-2@mail\.example\.com>\r\n/m);
+  });
+
+  it("will not answer a From line that named several addresses, though only the first was kept as the sender", async () => {
+    // A real import keeps the first address as senderEmail and counts the rest.
+    await received({
+      sourceId: businessId, id: "gm-many", thread: "tm", name: null, email: "alice@example.com", subject: "A", text: "Hi.", hoursAgo: 2,
+      kept: { messageId: "<many@mail.example.com>", references: null, fromAddresses: 2 },
+    });
+    stubProviders();
+    const refused = await replyAction({ sender_or_message: "alice@example.com", body: "Thank you." });
+    assert.equal(refused.body.error, "EMAIL_SENDER_ADDRESS_INVALID", JSON.stringify(refused.body));
+
+    // An older import has no count; the original's From line is read instead.
+    await prisma.communicationIntake.deleteMany({});
+    await received({ sourceId: businessId, id: "gm-many-old", thread: "tmo", name: null, email: "alice@example.com", subject: "A", text: "Hi.", hoursAgo: 2 });
+    stubProviders({ originalFrom: "Alice <alice@example.com>, Bob <bob@example.com>" });
+    const old = await replyAction({ sender_or_message: "alice@example.com", body: "Thank you." });
+    assert.equal(old.body.error, "EMAIL_SENDER_ADDRESS_INVALID", JSON.stringify(old.body));
+    assert.equal(originalReads, 1);
+    assert.equal(await prisma.voicePendingAction.count({ where: { status: "pending" } }), 0);
+    assert.equal(sent.length, 0);
   });
 
   it("keeps companies apart and requires the connector permission", async () => {
@@ -288,6 +336,35 @@ describe("Replying to a received email", () => {
       .send({ sender_or_message: "Jan", body: "Hello.", confirmed: true });
     assert.equal(route.status, 400, "a confirmed reply must name the exact email it answers");
     assert.equal(sent.length, 0);
+  });
+});
+
+describe("What an import keeps for a later reply", () => {
+  const imported = (from: string, extra: Array<{ name: string; value: string }> = []) => parseGmailMessage({
+    id: "m1", threadId: "t1", payload: { mimeType: "text/plain", headers: [{ name: "From", value: from }, ...extra], body: { data: Buffer.from("Hi").toString("base64url") } },
+  });
+
+  it("counts every address on the From line, not only the one kept as the sender", () => {
+    const two = imported("Alice <alice@example.com>, Bob <bob@example.com>");
+    assert.equal(two.senderEmail, "alice@example.com");
+    assert.equal(two.senderAddressCount, 2);
+    assert.equal(imported("\"Novák, Jan (a@b)\" <jan@example.com>").senderAddressCount, 1, "a comma or @ inside a quoted name is not an address");
+    assert.equal(imported("jan@example.com").senderAddressCount, 1);
+    assert.equal(imported("undisclosed-recipients:;").senderAddressCount, 0);
+    assert.equal(mailboxCount("a@x.example; b@y.example"), 2, "a semicolon some mail programs write counts too");
+  });
+
+  it("keeps the Message-ID and a short References chain, and nothing that is not one", () => {
+    const parsed = imported("jan@example.com", [
+      { name: "Message-ID", value: " <m2@mail.example.com> " },
+      { name: "References", value: "<m0@mail.example.com> junk\r\nBcc: evil@example.com <m1@mail.example.com>" },
+    ]);
+    assert.equal(parsed.messageIdHeader, "<m2@mail.example.com>");
+    assert.equal(parsed.references, "<m0@mail.example.com> <m1@mail.example.com>");
+    assert.equal(imported("jan@example.com", [{ name: "Message-ID", value: "x\r\nBcc: evil@example.com" }]).messageIdHeader, null);
+    const long = Array.from({ length: 15 }, (_, index) => `<r${index}@mail.example.com>`).join(" ");
+    assert.equal(compactReferences(long)?.split(" ").length, 10, "the first and the latest nine");
+    assert.ok(compactReferences(long)?.startsWith("<r0@mail.example.com> <r6@mail.example.com>"));
   });
 });
 
