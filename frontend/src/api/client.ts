@@ -2349,12 +2349,24 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ text, input_method: inputMethod }),
       }),
-    assistant: (text: string, language: AppLanguage, history: Array<{ role: "user" | "assistant"; content: string }>, signal?: AbortSignal) =>
-      request<MobileAssistantResponse>("/command/assistant", {
-        method: "POST",
-        body: JSON.stringify({ text, input_method: "voice_transcript", language, history }),
-        signal,
-      }),
+    assistant: async (text: string, language: AppLanguage, history: Array<{ role: "user" | "assistant"; content: string }>, signal?: AbortSignal) => {
+      try {
+        return await request<MobileAssistantResponse>("/command/assistant", {
+          method: "POST",
+          body: JSON.stringify({ text, input_method: "voice_transcript", language, history }),
+          signal,
+        });
+      } catch (error) {
+        // A review waiting for "yes" (409), a refusal (403) or a missing Gmail
+        // authorisation comes back with a non-2xx status and the sentence to say.
+        // That is Secretary's answer, not a lost connection: it used to be thrown
+        // away and the user heard "could not connect" instead of the review.
+        if (error instanceof ApiError && error.status !== 401 && typeof error.details?.message === "string") {
+          return error.details as unknown as MobileAssistantResponse;
+        }
+        throw error;
+      }
+    },
     voiceState: () => request<VoiceDeviceState>("/command/voice-state"),
     voiceConversations: (limit = 10) => request<VoiceConversation[]>(`/command/voice-conversations?limit=${limit}`),
     navigation: () => request<SecretaryNavigationCatalogue>("/command/navigation"),
