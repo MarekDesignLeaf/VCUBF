@@ -138,9 +138,15 @@ export async function saveMacro(user: AuthedUser, rawInput: unknown): Promise<Sa
       where: { companyId: user.companyId, term },
       include: { macro: { include: { names: true } } },
     });
-    // Already this command: nothing to do. Already another: leave it where it
-    // is, because silently moving a phrase would break the command it names.
-    if (owner.macroId === macro.id) continue;
+    // Already this command. For a command this request created, the name can
+    // only have come from a simultaneous save of the same recording, so it is
+    // reported as saved: the answer must still say what to say next time.
+    if (owner.macroId === macro.id) {
+      if (!alreadyKnown) addedNames.push(owner.spoken);
+      continue;
+    }
+    // Already another command: leave it where it is, because silently moving a
+    // phrase would break the command it names.
     takenNames.push({
       name: spoken,
       usedBy: owner.macro.names[0]?.spoken ?? "jiný příkaz",

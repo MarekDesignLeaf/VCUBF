@@ -118,7 +118,10 @@ describe("Commands taught by doing them", () => {
     assert.equal(both[0]!.macroId, both[1]!.macroId);
     assert.equal(await prisma.voiceMacro.count({ where: { fingerprint: fingerprintSteps(quote) } }), 1);
     assert.equal(await prisma.voiceMacroName.count({ where: { macroId: both[0]!.macroId } }), 1);
-    assert.deepEqual(both.flatMap((outcome) => outcome!.addedNames), ["nová nabídka"], "the name is added once, by one of them");
+    // Whichever stored it, each answer can tell the user what to say next time.
+    for (const outcome of both) {
+      assert.ok([...outcome!.addedNames, ...outcome!.existingNames].includes("nová nabídka"), JSON.stringify(outcome));
+    }
     assert.deepEqual(both.flatMap((outcome) => outcome!.takenNames), [], "its own name is not reported as taken");
 
     const again = await saveMacro(user, { steps: quote, names: ["nová nabídka"] });
