@@ -148,6 +148,16 @@ describe("Emma connector commands", () => {
     assert.equal(confirmed.body.intent, "confirm_whatsapp_message");
     assert.equal(confirmed.body.data.messageId, "wamid.test");
     assert.equal(sends, 1);
+
+    // Dictating it again is reviewed with a note that exactly this already went.
+    const repeated = await request(app)
+      .post("/command/assistant")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ text: "wyślij wiadomość na WhatsApp do +447700900123 wiadomość Dzień dobry", input_method: "voice_transcript", language: "pl-PL", history: [] });
+    assert.equal(repeated.body.data?.preview?.alreadySent?.minutesAgo, 0, JSON.stringify(repeated.body));
+    assert.match(repeated.body.message, /Uwaga: dokładnie to wysłałem już przed chwilą\. Czy mam ją wysłać\?$/);
+    assert.equal(sends, 1, "a review sends nothing");
+    await prisma.voicePendingAction.deleteMany({});
     await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "en-GB" } });
   });
 });

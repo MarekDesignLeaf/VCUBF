@@ -177,14 +177,6 @@ describe("Dictated in Czech, sent in English", () => {
     const audit = await prisma.auditLog.findFirstOrThrow({ where: { actionName: "send_whatsapp_message", result: "success" }, orderBy: { createdAt: "desc" } });
     assert.ok(!JSON.stringify(audit).includes("See you on Monday"), "the audit keeps a keyed hash, not the message");
 
-    // The parsed spoken command reviews the same way, and says it aloud.
-    await prisma.voicePendingAction.deleteMany({});
-    const spoken = await request(app).post("/command/assistant").set("Authorization", `Bearer ${token}`)
-      .send({ text: "pošli whatsapp na +447700900555; zpráva See you on Monday", input_method: "voice_transcript", history: [] });
-    assert.equal(spoken.body.intent, "prepare_whatsapp_message", JSON.stringify(spoken.body));
-    assert.equal(spoken.body.data.preview.alreadySent?.minutesAgo, 0);
-    assert.match(spoken.body.message, /Pozor: přesně tohle jsem už odeslal před chvílí\. Mám ji odeslat\?$/, spoken.body.message);
-    await prisma.voicePendingAction.deleteMany({});
   });
 
   it("leaves a message without send_in exactly as it was dictated", async () => {
