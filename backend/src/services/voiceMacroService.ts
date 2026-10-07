@@ -86,22 +86,31 @@ export async function saveMacro(user: AuthedUser, rawInput: unknown): Promise<Sa
   const steps = parsed.data.steps;
   const fingerprint = fingerprintSteps(steps);
 
-  const existing = await prisma.voiceMacro.findFirst({
-    where: { companyId: user.companyId, fingerprint },
-    include: { names: true },
-  });
+  // A save can arrive twice at once: the window stops waiting after ten
+  // seconds and the user is asked to say "save" again while the first request
+  // may still be running. The unique keys decide which insert wins; the other
+  // request reads what the winner stored instead of failing, so both answer
+  // truthfully and nothing is stored twice.
+  let macro = await prisma.voiceMacro.findFirst({ where: { companyId: user.companyId, fingerprint } });
+  let alreadyKnown = macro !== null;
+  if (!macro) {
+    try {
+      macro = await prisma.voiceMacro.create({
+        data: {
+          companyId: user.companyId,
+          createdBy: user.id,
+          fingerprint,
+          steps: steps as never,
+          stepCount: steps.length,
+        },
+      });
+    } catch (error) {
+      if (!isUniqueConflict(error)) throw error;
+      macro = await prisma.voiceMacro.findFirstOrThrow({ where: { companyId: user.companyId, fingerprint } });
+      alreadyKnown = true;
+    }
+  }
 
-  const macro = existing ?? await prisma.voiceMacro.create({
-    data: {
-      companyId: user.companyId,
-      createdBy: user.id,
-      fingerprint,
-      steps: steps as never,
-      stepCount: steps.length,
-    },
-  });
-
-  const existingNames = existing ? existing.names.map((name) => name.spoken) : [];
   const addedNames: string[] = [];
   const takenNames: { name: string; usedBy: string }[] = [];
 
@@ -113,30 +122,51 @@ export async function saveMacro(user: AuthedUser, rawInput: unknown): Promise<Sa
       where: { companyId: user.companyId, term },
       include: { macro: { include: { names: true } } },
     });
-    if (claimed) {
-      // Already this command: nothing to do. Already another: leave it where it
-      // is, because silently moving a phrase would break the command it names.
-      if (claimed.macroId === macro.id) continue;
-      takenNames.push({
-        name: spoken,
-        usedBy: claimed.macro.names[0]?.spoken ?? "jiný příkaz",
-      });
-      continue;
+    if (!claimed) {
+      try {
+        await prisma.voiceMacroName.create({
+          data: { companyId: user.companyId, macroId: macro.id, term, spoken: spoken.trim() },
+        });
+        addedNames.push(spoken.trim());
+        continue;
+      } catch (error) {
+        if (!isUniqueConflict(error)) throw error;
+        // Claimed by a request that got there first; judged below like any other.
+      }
     }
-
-    await prisma.voiceMacroName.create({
-      data: { companyId: user.companyId, macroId: macro.id, term, spoken: spoken.trim() },
+    const owner = claimed ?? await prisma.voiceMacroName.findFirstOrThrow({
+      where: { companyId: user.companyId, term },
+      include: { macro: { include: { names: true } } },
     });
-    addedNames.push(spoken.trim());
+    // Already this command: nothing to do. Already another: leave it where it
+    // is, because silently moving a phrase would break the command it names.
+    if (owner.macroId === macro.id) continue;
+    takenNames.push({
+      name: spoken,
+      usedBy: owner.macro.names[0]?.spoken ?? "jiný příkaz",
+    });
   }
+
+  // What the command was already called, read after the names above, so a
+  // save that lost the race still reports the names the winner stored.
+  const existingNames = alreadyKnown
+    ? (await prisma.voiceMacroName.findMany({ where: { macroId: macro.id }, orderBy: { createdAt: "asc" } }))
+      .map((name) => name.spoken)
+      .filter((name) => !addedNames.includes(name))
+    : [];
 
   return {
     macroId: macro.id,
-    alreadyKnown: existing !== null,
+    alreadyKnown,
     existingNames,
     addedNames,
     takenNames,
   };
+}
+
+/** Postgres unique violation, as Prisma reports it. */
+function isUniqueConflict(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "P2002";
 }
 
 export interface MatchedMacro {
