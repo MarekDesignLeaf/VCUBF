@@ -98,6 +98,32 @@ function clashSentence(clashes: unknown, lang: Locale) {
       : ` Note that the calendar already has ${titles} at that time.`;
 }
 
+/** "3 minutes ago", in the words each language counts minutes with. */
+function minutesAgo(minutes: number, lang: Locale) {
+  if (minutes < 1) return lang === "cs" ? "před chvílí" : lang === "pl" ? "przed chwilą" : "a moment ago";
+  if (lang === "cs") return minutes === 1 ? "před minutou" : `před ${minutes} minutami`;
+  if (lang === "pl") {
+    if (minutes === 1) return "minutę temu";
+    const few = minutes % 10 >= 2 && minutes % 10 <= 4 && (minutes % 100 < 12 || minutes % 100 > 14);
+    return `${minutes} ${few ? "minuty" : "minut"} temu`;
+  }
+  return minutes === 1 ? "a minute ago" : `${minutes} minutes ago`;
+}
+
+/**
+ * Said before the question when exactly this message already went to the
+ * same recipients shortly before: after a request that got no answer in time,
+ * the yes must be given knowing it would send a second copy.
+ */
+function repeatSentence(alreadySent: unknown, lang: Locale) {
+  const minutes = alreadySent && typeof alreadySent === "object" ? (alreadySent as Row).minutesAgo : undefined;
+  if (typeof minutes !== "number" || !Number.isFinite(minutes)) return "";
+  const ago = minutesAgo(minutes, lang);
+  return lang === "cs" ? ` Pozor: přesně tohle jsem už odeslal ${ago}.`
+    : lang === "pl" ? ` Uwaga: dokładnie to wysłałem już ${ago}.`
+      : ` Note: I already sent exactly this ${ago}.`;
+}
+
 /** The spoken review for an action waiting for a yes, or undefined if this module does not word it. */
 export function spokenReview(action: string, preview: Row | undefined, language: string): string | undefined {
   if (!preview) return undefined;
@@ -106,9 +132,10 @@ export function spokenReview(action: string, preview: Row | undefined, language:
     case "reply_whatsapp": {
       const who = preview.recipientName || preview.to;
       const how = spokenLanguage(preview.sentIn, lang);
-      if (lang === "cs") return `Odpověď pro ${who} na zprávu „${quote(preview.inReplyTo?.text, 160)}“. Pošlu ${how}: „${quote(preview.body)}“. Mám ji odeslat?`;
-      if (lang === "pl") return `Odpowiedź dla ${who} na wiadomość „${quote(preview.inReplyTo?.text, 160)}”. Wyślę ${how}: „${quote(preview.body)}”. Czy mam ją wysłać?`;
-      return `Reply to ${who} about “${quote(preview.inReplyTo?.text, 160)}”. I will send ${how}: “${quote(preview.body)}”. Shall I send it?`;
+      const again = repeatSentence(preview.alreadySent, lang);
+      if (lang === "cs") return `Odpověď pro ${who} na zprávu „${quote(preview.inReplyTo?.text, 160)}“. Pošlu ${how}: „${quote(preview.body)}“.${again} Mám ji odeslat?`;
+      if (lang === "pl") return `Odpowiedź dla ${who} na wiadomość „${quote(preview.inReplyTo?.text, 160)}”. Wyślę ${how}: „${quote(preview.body)}”.${again} Czy mam ją wysłać?`;
+      return `Reply to ${who} about “${quote(preview.inReplyTo?.text, 160)}”. I will send ${how}: “${quote(preview.body)}”.${again} Shall I send it?`;
     }
     case "reply_email": {
       // Who it goes to, which mailbox it leaves from and which email it answers.
@@ -118,15 +145,17 @@ export function spokenReview(action: string, preview: Row | undefined, language:
       const about = quote(preview.inReplyTo?.subject || preview.inReplyTo?.text, 160);
       const how = spokenLanguage(preview.sentIn, lang);
       const from = typeof preview.fromAccount === "string" && preview.fromAccount ? preview.fromAccount : "";
-      if (lang === "cs") return `Odpověď pro ${who} na e-mail „${about}“${from ? `, z účtu ${from}` : ""}. Pošlu ${how}: „${quote(preview.body)}“. Mám ji odeslat?`;
-      if (lang === "pl") return `Odpowiedź dla ${who} na e-mail „${about}”${from ? `, z konta ${from}` : ""}. Wyślę ${how}: „${quote(preview.body)}”. Czy mam ją wysłać?`;
-      return `Reply to ${who} about “${about}”${from ? `, from ${from}` : ""}. I will send ${how}: “${quote(preview.body)}”. Shall I send it?`;
+      const again = repeatSentence(preview.alreadySent, lang);
+      if (lang === "cs") return `Odpověď pro ${who} na e-mail „${about}“${from ? `, z účtu ${from}` : ""}. Pošlu ${how}: „${quote(preview.body)}“.${again} Mám ji odeslat?`;
+      if (lang === "pl") return `Odpowiedź dla ${who} na e-mail „${about}”${from ? `, z konta ${from}` : ""}. Wyślę ${how}: „${quote(preview.body)}”.${again} Czy mam ją wysłać?`;
+      return `Reply to ${who} about “${about}”${from ? `, from ${from}` : ""}. I will send ${how}: “${quote(preview.body)}”.${again} Shall I send it?`;
     }
     case "send_whatsapp": {
       const how = preview.sentIn ? ` ${spokenLanguage(preview.sentIn, lang)}` : "";
-      if (lang === "cs") return `Pošlu na WhatsApp na číslo ${preview.to}${how}: „${quote(preview.body)}“. Mám ji odeslat?`;
-      if (lang === "pl") return `Wyślę na WhatsApp na numer ${preview.to}${how}: „${quote(preview.body)}”. Czy mam ją wysłać?`;
-      return `I will send a WhatsApp message to ${preview.to}${how}: “${quote(preview.body)}”. Shall I send it?`;
+      const again = repeatSentence(preview.alreadySent, lang);
+      if (lang === "cs") return `Pošlu na WhatsApp na číslo ${preview.to}${how}: „${quote(preview.body)}“.${again} Mám ji odeslat?`;
+      if (lang === "pl") return `Wyślę na WhatsApp na numer ${preview.to}${how}: „${quote(preview.body)}”.${again} Czy mam ją wysłać?`;
+      return `I will send a WhatsApp message to ${preview.to}${how}: “${quote(preview.body)}”.${again} Shall I send it?`;
     }
     case "send_email": {
       const recipients = (Array.isArray(preview.to) ? preview.to : [preview.to]).filter(Boolean).join(", ");
@@ -137,9 +166,10 @@ export function spokenReview(action: string, preview: Row | undefined, language:
       const how = preview.sentIn ? ` ${spokenLanguage(preview.sentIn, lang)}` : "";
       // With two mailboxes connected the owner hears which one it leaves from.
       const from = typeof preview.fromAccount === "string" && preview.fromAccount ? preview.fromAccount : "";
-      if (lang === "cs") return `Pošlu${from ? ` z účtu ${from}` : ""} e-mail na ${recipients}${cc ? `, v kopii ${cc}` : ""}${bcc ? `, ve skryté kopii ${bcc}` : ""}${how}. Předmět: „${quote(preview.subject)}“. Text: „${quote(preview.body)}“. Mám ho odeslat?`;
-      if (lang === "pl") return `Wyślę${from ? ` z konta ${from}` : ""} e-mail do ${recipients}${cc ? `, w kopii ${cc}` : ""}${bcc ? `, w ukrytej kopii ${bcc}` : ""}${how}. Temat: „${quote(preview.subject)}”. Treść: „${quote(preview.body)}”. Czy mam go wysłać?`;
-      return `I will email ${recipients}${cc ? `, copying ${cc}` : ""}${bcc ? `, blind-copying ${bcc}` : ""}${from ? `, from ${from}` : ""}${how}. Subject: “${quote(preview.subject)}”. Text: “${quote(preview.body)}”. Shall I send it?`;
+      const again = repeatSentence(preview.alreadySent, lang);
+      if (lang === "cs") return `Pošlu${from ? ` z účtu ${from}` : ""} e-mail na ${recipients}${cc ? `, v kopii ${cc}` : ""}${bcc ? `, ve skryté kopii ${bcc}` : ""}${how}. Předmět: „${quote(preview.subject)}“. Text: „${quote(preview.body)}“.${again} Mám ho odeslat?`;
+      if (lang === "pl") return `Wyślę${from ? ` z konta ${from}` : ""} e-mail do ${recipients}${cc ? `, w kopii ${cc}` : ""}${bcc ? `, w ukrytej kopii ${bcc}` : ""}${how}. Temat: „${quote(preview.subject)}”. Treść: „${quote(preview.body)}”.${again} Czy mam go wysłać?`;
+      return `I will email ${recipients}${cc ? `, copying ${cc}` : ""}${bcc ? `, blind-copying ${bcc}` : ""}${from ? `, from ${from}` : ""}${how}. Subject: “${quote(preview.subject)}”. Text: “${quote(preview.body)}”.${again} Shall I send it?`;
     }
     case "create_calendar_event": {
       const when = spokenSlot(preview, preview.timeZone, lang);

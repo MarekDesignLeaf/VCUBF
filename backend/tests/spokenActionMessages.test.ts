@@ -36,6 +36,28 @@ describe("Spoken reviews", () => {
     assert.equal(spokenError("EMAIL_MESSAGE_NOT_FOUND", undefined, "cs-CZ"), "Takový přijatý e-mail jsem nenašel.");
   });
 
+  it("says, before the question, that exactly this already went out a few minutes ago", () => {
+    // After a request that got no answer in time, the yes must be given knowing
+    // it would send a second copy.
+    const email = { to: ["jan@example.com"], subject: "Plot", body: "We will come on Monday.", alreadySent: { sentAt: "2026-10-07T21:00:00.000Z", minutesAgo: 3 } };
+    assert.equal(
+      spokenReview("send_email", email, "cs-CZ"),
+      "Pošlu e-mail na jan@example.com. Předmět: „Plot“. Text: „We will come on Monday.“. Pozor: přesně tohle jsem už odeslal před 3 minutami. Mám ho odeslat?",
+    );
+    assert.match(spokenReview("send_email", email, "en-GB")!, /“We will come on Monday\.”\. Note: I already sent exactly this 3 minutes ago\. Shall I send it\?$/);
+    const whatsapp = (minutesAgo: number) => ({ to: "+447700900111", body: "Hello.", alreadySent: { minutesAgo } });
+    assert.match(spokenReview("send_whatsapp", whatsapp(22), "pl-PL")!, /Uwaga: dokładnie to wysłałem już 22 minuty temu\. Czy mam ją wysłać\?$/);
+    assert.match(spokenReview("send_whatsapp", whatsapp(12), "pl-PL")!, /12 minut temu/);
+    assert.match(spokenReview("send_whatsapp", whatsapp(5), "pl-PL")!, /5 minut temu/);
+    assert.match(spokenReview("send_whatsapp", whatsapp(1), "cs-CZ")!, /Pozor: přesně tohle jsem už odeslal před minutou\. Mám ji odeslat\?$/);
+    assert.match(spokenReview("send_whatsapp", whatsapp(0), "en-GB")!, /Note: I already sent exactly this a moment ago\. Shall I send it\?$/);
+    const reply = { to: ["jan@example.com"], inReplyTo: { subject: "Plot" }, body: "Thanks.", sentIn: "English", alreadySent: { minutesAgo: 7 } };
+    assert.match(spokenReview("reply_email", reply, "cs-CZ")!, /„Thanks\.“\. Pozor: přesně tohle jsem už odeslal před 7 minutami\. Mám ji odeslat\?$/);
+    assert.match(spokenReview("reply_whatsapp", { ...reply, to: "+447700900111", inReplyTo: { text: "Hi" } }, "pl-PL")!, /7 minut temu\. Czy mam ją wysłać\?$/);
+    // Nothing is said when nothing was sent before.
+    assert.doesNotMatch(spokenReview("send_email", { ...email, alreadySent: undefined }, "cs-CZ")!, /Pozor/);
+  });
+
   it("reads a calendar entry back with the day, time, an assumed length and clashes", () => {
     const day = tomorrow();
     const spoken = spokenReview("create_calendar_event", {

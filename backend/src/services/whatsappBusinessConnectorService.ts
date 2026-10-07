@@ -18,6 +18,7 @@ import {
   SYNC_WHATSAPP_CONTACTS_ACTION,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import { recentAuditedSend, recentReply, repeatNote, sendFingerprint } from "../lib/repeatedSend.js";
 import { isValidPhoneNumberFormat, normalizePhone, phoneNumberSchema } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
@@ -385,9 +386,13 @@ export async function sendWhatsAppMessage(
       throw error;
     }
   }
+  // The review says when the same text went to the same number shortly before.
+  const fingerprint = sendFingerprint({ recipients: [parsed.data.to.replace(/\D/g, "")], body });
+  const repeat = parsed.data.confirmed ? null : await recentAuditedSend(user.companyId, SEND_WHATSAPP_MESSAGE_ACTION.actionName, fingerprint);
   const preview = {
     sourceId, provider: "whatsapp_business", to: parsed.data.to, body,
     ...(translation ? { sentIn: translation.languageLabel, dictated: translation.original.body } : {}),
+    ...repeatNote(repeat),
   };
   if (!parsed.data.confirmed) {
     await recordAudit({
@@ -415,7 +420,7 @@ export async function sendWhatsAppMessage(
       userId: user.id,
       actionName: SEND_WHATSAPP_MESSAGE_ACTION.actionName,
       inputPayload: { sourceId, confirmed: true, recipientLength: parsed.data.to.length, bodyLength: parsed.data.body.length },
-      dataAfter: result,
+      dataAfter: { ...result, contentFingerprint: fingerprint },
       riskLevel: SEND_WHATSAPP_MESSAGE_ACTION.riskLevel,
       confirmationRequired: true,
       confirmed: true,
@@ -581,6 +586,8 @@ export async function replyToWhatsAppMessage(
       body: translation.body,
       sentIn: translation.languageLabel,
       dictated: translation.original.body,
+      // The same reply to this message shortly before is said in the review.
+      ...repeatNote(recentReply(intake.sourceMetadata, translation.body)),
     };
     await recordAudit({
       companyId: user.companyId,

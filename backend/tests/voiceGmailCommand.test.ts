@@ -112,4 +112,32 @@ describe("Emma Gmail sending", () => {
     assert.equal(repeated.body.error, "UNSUPPORTED_ACTION");
     assert.equal(sends, 1);
   });
+
+  it("says in the review when exactly this email went out a moment ago, and only then", async () => {
+    // A voice request that got no answer in time may still have sent the email;
+    // dictating it again must not send a second copy unknowingly.
+    const again = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ text: "send email to customer@example.com; subject Quote ready; body Hello customer, your quote is ready.", input_method: "voice_transcript" });
+    assert.equal(again.status, 202);
+    assert.equal(again.body.data.preview.alreadySent?.minutesAgo, 0, JSON.stringify(again.body.data.preview));
+
+    const different = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ text: "send email to customer@example.com; subject Quote ready; body Hello customer, the quote changed.", input_method: "voice_transcript" });
+    assert.equal(different.body.data.preview.alreadySent, undefined, "a different text is a different email");
+    const elsewhere = await request(app)
+      .post("/command/text")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ text: "send email to other@example.com; subject Quote ready; body Hello customer, your quote is ready.", input_method: "voice_transcript" });
+    assert.equal(elsewhere.body.data.preview.alreadySent, undefined, "the same text to someone else is a different email");
+
+    // What the audit keeps to recognise it is a keyed hash, never the words or the address.
+    const sent = await prisma.auditLog.findFirstOrThrow({ where: { actionName: "send_gmail_message", result: "success" } });
+    assert.match(String((sent.dataAfter as { contentFingerprint?: string }).contentFingerprint), /^[0-9a-f]{64}$/);
+    assert.ok(!JSON.stringify(sent).includes("quote is ready"));
+    assert.ok(!JSON.stringify(sent).includes("customer@example.com"));
+  });
 });
