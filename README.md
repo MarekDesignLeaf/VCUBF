@@ -87,7 +87,9 @@ docs/               User guide, connector engine, production architecture, voice
   that email's sender, from the Gmail account it arrived in, in the same conversation
   (thread, In-Reply-To and References); nothing spoken can change the recipient or the
   account. If that account cannot send, the reply is refused rather than sent from another.
-  Written in English unless another language is named, read back before the yes, and the
+  The import keeps the original's Message-ID, References and how many addresses its From
+  line named; a reply that could not join the conversation, or a From line naming several
+  addresses, is refused before the review. Written in English unless another language is named, read back before the yes, and the
   yes sends exactly that text once. Covered by mocked tests (`emailReply.test.ts`); a live
   Gmail send is not yet accepted.
 - **Learned browser macros**: saved steps and values require a replay preview. Replayed

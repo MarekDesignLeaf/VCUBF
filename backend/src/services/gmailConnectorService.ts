@@ -21,6 +21,7 @@ import {
   getGmailProfile,
   getGmailReplyHeaders,
   GmailAdapterError,
+  validMessageId,
   listGmailHistory,
   listGmailMessages,
   parseGmailMessage,
@@ -510,7 +511,16 @@ async function importMessageReferences(
           messageText: message.messageText,
           receivedAt: message.receivedAt,
           sourceReference: `gmail:${source.id}:${message.externalMessageId}`,
-          sourceMetadata: { provider: "gmail", labelIds: rawMessage.labelIds },
+          // What a reply to this email needs later, kept now: the original may
+          // be deleted or unreadable by then, and senderEmail keeps only the
+          // first address of a From line that names several.
+          sourceMetadata: {
+            provider: "gmail",
+            labelIds: rawMessage.labelIds,
+            messageId: message.messageIdHeader,
+            references: message.references,
+            fromAddresses: message.senderAddressCount,
+          },
           createdBy: user.id,
         },
       });
@@ -1162,6 +1172,55 @@ async function emailReplyTarget(
   return chosen && replyableEmail(chosen) ? ok(200, chosen) : fail(404, "EMAIL_MESSAGE_NOT_FOUND", "That email was not found.");
 }
 
+interface ReplyThreading {
+  threadId: string;
+  messageId: string;
+  references: string | null;
+}
+
+const THREAD_UNAVAILABLE_MESSAGE = "The original email can no longer be read, so a reply would arrive as a new conversation instead of an answer. Reply from Gmail instead.";
+const SENDER_INVALID_MESSAGE = "The sender's address on this email is not one valid address, so it cannot be answered from here. Reply from Gmail instead.";
+
+function metadataRecord(value: Prisma.JsonValue | null): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+/**
+ * What makes the reply an answer in the customer's conversation: the Gmail
+ * thread, the original's Message-ID and the References chain. Gmail joins a
+ * sent message to a thread only with all of them, so a reply that cannot have
+ * them is refused rather than sent as a new email that looks like an answer.
+ *
+ * The import keeps them (and how many addresses the From line named). An email
+ * imported before that is read once from Gmail instead.
+ */
+async function replyThreading(intake: EmailReplyTarget, accessToken: () => Promise<string>): Promise<ServiceResult<ReplyThreading>> {
+  const stored = metadataRecord(intake.sourceMetadata);
+  let messageId = typeof stored.messageId === "string" ? stored.messageId : null;
+  let references = typeof stored.references === "string" ? stored.references : null;
+  let fromAddresses = typeof stored.fromAddresses === "number" ? stored.fromAddresses : null;
+  let threadId = intake.externalThreadId;
+  if (!messageId || fromAddresses === null) {
+    try {
+      const headers = await getGmailReplyHeaders(await accessToken(), intake.externalMessageId);
+      messageId = headers.messageId;
+      references = headers.references;
+      fromAddresses = headers.senderAddressCount;
+      threadId ??= headers.threadId;
+    } catch (error) {
+      // Deleted, or this mailbox may no longer read it.
+      if (error instanceof GmailAdapterError && (error.code === "MESSAGE_NOT_FOUND" || error.code === "SCOPE_DENIED")) {
+        return fail(409, "EMAIL_THREAD_UNAVAILABLE", THREAD_UNAVAILABLE_MESSAGE);
+      }
+      return providerErrorResult(error);
+    }
+  }
+  if (fromAddresses !== 1) return fail(409, "EMAIL_SENDER_ADDRESS_INVALID", SENDER_INVALID_MESSAGE);
+  const original = validMessageId(messageId);
+  if (!threadId || !original) return fail(409, "EMAIL_THREAD_UNAVAILABLE", THREAD_UNAVAILABLE_MESSAGE);
+  return ok(200, { threadId, messageId: original, references });
+}
+
 /**
  * Reply to one received email. The recipient is that email's sender, the
  * account is the mailbox it arrived in, and the reply stays in the same
@@ -1198,7 +1257,7 @@ export async function replyToGmailMessage(user: AuthedUser, rawInput: unknown): 
 
   if (!singleValidAddress(intake.senderEmail)) {
     await audit(Boolean(parsed.data.confirmed), "rejected", { errorMessage: "EMAIL_SENDER_ADDRESS_INVALID" });
-    return fail(409, "EMAIL_SENDER_ADDRESS_INVALID", "The sender's address on this email is not one valid address, so it cannot be answered from here. Reply from Gmail instead.");
+    return fail(409, "EMAIL_SENDER_ADDRESS_INVALID", SENDER_INVALID_MESSAGE);
   }
 
   // The mailbox the email arrived in sends the reply. If it cannot send, the
@@ -1207,6 +1266,23 @@ export async function replyToGmailMessage(user: AuthedUser, rawInput: unknown): 
   if (!lookup.ok) {
     await audit(Boolean(parsed.data.confirmed), "rejected", { errorMessage: lookup.failure.error });
     return lookup.failure;
+  }
+  // One token for the whole call: the threading lookup and the send share it.
+  let credential: Promise<StoredGmailCredential> | undefined;
+  const usable = () => (credential ??= usableCredential({ credential: lookup.source.credential! }));
+  const accessToken = async () => (await usable()).accessToken;
+
+  // Checked before the review, so a yes is never asked for a reply that
+  // could not be sent as an answer.
+  let threading: ServiceResult<ReplyThreading>;
+  try {
+    threading = await replyThreading(intake, accessToken);
+  } catch (error) {
+    threading = providerErrorResult(error);
+  }
+  if (!threading.ok) {
+    await audit(Boolean(parsed.data.confirmed), threading.httpStatus >= 500 ? "error" : "rejected", { errorMessage: threading.error });
+    return threading;
   }
   const fromAccount = lookup.source.accountEmail ?? lookup.source.displayName;
   const originalSubject = importedSubject(intake);
@@ -1244,24 +1320,15 @@ export async function replyToGmailMessage(user: AuthedUser, rawInput: unknown): 
 
   let sent: { id: string; threadId?: string };
   try {
-    const credential = await usableCredential({ credential: lookup.source.credential! });
-    if (!credential.scopes.some((scope) => scope === GMAIL_COMPOSE_SCOPE || scope === GMAIL_SEND_SCOPE || scope === GMAIL_MODIFY_SCOPE)) {
+    const current = await usable();
+    if (!current.scopes.some((scope) => scope === GMAIL_COMPOSE_SCOPE || scope === GMAIL_SEND_SCOPE || scope === GMAIL_MODIFY_SCOPE)) {
       throw new GmailAdapterError("SCOPE_DENIED");
     }
-    // The original's Message-ID keeps the reply in the customer's conversation
-    // too. Without it (the account may not be allowed to read, or the email
-    // was deleted) the reply still goes, to the same person and thread.
-    let headers: Awaited<ReturnType<typeof getGmailReplyHeaders>> | undefined;
-    try {
-      headers = await getGmailReplyHeaders(credential.accessToken, intake.externalMessageId);
-    } catch {
-      headers = undefined;
-    }
-    sent = await sendGmailMessage(credential.accessToken, {
+    sent = await sendGmailMessage(current.accessToken, {
       to: [intake.senderEmail],
       subject,
       body: parsed.data.body,
-      reply: { threadId: intake.externalThreadId ?? headers?.threadId, messageId: headers?.messageId, references: headers?.references },
+      reply: threading.data,
     });
     if (!sent.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
   } catch (error) {
@@ -1273,9 +1340,7 @@ export async function replyToGmailMessage(user: AuthedUser, rawInput: unknown): 
   // Sent. Nothing after this point may report the reply as failed, or the
   // owner would be invited to send it a second time.
   const sentAt = new Date();
-  const metadata = intake.sourceMetadata && typeof intake.sourceMetadata === "object" && !Array.isArray(intake.sourceMetadata)
-    ? intake.sourceMetadata as Record<string, unknown>
-    : {};
+  const metadata = metadataRecord(intake.sourceMetadata);
   const replies = Array.isArray(metadata.replies) ? metadata.replies : [];
   try {
     await prisma.communicationIntake.update({

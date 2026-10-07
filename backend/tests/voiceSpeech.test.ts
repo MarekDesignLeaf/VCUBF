@@ -5,6 +5,7 @@ import { assistantRealtimeVoice, assistantVoice, DEFAULT_VOICE, isSpeechConfigur
 const realFetch = globalThis.fetch;
 const realKey = process.env.OPENAI_API_KEY;
 const realVoice = process.env.OPENAI_TTS_VOICE;
+const realRealtimeVoice = process.env.OPENAI_REALTIME_VOICE;
 
 describe("Spoken replies use OpenAI text-to-speech only", () => {
   afterEach(() => {
@@ -13,6 +14,8 @@ describe("Spoken replies use OpenAI text-to-speech only", () => {
     else process.env.OPENAI_API_KEY = realKey;
     if (realVoice === undefined) delete process.env.OPENAI_TTS_VOICE;
     else process.env.OPENAI_TTS_VOICE = realVoice;
+    if (realRealtimeVoice === undefined) delete process.env.OPENAI_REALTIME_VOICE;
+    else process.env.OPENAI_REALTIME_VOICE = realRealtimeVoice;
   });
   after(() => { globalThis.fetch = realFetch; });
 
@@ -96,6 +99,10 @@ describe("Spoken replies use OpenAI text-to-speech only", () => {
   });
 
   it("keeps only the male voices OpenAI offers", () => {
+    // An unset argument reads the environment, which a developer's or CI's
+    // own configuration may set; the default is what an unset one gives.
+    delete process.env.OPENAI_TTS_VOICE;
+    assert.equal(assistantVoice(), "onyx");
     assert.equal(assistantVoice(undefined), "onyx");
     assert.equal(assistantVoice(""), "onyx");
     assert.equal(assistantVoice("ash"), "ash");
@@ -106,6 +113,8 @@ describe("Spoken replies use OpenAI text-to-speech only", () => {
 
   it("a realtime session speaks with a man's voice too", () => {
     // "marin", a woman's voice, was the realtime default.
+    delete process.env.OPENAI_REALTIME_VOICE;
+    assert.equal(assistantRealtimeVoice(), "cedar");
     assert.equal(assistantRealtimeVoice(undefined), "cedar");
     assert.equal(assistantRealtimeVoice("marin"), "cedar");
     assert.equal(assistantRealtimeVoice("shimmer"), "cedar");
