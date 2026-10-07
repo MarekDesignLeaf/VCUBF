@@ -22,6 +22,7 @@ const TRANSLATED = "We will come on Monday at eight.";
 
 let token = "";
 let adminId = "";
+let workerToken = "";
 let businessId = "";
 let personalId = "";
 let readOnlyId = "";
@@ -33,7 +34,7 @@ function url(input: string | URL | Request) {
 }
 
 /** Google and OpenAI as the reply needs them; every send is recorded. */
-function stubProviders(options: { accessToken?: string; profileEmail?: string; scopes?: string[]; translation?: string } = {}) {
+function stubProviders(options: { accessToken?: string; profileEmail?: string; scopes?: string[]; translation?: string; originalGone?: boolean } = {}) {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const target = url(input);
     if (target === "https://oauth2.googleapis.com/token") {
@@ -56,6 +57,7 @@ function stubProviders(options: { accessToken?: string; profileEmail?: string; s
       return Response.json({ id: `sent-${sent.length}`, threadId: body.threadId ?? "new-thread" });
     }
     if (/\/users\/me\/messages\/gm-/.test(target)) {
+      if (options.originalGone) return new Response("not found", { status: 404 });
       return Response.json({
         id: "gm-jan-2",
         threadId: "thread-jan",
@@ -88,11 +90,11 @@ async function source(name: string, scopes: string[], accessToken: string, profi
   return created.body.id as string;
 }
 
-async function received(input: { sourceId: string; id: string; thread: string; name: string | null; email: string; subject: string; text: string; hoursAgo: number }) {
+async function received(input: { sourceId: string; id: string; thread: string; name: string | null; email: string; subject: string; text: string; hoursAgo: number; companyId?: string }) {
   const company = await prisma.user.findUniqueOrThrow({ where: { id: adminId }, select: { companyId: true } });
   return prisma.communicationIntake.create({
     data: {
-      companyId: company.companyId,
+      companyId: input.companyId ?? company.companyId,
       connectorSourceId: input.sourceId,
       externalMessageId: input.id,
       externalThreadId: input.thread,
@@ -121,9 +123,10 @@ describe("Replying to a received email", () => {
     process.env.CONNECTOR_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
     process.env.FRONTEND_URL = "http://localhost:5173";
     await resetDb();
-    const { admin } = await seedCompanyAndAdmin();
+    const { admin, worker } = await seedCompanyAndAdmin();
     adminId = admin.id;
     token = (await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" })).body.token;
+    workerToken = (await request(app).post("/auth/login").send({ email: worker.email, password: "Password123!" })).body.token;
     businessId = await source("Business Gmail", ["read:messages", "send:messages"], "access-business", "marek@designleaf.co.uk");
     personalId = await source("Osobní Gmail", ["read:messages", "send:messages"], "access-personal", "marek.private@gmail.com");
     readOnlyId = await source("Archive Gmail", ["read:messages"], "access-archive", "archive@designleaf.co.uk");
@@ -163,7 +166,7 @@ describe("Replying to a received email", () => {
     assert.equal(preview.subject, "Re: Nabídka na plot");
     assert.equal(preview.body, TRANSLATED, "written in English by default");
     assert.equal(preview.dictated, "Přijedeme v pondělí v osm.");
-    assert.equal(asked.body.message, `Reply to Jan Novák about “Nabídka na plot”, from marek.private@gmail.com. I will send in English: “${TRANSLATED}”. Shall I send it?`);
+    assert.equal(asked.body.message, `Reply to Jan Novák (jan@example.com) about “Nabídka na plot”, from marek.private@gmail.com. I will send in English: “${TRANSLATED}”. Shall I send it?`);
     assert.equal(sent.length, 0, "nothing leaves before the yes");
 
     const pending = await prisma.voicePendingAction.findFirstOrThrow({ where: { status: "pending" } });
@@ -191,6 +194,9 @@ describe("Replying to a received email", () => {
 
     const audit = await prisma.auditLog.findFirstOrThrow({ where: { actionName: "reply_gmail_message", result: "success" } });
     assert.ok(!JSON.stringify(audit).includes(TRANSLATED), "the email text is not copied into the audit");
+    const everyAudit = JSON.stringify(await prisma.auditLog.findMany({}));
+    assert.ok(!everyAudit.includes("Přijedeme v pondělí"), "nor is the dictated text, in any audit record");
+    assert.ok(!everyAudit.includes(TRANSLATED), "nor the English sent");
 
     const again = await speak("yes");
     assert.notEqual(again.body.ok, true, "a second yes must not send the reply again");
@@ -215,6 +221,50 @@ describe("Replying to a received email", () => {
 
     const byAddress = await replyAction({ sender_or_message: "jan.dvorak@example.com", body: "Thank you." });
     assert.deepEqual(byAddress.body.data.preview.to, ["jan.dvorak@example.com"], "an address picks exactly that sender");
+    assert.equal(sent.length, 0);
+  });
+
+  it("finds a sender with no display name by the pieces of the address, and \"the last one from\" means theirs", async () => {
+    const older = await received({ sourceId: businessId, id: "gm-p1", thread: "tp", name: null, email: "petra.dvorakova@example.com", subject: "Faktura", text: "Děkuji.", hoursAgo: 6 });
+    await received({ sourceId: businessId, id: "gm-o", thread: "to", name: "Someone Else", email: "else@example.com", subject: "Other", text: "Hi.", hoursAgo: 1 });
+    stubProviders();
+    const asked = await replyAction({ sender_or_message: "last Petra", body: "Thank you." });
+    assert.equal(asked.body.data?.preview?.intakeId, older.id, JSON.stringify(asked.body));
+    assert.equal(asked.body.message.startsWith("Reply to petra.dvorakova@example.com about “Faktura”"), true, asked.body.message);
+  });
+
+  it("will not answer an email whose From line is not one valid address", async () => {
+    await received({ sourceId: businessId, id: "gm-two", thread: "tt", name: "Jan Novák", email: "jan@example.com,boss@victim.example", subject: "A", text: "Hi.", hoursAgo: 1 });
+    stubProviders();
+    const refused = await replyAction({ sender_or_message: "Jan", body: "Thank you." });
+    assert.equal(refused.body.error, "EMAIL_SENDER_ADDRESS_INVALID", JSON.stringify(refused.body));
+    assert.equal(await prisma.voicePendingAction.count({ where: { status: "pending" } }), 0);
+    assert.equal(sent.length, 0);
+  });
+
+  it("still replies to the right person and thread when the original can no longer be read", async () => {
+    const email = await received({ sourceId: businessId, id: "gm-gone", thread: "thread-gone", name: "Jan Novák", email: "jan@example.com", subject: "Plot", text: "Hi.", hoursAgo: 1 });
+    stubProviders({ accessToken: "access-business", originalGone: true });
+    const done = await request(app).post("/connectors/gmail/messages/reply").set("Authorization", `Bearer ${token}`)
+      .send({ intake_id: email.id, body: "Thank you.", confirmed: true });
+    assert.equal(done.status, 200, JSON.stringify(done.body));
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].threadId, "thread-gone");
+    assert.match(sent[0].raw, /^To: jan@example\.com\r\n/m);
+    assert.doesNotMatch(sent[0].raw, /In-Reply-To/);
+  });
+
+  it("keeps companies apart and requires the connector permission", async () => {
+    const other = await prisma.company.create({ data: { name: "Other company" } });
+    const theirs = await received({ sourceId: businessId, id: "gm-theirs", thread: "tz", name: "Jan Novák", email: "jan@example.com", subject: "A", text: "Hi.", hoursAgo: 1, companyId: other.id });
+    stubProviders();
+    const foreign = await request(app).post("/connectors/gmail/messages/reply").set("Authorization", `Bearer ${token}`)
+      .send({ intake_id: theirs.id, body: "Thank you.", confirmed: true });
+    assert.equal(foreign.status, 404, JSON.stringify(foreign.body));
+    const mine = await received({ sourceId: businessId, id: "gm-mine", thread: "tm", name: "Jan Novák", email: "jan@example.com", subject: "A", text: "Hi.", hoursAgo: 1 });
+    const worker = await request(app).post("/connectors/gmail/messages/reply").set("Authorization", `Bearer ${workerToken}`)
+      .send({ intake_id: mine.id, body: "Thank you.", confirmed: true });
+    assert.equal(worker.status, 403);
     assert.equal(sent.length, 0);
   });
 

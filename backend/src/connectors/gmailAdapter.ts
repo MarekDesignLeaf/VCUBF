@@ -375,8 +375,11 @@ function replyHeaders(reply: GmailReplyContext | undefined) {
   const original = messageIdList(reply?.messageId)[0];
   if (!original) return [];
   // References carries the conversation so far and ends with the message
-  // being answered; it is kept short, as mail programs only need the chain.
-  const references = [...messageIdList(reply?.references).filter((id) => id !== original).slice(-10), original];
+  // being answered. A long chain keeps its first message and the latest ones,
+  // as the mail standard recommends.
+  const earlier = messageIdList(reply?.references).filter((id) => id !== original);
+  const kept = earlier.length > 10 ? [earlier[0], ...earlier.slice(-9)] : earlier;
+  const references = [...kept, original];
   return [`In-Reply-To: ${original}`, `References: ${references.join(" ")}`];
 }
 

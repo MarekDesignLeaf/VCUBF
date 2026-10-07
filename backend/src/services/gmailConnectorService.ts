@@ -1071,12 +1071,21 @@ export async function sendThroughGmailSource(user: AuthedUser, sourceId: string,
 // Replies leave in English unless another language is named: the owner
 // dictates in Czech, his customers read English.
 const DEFAULT_REPLY_LANGUAGE = "en-GB";
-const LATEST_WORDS = new Set(["last", "latest", "newest", "recent"]);
+// "last" is what the model is told to write; the user's own word for it is
+// accepted too, since the reference reaches here only in the language that is on.
+const LATEST_WORDS = new Set(["last", "latest", "newest", "recent", "posledni", "nejnovejsi", "ostatni", "ostatnia", "najnowszy", "najnowsza"]);
 
 type EmailReplyTarget = CommunicationIntake & { connectorSourceId: string; externalMessageId: string; senderEmail: string };
 
 function replyableEmail(intake: CommunicationIntake): intake is EmailReplyTarget {
   return Boolean(intake.connectorSourceId && intake.externalMessageId && intake.senderEmail);
+}
+
+// The sender's address comes from the email's own From line, which its sender
+// wrote. A reply goes there only if it is exactly one valid address: a From
+// line listing two addresses would otherwise copy the reply to the second.
+function singleValidAddress(address: string) {
+  return gmailAddressSchema.safeParse(address).success && !/[,;\s]/.test(address);
 }
 
 function plainWords(value: unknown) {
@@ -1113,35 +1122,44 @@ async function emailReplyTarget(
     });
     return intake && replyableEmail(intake) ? ok(200, intake) : fail(404, "EMAIL_MESSAGE_NOT_FOUND", "That email was not found.");
   }
+  // Only what the choice needs is read: an email body can be long, and this
+  // runs on every spoken reply.
   const received = (await prisma.communicationIntake.findMany({
     where: { companyId: user.companyId, channel: "email", connectorSourceId: { not: null }, externalMessageId: { not: null }, senderEmail: { not: null } },
     orderBy: { receivedAt: "desc" },
-    take: 500,
-  })).filter(replyableEmail);
+    take: 300,
+    select: { id: true, senderName: true, senderEmail: true, messageText: true },
+  })).filter((intake): intake is typeof intake & { senderEmail: string } => Boolean(intake.senderEmail));
   if (!received.length) return fail(404, "EMAIL_MESSAGE_NOT_FOUND", "There is no received email to reply to.");
 
   const needle = plainWords(input.sender_or_message);
-  if (!needle) return ok(200, received[0]);
-  const needleWords = needle.split(" ");
-  const bySender = received.filter((intake) => {
+  const needleWords = needle.split(" ").filter(Boolean);
+  const wantsLatest = !needle || needleWords.some((word) => LATEST_WORDS.has(word));
+  const named = needleWords.filter((word) => !LATEST_WORDS.has(word)).join(" ");
+  const namedWords = named.split(" ").filter(Boolean);
+  // A sender is named by address, by the part before the @ or its pieces
+  // (petra.dvorakova), or by display name.
+  const bySender = named ? received.filter((intake) => {
     const address = intake.senderEmail.toLowerCase();
-    if (needle.includes("@")) return address === needle;
-    if (address.split("@")[0] === needle) return true;
+    if (named.includes("@")) return address === named;
+    const local = address.split("@")[0];
+    if (local === named || local.split(/[._+-]/).some((piece) => piece.length >= 3 && namedWords.includes(piece))) return true;
     const name = plainWords(intake.senderName);
     if (!name) return false;
-    if (name === needle || (needle.length >= 2 && name.includes(needle))) return true;
-    return name.split(" ").some((word) => word.length >= 3 && needleWords.includes(word));
-  });
-  const wantsLatest = needleWords.some((word) => LATEST_WORDS.has(word));
-  const byText = needle.length >= 4 ? received.filter((intake) => plainWords(intake.messageText).includes(needle)) : [];
-  const matches = bySender.length ? bySender : wantsLatest ? [received[0]] : byText;
+    if (name === named || (named.length >= 2 && name.includes(named))) return true;
+    return name.split(" ").some((word) => word.length >= 3 && namedWords.includes(word));
+  }) : [];
+  const byText = named.length >= 4 ? received.filter((intake) => plainWords(intake.messageText).includes(named)) : [];
+  // "the last one from Petra" is Petra's latest; "last" alone is the newest from anyone.
+  const matches = bySender.length ? bySender : named ? byText : wantsLatest ? [received[0]] : [];
   if (!matches.length) return fail(404, "EMAIL_MESSAGE_NOT_FOUND", `No received email matches '${input.sender_or_message}'.`);
   const senders = [...new Set(matches.map((intake) => intake.senderEmail.toLowerCase()))];
   if (senders.length > 1) {
     const names = [...new Set(matches.map((intake) => intake.senderName ? `${intake.senderName} (${intake.senderEmail})` : intake.senderEmail))].slice(0, 5);
     return fail(409, "AMBIGUOUS_REFERENCE", `More than one sender matches '${input.sender_or_message}': ${names.join(", ")}.`, { candidates: names });
   }
-  return ok(200, matches[0]);
+  const chosen = await prisma.communicationIntake.findFirst({ where: { id: matches[0].id, companyId: user.companyId } });
+  return chosen && replyableEmail(chosen) ? ok(200, chosen) : fail(404, "EMAIL_MESSAGE_NOT_FOUND", "That email was not found.");
 }
 
 /**
@@ -1177,6 +1195,11 @@ export async function replyToGmailMessage(user: AuthedUser, rawInput: unknown): 
     result,
     ...extra,
   });
+
+  if (!singleValidAddress(intake.senderEmail)) {
+    await audit(Boolean(parsed.data.confirmed), "rejected", { errorMessage: "EMAIL_SENDER_ADDRESS_INVALID" });
+    return fail(409, "EMAIL_SENDER_ADDRESS_INVALID", "The sender's address on this email is not one valid address, so it cannot be answered from here. Reply from Gmail instead.");
+  }
 
   // The mailbox the email arrived in sends the reply. If it cannot send, the
   // owner is told so; the reply never silently leaves from another account.
@@ -1219,6 +1242,7 @@ export async function replyToGmailMessage(user: AuthedUser, rawInput: unknown): 
     });
   }
 
+  let sent: { id: string; threadId?: string };
   try {
     const credential = await usableCredential({ credential: lookup.source.credential! });
     if (!credential.scopes.some((scope) => scope === GMAIL_COMPOSE_SCOPE || scope === GMAIL_SEND_SCOPE || scope === GMAIL_MODIFY_SCOPE)) {
@@ -1233,40 +1257,47 @@ export async function replyToGmailMessage(user: AuthedUser, rawInput: unknown): 
     } catch {
       headers = undefined;
     }
-    const sent = await sendGmailMessage(credential.accessToken, {
+    sent = await sendGmailMessage(credential.accessToken, {
       to: [intake.senderEmail],
       subject,
       body: parsed.data.body,
       reply: { threadId: intake.externalThreadId ?? headers?.threadId, messageId: headers?.messageId, references: headers?.references },
     });
     if (!sent.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
-    const sentAt = new Date();
-    const metadata = intake.sourceMetadata && typeof intake.sourceMetadata === "object" && !Array.isArray(intake.sourceMetadata)
-      ? intake.sourceMetadata as Record<string, unknown>
-      : {};
-    const replies = Array.isArray(metadata.replies) ? metadata.replies : [];
-    try {
-      await prisma.communicationIntake.update({
-        where: { id: intake.id },
-        data: {
-          sourceMetadata: {
-            ...metadata,
-            replies: [...replies, { messageId: sent.id, threadId: sent.threadId ?? null, sentAt: sentAt.toISOString(), sentBy: user.id, body: parsed.data.body }],
-          } as Prisma.InputJsonValue,
-        },
-      });
-    } catch {
-      // The reply has already left. A failed note on the email must not make a
-      // sent reply look unsent and invite a second send; the audit records it.
-    }
-    const recorded = { sourceId, intakeId: intake.id, messageId: sent.id, threadId: sent.threadId ?? null, sentAt };
-    await audit(true, "success", { dataAfter: recorded });
-    return ok(200, { ...recorded, fromAccount, to: [intake.senderEmail] });
   } catch (error) {
     const result = providerErrorResult(error);
     await audit(true, "error", { errorMessage: result.ok ? "CONNECTOR_INTERNAL_ERROR" : result.error });
     return result;
   }
+
+  // Sent. Nothing after this point may report the reply as failed, or the
+  // owner would be invited to send it a second time.
+  const sentAt = new Date();
+  const metadata = intake.sourceMetadata && typeof intake.sourceMetadata === "object" && !Array.isArray(intake.sourceMetadata)
+    ? intake.sourceMetadata as Record<string, unknown>
+    : {};
+  const replies = Array.isArray(metadata.replies) ? metadata.replies : [];
+  try {
+    await prisma.communicationIntake.update({
+      where: { id: intake.id },
+      data: {
+        sourceMetadata: {
+          ...metadata,
+          replies: [...replies, { messageId: sent.id, threadId: sent.threadId ?? null, sentAt: sentAt.toISOString(), sentBy: user.id, body: parsed.data.body }],
+        } as Prisma.InputJsonValue,
+      },
+    });
+  } catch {
+    // The reply has already left. A failed note on the email must not make a
+    // sent reply look unsent and invite a second send; the audit records it.
+  }
+  const recorded = { sourceId, intakeId: intake.id, messageId: sent.id, threadId: sent.threadId ?? null, sentAt };
+  try {
+    await audit(true, "success", { dataAfter: recorded });
+  } catch (error) {
+    console.error("reply_gmail_message sent but its audit record failed", error instanceof Error ? error.message : error);
+  }
+  return ok(200, { ...recorded, fromAccount, to: [intake.senderEmail] });
 }
 
 export async function deleteGmailIntake(

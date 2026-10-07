@@ -30,7 +30,7 @@ describe("Spoken reviews", () => {
     };
     assert.equal(
       spokenReview("reply_email", preview, "cs-CZ"),
-      "Odpověď pro Jan Novák na e-mail „Nabídka na plot“, z účtu marek.private@gmail.com. Pošlu anglicky: „We will come on Monday at eight.“. Mám ji odeslat?",
+      "Odpověď pro Jan Novák (jan@example.com) na e-mail „Nabídka na plot“, z účtu marek.private@gmail.com. Pošlu anglicky: „We will come on Monday at eight.“. Mám ji odeslat?",
     );
     assert.equal(spokenOutcome("reply_email", {}, "cs-CZ"), "E-mail je odeslaný.");
     assert.equal(spokenError("EMAIL_MESSAGE_NOT_FOUND", undefined, "cs-CZ"), "Takový přijatý e-mail jsem nenašel.");
