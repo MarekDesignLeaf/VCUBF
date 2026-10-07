@@ -92,13 +92,18 @@ docs/               User guide, connector engine, production architecture, voice
   addresses, is refused before the review. Written in English unless another language is named, read back before the yes, and the
   yes sends exactly that text once. Covered by mocked tests (`emailReply.test.ts`); a live
   Gmail send is not yet accepted.
+- **Repeated sends**: a review of an email, a WhatsApp message or a reply says when exactly
+  the same text went to the same recipients in the last 30 minutes (“I already sent exactly
+  this 3 minutes ago”), so a request that got no answer in time is not sent twice
+  unknowingly. It only informs; the yes still sends. The audit keeps a keyed hash of
+  recipients and text, never the words. Covered by mocked tests.
 - **Learned browser macros**: saved steps and values require a replay preview. Replayed
   UI interactions are not proof of successful business changes; the UI says so explicitly.
   Live browser acceptance remains outstanding.
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 85 test files, including database integration tests and checks that only
+- **Tests**: 86 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.

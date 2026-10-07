@@ -156,6 +156,29 @@ describe("Dictated in Czech, sent in English", () => {
     assert.equal(translationRequests, 0, "an unknown language never reaches the model");
   });
 
+  it("says in the review when the same text went to the same number a moment ago", async () => {
+    stubProviders();
+    const first = await request(app).post(`/connectors/sources/${sourceId}/whatsapp/messages/send`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ to: "+447700900555", body: "See you on Monday", confirmed: true });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+
+    const again = await request(app).post(`/connectors/sources/${sourceId}/whatsapp/messages/send`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ to: "447700900555", body: "See you  on Monday" });
+    assert.equal(again.body.error, "CONFIRMATION_REQUIRED");
+    assert.equal(again.body.preview.alreadySent?.minutesAgo, 0, "the same number however written, the same words however spaced");
+
+    const otherNumber = await request(app).post(`/connectors/sources/${sourceId}/whatsapp/messages/send`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ to: "+447700900556", body: "See you on Monday" });
+    assert.equal(otherNumber.body.preview.alreadySent, undefined);
+
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { actionName: "send_whatsapp_message", result: "success" }, orderBy: { createdAt: "desc" } });
+    assert.ok(!JSON.stringify(audit).includes("See you on Monday"), "the audit keeps a keyed hash, not the message");
+
+  });
+
   it("leaves a message without send_in exactly as it was dictated", async () => {
     stubProviders();
     const asked = await request(app).post(`/connectors/sources/${sourceId}/whatsapp/messages/send`)

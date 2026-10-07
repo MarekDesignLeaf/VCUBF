@@ -32,6 +32,7 @@ import {
   type StoredGmailCredential,
   type GmailComposeInput,
 } from "../connectors/gmailAdapter.js";
+import { recentAuditedSend, recentReplyOrAudited, repeatNote, replyFingerprint, sendFingerprint } from "../lib/repeatedSend.js";
 import {
   COMPLETE_GMAIL_OAUTH_ACTION,
   CREATE_GMAIL_DRAFT_ACTION,
@@ -904,11 +905,16 @@ export async function sendGmailMessageNow(
       throw error;
     }
   }
+  // Who it goes to and what it says, as a keyed hash: the review says when the
+  // same email went out shortly before, and the send records it for the next one.
+  const fingerprint = sendFingerprint({ recipients: [...message.to, ...message.cc, ...message.bcc], subject: message.subject, body: message.body });
+  const repeat = parsed.data.confirmed ? null : await recentAuditedSend(user.companyId, SEND_GMAIL_MESSAGE_ACTION.actionName, fingerprint);
   const preview = {
     sourceId, provider: "gmail",
     fromAccount: lookup.source.accountEmail ?? lookup.source.displayName,
     ...message,
     ...(translation ? { sentIn: translation.languageLabel, dictated: translation.original } : {}),
+    ...repeatNote(repeat),
   };
   if (!parsed.data.confirmed) {
     await recordAudit({
@@ -941,7 +947,7 @@ export async function sendGmailMessageNow(
       userId: user.id,
       actionName: SEND_GMAIL_MESSAGE_ACTION.actionName,
       inputPayload: { sourceId, confirmed: true, ...composeAuditSummary(message) },
-      dataAfter: result,
+      dataAfter: { ...result, contentFingerprint: fingerprint },
       riskLevel: SEND_GMAIL_MESSAGE_ACTION.riskLevel,
       confirmationRequired: true,
       confirmed: true,
@@ -1308,6 +1314,8 @@ export async function replyToGmailMessage(user: AuthedUser, rawInput: unknown): 
       body: translation.body,
       sentIn: translation.languageLabel,
       dictated: translation.original.body,
+      // The same reply to this email shortly before is said in the review.
+      ...repeatNote(await recentReplyOrAudited(user.companyId, REPLY_GMAIL_MESSAGE_ACTION.actionName, intake, translation.body)),
     };
     await audit(false, "rejected", { errorMessage: "CONFIRMATION_REQUIRED" });
     return fail(409, "CONFIRMATION_REQUIRED", "Review who the reply goes to, the account it leaves from, the email it answers and the final text, then confirm sending.", {
@@ -1358,7 +1366,9 @@ export async function replyToGmailMessage(user: AuthedUser, rawInput: unknown): 
   }
   const recorded = { sourceId, intakeId: intake.id, messageId: sent.id, threadId: sent.threadId ?? null, sentAt };
   try {
-    await audit(true, "success", { dataAfter: recorded });
+    // The fingerprint lets a later review recognise this reply even if the note
+    // on the email above could not be written.
+    await audit(true, "success", { dataAfter: { ...recorded, contentFingerprint: replyFingerprint(intake.id, parsed.data.body) } });
   } catch (error) {
     console.error("reply_gmail_message sent but its audit record failed", error instanceof Error ? error.message : error);
   }

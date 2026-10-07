@@ -302,6 +302,34 @@ describe("Replying to a received email", () => {
     assert.equal(sent.length, 0);
   });
 
+  it("says in the review when exactly this reply already went to this email", async () => {
+    const email = await received({
+      sourceId: businessId, id: "gm-again", thread: "thread-again", name: "Jan Novák", email: "jan@example.com", subject: "Plot", text: "Hi.", hoursAgo: 1,
+      kept: { messageId: "<again@mail.example.com>", references: null, fromAddresses: 1 },
+    });
+    stubProviders({ accessToken: "access-business" });
+    const first = await request(app).post("/connectors/gmail/messages/reply").set("Authorization", `Bearer ${token}`)
+      .send({ intake_id: email.id, body: TRANSLATED, confirmed: true });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+
+    const again = await replyAction({ sender_or_message: "Jan", body: "Přijedeme v pondělí v osm." });
+    assert.equal(again.body.data.preview.alreadySent?.minutesAgo, 0, JSON.stringify(again.body.data?.preview));
+    assert.match(again.body.message, /Note: I already sent exactly this a moment ago\. Shall I send it\?$/);
+
+    // If the note on the email could not be written after the reply left, the
+    // audit still recognises it.
+    await prisma.voicePendingAction.deleteMany({});
+    await prisma.communicationIntake.update({ where: { id: email.id }, data: { sourceMetadata: { provider: "gmail", labelIds: ["INBOX"], messageId: "<again@mail.example.com>", references: null, fromAddresses: 1 } } });
+    const noNote = await replyAction({ sender_or_message: "Jan", body: "Přijedeme v pondělí v osm." });
+    assert.equal(noNote.body.data.preview.alreadySent?.minutesAgo, 0, "found through the audit");
+
+    await prisma.voicePendingAction.deleteMany({});
+    stubProviders({ translation: "A different answer." });
+    const different = await replyAction({ sender_or_message: "Jan", body: "Něco jiného." });
+    assert.equal(different.body.data.preview.alreadySent, undefined);
+    assert.equal(sent.length, 1, "a review sends nothing");
+  });
+
   it("keeps companies apart and requires the connector permission", async () => {
     const other = await prisma.company.create({ data: { name: "Other company" } });
     const theirs = await received({ sourceId: businessId, id: "gm-theirs", thread: "tz", name: "Jan Novák", email: "jan@example.com", subject: "A", text: "Hi.", hoursAgo: 1, companyId: other.id });

@@ -1209,6 +1209,8 @@ export async function dispatchParsedCommand(
 
     case "prepare_whatsapp_message": {
       const result = await voiceWhatsAppService.prepareVoiceWhatsAppMessage(user, command.entities);
+      // Read back in full, as the email review is: the number, the exact text
+      // and whether it already went out, so the yes is given to what was heard.
       response = {
         intent: command.intent,
         interpreted: command.entities,
@@ -1216,7 +1218,9 @@ export async function dispatchParsedCommand(
         httpStatus: result.httpStatus,
         data: result.ok ? result.data : undefined,
         error: result.ok ? undefined : result.error,
-        message: result.ok ? (result.data as { message?: string }).message : result.message,
+        message: result.ok
+          ? spokenReview("send_whatsapp", (result.data as { preview?: Record<string, unknown> }).preview, user.voiceLanguage) ?? (result.data as { message?: string }).message
+          : result.message,
       };
       break;
     }

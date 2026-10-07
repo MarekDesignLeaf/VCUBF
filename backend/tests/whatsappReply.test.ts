@@ -160,6 +160,13 @@ describe("Replying to a received WhatsApp message", () => {
     const again = await speak("yes");
     assert.notEqual(again.body.ok, true, "a second yes must not send the reply again");
     assert.equal(sends.length, 1);
+
+    // Dictating the same reply again is reviewed with a note that it already went.
+    stubProviders();
+    const dictatedAgain = await replyAction({ sender_or_message: "Honza", body: DICTATED });
+    assert.equal(dictatedAgain.body.data.preview.alreadySent?.minutesAgo, 0, JSON.stringify(dictatedAgain.body.data?.preview));
+    assert.match(dictatedAgain.body.message, /I already sent exactly this a moment ago/);
+    await prisma.voicePendingAction.deleteMany({});
   });
 
   it("reads the newest WhatsApp messages aloud, newest first, saying which were answered", async () => {

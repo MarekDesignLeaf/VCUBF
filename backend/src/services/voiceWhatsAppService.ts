@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { SEND_WHATSAPP_MESSAGE_ACTION } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import { recentAuditedSend, repeatNote, sendFingerprint } from "../lib/repeatedSend.js";
 import { validateWhatsAppConfiguration, WhatsAppBusinessAdapterError } from "../connectors/whatsappBusinessAdapter.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { prisma } from "../db.js";
@@ -110,10 +111,12 @@ export async function prepareVoiceWhatsAppMessage(user: AuthedUser, rawInput: un
     confirmationRequired: true,
     result: "success",
   });
+  // The same text to the same number shortly before is said in the review.
+  const repeat = await recentAuditedSend(user.companyId, SEND_WHATSAPP_MESSAGE_ACTION.actionName, sendFingerprint({ recipients: [payload.to.replace(/\D/g, "")], body: payload.body }));
   return ok(202, {
     confirmationRequired: true,
     expiresAt: expiresAt.toISOString(),
-    preview: payload,
+    preview: { ...payload, ...repeatNote(repeat) },
     message: "I prepared the WhatsApp message for review. I will send it only after your explicit confirmation.",
   });
 }
