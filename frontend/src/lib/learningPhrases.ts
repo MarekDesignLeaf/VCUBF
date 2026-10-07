@@ -29,6 +29,10 @@ export interface LearningSpeech {
   saved: (names: string[]) => string;
   cancelled: string;
   saveFailed: string;
+  /** The save got no answer in time; it may or may not have been kept. */
+  saveUnknown: string;
+  /** The taught commands could not be checked, so the sentence was not acted on. */
+  lookupFailed: string;
   running: (name: string) => string;
   runFailed: (label: string) => string;
   replayed: string;
@@ -70,6 +74,8 @@ const CZECH_SPEECH: LearningSpeech = {
   saved: (names) => `Uloženo. Příště řekněte ${names.join(" nebo ")}.`,
   cancelled: "Učení zrušeno, nic jsem neuložil.",
   saveFailed: "Uložení se nepodařilo.",
+  saveUnknown: "Nevím jistě, jestli se příkaz uložil, odpověď nepřišla včas. Řekněte ještě jednou „Ulož“; pokud už uložený je, řeknu vám to.",
+  lookupFailed: "Nepodařilo se ověřit naučené příkazy, takže jsem nic neudělal. Řekněte to prosím znovu.",
   running: (name) => `Provádím ${name}.`,
   replayed: "Kroky byly přehrány. Ověřte výsledek na stránce; změna dat zatím není potvrzená.",
   reviewReplay: "Přehrát tyto uložené kroky a hodnoty? Mohou změnit data nebo odeslat formulář.",
@@ -91,6 +97,8 @@ const ENGLISH_SPEECH: LearningSpeech = {
   saved: (names) => `Saved. Next time say ${names.join(" or ")}.`,
   cancelled: "Learning cancelled, nothing was saved.",
   saveFailed: "Saving failed.",
+  saveUnknown: "I am not sure the command was saved; the answer did not come in time. Say “save” again, and if it is already saved I will tell you.",
+  lookupFailed: "I could not check the commands you taught me, so I did nothing. Please say it again.",
   running: (name) => `Running ${name}.`,
   replayed: "The steps were replayed. Check the result on the page; data changes are not yet verified.",
   reviewReplay: "Replay these saved steps and values? They may change data or submit a form.",

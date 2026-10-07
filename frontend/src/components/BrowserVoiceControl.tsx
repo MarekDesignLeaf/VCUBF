@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { DEFAULT_ASSISTANT_NAME } from "../assistantName";
-import { api, getToken, refreshLocalSessionToken, type MobileAssistantResponse } from "../api/client";
+import { api, ApiError, getToken, refreshLocalSessionToken, type MobileAssistantResponse } from "../api/client";
 import { appLanguage } from "../i18n";
 import { useAuth } from "../context/useAuth";
 import { isDesktopCompanionWindow } from "../lib/platform";
@@ -75,6 +75,11 @@ const MAX_UTTERANCE_MS = 20_000;
 // sentence's handling rather than leaving it running alongside the next.
 const TRANSCRIBE_LIMIT_MS = 15_000;
 const ASSISTANT_LIMIT_MS = 30_000;
+
+/** A request this window stopped waiting for, as opposed to one that failed. */
+function isTimeout(error: unknown): boolean {
+  return error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError");
+}
 const LOOKUP_LIMIT_MS = 10_000;
 const CONVERSATION_CAP_MS = 90_000;
 
@@ -120,6 +125,11 @@ type Copy = {
   micDenied: string;
   unsupported: string;
   connectionError: string;
+  /**
+   * A request cancelled at its time limit may still have reached Secretary and
+   * finished there, so its outcome is unknown rather than failed.
+   */
+  unknownOutcome: string;
   completed: string;
   failed: string;
   send: string;
@@ -165,6 +175,7 @@ function copyFor(language: string): Copy {
       micDenied: "Microphone access was refused. Allow it and turn listening on again.",
       unsupported: "This browser cannot recognise speech. Use Edge or Chrome.",
       connectionError: "Could not reach Secretary.", completed: "Done.",
+      unknownOutcome: "Secretary did not answer in time. If you were confirming something, it may still have been done, so check before you say it again.",
       failed: "That request could not be completed.", send: "Send", typeHere: "…or type a command",
       monitor: "What was heard (this computer only)", monitorEmpty: "Nothing yet.",
       meter: "Microphone", meterLive: "The microphone is picking up sound.",
@@ -194,6 +205,7 @@ function copyFor(language: string): Copy {
       micDenied: "Přístup k mikrofonu byl odmítnut. Povolte ho a zapněte naslouchání znovu.",
       unsupported: "Tento prohlížeč neumí rozpoznávat řeč. Použijte Edge nebo Chrome.",
       connectionError: "Nepodařilo se spojit se Secretary.", completed: "Hotovo.",
+      unknownOutcome: "Odpověď ze Secretary nepřišla včas. Pokud jste něco potvrzovali, mohlo se to přesto provést, tak to před zopakováním zkontrolujte.",
       failed: "Tento požadavek se nepodařilo dokončit.", send: "Odeslat", typeHere: "…nebo napište příkaz",
       monitor: "Co bylo slyšet (jen tento počítač)", monitorEmpty: "Zatím nic.",
       meter: "Mikrofon", meterLive: "Mikrofon snímá zvuk.",
@@ -223,6 +235,7 @@ function copyFor(language: string): Copy {
       micDenied: "Odmówiono dostępu do mikrofonu. Zezwól i włącz nasłuchiwanie ponownie.",
       unsupported: "Ta przeglądarka nie rozpoznaje mowy. Użyj Edge lub Chrome.",
       connectionError: "Nie udało się połączyć z Secretary.", completed: "Gotowe.",
+      unknownOutcome: "Odpowiedź z Secretary nie przyszła na czas. Jeśli coś potwierdzałeś, mogło to zostać wykonane, więc sprawdź przed powtórzeniem.",
       failed: "Nie udało się wykonać tego żądania.", send: "Wyślij", typeHere: "…albo wpisz polecenie",
       monitor: "Co było słychać (tylko ten komputer)", monitorEmpty: "Jeszcze nic.",
       meter: "Mikrofon", meterLive: "Mikrofon odbiera dźwięk.",
@@ -252,6 +265,7 @@ function copyFor(language: string): Copy {
       micDenied: "Mikrofonzugriff verweigert. Erlauben Sie ihn und schalten Sie erneut ein.",
       unsupported: "Dieser Browser erkennt keine Sprache. Verwenden Sie Edge oder Chrome.",
       connectionError: "Secretary war nicht erreichbar.", completed: "Fertig.",
+      unknownOutcome: "Secretary hat nicht rechtzeitig geantwortet. Falls Sie etwas bestätigt haben, wurde es vielleicht trotzdem ausgeführt; prüfen Sie das, bevor Sie es wiederholen.",
       failed: "Diese Anfrage konnte nicht abgeschlossen werden.", send: "Senden", typeHere: "…oder Befehl eingeben",
       monitor: "Was zu hören war (nur dieser Computer)", monitorEmpty: "Noch nichts.",
       meter: "Mikrofon", meterLive: "Das Mikrofon nimmt Ton auf.",
@@ -281,6 +295,7 @@ function copyFor(language: string): Copy {
       micDenied: "Accès au microphone refusé. Autorisez-le et réactivez l’écoute.",
       unsupported: "Ce navigateur ne reconnaît pas la parole. Utilisez Edge ou Chrome.",
       connectionError: "Secretary est injoignable.", completed: "Terminé.",
+      unknownOutcome: "Secretary n\u2019a pas répondu à temps. Si vous confirmiez quelque chose, cela a peut-être été fait ; vérifiez avant de le redire.",
       failed: "Cette demande n’a pas pu être traitée.", send: "Envoyer", typeHere: "…ou tapez une commande",
       monitor: "Ce qui a été entendu (cet ordinateur uniquement)", monitorEmpty: "Rien pour l’instant.",
       meter: "Microphone", meterLive: "Le microphone capte du son.",
@@ -310,6 +325,7 @@ function copyFor(language: string): Copy {
       micDenied: "Acceso al micrófono denegado. Permítalo y vuelva a activar la escucha.",
       unsupported: "Este navegador no reconoce el habla. Use Edge o Chrome.",
       connectionError: "No se ha podido contactar con Secretary.", completed: "Hecho.",
+      unknownOutcome: "Secretary no respondió a tiempo. Si estaba confirmando algo, puede que se haya hecho igualmente; compruébelo antes de repetirlo.",
       failed: "No se ha podido completar la solicitud.", send: "Enviar", typeHere: "…o escriba una orden",
       monitor: "Lo que se ha oído (solo este ordenador)", monitorEmpty: "Todavía nada.",
       meter: "Micrófono", meterLive: "El micrófono capta sonido.",
@@ -339,6 +355,7 @@ function copyFor(language: string): Copy {
       micDenied: "Accesso al microfono negato. Consentitelo e riattivate l’ascolto.",
       unsupported: "Questo browser non riconosce il parlato. Usate Edge o Chrome.",
       connectionError: "Secretary non è raggiungibile.", completed: "Fatto.",
+      unknownOutcome: "Secretary non ha risposto in tempo. Se stavate confermando qualcosa, potrebbe essere stato eseguito comunque: controllate prima di ripeterlo.",
       failed: "Non è stato possibile completare la richiesta.", send: "Invia", typeHere: "…oppure scrivete un comando",
       monitor: "Ciò che è stato sentito (solo questo computer)", monitorEmpty: "Ancora nulla.",
       meter: "Microfono", meterLive: "Il microfono sta captando suono.",
@@ -1370,7 +1387,14 @@ export function BrowserVoiceControl() {
         const message = lines.join(" ");
         setAnswer(message);
         speak(message);
-      } catch {
+      } catch (error) {
+        if (!(error instanceof ApiError)) {
+          // No answer in time: the save may still have reached Secretary and
+          // been kept. The recording stays, so saying "save" again either
+          // stores it or is told it is already known; nothing is lost.
+          speak(learningVoice.saveUnknown);
+          return true;
+        }
         speak(learningVoice.saveFailed);
       }
       setLearningStage("off");
@@ -1413,14 +1437,18 @@ export function BrowserVoiceControl() {
       if (result.uiAction?.kind === "set_language") updateUser({ voiceLanguage: result.uiAction.language });
       speak(responseText);
       extendConversation();
-    } catch {
-      setAnswer(copy.connectionError);
-      appendTurn({ role: "assistant", content: copy.connectionError });
-      speak(copy.connectionError);
+    } catch (error) {
+      // Cancelling at the limit only stops this window waiting; Secretary may
+      // still finish the request (a confirmed email, a calendar change). "Could
+      // not reach" would invite saying it again, and a second send.
+      const message = isTimeout(error) ? copy.unknownOutcome : copy.connectionError;
+      setAnswer(message);
+      appendTurn({ role: "assistant", content: message });
+      speak(message);
     } finally {
       setStatus("idle");
     }
-  }, [appendTurn, copy.completed, copy.connectionError, copy.failed, extendConversation, language, learningVoice, navigate, speak, updateUser]);
+  }, [appendTurn, copy.completed, copy.connectionError, copy.failed, copy.unknownOutcome, extendConversation, language, learningVoice, navigate, speak, updateUser]);
 
   // One finished sentence from the recogniser.
   handleFinal.current = async (spoken: string, spokenAt = Date.now()) => {
@@ -1449,7 +1477,18 @@ export function BrowserVoiceControl() {
     if (await handleLearningTurn(text)) return;
 
     if (alreadyActive) {
-      const learned = await api.command.macros.match(text, AbortSignal.timeout(LOOKUP_LIMIT_MS)).then((r) => r.macro).catch(() => null);
+      // "No taught command" and "could not check" are different answers. Only
+      // the first lets the sentence go on to be interpreted: otherwise a taught
+      // command could be acted on as some other command.
+      let learned: Awaited<ReturnType<typeof api.command.macros.match>>["macro"];
+      try {
+        learned = (await api.command.macros.match(text, AbortSignal.timeout(LOOKUP_LIMIT_MS))).macro;
+      } catch {
+        setAnswer(learningVoice.lookupFailed);
+        appendTurn({ role: "assistant", content: learningVoice.lookupFailed });
+        speak(learningVoice.lookupFailed);
+        return;
+      }
       if (learned) { await runLearned(learned); return; }
       await execute(text);
       return;
