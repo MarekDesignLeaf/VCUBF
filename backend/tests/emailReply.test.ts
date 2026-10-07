@@ -356,6 +356,22 @@ describe("What an import keeps for a later reply", () => {
     assert.equal(mailboxCount("Alice ((a@x.example), b@y.example) <alice@example.com>, bob@example.com"), 2);
   });
 
+  it("reads the sender as it counts: never an address inside a comment or a quoted name", () => {
+    // A reply goes to senderEmail. An address mentioned only in a comment or a
+    // display name must not become it, or the reply would be disclosed there.
+    const sender = (from: string) => { const parsed = imported(from); return [parsed.senderEmail, parsed.senderAddressCount]; };
+    assert.deepEqual(sender("(contact foo@example.com , (primary)) alice@example.com"), ["alice@example.com", 1]);
+    assert.deepEqual(sender("Alice (work, bob@evil.example) <alice@example.com>"), ["alice@example.com", 1]);
+    assert.deepEqual(sender("\"foo@evil.example\" <alice@example.com>"), ["alice@example.com", 1]);
+    assert.deepEqual(sender("\"x, foo@evil.example\" alice@example.com"), ["alice@example.com", 1]);
+    assert.deepEqual(sender("Alice (unclosed alice@example.com"), [null, 0], "a broken line yields no sender, not a wrong one");
+    assert.equal(imported("\"Jan (CZ)\" <jan@example.com>").senderName, "Jan (CZ)");
+    // Malformed lines that name more than one address are refused.
+    assert.equal(mailboxCount("b@evil.example alice@example.com"), 2);
+    assert.equal(mailboxCount("foo@evil.example <alice@example.com>"), 2);
+    assert.equal(mailboxCount("(a \"quote) b@evil.example\" ) alice@example.com"), 2, "a quote inside a comment is only a character");
+  });
+
   it("keeps the Message-ID and a short References chain, and nothing that is not one", () => {
     const parsed = imported("jan@example.com", [
       { name: "Message-ID", value: " <m2@mail.example.com> " },

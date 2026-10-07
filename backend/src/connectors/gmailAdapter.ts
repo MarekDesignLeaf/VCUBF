@@ -399,20 +399,50 @@ export function compactReferences(value: string | null | undefined): string | nu
 }
 
 /**
- * How many mailboxes an address header names. Quoted display names and
- * comments may contain commas and "@", so they are removed before counting.
- * A semicolon is not a separator in a valid header, but some mail programs
- * write one, so it counts as one: a doubtful line is refused, not answered.
+ * An address header without its comments. Comments ("(work)") may nest and may
+ * contain addresses, commas and quotes; quoted display names may contain
+ * parentheses. Both are read character by character, so neither can hide in or
+ * break out of the other. An unclosed comment swallows the rest of the line,
+ * which leaves no address there rather than a wrong one.
+ */
+function withoutComments(value: string): string {
+  let out = "";
+  let depth = 0;
+  let quoted = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (quoted) {
+      out += char;
+      if (char === "\\" && index + 1 < value.length) out += value[++index];
+      else if (char === '"') quoted = false;
+    } else if (depth > 0) {
+      if (char === "\\") index += 1;
+      else if (char === "(") depth += 1;
+      else if (char === ")" && (depth -= 1) === 0) out += " ";
+    } else if (char === "(") {
+      depth = 1;
+    } else {
+      if (char === '"') quoted = true;
+      out += char;
+    }
+  }
+  return out;
+}
+
+/** Quoted display names emptied, so nothing inside them reads as an address. */
+function withoutQuoted(value: string): string {
+  return value.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+}
+
+/**
+ * How many addresses an address header names, counted on the same text the
+ * sender is read from: no comments, no quoted names. Every address-shaped
+ * word counts, however it is separated, so a malformed line ("a@x b@y", an
+ * unquoted name that is itself an address) is refused rather than answered.
  */
 export function mailboxCount(value: string | null | undefined): number {
-  let plain = (value ?? "").replace(/"(?:[^"\\]|\\.)*"/g, "\"\"");
-  // Comments nest ("(contact a@b.example, (primary))"), so the innermost are
-  // removed until none is left; a header line is short, so this ends quickly.
-  for (let previous = ""; previous !== plain;) {
-    previous = plain;
-    plain = plain.replace(/\([^()]*\)/g, " ");
-  }
-  return plain.split(/[,;]/).filter((part) => /[^\s<>@,;:]+@[^\s<>@,;:]+/.test(part)).length;
+  const plain = withoutQuoted(withoutComments(value ?? ""));
+  return plain.match(/[^\s<>@,;:"()]+@[^\s<>@,;:"()]+/g)?.length ?? 0;
 }
 
 function replyHeaders(reply: GmailReplyContext | undefined) {
@@ -595,11 +625,14 @@ function stripHtml(value: string) {
     .trim();
 }
 
-function sender(value: string) {
+// A reply goes to this address, so it is read from the header as mailboxCount
+// reads it: an address inside a comment or a quoted name is never the sender.
+function sender(raw: string) {
+  const value = withoutComments(raw);
   const match = value.match(/^\s*(?:"?([^"<]*)"?\s*)?<([^<>\s]+@[^<>\s]+)>\s*$/);
   if (match) return { senderName: match[1]?.trim() || null, senderEmail: match[2].toLowerCase() };
-  const email = value.match(/[^\s<>]+@[^\s<>]+/)?.[0];
-  return { senderName: email ? null : value || null, senderEmail: email?.toLowerCase() ?? null };
+  const email = withoutQuoted(value).match(/[^\s<>"]+@[^\s<>"]+/)?.[0];
+  return { senderName: email ? null : value.trim() || null, senderEmail: email?.toLowerCase() ?? null };
 }
 
 export function parseGmailMessage(message: GmailMessage): ParsedGmailMessage {
