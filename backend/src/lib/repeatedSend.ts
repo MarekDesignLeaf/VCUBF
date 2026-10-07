@@ -97,8 +97,12 @@ export function recentReply(sourceMetadata: unknown, body: string, now = Date.no
  * records every successful reply with its fingerprint.
  */
 export async function recentReplyOrAudited(companyId: string, actionName: string, intake: { id: string; sourceMetadata: unknown }, body: string, now = Date.now()): Promise<AlreadySent | null> {
-  return recentReply(intake.sourceMetadata, body, now)
-    ?? await recentAuditedSend(companyId, actionName, replyFingerprint(intake.id, body), now);
+  // Both are read: an older reply may be noted on the message while a newer
+  // one's note failed, and the review must name the latest.
+  const noted = recentReply(intake.sourceMetadata, body, now);
+  const audited = await recentAuditedSend(companyId, actionName, replyFingerprint(intake.id, body), now);
+  if (!noted || !audited) return noted ?? audited;
+  return Date.parse(noted.sentAt) >= Date.parse(audited.sentAt) ? noted : audited;
 }
 
 /** The review's note, spread into a preview: present only when there is something to say. */
