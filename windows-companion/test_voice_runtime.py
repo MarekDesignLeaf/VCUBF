@@ -39,6 +39,15 @@ class RuntimeControls(unittest.TestCase):
         self.assertEqual(request.call_args.args[0].full_url, "https://api.openai.com/v1/audio/speech")
         speaker.enqueue.assert_not_called()
 
+    def test_alfonzo_speaks_with_a_male_voice(self):
+        with patch.object(voice, "environment_value", return_value="test-key"):
+            # "nova" was the default while the assistant was a woman.
+            self.assertEqual(voice.OpenAIPcmTts({"provider": "openai", "voice": "nova"}).voice, "onyx")
+            self.assertEqual(voice.OpenAIPcmTts({"provider": "openai", "voice": "shimmer"}).voice, "onyx")
+            self.assertEqual(voice.OpenAIPcmTts({"provider": "openai"}).voice, "onyx")
+            self.assertEqual(voice.OpenAIPcmTts({"provider": "openai", "voice": " Echo "}).voice, "echo")
+        self.assertEqual(voice.default_v2_config()["tts"]["voice"], "onyx")
+
     def test_other_speech_provider_is_rejected(self):
         with self.assertRaisesRegex(RuntimeError, "OPENAI_TTS_REQUIRED"):
             voice.OpenAIPcmTts({"provider": "unsupported"})

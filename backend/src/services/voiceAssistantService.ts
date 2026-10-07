@@ -5,6 +5,7 @@ import type { AssistantContext } from "./assistantMemoryService.js";
 import { buildEmmaBehaviorInstructions } from "./emmaBehaviorService.js";
 import { EMMA_EXECUTABLE_ACTION_GUIDE } from "../lib/emmaExecutableActionCatalogue.js";
 import { DEFAULT_ASSISTANT_NAME, withAssistantName } from "../lib/assistantName.js";
+import { assistantRealtimeVoice } from "./voiceSpeechService.js";
 
 const assistantResultSchema = z.object({
   kind: z.enum(["command", "reply", "clarification", "plan"]),
@@ -372,7 +373,7 @@ export async function createRealtimeClientSession(behaviorScenario?: string): Pr
         type: "realtime",
         model,
         ...(behaviorInstructions ? { instructions: behaviorInstructions } : {}),
-        audio: { output: { voice: process.env.OPENAI_REALTIME_VOICE ?? "marin" } },
+        audio: { output: { voice: assistantRealtimeVoice() } },
       },
     }),
     signal: AbortSignal.timeout(15_000),

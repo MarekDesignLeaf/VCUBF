@@ -124,7 +124,10 @@ if(!$voiceConfig.PSObject.Properties['tts']){
 $tts=$voiceConfig.tts
 if(!$tts.PSObject.Properties['deviceName']){$tts|Add-Member -NotePropertyName deviceName -NotePropertyValue ''}
 # OpenAI is the only speech-output provider. Migrate old provider fields.
-$voiceName=if($tts.voice){[string]$tts.voice}elseif($tts.fallbackVoice){[string]$tts.fallbackVoice}else{'nova'}
+$voiceName=if($tts.voice){[string]$tts.voice}elseif($tts.fallbackVoice){[string]$tts.fallbackVoice}else{'onyx'}
+# Alfonzo is a man: only a man's OpenAI voice is kept. 'nova' (a woman's voice)
+# was the default while the assistant was female, so it is replaced here.
+if(@('onyx','echo','ash') -notcontains $voiceName.Trim().ToLowerInvariant()){$voiceName='onyx'}else{$voiceName=$voiceName.Trim().ToLowerInvariant()}
 $model=if($tts.provider -eq 'openai' -and $tts.model -notlike 'eleven*' -and $tts.model){[string]$tts.model}elseif($tts.fallbackModel){[string]$tts.fallbackModel}else{'tts-1'}
 $voiceConfig.tts=[pscustomobject]@{provider='openai';apiKeyEnv='OPENAI_API_KEY';model=$model;voice=$voiceName;deviceName=[string]$tts.deviceName}
 $voiceConfig | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $activeConfig -Encoding UTF8

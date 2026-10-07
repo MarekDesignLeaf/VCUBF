@@ -770,7 +770,7 @@ SECRETARY_NAVIGATION={navigation_json}"""
                         },
                         "output": {
                             "format": {"type": "audio/pcm", "rate": RATE},
-                            "voice": "marin",
+                            "voice": "cedar",  # Alfonzo is a man; "marin" is a woman's voice
                         },
                     },
                     "tools": [
