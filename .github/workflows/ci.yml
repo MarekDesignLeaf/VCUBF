@@ -43,3 +43,36 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+
+  windows-companion:
+    name: Windows companion tests and script syntax
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: windows-companion
+    steps:
+      - uses: actions/checkout@v7
+      # The owner PC runs the companion on Python 3.13.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      # Pure runtime logic only: the Windows audio packages are stubbed by the
+      # tests, so this is no microphone, speaker or live-provider acceptance.
+      - name: Python runtime tests
+        run: python -m unittest -v test_voice_gate test_voice_runtime
+      # A syntax error in an installer or launcher would only show on the PC.
+      - name: PowerShell scripts parse
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($file in Get-ChildItem -Path . -Filter *.ps1) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            foreach ($problem in $errors) {
+              Write-Host "::error file=windows-companion/$($file.Name),line=$($problem.Extent.StartLineNumber)::$($problem.Message)"
+              $failed = $true
+            }
+            if (-not $errors) { Write-Host "ok $($file.Name)" }
+          }
+          if ($failed) { exit 1 }

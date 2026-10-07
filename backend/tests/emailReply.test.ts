@@ -352,6 +352,8 @@ describe("What an import keeps for a later reply", () => {
     assert.equal(imported("jan@example.com").senderAddressCount, 1);
     assert.equal(imported("undisclosed-recipients:;").senderAddressCount, 0);
     assert.equal(mailboxCount("a@x.example; b@y.example"), 2, "a semicolon some mail programs write counts too");
+    assert.equal(mailboxCount("Alice (contact foo@example.com, (primary)) <alice@example.com>"), 1, "a nested comment is not an address");
+    assert.equal(mailboxCount("Alice ((a@x.example), b@y.example) <alice@example.com>, bob@example.com"), 2);
   });
 
   it("keeps the Message-ID and a short References chain, and nothing that is not one", () => {

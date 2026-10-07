@@ -405,9 +405,13 @@ export function compactReferences(value: string | null | undefined): string | nu
  * write one, so it counts as one: a doubtful line is refused, not answered.
  */
 export function mailboxCount(value: string | null | undefined): number {
-  const plain = (value ?? "")
-    .replace(/"(?:[^"\\]|\\.)*"/g, "\"\"")
-    .replace(/\([^()]*\)/g, " ");
+  let plain = (value ?? "").replace(/"(?:[^"\\]|\\.)*"/g, "\"\"");
+  // Comments nest ("(contact a@b.example, (primary))"), so the innermost are
+  // removed until none is left; a header line is short, so this ends quickly.
+  for (let previous = ""; previous !== plain;) {
+    previous = plain;
+    plain = plain.replace(/\([^()]*\)/g, " ");
+  }
   return plain.split(/[,;]/).filter((part) => /[^\s<>@,;:]+@[^\s<>@,;:]+/.test(part)).length;
 }
 
