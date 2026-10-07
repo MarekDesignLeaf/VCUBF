@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { Prisma } from "@prisma/client";
+import { Prisma, type CommunicationIntake } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import {
@@ -19,6 +19,7 @@ import {
   getGmailAccountEmail,
   getGmailMessage,
   getGmailProfile,
+  getGmailReplyHeaders,
   GmailAdapterError,
   listGmailHistory,
   listGmailMessages,
@@ -35,6 +36,7 @@ import {
   CREATE_GMAIL_DRAFT_ACTION,
   DELETE_GMAIL_INTAKE_ACTION,
   DISCONNECT_GMAIL_SOURCE_ACTION,
+  REPLY_GMAIL_MESSAGE_ACTION,
   START_GMAIL_OAUTH_ACTION,
   SEND_GMAIL_MESSAGE_ACTION,
   SET_DEFAULT_GMAIL_SENDER_ACTION,
@@ -83,6 +85,16 @@ const gmailComposeFields = {
   body: z.string().min(1).max(100_000),
 };
 export const createGmailDraftSchema = z.object(gmailComposeFields).strict();
+export const replyGmailMessageSchema = z.object({
+  /** The exact received email being answered, as bound by a reviewed reply. */
+  intake_id: z.string().trim().min(1).max(100).optional(),
+  /** Who or what is being answered: a sender's name or address, words from the email, or "last". */
+  sender_or_message: z.string().trim().min(1).max(300).optional(),
+  body: z.string().trim().min(1).max(100_000),
+  send_in: z.string().trim().min(1).max(40).optional(),
+  confirmed: z.boolean().optional(),
+}).strict();
+
 export const sendGmailMessageSchema = z.object({
   ...gmailComposeFields,
   /** Dictate in one language, send in another: "en-GB", "English", "anglicky". */
@@ -1051,6 +1063,209 @@ export async function sendThroughGmailSource(user: AuthedUser, sourceId: string,
     return ok(200, { sourceId, messageId: sent.id, threadId: sent.threadId ?? null, sentAt: new Date() });
   } catch (error) {
     return providerErrorResult(error);
+  }
+}
+
+// --- replying to a received email ---------------------------------------------
+
+// Replies leave in English unless another language is named: the owner
+// dictates in Czech, his customers read English.
+const DEFAULT_REPLY_LANGUAGE = "en-GB";
+const LATEST_WORDS = new Set(["last", "latest", "newest", "recent"]);
+
+type EmailReplyTarget = CommunicationIntake & { connectorSourceId: string; externalMessageId: string; senderEmail: string };
+
+function replyableEmail(intake: CommunicationIntake): intake is EmailReplyTarget {
+  return Boolean(intake.connectorSourceId && intake.externalMessageId && intake.senderEmail);
+}
+
+function plainWords(value: unknown) {
+  return String(value ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("en").replace(/\s+/g, " ").trim();
+}
+
+/** The subject the email was imported with ("Subject: …" leads the stored text). */
+function importedSubject(intake: CommunicationIntake) {
+  return intake.messageText.match(/^Subject: ([^\n]*)/)?.[1]?.trim() ?? "";
+}
+
+function importedBody(intake: CommunicationIntake) {
+  return intake.messageText.replace(/^Subject: [^\n]*\n\n?/, "").trim();
+}
+
+function replySubject(original: string) {
+  if (!original) return "Re:";
+  return /^re:/i.test(original) ? original : `Re: ${original}`;
+}
+
+/**
+ * Finds the received email being answered. A sender's name or address picks
+ * that sender's most recent email; "last" the most recent email from anyone;
+ * otherwise words from the email itself are matched. A reference that fits more
+ * than one sender is refused rather than guessed.
+ */
+async function emailReplyTarget(
+  user: AuthedUser,
+  input: { intake_id?: string; sender_or_message?: string }
+): Promise<ServiceResult<EmailReplyTarget>> {
+  if (input.intake_id) {
+    const intake = await prisma.communicationIntake.findFirst({
+      where: { id: input.intake_id, companyId: user.companyId, channel: "email" },
+    });
+    return intake && replyableEmail(intake) ? ok(200, intake) : fail(404, "EMAIL_MESSAGE_NOT_FOUND", "That email was not found.");
+  }
+  const received = (await prisma.communicationIntake.findMany({
+    where: { companyId: user.companyId, channel: "email", connectorSourceId: { not: null }, externalMessageId: { not: null }, senderEmail: { not: null } },
+    orderBy: { receivedAt: "desc" },
+    take: 500,
+  })).filter(replyableEmail);
+  if (!received.length) return fail(404, "EMAIL_MESSAGE_NOT_FOUND", "There is no received email to reply to.");
+
+  const needle = plainWords(input.sender_or_message);
+  if (!needle) return ok(200, received[0]);
+  const needleWords = needle.split(" ");
+  const bySender = received.filter((intake) => {
+    const address = intake.senderEmail.toLowerCase();
+    if (needle.includes("@")) return address === needle;
+    if (address.split("@")[0] === needle) return true;
+    const name = plainWords(intake.senderName);
+    if (!name) return false;
+    if (name === needle || (needle.length >= 2 && name.includes(needle))) return true;
+    return name.split(" ").some((word) => word.length >= 3 && needleWords.includes(word));
+  });
+  const wantsLatest = needleWords.some((word) => LATEST_WORDS.has(word));
+  const byText = needle.length >= 4 ? received.filter((intake) => plainWords(intake.messageText).includes(needle)) : [];
+  const matches = bySender.length ? bySender : wantsLatest ? [received[0]] : byText;
+  if (!matches.length) return fail(404, "EMAIL_MESSAGE_NOT_FOUND", `No received email matches '${input.sender_or_message}'.`);
+  const senders = [...new Set(matches.map((intake) => intake.senderEmail.toLowerCase()))];
+  if (senders.length > 1) {
+    const names = [...new Set(matches.map((intake) => intake.senderName ? `${intake.senderName} (${intake.senderEmail})` : intake.senderEmail))].slice(0, 5);
+    return fail(409, "AMBIGUOUS_REFERENCE", `More than one sender matches '${input.sender_or_message}': ${names.join(", ")}.`, { candidates: names });
+  }
+  return ok(200, matches[0]);
+}
+
+/**
+ * Reply to one received email. The recipient is that email's sender, the
+ * account is the mailbox it arrived in, and the reply stays in the same
+ * conversation; nothing spoken can change any of the three. The text is
+ * translated (English unless another language is named) before the review, so
+ * the yes approves the words that will be sent, and the confirmed call sends
+ * exactly the reviewed text once.
+ */
+export async function replyToGmailMessage(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
+  const parsed = replyGmailMessageSchema.safeParse(rawInput);
+  if (!parsed.success) return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  if (parsed.data.confirmed && !parsed.data.intake_id) {
+    return fail(400, "VALIDATION_FAILED", "Confirm the reviewed reply; it names the exact email being answered.");
+  }
+  if (parsed.data.confirmed && parsed.data.send_in) {
+    return fail(400, "TRANSLATION_AFTER_APPROVAL", "Confirm the reply that was reviewed; it is already in the language it will be sent in.");
+  }
+  const target = await emailReplyTarget(user, parsed.data);
+  if (!target.ok) return target;
+  const intake = target.data;
+  const sourceId = intake.connectorSourceId;
+  const auditInput = (confirmed: boolean) => ({ sourceId, intakeId: intake.id, confirmed, bodyLength: parsed.data.body.length });
+  const audit = (confirmed: boolean, result: "success" | "rejected" | "error", extra: { errorMessage?: string; dataAfter?: Record<string, unknown> } = {}) => recordAudit({
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: REPLY_GMAIL_MESSAGE_ACTION.actionName,
+    inputPayload: auditInput(confirmed),
+    riskLevel: REPLY_GMAIL_MESSAGE_ACTION.riskLevel,
+    confirmationRequired: true,
+    ...(confirmed ? { confirmed: true } : {}),
+    result,
+    ...extra,
+  });
+
+  // The mailbox the email arrived in sends the reply. If it cannot send, the
+  // owner is told so; the reply never silently leaves from another account.
+  const lookup = await gmailWriteSource(user, sourceId, "send:messages");
+  if (!lookup.ok) {
+    await audit(Boolean(parsed.data.confirmed), "rejected", { errorMessage: lookup.failure.error });
+    return lookup.failure;
+  }
+  const fromAccount = lookup.source.accountEmail ?? lookup.source.displayName;
+  const originalSubject = importedSubject(intake);
+  const subject = replySubject(originalSubject);
+
+  if (!parsed.data.confirmed) {
+    let translation: OutgoingTranslation;
+    try {
+      translation = await translateOutgoingMessage({ body: parsed.data.body }, parsed.data.send_in ?? DEFAULT_REPLY_LANGUAGE);
+    } catch (error) {
+      if (error instanceof TranslationUnavailable) return fail(503, error.reason, error.message);
+      throw error;
+    }
+    const preview = {
+      sourceId,
+      provider: "gmail",
+      intakeId: intake.id,
+      fromAccount,
+      to: [intake.senderEmail],
+      recipientName: intake.senderName,
+      inReplyTo: { receivedAt: intake.receivedAt, subject: originalSubject, text: importedBody(intake).slice(0, 500) },
+      subject,
+      body: translation.body,
+      sentIn: translation.languageLabel,
+      dictated: translation.original.body,
+    };
+    await audit(false, "rejected", { errorMessage: "CONFIRMATION_REQUIRED" });
+    return fail(409, "CONFIRMATION_REQUIRED", "Review who the reply goes to, the account it leaves from, the email it answers and the final text, then confirm sending.", {
+      preview,
+      // Confirmation sends exactly this: the reviewed text, to the sender of
+      // this one email, from the account it arrived in.
+      confirmInput: { intake_id: intake.id, body: translation.body },
+    });
+  }
+
+  try {
+    const credential = await usableCredential({ credential: lookup.source.credential! });
+    if (!credential.scopes.some((scope) => scope === GMAIL_COMPOSE_SCOPE || scope === GMAIL_SEND_SCOPE || scope === GMAIL_MODIFY_SCOPE)) {
+      throw new GmailAdapterError("SCOPE_DENIED");
+    }
+    // The original's Message-ID keeps the reply in the customer's conversation
+    // too. Without it (the account may not be allowed to read, or the email
+    // was deleted) the reply still goes, to the same person and thread.
+    let headers: Awaited<ReturnType<typeof getGmailReplyHeaders>> | undefined;
+    try {
+      headers = await getGmailReplyHeaders(credential.accessToken, intake.externalMessageId);
+    } catch {
+      headers = undefined;
+    }
+    const sent = await sendGmailMessage(credential.accessToken, {
+      to: [intake.senderEmail],
+      subject,
+      body: parsed.data.body,
+      reply: { threadId: intake.externalThreadId ?? headers?.threadId, messageId: headers?.messageId, references: headers?.references },
+    });
+    if (!sent.id) throw new GmailAdapterError("PROVIDER_RESPONSE_INVALID");
+    const sentAt = new Date();
+    const metadata = intake.sourceMetadata && typeof intake.sourceMetadata === "object" && !Array.isArray(intake.sourceMetadata)
+      ? intake.sourceMetadata as Record<string, unknown>
+      : {};
+    const replies = Array.isArray(metadata.replies) ? metadata.replies : [];
+    try {
+      await prisma.communicationIntake.update({
+        where: { id: intake.id },
+        data: {
+          sourceMetadata: {
+            ...metadata,
+            replies: [...replies, { messageId: sent.id, threadId: sent.threadId ?? null, sentAt: sentAt.toISOString(), sentBy: user.id, body: parsed.data.body }],
+          } as Prisma.InputJsonValue,
+        },
+      });
+    } catch {
+      // The reply has already left. A failed note on the email must not make a
+      // sent reply look unsent and invite a second send; the audit records it.
+    }
+    const recorded = { sourceId, intakeId: intake.id, messageId: sent.id, threadId: sent.threadId ?? null, sentAt };
+    await audit(true, "success", { dataAfter: recorded });
+    return ok(200, { ...recorded, fromAccount, to: [intake.senderEmail] });
+  } catch (error) {
+    const result = providerErrorResult(error);
+    await audit(true, "error", { errorMessage: result.ok ? "CONNECTOR_INTERNAL_ERROR" : result.error });
+    return result;
   }
 }
 

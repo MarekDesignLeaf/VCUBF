@@ -13,6 +13,7 @@ import {
   IMPORT_GOOGLE_CONTACT_ACTION,
   REGISTER_GOOGLE_DRIVE_PHOTO_ACTION,
   REGISTER_GOOGLE_PHOTOS_PHOTO_ACTION,
+  REPLY_GMAIL_MESSAGE_ACTION,
   CANCEL_GOOGLE_CALENDAR_EVENT_ACTION,
   CREATE_GOOGLE_CALENDAR_EVENT_ACTION,
   MOVE_GOOGLE_CALENDAR_EVENT_ACTION,
@@ -192,6 +193,18 @@ connectorsRouter.post(
   requirePermission(SEND_GMAIL_MESSAGE_ACTION.requiredPermission),
   async (req, res) => {
     const result = await gmailConnectorService.sendGmailMessageNow(req.user!, req.params.id, req.body);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
+// Answer one received email. The account is the one it arrived in, so the
+// route names the email, not a source.
+connectorsRouter.post(
+  "/gmail/messages/reply",
+  requirePermission(REPLY_GMAIL_MESSAGE_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await gmailConnectorService.replyToGmailMessage(req.user!, req.body);
     if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
     res.status(result.httpStatus).json(result.data);
   }

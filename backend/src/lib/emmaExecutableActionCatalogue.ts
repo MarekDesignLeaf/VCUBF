@@ -96,6 +96,9 @@ export const EMMA_EXECUTABLE_ACTIONS = {
   // Answers one received message: the recipient is its sender, never a number
   // taken from speech. Sent in English unless send_in names another language.
   reply_whatsapp: { capabilityAction: "reply_whatsapp_message", fields: "sender_or_message, body, send_in?", confirmation: "service_preview" },
+  // Answers one received email: to its sender, from the mailbox it arrived in,
+  // in the same conversation. Sent in English unless send_in names another language.
+  reply_email: { capabilityAction: "reply_gmail_message", fields: "sender_or_message, body, send_in?", confirmation: "service_preview" },
   // Calendar writes. Dates and times are passed as spoken ("zítra", "v pátek",
   // "6. října"; 24-hour times); the backend resolves them in the calendar's time
   // zone and reads them back for confirmation.
@@ -181,7 +184,7 @@ export const EMMA_EXECUTABLE_ACTION_PAGES: Record<EmmaExecutableActionName, stri
   disconnect_google_photos: "connectors", disconnect_whatsapp: "connectors",
   update_connector_source: "connectors", disable_connector_source: "connectors", enable_connector_source: "connectors",
   create_gmail_draft: "connectors", delete_gmail_message: "connectors", import_google_contact: "connectors",
-  send_email: "connectors", set_default_email_account: "connectors", send_whatsapp: "connectors", reply_whatsapp: "communication_intake",
+  send_email: "connectors", set_default_email_account: "connectors", send_whatsapp: "connectors", reply_whatsapp: "communication_intake", reply_email: "communication_intake",
   create_calendar_event: "calendar", move_calendar_event: "calendar", cancel_calendar_event: "calendar",
   create_google_photos_picker: "photo_selection", stage_google_photos: "photo_selection", register_google_photos_photo: "photos",
   stage_google_drive_images: "photo_selection", register_google_drive_photo: "photos", find_photos_for_service: "photo_selection",

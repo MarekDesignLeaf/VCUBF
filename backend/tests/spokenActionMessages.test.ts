@@ -22,6 +22,20 @@ describe("Spoken reviews", () => {
     assert.match(spokenReview("reply_whatsapp", preview, "en-GB")!, /I will send in English: “Hello, we will arrive on Monday at eight\.”\. Shall I send it\?$/);
   });
 
+  it("reads an email reply back with who, the email it answers, the account and the exact English", () => {
+    const preview = {
+      to: ["jan@example.com"], recipientName: "Jan Novák", fromAccount: "marek.private@gmail.com",
+      inReplyTo: { subject: "Nabídka na plot", text: "Dobrý den, kdy můžete přijet?" }, subject: "Re: Nabídka na plot",
+      body: "We will come on Monday at eight.", sentIn: "English (United Kingdom)",
+    };
+    assert.equal(
+      spokenReview("reply_email", preview, "cs-CZ"),
+      "Odpověď pro Jan Novák na e-mail „Nabídka na plot“, z účtu marek.private@gmail.com. Pošlu anglicky: „We will come on Monday at eight.“. Mám ji odeslat?",
+    );
+    assert.equal(spokenOutcome("reply_email", {}, "cs-CZ"), "E-mail je odeslaný.");
+    assert.equal(spokenError("EMAIL_MESSAGE_NOT_FOUND", undefined, "cs-CZ"), "Takový přijatý e-mail jsem nenašel.");
+  });
+
   it("reads a calendar entry back with the day, time, an assumed length and clashes", () => {
     const day = tomorrow();
     const spoken = spokenReview("create_calendar_event", {
@@ -84,6 +98,19 @@ describe("Reading received messages aloud", () => {
     }, "cs-CZ", now);
     assert.equal(spoken, "Poslední zprávy na WhatsAppu: 1. Honza Novák, před 2 hodinami: „What time will you arrive?“. Odpovězeno. 2. +447700900222, včera: „Thanks for the quote.“. Bez odpovědi. Za posledních 24 hodin zůstává bez odpovědi 1. Odpovědět můžete třeba: odpověz Honzovi, že…");
     assert.equal(spokenChannelMessages("whatsapp", { items: [], unansweredToday: 0 }, "en-GB"), "There are no received WhatsApp messages.");
+  });
+
+  it("says an email was answered only when the reply left from Secretary, and how to reply", () => {
+    const now = new Date("2026-10-05T20:00:00Z");
+    const spoken = spokenChannelMessages("email", {
+      items: [
+        { sender: "Jan Novák", text: "Subject: Plot", receivedAt: new Date("2026-10-05T18:00:00Z"), replied: true },
+        { sender: "petra@example.com", text: "Subject: Faktura", receivedAt: new Date("2026-10-04T19:00:00Z") },
+      ],
+      unansweredToday: 0,
+    }, "cs-CZ", now);
+    // The second may have been answered straight from Gmail, so nothing is claimed about it.
+    assert.equal(spoken, "Poslední zprávy v e-mailu: 1. Jan Novák, před 2 hodinami: „Subject: Plot“. Odpovězeno. 2. petra@example.com, včera: „Subject: Faktura“. Odpovědět můžete třeba: odpověz Honzovi na e-mail, že…");
   });
 });
 
