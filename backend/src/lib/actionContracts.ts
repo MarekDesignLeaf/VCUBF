@@ -456,6 +456,20 @@ export const SEND_GMAIL_MESSAGE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_AUTHORIZATION_REQUIRED", "CONNECTOR_SCOPE_REQUIRED", "GMAIL_ACCOUNT_NOT_FOUND", "AMBIGUOUS_GMAIL_SOURCE", "CONFIRMATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "VALIDATION_FAILED"],
 };
 
+// A reply is bound to one received email: it goes to that email's sender, from
+// the mailbox the email arrived in, in the same conversation. Nothing spoken
+// can redirect it to another address or another account. Like any send it is
+// reviewed and confirmed first, in the language it will be sent in.
+export const REPLY_GMAIL_MESSAGE_ACTION: ActionContract = {
+  actionName: "reply_gmail_message",
+  purpose: "Reply by email to the sender of one received email, from the Gmail account it arrived in and in the same conversation, only after the user reviews the recipient, the account, the original email and the final reply text and confirms the external action.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["crm.communication_intakes", "connector_sources", "connector_credentials", "gmail.messages"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "EMAIL_MESSAGE_NOT_FOUND", "AMBIGUOUS_REFERENCE", "EMAIL_SENDER_ADDRESS_INVALID", "CONNECTOR_SOURCE_NOT_FOUND", "CONNECTOR_NOT_ENABLED", "CONNECTOR_SCOPE_REQUIRED", "CONNECTOR_AUTHORIZATION_REQUIRED", "TRANSLATION_NOT_CONFIGURED", "TRANSLATION_FAILED", "TRANSLATION_LANGUAGE_UNKNOWN", "TRANSLATION_AFTER_APPROVAL", "CONFIRMATION_REQUIRED", "SCOPE_DENIED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "PROVIDER_RESPONSE_INVALID"],
+};
+
 export const SET_DEFAULT_GMAIL_SENDER_ACTION: ActionContract = {
   actionName: "set_default_gmail_sender",
   purpose: "Choose which connected Gmail account sends email when the user does not name one. Internal setting with no external effect; the previous default is audited so the change can be reversed.",

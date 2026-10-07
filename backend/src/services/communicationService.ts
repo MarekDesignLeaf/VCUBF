@@ -359,7 +359,11 @@ export interface RecentChannelMessage {
   sender: string;
   text: string;
   receivedAt: Date;
-  /** WhatsApp only: whether a reply was sent from Secretary. */
+  /**
+   * Whether a reply was sent from Secretary. WhatsApp replies only leave from
+   * here, so false means unanswered. An email may have been answered straight
+   * from Gmail, so for email only a reply sent from here is stated.
+   */
   replied?: boolean;
 }
 
@@ -380,7 +384,7 @@ export async function recentChannelMessages(user: AuthedUser, channel: "email" |
     sender: intake.senderName ?? intake.senderEmail ?? intake.senderPhone ?? "Unknown sender",
     text: intake.messageText,
     receivedAt: intake.receivedAt,
-    ...(channel === "whatsapp" ? { replied: replied(intake.sourceMetadata) } : {}),
+    ...(channel === "whatsapp" ? { replied: replied(intake.sourceMetadata) } : replied(intake.sourceMetadata) ? { replied: true } : {}),
   }));
   let unansweredToday = 0;
   if (channel === "whatsapp") {

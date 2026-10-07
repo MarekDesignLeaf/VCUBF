@@ -119,17 +119,25 @@ async function resolveUserCommand(user: AuthedUser, text: string, reader: string
   return parsed;
 }
 
+// Voice actions that carry the text of a message to someone outside. The text
+// is kept in the short-lived review and the conversation, never in the audit.
+const OUTBOUND_VOICE_ACTIONS = new Set(["send_email", "send_whatsapp", "reply_email", "reply_whatsapp"]);
+
+function outboundMessage(command: ParsedTextCommand) {
+  return command.intent === "prepare_gmail_message" || command.intent === "prepare_whatsapp_message"
+    || (command.intent === "execute_action" && OUTBOUND_VOICE_ACTIONS.has(command.entities.action));
+}
+
 function auditText(command: ParsedTextCommand, value: string | null | undefined) {
-  return ["prepare_gmail_message", "prepare_whatsapp_message"].includes(command.intent) && value
-    ? "[REDACTED_OUTBOUND_MESSAGE]"
-    : value;
+  return outboundMessage(command) && value ? "[REDACTED_OUTBOUND_MESSAGE]" : value;
 }
 
 function auditAssistantInput(text: string) {
   // A natural-language outbound request may be clarified before it becomes a
   // deterministic command. Keep that message content in the conversation
   // transcript (the user's chosen history), but never copy it into the audit.
-  return /(?:send|write|compose|draft|pošli|posli|odešli|odesli|napiš|napis|wyślij|wyslij|napisz).*?(?:e-?mail|mail|whatsapp)/iu.test(text)
+  // A reply names no channel ("odpověz Honzovi, že…"), so the verb is enough.
+  return /(?:send|write|compose|draft|pošli|posli|odešli|odesli|napiš|napis|wyślij|wyslij|napisz).*?(?:e-?mail|mail|whatsapp)|\b(?:reply|answer|odpověz|odpovez|odpovězte|odpovezte|odpowiedz)\b|voice\s+action\s+(?:send_email|send_whatsapp|reply_email|reply_whatsapp)\b/iu.test(text)
     ? "[REDACTED_OUTBOUND_MESSAGE]"
     : text;
 }
@@ -147,6 +155,14 @@ function auditInterpreted(command: ParsedTextCommand, interpreted: unknown) {
   }
   if (command.intent === "prepare_whatsapp_message") {
     return { recipientLength: command.entities.to.length, bodyLength: command.entities.body.length };
+  }
+  if (outboundMessage(command) && command.intent === "execute_action") {
+    const parameters = command.entities.parameters as Record<string, unknown>;
+    return {
+      action: command.entities.action,
+      fields: Object.keys(parameters).filter((key) => key !== "body").sort(),
+      bodyLength: typeof parameters.body === "string" ? parameters.body.length : 0,
+    };
   }
   return interpreted;
 }

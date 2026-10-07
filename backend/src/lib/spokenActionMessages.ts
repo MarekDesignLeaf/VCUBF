@@ -110,6 +110,18 @@ export function spokenReview(action: string, preview: Row | undefined, language:
       if (lang === "pl") return `Odpowiedź dla ${who} na wiadomość „${quote(preview.inReplyTo?.text, 160)}”. Wyślę ${how}: „${quote(preview.body)}”. Czy mam ją wysłać?`;
       return `Reply to ${who} about “${quote(preview.inReplyTo?.text, 160)}”. I will send ${how}: “${quote(preview.body)}”. Shall I send it?`;
     }
+    case "reply_email": {
+      // Who it goes to, which mailbox it leaves from and which email it answers.
+      // The address is said too: a display name is whatever the sender typed.
+      const address = Array.isArray(preview.to) ? preview.to[0] : preview.to;
+      const who = preview.recipientName && preview.recipientName !== address ? `${preview.recipientName} (${address})` : address;
+      const about = quote(preview.inReplyTo?.subject || preview.inReplyTo?.text, 160);
+      const how = spokenLanguage(preview.sentIn, lang);
+      const from = typeof preview.fromAccount === "string" && preview.fromAccount ? preview.fromAccount : "";
+      if (lang === "cs") return `Odpověď pro ${who} na e-mail „${about}“${from ? `, z účtu ${from}` : ""}. Pošlu ${how}: „${quote(preview.body)}“. Mám ji odeslat?`;
+      if (lang === "pl") return `Odpowiedź dla ${who} na e-mail „${about}”${from ? `, z konta ${from}` : ""}. Wyślę ${how}: „${quote(preview.body)}”. Czy mam ją wysłać?`;
+      return `Reply to ${who} about “${about}”${from ? `, from ${from}` : ""}. I will send ${how}: “${quote(preview.body)}”. Shall I send it?`;
+    }
     case "send_whatsapp": {
       const how = preview.sentIn ? ` ${spokenLanguage(preview.sentIn, lang)}` : "";
       if (lang === "cs") return `Pošlu na WhatsApp na číslo ${preview.to}${how}: „${quote(preview.body)}“. Mám ji odeslat?`;
@@ -169,6 +181,7 @@ export function spokenOutcome(action: string | undefined, data: Row | undefined,
     case "send_whatsapp":
       return lang === "cs" ? "Zpráva je odeslaná." : lang === "pl" ? "Wiadomość została wysłana." : "The message has been sent.";
     case "send_email":
+    case "reply_email":
       return lang === "cs" ? "E-mail je odeslaný." : lang === "pl" ? "E-mail został wysłany." : "The email has been sent.";
     case "create_calendar_event":
       if (data?.alreadyCreated) return lang === "cs" ? "Tahle událost už v kalendáři je, druhou jsem nezapsal." : lang === "pl" ? "To wydarzenie już jest w kalendarzu, drugiego nie dodałem." : "That event is already in the calendar; I did not add a second one.";
@@ -197,6 +210,16 @@ export function spokenError(error: string | undefined, extra: Row | undefined, l
       cs: "Tenhle zákazník psal před víc než 24 hodinami. WhatsApp teď dovolí jen schválenou šablonu a tu zatím neposílám. Zavolejte mu nebo pošlete e-mail.",
       pl: "Ten klient pisał ponad 24 godziny temu. WhatsApp pozwala teraz tylko na zatwierdzony szablon, którego jeszcze nie wysyłam. Zadzwoń lub wyślij e-mail.",
       en: "This customer last wrote more than 24 hours ago. WhatsApp now allows only an approved template, which I do not send yet. Call or email them instead.",
+    },
+    EMAIL_SENDER_ADDRESS_INVALID: {
+      cs: "Adresa odesílatele u tohoto e-mailu není jedna platná adresa, takže na něj odsud neodpovím. Odpovězte prosím přímo v Gmailu.",
+      pl: "Adres nadawcy tego e-maila nie jest jednym poprawnym adresem, więc nie odpowiem stąd. Odpowiedz bezpośrednio w Gmailu.",
+      en: "The sender's address on this email is not one valid address, so I will not reply to it from here. Please reply in Gmail.",
+    },
+    EMAIL_MESSAGE_NOT_FOUND: {
+      cs: "Takový přijatý e-mail jsem nenašel.",
+      pl: "Nie znalazłem takiego odebranego e-maila.",
+      en: "I could not find that received email.",
     },
     WHATSAPP_MESSAGE_NOT_FOUND: {
       cs: "Takovou přijatou WhatsApp zprávu jsem nenašel.",
@@ -322,6 +345,6 @@ export function spokenChannelMessages(
     : "";
   const hint = channel === "whatsapp"
     ? (lang === "cs" ? " Odpovědět můžete třeba: odpověz Honzovi, že…" : lang === "pl" ? " Możesz odpowiedzieć na przykład: odpowiedz Janowi, że…" : " You can reply, for example: reply to John that…")
-    : "";
+    : (lang === "cs" ? " Odpovědět můžete třeba: odpověz Honzovi na e-mail, že…" : lang === "pl" ? " Możesz odpowiedzieć na przykład: odpowiedz Janowi na e-mail, że…" : " You can reply, for example: reply to John's email that…");
   return `${head} ${lines.join(" ")}${unanswered}${hint}`;
 }

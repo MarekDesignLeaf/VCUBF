@@ -46,6 +46,20 @@ export interface GmailComposeInput {
   subject: string;
   body: string;
   attachments?: GmailAttachment[];
+  /** A reply: the conversation it belongs to and the message it answers. */
+  reply?: GmailReplyContext;
+}
+
+/**
+ * What makes a message a reply rather than a new conversation: Gmail keeps it
+ * in the same thread (threadId), and the recipient's mail program does so by
+ * the standard In-Reply-To and References headers, which name the original
+ * message by its own Message-ID.
+ */
+export interface GmailReplyContext {
+  threadId?: string | null;
+  messageId?: string | null;
+  references?: string | null;
 }
 
 export interface GmailDraftResult {
@@ -350,12 +364,32 @@ function safeAttachmentFilename(filename: string) {
   return cleaned || "attachment";
 }
 
+// A Message-ID is "<…@…>" in plain ASCII. Anything else is left out rather
+// than written into a header, so nothing the original sender wrote can add
+// headers of its own.
+function messageIdList(value: string | null | undefined) {
+  return (value ?? "").split(/\s+/).filter((id) => /^<[\x21-\x3B\x3D\x3F-\x7E]+@[\x21-\x3B\x3D\x3F-\x7E]+>$/.test(id));
+}
+
+function replyHeaders(reply: GmailReplyContext | undefined) {
+  const original = messageIdList(reply?.messageId)[0];
+  if (!original) return [];
+  // References carries the conversation so far and ends with the message
+  // being answered. A long chain keeps its first message and the latest ones,
+  // as the mail standard recommends.
+  const earlier = messageIdList(reply?.references).filter((id) => id !== original);
+  const kept = earlier.length > 10 ? [earlier[0], ...earlier.slice(-9)] : earlier;
+  const references = [...kept, original];
+  return [`In-Reply-To: ${original}`, `References: ${references.join(" ")}`];
+}
+
 export function buildGmailMimeMessage(input: GmailComposeInput) {
   const addressHeaders = [
     `To: ${input.to.join(", ")}`,
     ...(input.cc?.length ? [`Cc: ${input.cc.join(", ")}`] : []),
     ...(input.bcc?.length ? [`Bcc: ${input.bcc.join(", ")}`] : []),
     `Subject: ${mimeHeader(input.subject)}`,
+    ...replyHeaders(input.reply),
     "MIME-Version: 1.0",
   ];
   const body = input.body.replace(/\r?\n/g, "\r\n");
@@ -390,6 +424,7 @@ export async function createGmailDraft(accessToken: string, input: GmailComposeI
 export async function sendGmailMessage(accessToken: string, input: GmailComposeInput) {
   return gmailPostJson<GmailSendResult>(new URL(`${GMAIL_MESSAGES_ENDPOINT}/send`), accessToken, {
     raw: buildGmailRawMessage(input),
+    ...(input.reply?.threadId ? { threadId: input.reply.threadId } : {}),
   });
 }
 
@@ -418,6 +453,20 @@ export async function getGmailMessage(accessToken: string, id: string) {
   const url = new URL(`${GMAIL_MESSAGES_ENDPOINT}/${encodeURIComponent(id)}`);
   url.searchParams.set("format", "full");
   return gmailJson<GmailMessage>(url, accessToken, "message");
+}
+
+/** The headers a reply needs from the message it answers. */
+export async function getGmailReplyHeaders(accessToken: string, id: string) {
+  const url = new URL(`${GMAIL_MESSAGES_ENDPOINT}/${encodeURIComponent(id)}`);
+  url.searchParams.set("format", "metadata");
+  for (const name of ["Message-ID", "References", "Subject"]) url.searchParams.append("metadataHeaders", name);
+  const message = await gmailJson<GmailMessage>(url, accessToken, "message");
+  return {
+    messageId: header(message.payload, "Message-ID") || null,
+    references: header(message.payload, "References") || null,
+    subject: header(message.payload, "Subject") || null,
+    threadId: message.threadId ?? null,
+  };
 }
 
 export async function getGmailProfile(accessToken: string) {
