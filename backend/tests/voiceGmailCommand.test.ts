@@ -113,6 +113,48 @@ describe("Emma Gmail sending", () => {
     assert.equal(sends, 1);
   });
 
+  it("writes an email dictated in Czech in English before the review, and sends that English", async () => {
+    const originalOpenAiKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "cs-CZ" } });
+    try {
+      let raw = "";
+      let translations = 0;
+      globalThis.fetch = async (input, init) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
+        if (url.hostname === "api.openai.com") {
+          translations += 1;
+          return Response.json({ output_text: "Fence quote\n\n<<<BODY>>>\n\nYour quote is ready." });
+        }
+        raw = Buffer.from(JSON.parse(String(init?.body)).raw, "base64url").toString("utf8");
+        return Response.json({ id: "gmail-message-cz", threadId: "gmail-thread-cz" });
+      };
+      const asked = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ text: "pošli e-mail na novak@example.com; předmět Nabídka plotu; text Vaše nabídka je hotová", input_method: "voice_transcript", history: [] });
+      assert.equal(asked.body.intent, "prepare_gmail_message", JSON.stringify(asked.body));
+      assert.equal(asked.body.data.preview.subject, "Fence quote");
+      assert.equal(asked.body.data.preview.body, "Your quote is ready.");
+      assert.deepEqual(asked.body.data.preview.dictated, { subject: "Nabídka plotu", body: "Vaše nabídka je hotová" });
+      assert.match(asked.body.message, /anglicky\. Předmět: „Fence quote“\. Text: „Your quote is ready\.“\. Mám ho odeslat\?$/, asked.body.message);
+
+      const confirmed = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ text: "ano", input_method: "voice_transcript", history: [] });
+      assert.equal(confirmed.body.intent, "confirm_gmail_message", JSON.stringify(confirmed.body));
+      assert.match(raw, /Subject: Fence quote/);
+      assert.match(raw, /Your quote is ready\./);
+      assert.doesNotMatch(raw, /Vaše nabídka/, "the Czech never leaves");
+      assert.equal(translations, 1, "translated once, before the review; never again after the yes");
+    } finally {
+      await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "en-GB" } });
+      if (originalOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenAiKey;
+    }
+  });
+
   it("says in the review when exactly this email went out a moment ago, and only then", async () => {
     // A voice request that got no answer in time may still have sent the email;
     // dictating it again must not send a second copy unknowingly.

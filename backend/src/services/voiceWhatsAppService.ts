@@ -7,9 +7,12 @@ import type { AuthedUser } from "../middleware/auth.js";
 import { prisma } from "../db.js";
 import { sendWhatsAppMessage, sendWhatsAppMessageSchema } from "./whatsappBusinessConnectorService.js";
 import { fail, ok, type ServiceResult } from "./result.js";
+import { TranslationUnavailable, translateOutgoingMessage } from "./translationService.js";
 
 const PENDING_WHATSAPP_ACTION = "send_whatsapp_message";
 const PENDING_WHATSAPP_LIFETIME_MS = 5 * 60 * 1000;
+/** The language spoken messages leave in unless the user dictates in English. */
+const MESSAGE_LANGUAGE = "en-GB";
 
 type WhatsAppMessage = { to: string; body: string };
 
@@ -82,9 +85,24 @@ export async function prepareVoiceWhatsAppMessage(user: AuthedUser, rawInput: un
   const source = await eligibleSource(user);
   if (!source.ok) return source;
 
+  // Customers read English: a message dictated in Czech or Polish is written in
+  // English before the review, so the yes approves the words that will leave.
+  let body = parsed.data.body;
+  let reviewed: Record<string, unknown> = {};
+  if (!(user.voiceLanguage ?? "").toLowerCase().startsWith("en")) {
+    try {
+      const translation = await translateOutgoingMessage({ body }, MESSAGE_LANGUAGE);
+      body = translation.body;
+      reviewed = { sentIn: translation.languageLabel, dictated: translation.original.body };
+    } catch (error) {
+      if (error instanceof TranslationUnavailable) return fail(503, error.reason, error.message);
+      throw error;
+    }
+  }
+
   const now = new Date();
   const expiresAt = new Date(now.getTime() + PENDING_WHATSAPP_LIFETIME_MS);
-  const payload: WhatsAppMessage = { to: parsed.data.to, body: parsed.data.body };
+  const payload: WhatsAppMessage = { to: parsed.data.to, body };
   await prisma.$transaction(async (tx) => {
     await tx.voicePendingAction.updateMany({
       where: { companyId: user.companyId, userId: user.id, actionType: PENDING_WHATSAPP_ACTION, status: "pending" },
@@ -116,7 +134,7 @@ export async function prepareVoiceWhatsAppMessage(user: AuthedUser, rawInput: un
   return ok(202, {
     confirmationRequired: true,
     expiresAt: expiresAt.toISOString(),
-    preview: { ...payload, ...repeatNote(repeat) },
+    preview: { ...payload, ...reviewed, ...repeatNote(repeat) },
     message: "I prepared the WhatsApp message for review. I will send it only after your explicit confirmation.",
   });
 }

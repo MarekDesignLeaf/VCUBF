@@ -1220,7 +1220,7 @@ export async function dispatchParsedCommand(
         error: result.ok ? undefined : result.error,
         message: result.ok
           ? spokenReview("send_whatsapp", (result.data as { preview?: Record<string, unknown> }).preview, user.voiceLanguage) ?? (result.data as { message?: string }).message
-          : result.message,
+          : spokenError(result.error, result.extra, user.voiceLanguage) ?? result.message,
       };
       break;
     }

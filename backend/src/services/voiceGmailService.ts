@@ -13,6 +13,7 @@ import { recentAuditedSend, repeatNote, sendFingerprint } from "../lib/repeatedS
 import { chooseGmailSendingAccount, gmailAccountLabel } from "../lib/gmailAccountChoice.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
+import { TranslationUnavailable, translateOutgoingMessage } from "./translationService.js";
 
 const PENDING_GMAIL_ACTION = "send_gmail_message";
 const PENDING_GMAIL_LIFETIME_MS = 5 * 60 * 1000;
@@ -24,6 +25,29 @@ type GmailMessage = {
   subject: string;
   body: string;
 };
+
+/** The language spoken messages leave in unless the user dictates in English. */
+const MESSAGE_LANGUAGE = "en-GB";
+
+/**
+ * The message as it will be sent: in English. Dictated in English (English is
+ * the language switched on) it is left exactly as said; otherwise subject and
+ * body are translated together, and the review carries both what was said and
+ * what will be sent.
+ */
+async function inEnglish(user: AuthedUser, message: GmailMessage): Promise<ServiceResult<{ message: GmailMessage; reviewed: Record<string, unknown> }>> {
+  if ((user.voiceLanguage ?? "").toLowerCase().startsWith("en")) return ok(200, { message, reviewed: {} });
+  try {
+    const translation = await translateOutgoingMessage({ subject: message.subject, body: message.body }, MESSAGE_LANGUAGE);
+    return ok(200, {
+      message: { ...message, subject: translation.subject ?? message.subject, body: translation.body },
+      reviewed: { sentIn: translation.languageLabel, dictated: translation.original },
+    });
+  } catch (error) {
+    if (error instanceof TranslationUnavailable) return fail(503, error.reason, error.message);
+    throw error;
+  }
+}
 
 function canManageConnectors(user: AuthedUser) {
   return user.permissions.includes("connectors.manage");
@@ -142,6 +166,16 @@ export async function prepareVoiceGmailMessage(user: AuthedUser, rawInput: unkno
     return sourceResult;
   }
 
+  // Customers read English. A message dictated in Czech or Polish is written in
+  // English before the review, so the yes approves the words that will leave
+  // and the confirmed send never translates again (section 41).
+  const english = await inEnglish(user, parsed.data);
+  if (!english.ok) {
+    await recordFailure(user, PREPARE_VOICE_GMAIL_MESSAGE_ACTION, english.error);
+    return english;
+  }
+  const toSend: GmailMessage = english.data.message;
+
   const now = new Date();
   const expiresAt = new Date(now.getTime() + PENDING_GMAIL_LIFETIME_MS);
   await prisma.$transaction(async (tx) => {
@@ -155,7 +189,7 @@ export async function prepareVoiceGmailMessage(user: AuthedUser, rawInput: unkno
         userId: user.id,
         actionType: PENDING_GMAIL_ACTION,
         sourceId: sourceResult.data.id,
-        payload: parsed.data as Prisma.InputJsonValue,
+        payload: toSend as Prisma.InputJsonValue,
         expiresAt,
       },
     });
@@ -165,7 +199,7 @@ export async function prepareVoiceGmailMessage(user: AuthedUser, rawInput: unkno
     companyId: user.companyId,
     userId: user.id,
     actionName: PREPARE_VOICE_GMAIL_MESSAGE_ACTION.actionName,
-    inputPayload: { sourceId: sourceResult.data.id, ...messageSummary(parsed.data) },
+    inputPayload: { sourceId: sourceResult.data.id, ...messageSummary(toSend) },
     dataAfter: { expiresAt },
     riskLevel: PREPARE_VOICE_GMAIL_MESSAGE_ACTION.riskLevel,
     confirmationRequired: true,
@@ -173,12 +207,17 @@ export async function prepareVoiceGmailMessage(user: AuthedUser, rawInput: unkno
   });
   // The same email to the same recipients shortly before is said in the review.
   const repeat = await recentAuditedSend(user.companyId, SEND_GMAIL_MESSAGE_ACTION.actionName, sendFingerprint({
-    recipients: [...parsed.data.to, ...parsed.data.cc, ...parsed.data.bcc], subject: parsed.data.subject, body: parsed.data.body,
+    recipients: [...toSend.to, ...toSend.cc, ...toSend.bcc], subject: toSend.subject, body: toSend.body,
   }));
   return ok(202, {
     confirmationRequired: true,
     expiresAt: expiresAt.toISOString(),
-    preview: { ...parsed.data, fromAccount: sourceResult.data.accountEmail ?? sourceResult.data.displayName, ...repeatNote(repeat) },
+    preview: {
+      ...toSend,
+      fromAccount: sourceResult.data.accountEmail ?? sourceResult.data.displayName,
+      ...english.data.reviewed,
+      ...repeatNote(repeat),
+    },
     message: "I prepared the email for review. I will send it only after your explicit confirmation.",
   });
 }

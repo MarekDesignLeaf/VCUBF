@@ -116,9 +116,13 @@ describe("Emma connector commands", () => {
 
   it("previews and explicitly confirms a Polish WhatsApp voice request once Polish is switched on", async () => {
     await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "pl-PL" } });
+    const originalOpenAiKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "test-openai-key";
     let sends = 0;
     globalThis.fetch = async (input, init) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
+      // Dictated in Polish, it leaves in English: the translation comes first.
+      if (url.hostname === "api.openai.com") return Response.json({ output_text: "Good morning" });
       if (init?.method !== "POST") {
         assert.equal(url.pathname, "/v23.0/123456789");
         return Response.json({ id: "123456789", display_phone_number: "+44 7700 900123", verified_name: "VCUBF", quality_rating: "GREEN" });
@@ -126,7 +130,7 @@ describe("Emma connector commands", () => {
       assert.equal(url.pathname, "/v23.0/123456789/messages");
       const body = JSON.parse(String(init?.body));
       assert.equal(body.to, "447700900123");
-      assert.equal(body.text.body, "Dzień dobry");
+      assert.equal(body.text.body, "Good morning", "the approved English, never the Polish");
       sends += 1;
       return Response.json({ messages: [{ id: "wamid.test" }] });
     };
@@ -138,7 +142,8 @@ describe("Emma connector commands", () => {
     assert.equal(preview.body.intent, "prepare_whatsapp_message");
     assert.equal(preview.body.data.confirmationRequired, true);
     // The review is read back in full, in the language that is on.
-    assert.match(preview.body.message, /^Wyślę na WhatsApp na numer \+?447700900123: „Dzień dobry”\. Czy mam ją wysłać\?$/, JSON.stringify(preview.body));
+    assert.match(preview.body.message, /^Wyślę na WhatsApp na numer \+?447700900123 po angielsku: „Good morning”\. Czy mam ją wysłać\?$/, JSON.stringify(preview.body));
+    assert.equal(preview.body.data.preview.dictated, "Dzień dobry", "what was said is kept beside what will be sent");
 
     const confirmed = await request(app)
       .post("/command/assistant")
@@ -159,5 +164,7 @@ describe("Emma connector commands", () => {
     assert.equal(sends, 1, "a review sends nothing");
     await prisma.voicePendingAction.deleteMany({});
     await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "en-GB" } });
+    if (originalOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = originalOpenAiKey;
   });
 });
