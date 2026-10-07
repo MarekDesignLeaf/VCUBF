@@ -2308,13 +2308,14 @@ export const api = {
     macros: {
       list: () => request<{ macros: LearnedCommand[] }>("/command/macros"),
       /** Saves a recording; reports whether it was already known. */
-      save: (steps: MacroStepPayload[], names: string[]) =>
+      save: (steps: MacroStepPayload[], names: string[], signal?: AbortSignal) =>
         request<SaveMacroOutcome>("/command/macros", {
           method: "POST",
           body: JSON.stringify({ steps, names }),
+          signal,
         }),
-      match: (phrase: string) =>
-        request<{ macro: MatchedMacro | null }>(`/command/macros/match?phrase=${encodeURIComponent(phrase)}`),
+      match: (phrase: string, signal?: AbortSignal) =>
+        request<{ macro: MatchedMacro | null }>(`/command/macros/match?phrase=${encodeURIComponent(phrase)}`, { signal }),
       ran: (id: string) => request<{ ok: boolean }>(`/command/macros/${id}/ran`, { method: "POST" }),
       remove: (id: string) => request<{ ok: boolean }>(`/command/macros/${id}`, { method: "DELETE" }),
     },
@@ -2348,10 +2349,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ text, input_method: inputMethod }),
       }),
-    assistant: (text: string, language: AppLanguage, history: Array<{ role: "user" | "assistant"; content: string }>) =>
+    assistant: (text: string, language: AppLanguage, history: Array<{ role: "user" | "assistant"; content: string }>, signal?: AbortSignal) =>
       request<MobileAssistantResponse>("/command/assistant", {
         method: "POST",
         body: JSON.stringify({ text, input_method: "voice_transcript", language, history }),
+        signal,
       }),
     voiceState: () => request<VoiceDeviceState>("/command/voice-state"),
     voiceConversations: (limit = 10) => request<VoiceConversation[]>(`/command/voice-conversations?limit=${limit}`),

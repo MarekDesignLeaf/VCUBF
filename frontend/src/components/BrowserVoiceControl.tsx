@@ -68,21 +68,14 @@ const ACTIVE_WINDOW_MS = 20_000;
  */
 const MAX_UTTERANCE_MS = 20_000;
 
-// Sentences are acted on in the order they were spoken, one after another. A
-// request whose connection hangs must not hold up every sentence after it, so
-// each step has a limit and the queue moves on when it is reached.
+// Sentences are acted on in the order they were spoken, each only after the one
+// before it has finished: a "yes" must never overtake the request it answers.
+// So that one hung connection cannot hold up every sentence after it, each
+// request the queue waits on is itself cancelled at a limit, which ends that
+// sentence's handling rather than leaving it running alongside the next.
 const TRANSCRIBE_LIMIT_MS = 15_000;
-const HANDLE_LIMIT_MS = 30_000;
-
-function withinLimit<T>(work: Promise<T>, fallback: T, limitMs: number): Promise<T> {
-  return new Promise((resolve) => {
-    const timer = window.setTimeout(() => resolve(fallback), limitMs);
-    work.then(
-      (value) => { window.clearTimeout(timer); resolve(value); },
-      () => { window.clearTimeout(timer); resolve(fallback); },
-    );
-  });
-}
+const ASSISTANT_LIMIT_MS = 30_000;
+const LOOKUP_LIMIT_MS = 10_000;
 const CONVERSATION_CAP_MS = 90_000;
 
 type RecogniserState = {
@@ -1319,7 +1312,7 @@ export function BrowserVoiceControl() {
         return true;
       }
       try {
-        const outcome = await api.command.macros.save(stepsRef.current, namesRef.current);
+        const outcome = await api.command.macros.save(stepsRef.current, namesRef.current, AbortSignal.timeout(LOOKUP_LIMIT_MS));
         const lines: string[] = [];
         // The specification is explicit: say that it already exists, and save the
         // new names to it anyway.
@@ -1352,7 +1345,9 @@ export function BrowserVoiceControl() {
     appendTurn({ role: "user", content: text });
     try {
       const history = transcriptRef.current.slice(-6);
-      const result: MobileAssistantResponse = await api.command.assistant(text, language, history);
+      // Cancelled at the limit, so the next sentence never starts while this
+      // one could still answer; a cancelled request is reported as failed.
+      const result: MobileAssistantResponse = await api.command.assistant(text, language, history, AbortSignal.timeout(ASSISTANT_LIMIT_MS));
       // Not understood: say so and offer to be taught, rather than repeating a
       // generic failure the user can do nothing with.
       const notUnderstood = result.intent === "unrecognized"
@@ -1411,7 +1406,7 @@ export function BrowserVoiceControl() {
     if (await handleLearningTurn(text)) return;
 
     if (alreadyActive) {
-      const learned = await api.command.macros.match(text).then((r) => r.macro).catch(() => null);
+      const learned = await api.command.macros.match(text, AbortSignal.timeout(LOOKUP_LIMIT_MS)).then((r) => r.macro).catch(() => null);
       if (learned) { await runLearned(learned); return; }
       await execute(text);
       return;
@@ -1453,8 +1448,8 @@ export function BrowserVoiceControl() {
     const transcribe = (audio: Float32Array, spokenAt: number) => {
       const heard = transcribeOne(audio);
       inOrder = inOrder.then(async () => {
-        const text = await withinLimit(heard, "", TRANSCRIBE_LIMIT_MS);
-        if (text && !cancelled) await withinLimit(handleFinal.current(text, spokenAt), undefined, HANDLE_LIMIT_MS);
+        const text = await heard;
+        if (text && !cancelled) await handleFinal.current(text, spokenAt);
       }).catch(() => { /* one failed sentence must not block the ones after it */ });
     };
 
