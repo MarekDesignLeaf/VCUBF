@@ -71,8 +71,9 @@ const COMMANDS: Row[] = [
   { intent: "connector_status", english: "check gmail status", czech: "stav gmailu" },
 ];
 
-function resolvedIntent(phrase: string) {
-  const parsed = parseTextCommand(phrase);
+// Each form is read in its own language, as it is when that language is on.
+function resolvedIntent(phrase: string, language: "en-GB" | "cs-CZ") {
+  const parsed = parseTextCommand(phrase, language);
   return parsed.intent === "execute_action"
     ? `execute_action:${(parsed as { entities: { action: string } }).entities.action}`
     : parsed.intent;
@@ -82,19 +83,19 @@ describe("spoken command coverage by language", () => {
   it("understands the English form of every command without the model", () => {
     for (const row of COMMANDS) {
       if (row.englishPending) continue;
-      assert.equal(resolvedIntent(row.english), row.intent, row.english);
+      assert.equal(resolvedIntent(row.english, "en-GB"), row.intent, row.english);
     }
   });
 
   it("understands the Czech form of every command that is not a recorded gap", () => {
     for (const row of COMMANDS) {
       if (row.pending) continue;
-      assert.equal(resolvedIntent(row.czech), row.intent, row.czech);
+      assert.equal(resolvedIntent(row.czech, "cs-CZ"), row.intent, row.czech);
     }
   });
 
   it("records a gap only while it is still a gap", () => {
-    const closed = COMMANDS.filter((row) => row.pending && resolvedIntent(row.czech) === row.intent);
+    const closed = COMMANDS.filter((row) => row.pending && resolvedIntent(row.czech, "cs-CZ") === row.intent);
     assert.deepEqual(
       closed.map((row) => row.czech),
       [],
@@ -106,7 +107,7 @@ describe("spoken command coverage by language", () => {
     // Raise this floor as gaps close. It may never be lowered: a drop means a
     // command a Czech speaker used yesterday now needs the model again.
     const CZECH_FLOOR = 38;
-    const understood = COMMANDS.filter((row) => resolvedIntent(row.czech) === row.intent).length;
+    const understood = COMMANDS.filter((row) => resolvedIntent(row.czech, "cs-CZ") === row.intent).length;
     assert.ok(
       understood >= CZECH_FLOOR,
       `Czech commands understood without the model: ${understood}/${COMMANDS.length}, floor is ${CZECH_FLOOR}`,

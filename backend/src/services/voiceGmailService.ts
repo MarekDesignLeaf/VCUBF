@@ -86,7 +86,7 @@ async function eligibleGmailSource(user: AuthedUser, from?: string) {
   }
   // The account the user named, else the only one, else the default sender;
   // otherwise the owner is asked to choose rather than {assistant} picking.
-  const choice = chooseGmailSendingAccount(authorised, from);
+  const choice = chooseGmailSendingAccount(authorised, from, user.voiceLanguage);
   if (!choice.ok) {
     const accounts = choice.candidates.map(gmailAccountLabel);
     return fail(409, choice.error, choice.error === "GMAIL_ACCOUNT_NOT_FOUND"

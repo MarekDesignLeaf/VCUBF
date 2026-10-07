@@ -19,12 +19,40 @@ export type GmailAccountChoice<T extends GmailSendingCandidate> =
   | { ok: true; source: T; reason: "named" | "only" | "default" }
   | { ok: false; error: "GMAIL_ACCOUNT_NOT_FOUND" | "AMBIGUOUS_GMAIL_SOURCE"; candidates: T[] };
 
-// Words that say "account" or "from" rather than which account.
-const FILLER = new Set([
-  "z", "ze", "od", "s", "from", "the", "my", "muj", "meho", "mym", "moje",
-  "ucet", "uctu", "uctem", "ucty", "account", "mailbox", "schranka", "schranky",
-  "email", "e", "mail", "mailu", "emailu", "adresa", "adresy", "adresou", "address",
-]);
+type AccountWordsLanguage = "en" | "cs" | "pl";
+
+// The words of the language switched on, plus English, the system's internal
+// language, in which the language model may write the reference. With Czech
+// on, Polish words are not read, nor Czech ones with Polish on.
+const ACCOUNT_WORDS: Record<AccountWordsLanguage, { filler: string[]; business: string[]; personal: string[] }> = {
+  en: {
+    filler: ["from", "the", "my", "account", "mailbox", "email", "e", "mail", "address"],
+    business: ["business", "company", "work", "office"],
+    personal: ["personal", "private", "home"],
+  },
+  cs: {
+    filler: ["z", "ze", "od", "s", "muj", "meho", "mym", "moje", "ucet", "uctu", "uctem", "ucty", "schranka", "schranky",
+      "email", "e", "mail", "mailu", "emailu", "adresa", "adresy", "adresou"],
+    business: ["firemni", "firma", "firmy", "pracovni", "kancelar"],
+    personal: ["osobni", "soukromy", "soukrome", "domaci"],
+  },
+  pl: {
+    filler: ["z", "ze", "od", "konta", "konto", "email", "e", "mail"],
+    business: ["firmowy", "firmowe", "sluzbowy", "sluzbowe"],
+    personal: ["prywatny", "prywatne", "osobisty", "osobiste", "domowy"],
+  },
+};
+
+function accountWords(language: string) {
+  const prefix = language.trim().toLowerCase().split("-", 1)[0];
+  const own = ACCOUNT_WORDS[(prefix === "cs" || prefix === "pl" ? prefix : "en") as AccountWordsLanguage];
+  const english = ACCOUNT_WORDS.en;
+  return own === english ? english : {
+    filler: [...own.filler, ...english.filler],
+    business: [...own.business, ...english.business],
+    personal: [...own.personal, ...english.personal],
+  };
+}
 
 function plain(value: string) {
   return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("en");
@@ -46,17 +74,16 @@ function sameWord(spoken: string, name: string) {
   return common >= Math.min(spoken.length, name.length) - 2;
 }
 
-// Owners call the same account by its purpose in either language: the
-// "Business Gmail" source is "firemní" when spoken in Czech.
-const SAME_MEANING = [
-  ["business", "company", "work", "office", "firemni", "firma", "firmy", "pracovni", "kancelar"],
-  ["personal", "private", "home", "osobni", "soukromy", "soukrome", "domaci"],
-];
+// Owners call an account by its purpose: the "Business Gmail" source is
+// "firemní" when spoken in Czech. The account's own name may be written in any
+// language, so its purpose is recognised in all of them; what the user says is
+// read in the language switched on.
+const PURPOSES = ["business", "personal"] as const;
 
-function meaning(word: string) {
+function meaning(word: string, languages: Array<(typeof ACCOUNT_WORDS)[AccountWordsLanguage]>) {
   if (word.length < 4) return undefined;
-  const index = SAME_MEANING.findIndex((group) => group.some((known) => sameWord(word, known)));
-  return index < 0 ? undefined : `#meaning${index}`;
+  const purpose = PURPOSES.find((name) => languages.some((words) => words[name].some((known) => sameWord(word, known))));
+  return purpose ? `#${purpose}` : undefined;
 }
 
 // The address contributes its mailbox name and its provider ("designleaf",
@@ -69,34 +96,38 @@ function addressWords(address: string | null) {
 
 function nameWords(candidate: GmailSendingCandidate) {
   const named = words(candidate.displayName);
-  const meanings = named.map(meaning).filter((value): value is string => Boolean(value));
+  const meanings = named.map((word) => meaning(word, Object.values(ACCOUNT_WORDS))).filter((value): value is string => Boolean(value));
   return [...named, ...addressWords(candidate.accountEmail), ...meanings];
 }
 
-function spokenMatches(word: string, names: string[]) {
-  const spokenMeaning = meaning(word);
+function spokenMatches(word: string, names: string[], language: string) {
+  const spokenMeaning = meaning(word, [accountWords(language)]);
   return names.some((name) => (name.startsWith("#") ? name === spokenMeaning : sameWord(word, name)));
 }
 
-/** Accounts the spoken or typed reference points at; empty when none does. */
-export function matchGmailAccounts<T extends GmailSendingCandidate>(candidates: T[], reference: string): T[] {
+/**
+ * Accounts the spoken or typed reference points at; empty when none does.
+ * `language` is the one switched on, whose words the reference is read in.
+ */
+export function matchGmailAccounts<T extends GmailSendingCandidate>(candidates: T[], reference: string, language: string): T[] {
   const trimmed = reference.trim();
   if (!trimmed) return [];
   if (trimmed.includes("@")) {
     const address = plain(trimmed);
     return candidates.filter((candidate) => candidate.accountEmail && plain(candidate.accountEmail) === address);
   }
-  const spoken = words(trimmed).filter((word) => !FILLER.has(word));
+  const filler = new Set(accountWords(language).filler);
+  const spoken = words(trimmed).filter((word) => !filler.has(word));
   if (!spoken.length) return [];
   return candidates.filter((candidate) => {
     const names = nameWords(candidate);
-    return spoken.every((word) => spokenMatches(word, names));
+    return spoken.every((word) => spokenMatches(word, names, language));
   });
 }
 
-export function chooseGmailSendingAccount<T extends GmailSendingCandidate>(candidates: T[], reference?: string): GmailAccountChoice<T> {
+export function chooseGmailSendingAccount<T extends GmailSendingCandidate>(candidates: T[], reference: string | undefined, language: string): GmailAccountChoice<T> {
   if (reference?.trim()) {
-    const named = matchGmailAccounts(candidates, reference);
+    const named = matchGmailAccounts(candidates, reference, language);
     if (named.length === 1) return { ok: true, source: named[0], reason: "named" };
     return named.length === 0
       ? { ok: false, error: "GMAIL_ACCOUNT_NOT_FOUND", candidates }

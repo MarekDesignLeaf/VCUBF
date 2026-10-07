@@ -101,10 +101,13 @@ describe("Emma connector commands", () => {
   });
 
   it("reads tomorrow's staged Google Calendar events without an AI round trip", async () => {
+    // Asked in Czech, so Czech is the language switched on.
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "cs-CZ" } });
     const response = await request(app)
       .post("/command/assistant")
       .set("Authorization", `Bearer ${token}`)
       .send({ text: "co mám zítra v kalendáři", input_method: "voice_transcript", language: "cs-CZ", history: [] });
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "en-GB" } });
     assert.equal(response.status, 200);
     assert.equal(response.body.intent, "list_calendar_events");
     assert.equal(response.body.data.items.length, 1);

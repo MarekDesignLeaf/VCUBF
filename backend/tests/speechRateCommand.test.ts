@@ -33,21 +33,22 @@ describe("Changing how fast she talks", () => {
     ["mluv normálně", "normal"],
   ] as const) {
     it(`understands "${phrase}"`, () => {
-      const parsed = parseTextCommand(phrase);
+      // Each phrase in the language it is said in; only that language reads it.
+      const parsed = parseTextCommand(phrase, /^(?:speak|slow)/.test(phrase) ? "en-GB" : "cs-CZ");
       assert.equal(parsed.intent, "set_speech_rate");
       assert.equal((parsed.entities as { change?: string }).change, change);
     });
   }
 
   it("understands an explicit number and a percentage", () => {
-    assert.equal((parseTextCommand("nastav rychlost 1.4").entities as { rate?: number }).rate, 1.4);
+    assert.equal((parseTextCommand("nastav rychlost 1.4", "cs-CZ").entities as { rate?: number }).rate, 1.4);
     // Said as a percentage rather than a multiplier.
-    assert.equal((parseTextCommand("rychlost 130").entities as { rate?: number }).rate, 1.3);
+    assert.equal((parseTextCommand("rychlost 130", "cs-CZ").entities as { rate?: number }).rate, 1.3);
   });
 
   it("does not mistake ordinary speech for a speed change", () => {
     for (const phrase of ["ukaž klienty", "vytvoř zakázku pro Nováka", "kolik mám faktur"]) {
-      assert.notEqual(parseTextCommand(phrase).intent, "set_speech_rate", phrase);
+      assert.notEqual(parseTextCommand(phrase, "cs-CZ").intent, "set_speech_rate", phrase);
     }
   });
 
@@ -58,8 +59,9 @@ describe("Changing how fast she talks", () => {
     return response.body as { ok: boolean; message?: string; data?: { percent?: number; voiceSpeechRate?: number } };
   }
 
+  // The test user starts in English, so these are said in English.
   it("speeds up and says what the value now is", async () => {
-    const result = await say("mluv rychleji");
+    const result = await say("speak faster");
     assert.equal(result.ok, true);
     // A number the user cannot see is not one they can steer, so the value has to
     // be in what she says — in whatever language she is speaking.
@@ -68,21 +70,21 @@ describe("Changing how fast she talks", () => {
   });
 
   it("says when it cannot go any faster, rather than doing nothing", async () => {
-    for (let i = 0; i < 10; i += 1) await say("rychleji");
-    const result = await say("rychleji");
+    for (let i = 0; i < 10; i += 1) await say("faster");
+    const result = await say("faster");
     assert.equal(result.data?.voiceSpeechRate, 2);
     assert.match(result.message ?? "", /as fast as I go/i);
   });
 
   it("returns to normal on request", async () => {
-    const result = await say("mluv normálně");
+    const result = await say("normal speed");
     assert.equal(result.data?.voiceSpeechRate, 1);
     assert.equal(result.data?.percent, 100);
   });
 
   it("says when it cannot go any slower", async () => {
-    for (let i = 0; i < 10; i += 1) await say("pomaleji");
-    const result = await say("pomaleji");
+    for (let i = 0; i < 10; i += 1) await say("slower");
+    const result = await say("slower");
     assert.equal(result.data?.voiceSpeechRate, 0.5);
     assert.match(result.message ?? "", /as slow as I go/i);
   });

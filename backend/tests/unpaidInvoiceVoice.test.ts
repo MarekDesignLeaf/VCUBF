@@ -17,7 +17,8 @@ describe("Unpaid invoice voice query", () => {
     const { company, admin, worker } = await seedCompanyAndAdmin();
     companyId = company.id;
     await prisma.user.update({ where: { id: admin.id }, data: { voiceLanguage: "cs-CZ" } });
-    await prisma.user.update({ where: { id: worker.id }, data: { permissions: ["voice.execute"] } });
+    // Both ask in Czech, so Czech is the language switched on for both.
+    await prisma.user.update({ where: { id: worker.id }, data: { permissions: ["voice.execute"], voiceLanguage: "cs-CZ" } });
     token = (await request(app).post("/auth/login").send({ email: admin.email, password: "Password123!" })).body.token;
     workerToken = (await request(app).post("/auth/login").send({ email: worker.email, password: "Password123!" })).body.token;
     const client = await prisma.client.create({ data: { companyId, displayName: "Invoice voice fixture" } });
@@ -40,9 +41,11 @@ describe("Unpaid invoice voice query", () => {
 
   it("recognises Czech and English count questions without a model", () => {
     for (const text of ["Kolik mám nezaplacených faktur?", "kolik máme neuhrazených faktur", "How many unpaid invoices do I have?", "Kdo mi nezaplatil?", "Who owes us money?"]) {
-      assert.deepEqual(parseTextCommand(text), { intent: "execute_action", entities: { action: "get_unpaid_invoices", parameters: {} } });
+      // Each question in its own language, as it is read when that language is on.
+      const language = /^(?:how|who)/i.test(text) ? "en-GB" : "cs-CZ";
+      assert.deepEqual(parseTextCommand(text, language), { intent: "execute_action", entities: { action: "get_unpaid_invoices", parameters: {} } });
     }
-    assert.equal(parseTextCommand("zaplať všechny nezaplacené faktury").intent, "unrecognized");
+    assert.equal(parseTextCommand("zaplať všechny nezaplacené faktury", "cs-CZ").intent, "unrecognized");
   });
 
   it("counts unpaid issued invoices, includes partial payments, excludes drafts, paid, void and other tenants", async () => {

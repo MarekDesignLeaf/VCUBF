@@ -43,20 +43,37 @@ describe("Emma notification deletion", () => {
 
   it("does not act on Polish while Czech is switched on", async () => {
     await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "cs-CZ" } });
-    const refused = await request(app)
+    // Only the Czech grammar reads the sentence, and it is not Czech.
+    const typed = await request(app)
       .post("/command/text")
       .set("Authorization", `Bearer ${token}`)
       .send({ text: "usuń wszystkie powiadomienia", input_method: "voice_transcript" });
-    assert.equal(refused.status, 422);
-    assert.equal(refused.body.error, "LANGUAGE_NOT_ACTIVE");
-    assert.match(refused.body.message, /^Teď mluvím česky a polsky nerozumím\./);
+    assert.equal(typed.body.intent, "unrecognized");
+    assert.match(typed.body.message, /^Tomu příkazu nerozumím\./, "said in Czech, with a Czech example");
     assert.equal(await prisma.voicePendingAction.count({ where: { actionType: "delete_all_notifications" } }), 0, "nothing was prepared");
-    const assistant = await request(app)
-      .post("/command/assistant")
-      .set("Authorization", `Bearer ${token}`)
-      .send({ text: "usuń wszystkie powiadomienia", input_method: "voice_transcript", history: [] });
-    assert.equal(assistant.body.error, "LANGUAGE_NOT_ACTIVE", "and it is not handed to the language model either");
-    assert.equal(assistant.body.actionExecuted, false);
+
+    // The language model is told which language is on and to act on no other.
+    const previousKey = process.env.OPENAI_API_KEY;
+    const previousFetch = globalThis.fetch;
+    let instructions = "";
+    process.env.OPENAI_API_KEY = "test-key";
+    globalThis.fetch = async (_input, init) => {
+      instructions = JSON.parse(String(init?.body)).instructions;
+      return Response.json({ output: [{ content: [{ text: JSON.stringify({ kind: "reply", canonical_command: null, message: "Teď mluvím česky." }) }] }] });
+    };
+    try {
+      const spoken = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ text: "usuń wszystkie powiadomienia", input_method: "voice_transcript", history: [] });
+      assert.equal(spoken.body.actionExecuted, false);
+      assert.match(instructions, /The language switched on is Czech\. Act only on what the user says in Czech\./);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousKey;
+    }
+    assert.equal(await prisma.voicePendingAction.count({ where: { actionType: "delete_all_notifications" } }), 0);
   });
 
   it("previews Polish voice deletion once Polish is switched on, waits for confirmation, then hides only reviewed notifications", async () => {

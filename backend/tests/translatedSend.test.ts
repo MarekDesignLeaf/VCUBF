@@ -68,6 +68,8 @@ describe("Dictated in Czech, sent in English", () => {
     process.env.META_APP_SECRET = "test-app-secret";
     await resetDb();
     await seedCompanyAndAdmin();
+    // The owner speaks Czech here, so his yes is the Czech "ano".
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "cs-CZ" } });
     token = (await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" })).body.token;
     const created = await request(app).post("/connectors/sources").set("Authorization", `Bearer ${token}`)
       .send({ connector_key: "whatsapp_business", display_name: "Business number", configured_scopes: ["send:messages"] });

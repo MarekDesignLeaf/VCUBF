@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { PROGRAM_KNOWLEDGE } from "../lib/programKnowledge.js";
-import { VOICE_LANGUAGES } from "../lib/voiceLanguages.js";
+import { VOICE_LANGUAGES, VOICE_LANGUAGE_LABELS, isVoiceLanguage } from "../lib/voiceLanguages.js";
 import type { AssistantContext } from "./assistantMemoryService.js";
 import { buildEmmaBehaviorInstructions } from "./emmaBehaviorService.js";
 import { EMMA_EXECUTABLE_ACTION_GUIDE } from "../lib/emmaExecutableActionCatalogue.js";
@@ -95,6 +95,17 @@ Additional allowlisted Secretary actions use exactly:
 voice action ACTION_NAME JSON_OBJECT
 The JSON must contain only facts explicitly supplied by the user. Never invent a name, identifier, date, amount, status, address, phone number or record value. Available actions and fields:
 ${EMMA_EXECUTABLE_ACTION_GUIDE}`.trim();
+
+/**
+ * Only the language switched on is understood. The deterministic grammar is
+ * already chosen by it; this keeps the model from acting on a sentence in
+ * another language either. Names, addresses and the text of a message are not
+ * the language of the request, so they may be in any language.
+ */
+export function activeLanguageRule(language: string): string {
+  const name = isVoiceLanguage(language) ? VOICE_LANGUAGE_LABELS[language] : language;
+  return `The language switched on is ${name}. Act only on what the user says in ${name}. Judge that by the sentence's own grammar and command words, not by names, e-mail addresses, product names or the words of a message to be sent, which may be in any language. When the user speaks another language, do not interpret the request and do not return a command: return kind reply and say, in ${name}, that you are working in ${name} and that saying just the name of a language switches to it.`;
+}
 
 function outputText(payload: any): string | undefined {
   if (typeof payload?.output_text === "string") return payload.output_text;
@@ -293,6 +304,7 @@ export async function interpretVoiceRequest(input: {
       max_output_tokens: 500,
       instructions: withAssistantName(`You are {assistant}, the concise voice interface for a business operating system.
 Reply exclusively in the user's current language (${input.language}). Do not mix in words, number readings, sentence fragments or grammar from any other language. Previous conversation excerpts may be in an older language; never copy their language after the current language has changed. Address the user naturally when useful; their name is ${input.userName}.
+${activeLanguageRule(input.language)}
 Never claim an action happened unless kind is command and the backend later confirms it.
 Never claim that you will now perform, proceed with, or complete a business change in a reply, clarification, or plan. Only a canonical command can request a change, and only the later backend result can confirm it.
 Never invent company data. Any action marked preview only may be prepared, but it must not be described as completed and the reviewed confirmation flow remains mandatory. Sending, deletion, disconnecting, merging, payment, publication and other confirmation-required operations must never bypass their owning service's preview. The supported Gmail and notification-deletion commands use short-lived reviews, and nothing is sent or hidden until a separate confirmation succeeds. Deleting notifications hides only the reviewed attention-feed items and never deletes their source business records.

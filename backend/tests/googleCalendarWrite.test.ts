@@ -172,7 +172,7 @@ describe("Writing to Google Calendar after review", () => {
     assert.equal(waiting.end_time, "09:00");
     assert.match(String(waiting.event_id), /^[a-v0-9]{20,64}$/);
 
-    const confirmed = await speak("ano");
+    const confirmed = await speak("yes");
     assert.equal(confirmed.body.ok, true, JSON.stringify(confirmed.body));
     assert.equal(writes.length, 1);
     const written = writes[0];
@@ -244,7 +244,7 @@ describe("Writing to Google Calendar after review", () => {
     assert.equal(preview.to.date, day);
     assert.equal(writes.length, 0);
 
-    const confirmed = await speak("ano");
+    const confirmed = await speak("yes");
     assert.equal(confirmed.body.ok, true, JSON.stringify(confirmed.body));
     assert.equal(writes.length, 1);
     assert.equal(writes[0].method, "PATCH");
@@ -279,7 +279,7 @@ describe("Writing to Google Calendar after review", () => {
     assert.equal(asked.body.data.preview.attendeeCount, 1);
     assert.equal(asked.body.data.preview.othersNotified, false);
     assert.equal(writes.length, 0);
-    const confirmed = await speak("ano");
+    const confirmed = await speak("yes");
     assert.equal(confirmed.body.ok, true, JSON.stringify(confirmed.body));
     assert.deepEqual(writes.map((write) => write.method), ["DELETE"]);
     assert.equal(writes[0].url.searchParams.get("sendUpdates"), "none");
