@@ -121,6 +121,8 @@ describe("Commands taught by doing them", () => {
     // Whichever stored it, each answer can tell the user what to say next time.
     for (const outcome of both) {
       assert.ok([...outcome!.addedNames, ...outcome!.existingNames].includes("nová nabídka"), JSON.stringify(outcome));
+      // "Already known as" is said only with a name to say.
+      if (outcome!.alreadyKnown) assert.ok(outcome!.existingNames.length > 0, JSON.stringify(outcome));
     }
     assert.deepEqual(both.flatMap((outcome) => outcome!.takenNames), [], "its own name is not reported as taken");
 

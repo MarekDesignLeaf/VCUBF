@@ -160,6 +160,10 @@ export async function saveMacro(user: AuthedUser, rawInput: unknown): Promise<Sa
       .map((name) => name.spoken)
       .filter((name) => !addedNames.includes(name))
     : [];
+  // A command another save of this same recording created a moment ago, with
+  // no name yet, is not "already known": to the user it is this save, and the
+  // answer must name what to say next time rather than "known as" nothing.
+  if (alreadyKnown && existingNames.length === 0 && addedNames.length > 0) alreadyKnown = false;
 
   return {
     macroId: macro.id,
