@@ -136,7 +136,7 @@ def default_v2_config() -> dict[str, Any]:
             "provider": "openai",
             "apiKeyEnv": "OPENAI_API_KEY",
             "model": "tts-1",
-            "voice": "nova",
+            "voice": "onyx",
             "deviceName": "",
         },
         "session": {
@@ -919,6 +919,19 @@ WAKE_PROVIDER = "openai_vad"
 STT_PROVIDER = "openai"
 TTS_PROVIDER = "openai"
 
+# Alfonzo is a man, so he speaks only with an OpenAI voice that sounds like
+# one. "nova", a woman's voice, was the default while the assistant was
+# female; an older voice-v2.json that still names it (or any other woman's or
+# neutral voice) gets the default instead.
+MALE_TTS_VOICES = frozenset({"onyx", "echo", "ash"})
+DEFAULT_TTS_VOICE = "onyx"
+
+
+def assistant_voice(configured: Any) -> str:
+    """The configured voice when it is a man's, otherwise the default."""
+    voice = str(configured or "").strip().lower()
+    return voice if voice in MALE_TTS_VOICES else DEFAULT_TTS_VOICE
+
 
 def provider_status(config: dict[str, Any]) -> dict[str, Any]:
     """Report what this runtime will use. It only ever uses OpenAI.
@@ -971,7 +984,7 @@ def provider_status(config: dict[str, Any]) -> dict[str, Any]:
             "provider": TTS_PROVIDER,
             "apiKeyPresent": bool(environment_value("OPENAI_API_KEY")),
             "model": str(tts.get("model") or "tts-1"),
-            "voice": str(tts.get("voice") or "nova"),
+            "voice": assistant_voice(tts.get("voice")),
         },
         "speech": {
             "requestedProvider": requested_tts,
@@ -1185,7 +1198,7 @@ class OpenAIPcmTts:
             raise RuntimeError("OPENAI_TTS_REQUIRED")
         self.api_key = environment_value("OPENAI_API_KEY")
         self.model = str(config.get("model") or "tts-1").strip()
-        self.voice = str(config.get("voice") or "nova").strip()
+        self.voice = assistant_voice(config.get("voice"))
 
     def stream(self, text: str, language: str, speaker: DuplexSpeaker, generation: int, current_generation: callable) -> None:
         if not self.api_key:

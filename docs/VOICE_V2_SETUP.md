@@ -8,8 +8,10 @@ Voice v2 is the single Windows Alfonzo runtime. It speaks only OpenAI:
 - **Transcription** — OpenAI (`gpt-4o-transcribe` by default) through the
   authenticated Secretary endpoint `POST /command/transcribe`. The OpenAI key
   lives in the backend, not on the PC;
-- **Speech output** — OpenAI TTS (`tts-1`, voice `nova` by default) streamed as
-  PCM;
+- **Speech output** — OpenAI TTS (`tts-1`, voice `onyx` by default) streamed as
+  PCM. Alfonzo is a man, so only a man's voice is used (`onyx`, `echo` or
+  `ash`); a configuration that still names `nova` or another woman's or neutral
+  voice is spoken with `onyx`, and the installer rewrites it;
 - **Every business action** — the authenticated Secretary `/command/assistant`
   endpoint, with its permission checks, validation, confirmation and audit.
 

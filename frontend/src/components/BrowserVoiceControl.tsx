@@ -431,16 +431,33 @@ const FEMALE_VOICE_NAMES = new Set([
   "kyoko", "yuna", "lekha", "female",
 ]);
 
+/** Male voices shipped by Windows and macOS, for the same reason. */
+const MALE_VOICE_NAMES = new Set([
+  "david", "mark", "george", "james", "richard", "ryan", "guy", "jakub", "adam",
+  "stefan", "paul", "pablo", "raul", "cosimo", "pavel", "daniel", "alex", "fred",
+  "thomas", "diego", "luca", "jorge", "juan", "markus", "yannick", "xander",
+]);
+
+function nameWords(voice: SpeechSynthesisVoice): string[] {
+  return voice.name.toLowerCase().split(/[^a-zà-ž]+/i);
+}
+
 function isFemaleVoice(voice: SpeechSynthesisVoice): boolean {
-  const name = voice.name.toLowerCase();
-  if (name.includes("female")) return true;
-  return name.split(/[^a-zà-ž]+/i).some((word) => FEMALE_VOICE_NAMES.has(word));
+  if (voice.name.toLowerCase().includes("female")) return true;
+  return nameWords(voice).some((word) => FEMALE_VOICE_NAMES.has(word));
+}
+
+function isMaleVoice(voice: SpeechSynthesisVoice): boolean {
+  if (isFemaleVoice(voice)) return false;
+  return nameWords(voice).some((word) => word === "male" || MALE_VOICE_NAMES.has(word));
 }
 
 /**
- * A voice in the requested language, preferring a female one. Language wins over
- * gender: Czech words spoken by an English voice are far worse than a male
- * Czech voice, and Windows ships no female Czech voice at all.
+ * A voice in the requested language, preferring a man's: {assistant} is a man.
+ * A voice known to be male comes first, then one not known to be female.
+ * Language still wins over gender: Czech words spoken by an English voice are
+ * far worse than the wrong voice, so a woman's voice is used only when the
+ * language has nothing else.
  */
 function pickVoice(language: string): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis.getVoices();
@@ -450,7 +467,7 @@ function pickVoice(language: string): SpeechSynthesisVoice | null {
   if (sameLanguage.length === 0) return null;
   const exact = sameLanguage.filter((voice) => voice.lang.replace("_", "-").toLowerCase() === language.toLowerCase());
   const candidates = exact.length > 0 ? exact : sameLanguage;
-  return candidates.find(isFemaleVoice) ?? candidates[0];
+  return candidates.find(isMaleVoice) ?? candidates.find((voice) => !isFemaleVoice(voice)) ?? candidates[0];
 }
 
 /**

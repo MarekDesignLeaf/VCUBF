@@ -1,15 +1,44 @@
 /**
  * Spoken replies through OpenAI text-to-speech.
  *
- * The browser can only use voices installed in Windows, and Windows ships no
- * female Czech voice. OpenAI's voices speak every language the app supports,
- * and voice runs on OpenAI only, so this is the one server-side voice.
+ * The browser can only use voices installed in Windows. OpenAI's voices speak
+ * every language the app supports, and voice runs on OpenAI only, so this is
+ * the one server-side voice.
  *
  * Only the reply text is sent. Configuration:
  *   OPENAI_API_KEY    required; without it the browser uses its own voice
  *   OPENAI_TTS_MODEL  optional, default "tts-1"
- *   OPENAI_TTS_VOICE  optional, default "nova"
+ *   OPENAI_TTS_VOICE  optional, one of MALE_VOICES, default "onyx"
  */
+
+/**
+ * OpenAI voices that sound like a man.
+ *
+ * {assistant} is a man, so he speaks only with one of these. The voice used to
+ * default to "nova", a woman's voice, from when the assistant was female; a
+ * deployment that still names a woman's (or the neutral "alloy") voice in
+ * OPENAI_TTS_VOICE gets the default instead of speaking as a woman.
+ */
+export const MALE_VOICES: ReadonlySet<string> = new Set(["onyx", "echo", "ash"]);
+export const DEFAULT_VOICE = "onyx";
+
+/** The configured voice when it is a man's, otherwise the default. */
+export function assistantVoice(configured = process.env.OPENAI_TTS_VOICE): string {
+  const voice = configured?.trim().toLowerCase();
+  return voice && MALE_VOICES.has(voice) ? voice : DEFAULT_VOICE;
+}
+
+/**
+ * The same rule for a realtime voice session, whose voices differ: its default
+ * used to be "marin", a woman's voice.
+ */
+export const MALE_REALTIME_VOICES: ReadonlySet<string> = new Set(["cedar", "ash", "echo", "verse"]);
+export const DEFAULT_REALTIME_VOICE = "cedar";
+
+export function assistantRealtimeVoice(configured = process.env.OPENAI_REALTIME_VOICE): string {
+  const voice = configured?.trim().toLowerCase();
+  return voice && MALE_REALTIME_VOICES.has(voice) ? voice : DEFAULT_REALTIME_VOICE;
+}
 
 /** Per synthesised piece: long enough for one full OpenAI request. */
 const SPEECH_TIMEOUT_MS = 30_000;
@@ -69,14 +98,14 @@ export async function speakReply(text: string, _language: string, rate = 1): Pro
 
 // Short replies repeat ("Ano?", "Hotovo.", "Zpráva je odeslaná."). Each one
 // cost a full OpenAI round trip — one to two seconds before {assistant} could
-// answer to her name. The same words in the same voice are the same audio, so
+// answer to his name. The same words in the same voice are the same audio, so
 // they are kept in memory and answered at once the next time.
 const CACHEABLE_TEXT = 160;
 const CACHE_ENTRIES = 200;
 const spokenCache = new Map<string, SpokenReply>();
 
 function cacheKey(text: string, rate: number) {
-  return [process.env.OPENAI_TTS_MODEL?.trim() || "tts-1", process.env.OPENAI_TTS_VOICE?.trim() || "nova", openAiSpeed(rate), text].join("\u0000");
+  return [process.env.OPENAI_TTS_MODEL?.trim() || "tts-1", assistantVoice(), openAiSpeed(rate), text].join("\u0000");
 }
 
 async function speakChunk(key: string, trimmed: string, rate: number): Promise<SpokenReply | null> {
@@ -106,7 +135,7 @@ async function synthesise(key: string, trimmed: string, rate: number): Promise<S
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: process.env.OPENAI_TTS_MODEL?.trim() || "tts-1",
-        voice: process.env.OPENAI_TTS_VOICE?.trim() || "nova",
+        voice: assistantVoice(),
         input: trimmed,
         response_format: "mp3",
         speed: openAiSpeed(rate),

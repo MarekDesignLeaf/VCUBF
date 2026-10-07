@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, it } from "node:test";
-import { isSpeechConfigured, speakReply } from "../src/services/voiceSpeechService.js";
+import { assistantRealtimeVoice, assistantVoice, DEFAULT_VOICE, isSpeechConfigured, speakReply } from "../src/services/voiceSpeechService.js";
 
 const realFetch = globalThis.fetch;
 const realKey = process.env.OPENAI_API_KEY;
+const realVoice = process.env.OPENAI_TTS_VOICE;
 
 describe("Spoken replies use OpenAI text-to-speech only", () => {
   afterEach(() => {
     globalThis.fetch = realFetch;
     if (realKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = realKey;
+    if (realVoice === undefined) delete process.env.OPENAI_TTS_VOICE;
+    else process.env.OPENAI_TTS_VOICE = realVoice;
   });
   after(() => { globalThis.fetch = realFetch; });
 
@@ -68,5 +71,44 @@ describe("Spoken replies use OpenAI text-to-speech only", () => {
     assert.equal(inputs.slice().sort((a, b) => text.indexOf(a) - text.indexOf(b)).join(" "), text, "nothing is lost");
     const audio = new TextDecoder().decode(spoken!.audio);
     assert.ok(audio.startsWith("[Sentence 000"), "the first piece plays first");
+  });
+  it("Alfonzo speaks with a man's voice, whatever a deployment left configured", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    const voices: unknown[] = [];
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      voices.push(JSON.parse(String(init?.body)).voice);
+      return new Response(new Uint8Array([1]), { status: 200, headers: { "content-type": "audio/mpeg" } });
+    }) as typeof fetch;
+
+    delete process.env.OPENAI_TTS_VOICE;
+    await speakReply("Voice check without a setting.", "en-GB");
+    // "nova" was the default while the assistant was a woman; a deployment that
+    // still names it, or any other woman's or neutral voice, must not be heard.
+    for (const notMale of ["nova", "shimmer", "coral", "sage", "alloy", "NOVA "]) {
+      process.env.OPENAI_TTS_VOICE = notMale;
+      await speakReply(`Voice check with ${notMale.trim()} configured.`, "en-GB");
+    }
+    process.env.OPENAI_TTS_VOICE = " Echo ";
+    await speakReply("Voice check with echo configured.", "en-GB");
+
+    assert.equal(DEFAULT_VOICE, "onyx");
+    assert.deepEqual(voices, ["onyx", "onyx", "onyx", "onyx", "onyx", "onyx", "onyx", "echo"]);
+  });
+
+  it("keeps only the male voices OpenAI offers", () => {
+    assert.equal(assistantVoice(undefined), "onyx");
+    assert.equal(assistantVoice(""), "onyx");
+    assert.equal(assistantVoice("ash"), "ash");
+    assert.equal(assistantVoice("onyx"), "onyx");
+    assert.equal(assistantVoice("nova"), "onyx");
+    assert.equal(assistantVoice("not-a-voice"), "onyx");
+  });
+
+  it("a realtime session speaks with a man's voice too", () => {
+    // "marin", a woman's voice, was the realtime default.
+    assert.equal(assistantRealtimeVoice(undefined), "cedar");
+    assert.equal(assistantRealtimeVoice("marin"), "cedar");
+    assert.equal(assistantRealtimeVoice("shimmer"), "cedar");
+    assert.equal(assistantRealtimeVoice(" Verse "), "verse");
   });
 });
