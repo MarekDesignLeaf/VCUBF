@@ -148,6 +148,22 @@ describe("Emma Gmail sending", () => {
       assert.match(raw, /Your quote is ready\./);
       assert.doesNotMatch(raw, /Vaše nabídka/, "the Czech never leaves");
       assert.equal(translations, 1, "translated once, before the review; never again after the yes");
+
+      // A new email whose translation fails withdraws the one still waiting, so
+      // the next yes cannot send the older email.
+      const waiting = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ text: "pošli e-mail na novak@example.com; předmět Nabídka plotu; text Vaše nabídka je hotová", input_method: "voice_transcript", history: [] });
+      assert.equal(waiting.body.intent, "prepare_gmail_message");
+      globalThis.fetch = async () => new Response("upstream down", { status: 503 });
+      const failed = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ text: "pošli e-mail na eva@example.com; předmět Termín; text Přijedeme zítra", input_method: "voice_transcript", history: [] });
+      assert.equal(failed.body.error, "TRANSLATION_FAILED", JSON.stringify(failed.body));
+      assert.match(failed.body.message, /nepodařilo přeložit/);
+      assert.equal(await prisma.voicePendingAction.count({ where: { actionType: "send_gmail_message", status: "pending" } }), 0, "nothing is left waiting for a yes");
     } finally {
       await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "en-GB" } });
       if (originalOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;

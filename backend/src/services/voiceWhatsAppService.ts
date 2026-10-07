@@ -95,8 +95,14 @@ export async function prepareVoiceWhatsAppMessage(user: AuthedUser, rawInput: un
       body = translation.body;
       reviewed = { sentIn: translation.languageLabel, dictated: translation.original.body };
     } catch (error) {
-      if (error instanceof TranslationUnavailable) return fail(503, error.reason, error.message);
-      throw error;
+      if (!(error instanceof TranslationUnavailable)) throw error;
+      // A new message was asked for, so an older one still waiting for a yes
+      // is withdrawn: the next yes must not send something else.
+      await prisma.voicePendingAction.updateMany({
+        where: { companyId: user.companyId, userId: user.id, actionType: PENDING_WHATSAPP_ACTION, status: "pending" },
+        data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: new Date() },
+      });
+      return fail(503, error.reason, error.message);
     }
   }
 

@@ -171,6 +171,12 @@ export async function prepareVoiceGmailMessage(user: AuthedUser, rawInput: unkno
   // and the confirmed send never translates again (section 41).
   const english = await inEnglish(user, parsed.data);
   if (!english.ok) {
+    // A new email was asked for, so an older one still waiting for a yes is
+    // withdrawn: the next yes must not send something else than was just said.
+    await prisma.voicePendingAction.updateMany({
+      where: { companyId: user.companyId, userId: user.id, actionType: PENDING_GMAIL_ACTION, status: "pending" },
+      data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: new Date() },
+    });
     await recordFailure(user, PREPARE_VOICE_GMAIL_MESSAGE_ACTION, english.error);
     return english;
   }
