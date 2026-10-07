@@ -108,7 +108,7 @@ Production environment contains these services:
 
 As of 2026-09-26, Railway reports the latest backend, frontend and Postgres deployments as successful. This does not replace live functional acceptance.
 
-GitHub Actions CI exists and runs backend build, Prisma generation, embedded PostgreSQL tests, frontend lint and frontend build on Node 22.
+GitHub Actions CI exists and runs backend build, Prisma generation, embedded PostgreSQL tests, frontend lint and frontend build on Node 22, and the Windows companion Python runtime tests (Python 3.13, audio packages stubbed) plus a PowerShell syntax check of its scripts.
 
 Node 22 is the current validated CI runtime. Node 24 remains a target only until a real migration is completed and verified.
 
