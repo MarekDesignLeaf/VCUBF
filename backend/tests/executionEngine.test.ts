@@ -72,6 +72,28 @@ describe("execution engine — the reviewed-action state machine", () => {
     await cancelReviewedAction(user, REVIEW.actionType);
   });
 
+  it("claiming the newest review cancels a stale older duplicate", async () => {
+    await prepareReviewedAction(user, REVIEW, { note: "current" });
+    // A stale duplicate from before the advisory lock shipped: older, pending.
+    const stale = await prisma.voicePendingAction.create({
+      data: {
+        companyId: user.companyId,
+        userId: user.id,
+        actionType: REVIEW.actionType,
+        payload: { note: "stale" },
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt: new Date(Date.now() - 60_000),
+      },
+    });
+    const claimed = await claimReviewedAction(user, REVIEW);
+    assert.ok(claimed.ok);
+    assert.equal(claimed.payload.note, "current");
+    const staleRow = await prisma.voicePendingAction.findUnique({ where: { id: stale.id } });
+    assert.equal(staleRow?.status, "cancelled");
+    assert.equal(staleRow?.payload, null);
+    await claimed.complete(true);
+  });
+
   it("of two simultaneous confirmations exactly one wins", async () => {
     await prepareReviewedAction(user, REVIEW, { note: "raced" });
     const [first, second] = await Promise.all([

@@ -154,9 +154,16 @@ export async function claimReviewedAction<Payload>(
 
   // Belt to the advisory lock's braces: should an older duplicate pending row
   // exist (rows written before the lock shipped, mid-deploy overlap), it is
-  // cancelled now, so a later yes can never claim a stale review.
+  // cancelled now, so a later yes can never claim a stale review. Only rows
+  // that predate the claimed one — a review legitimately prepared after the
+  // claim must survive, or its caller's fresh preview could never be confirmed.
   await prisma.voicePendingAction.updateMany({
-    where: { ...scope(user, definition.actionType), status: "pending", id: { not: pending.id } },
+    where: {
+      ...scope(user, definition.actionType),
+      status: "pending",
+      id: { not: pending.id },
+      createdAt: { lt: pending.createdAt },
+    },
     data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
   });
 
