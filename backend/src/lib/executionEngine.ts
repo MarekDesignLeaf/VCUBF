@@ -43,8 +43,11 @@ export interface ReviewedActionDefinition<Payload> {
   actionType: string;
   /** How long the review waits for its yes. */
   lifetimeMs: number;
-  /** The stored payload's shape; what no longer parses is not executed. */
-  payloadSchema: z.ZodType<Payload>;
+  /**
+   * The stored payload's shape; what no longer parses is not executed. It may
+   * transform (re-validate and normalise) the stored value on the way out.
+   */
+  payloadSchema: z.ZodType<Payload, z.ZodTypeDef, unknown>;
   /**
    * The status a claimed review carries while it executes. Kept per action
    * type because existing rows and tests know the current words.
@@ -79,6 +82,26 @@ export async function hasReviewedActionPending(user: ActingUser, actionType: str
       select: { id: true },
     })
   );
+}
+
+/**
+ * The newest review of this type still waiting for its yes, read without
+ * claiming it — for callers that need to know what a yes would mean (which
+ * action, to word the outcome) before they ask the engine to claim it. The
+ * payload is returned raw: it is a hint, never something to execute.
+ */
+export async function peekReviewedAction(
+  user: ActingUser,
+  actionType: string,
+  now = new Date()
+): Promise<{ payload: unknown } | undefined> {
+  await expireReviewedActions(user, actionType, now);
+  const pending = await prisma.voicePendingAction.findFirst({
+    where: { ...scope(user, actionType), status: "pending", expiresAt: { gt: now } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { payload: true },
+  });
+  return pending ? { payload: pending.payload } : undefined;
 }
 
 /**
@@ -138,6 +161,11 @@ export type ClaimedReviewedAction<Payload> =
        * be prepared again.
        */
       reason: "none" | "raced" | "invalid";
+      /**
+       * For "invalid" because the stored payload no longer parses: what the
+       * schema rejected, so the owning service can keep its own wording.
+       */
+      issues?: z.ZodIssue[];
     };
 
 /**
@@ -215,7 +243,7 @@ export async function claimReviewedAction<Payload>(
   const parsed = definition.payloadSchema.safeParse(pending.payload);
   if (!parsed.success) {
     await resolveReviewedAction(pending.id, "failed");
-    return { ok: false, reason: "invalid" };
+    return { ok: false, reason: "invalid", issues: parsed.error.issues };
   }
 
   return {

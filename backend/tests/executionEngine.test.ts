@@ -6,6 +6,7 @@ import {
   cancelReviewedAction,
   claimReviewedAction,
   hasReviewedActionPending,
+  peekReviewedAction,
   prepareReviewedAction,
   type ReviewedActionDefinition,
 } from "../src/lib/executionEngine.js";
@@ -250,10 +251,53 @@ describe("execution engine — the reviewed-action state machine", () => {
     await cancelReviewedAction(user, REVIEW.actionType);
   });
 
+  it("peeks at the waiting review without claiming it", async () => {
+    assert.equal(await peekReviewedAction(user, REVIEW.actionType), undefined);
+    await prepareReviewedAction(user, REVIEW, { note: "peeked" });
+    const peeked = await peekReviewedAction(user, REVIEW.actionType);
+    assert.deepEqual(peeked?.payload, { note: "peeked" });
+    // Peeking changes nothing: the review is still there to be claimed.
+    const claimed = await claimReviewedAction(user, REVIEW);
+    assert.ok(claimed.ok);
+    assert.equal(claimed.payload.note, "peeked");
+    assert.equal(await peekReviewedAction(user, REVIEW.actionType), undefined);
+    await claimed.complete(true);
+    // An expired review is not a hint either.
+    await prepareReviewedAction(user, REVIEW, { note: "stale" }, { now: new Date(Date.now() - REVIEW.lifetimeMs - 1000) });
+    assert.equal(await peekReviewedAction(user, REVIEW.actionType), undefined);
+  });
+
+  it("a transforming schema re-validates on the way out and reports what it rejected", async () => {
+    const strict: ReviewedActionDefinition<{ note: string; checked: true }> = {
+      ...REVIEW,
+      payloadSchema: z.object({ note: z.string() }).transform((value, ctx) => {
+        if (value.note === "reject me") {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["note"], message: "note is no longer acceptable" });
+          return z.NEVER;
+        }
+        return { note: value.note.trim(), checked: true as const };
+      }),
+    };
+    await prepareReviewedAction(user, strict, { note: "  normalised  ", checked: true });
+    const accepted = await claimReviewedAction(user, strict);
+    assert.ok(accepted.ok);
+    assert.deepEqual(accepted.payload, { note: "normalised", checked: true });
+    await accepted.complete(true);
+
+    await prepareReviewedAction(user, strict, { note: "reject me", checked: true });
+    const rejected = await claimReviewedAction(user, strict);
+    assert.equal(rejected.ok, false);
+    assert.equal(!rejected.ok && rejected.reason, "invalid");
+    const issue = !rejected.ok ? rejected.issues?.[0] : undefined;
+    assert.equal(issue?.path[0], "note");
+    assert.equal(issue?.message, "note is no longer acceptable");
+  });
+
   it("never crosses user or tenant", async () => {
     await prepareReviewedAction(user, REVIEW, { note: "mine" });
     const stranger = { id: user.id, companyId: "20000000-0000-0000-0000-000000000002" };
     assert.equal(await hasReviewedActionPending(stranger, REVIEW.actionType), false);
+    assert.equal(await peekReviewedAction(stranger, REVIEW.actionType), undefined);
     const claimed = await claimReviewedAction(stranger, REVIEW);
     assert.equal(claimed.ok, false);
     await cancelReviewedAction(user, REVIEW.actionType);
