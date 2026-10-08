@@ -155,4 +155,41 @@ describe("Contact Directory", () => {
     assert.equal(foreignLink.status, 404);
     assert.equal(foreignLink.body.error, "CLIENT_NOT_FOUND");
   });
+
+  it("archives a contact by voice only after its review is confirmed, exactly once", async () => {
+    const say = (text: string) => request(app).post("/command/text").set("Authorization", `Bearer ${adminToken}`).send({ text });
+    const contact = await prisma.contact.create({
+      data: { companyId, displayName: "Voice Archive Target", email: "voice-archive@example.test", source: "user_input" },
+    });
+
+    // A cancelled review changes nothing.
+    const firstPreview = await say("archive contact Voice Archive Target");
+    assert.equal(firstPreview.status, 202);
+    assert.equal(firstPreview.body.data.confirmationRequired, true);
+    const cancelled = await say("cancel contact deletion");
+    assert.equal(cancelled.status, 200);
+    assert.equal(cancelled.body.intent, "cancel_archive_contact");
+    assert.equal((await prisma.contact.findUnique({ where: { id: contact.id } }))?.isActive, true);
+    const cancelledAgain = await say("cancel contact deletion");
+    assert.equal(cancelledAgain.status, 409);
+    assert.equal(cancelledAgain.body.error, "NO_PENDING_CONTACT_ARCHIVE");
+
+    // A confirmed review archives once; a repeated yes finds nothing waiting.
+    const preview = await say("archive contact Voice Archive Target");
+    assert.equal(preview.status, 202);
+    assert.equal((await prisma.contact.findUnique({ where: { id: contact.id } }))?.isActive, true);
+    const confirmed = await say("confirm contact deletion");
+    assert.equal(confirmed.status, 200);
+    assert.equal(confirmed.body.intent, "confirm_archive_contact");
+    assert.equal((await prisma.contact.findUnique({ where: { id: contact.id } }))?.isActive, false);
+    const repeated = await say("confirm contact deletion");
+    assert.equal(repeated.status, 409);
+    assert.equal(repeated.body.error, "NO_PENDING_CONTACT_ARCHIVE");
+
+    const review = await prisma.voicePendingAction.findFirst({
+      where: { companyId, actionType: "archive_contact", status: "completed" },
+    });
+    assert.ok(review, "the confirmed review is resolved as completed");
+    assert.equal(review.payload, null);
+  });
 });
