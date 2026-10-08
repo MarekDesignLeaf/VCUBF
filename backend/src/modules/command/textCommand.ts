@@ -22,6 +22,7 @@ import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorServic
 import { getPendingEmmaActionName } from "../../services/emmaExecutableActionService.js";
 import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
 import { assistantNameFor } from "../../lib/assistantName.js";
+import { observeShadow, parserOutcomeOf } from "../../agents/shadowAgent.js";
 
 /**
  * The user's voice language as it is right now.
@@ -432,6 +433,8 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
         confirmationRequired: false,
         result: "success",
       });
+      // The agent in shadow sees the same request; nothing it proposes runs.
+      observeShadow({ user, channel: "assistant", language, text: alias.resolvedText, history, actual: { intent: `assistant_${assistant.kind}`, key: null } });
       return res.json({
         ok: true,
         kind: assistant.kind,
@@ -457,6 +460,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
         result: "error",
         errorMessage: "CANONICAL_COMMAND_NOT_RECOGNISED",
       });
+      observeShadow({ user, channel: "assistant", language, text: alias.resolvedText, history, actual: { intent: "unrecognized", key: null } });
       return res.json({ ok: true, kind: "clarification", message: assistantServiceMessage(language, "unsupported") });
     }
     if (command.intent === "set_voice_language" && !isExplicitVoiceLanguageChange(alias.resolvedText, command.entities.language)) {
@@ -511,6 +515,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     result: response.ok ? "success" : "error",
     errorMessage: response.ok ? undefined : response.error,
   });
+  observeShadow({ user, channel: "assistant", language, text: alias.resolvedText, history, actual: parserOutcomeOf(command) });
   // Once a command has reached the deterministic action engine, its verified
   // result is the only text {assistant} may show or speak. The language model's
   // interpretation message can be incomplete, malformed, or claim success
@@ -577,5 +582,6 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
     errorMessage: response.ok ? undefined : response.error,
   });
 
+  observeShadow({ user, channel: "text", language: user.voiceLanguage, text: alias.resolvedText, actual: parserOutcomeOf(command) });
   res.status(response.httpStatus).json({ ...response, uiAction, appliedAliases: alias.appliedRules });
 });

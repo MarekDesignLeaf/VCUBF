@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 34 mounted route groups, 52 Prisma models, 143 Action Contracts,
+- **Backend**: 34 mounted route groups, 53 Prisma models, 143 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,
@@ -109,7 +109,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 90 test files, including database integration tests and checks that only
+- **Tests**: 91 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -982,7 +982,10 @@ Build order should follow the roadmap in the master documentation (Phase 1 → P
   `SEED_ADMIN_PASSWORD` before seeding, and a 32-byte base64
   `CONNECTOR_ENCRYPTION_KEY` as environment variables. Optional non-secret controls are
   `CONNECTOR_BACKGROUND_SYNC_ENABLED` (defaults to `true`) and
-  `CONNECTOR_BACKGROUND_SYNC_INTERVAL_MINUTES` (defaults to `5`, minimum `1`); run
+  `CONNECTOR_BACKGROUND_SYNC_INTERVAL_MINUTES` (defaults to `5`, minimum `1`), and the agent shadow
+  `AGENT_SHADOW_SAMPLE_RATE` (share of handled commands, `0`–`1`, defaults to `0` = off; each shadow
+  run is a paid model call of roughly ten thousand input tokens, model `OPENAI_AGENT_MODEL`, see
+  docs/AGENT_MASTERPLAN_2026-10-08.md, F1); run
   `npm run build && npx prisma migrate deploy && npm start`.
 - **Frontend**: any static host (Railway static site, Vercel, Netlify). Set
   `VITE_API_URL` to the deployed backend URL at build time.

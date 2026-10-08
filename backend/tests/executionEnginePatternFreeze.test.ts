@@ -45,6 +45,36 @@ describe("execution engine pattern freeze", () => {
     );
   });
 
+  it("every status the engine writes is allowed by the production CHECK constraint", () => {
+    // CI builds its database with `prisma db push`, which never applies the
+    // CHECK constraints written in migrations. A new status word would pass
+    // every test and fail only in production — so it is checked here, against
+    // the newest migration that defines the constraint.
+    const migrations = fileURLToPath(new URL("../prisma/migrations/", import.meta.url));
+    const definitions = readdirSync(migrations)
+      .filter((name) => statSync(join(migrations, name)).isDirectory())
+      .sort()
+      .map((name) => readFileSync(join(migrations, name, "migration.sql"), "utf8"))
+      .filter((sql) => /ADD CONSTRAINT "voice_pending_actions_status_check"|CONSTRAINT "voice_pending_actions_status_check"\s+CHECK/.test(sql));
+    const latest = definitions.at(-1);
+    assert.ok(latest, "no migration defines voice_pending_actions_status_check");
+    const check = latest.slice(latest.lastIndexOf("voice_pending_actions_status_check"));
+    const allowed = new Set([...check.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]));
+
+    const engine = readFileSync(join(SRC, "lib/executionEngine.ts"), "utf8");
+    const written = new Set<string>();
+    for (const match of engine.matchAll(/status: "([a-z_]+)"/g)) written.add(match[1]);
+    for (const match of engine.matchAll(/\?\? "([a-z_]+)"/g)) written.add(match[1]);
+    for (const path of sourceFiles(SRC)) {
+      for (const match of readFileSync(path, "utf8").matchAll(/(?:claimedStatus|replacedStatus|completedStatus): "([a-z_]+)"/g)) {
+        written.add(match[1]);
+      }
+    }
+    assert.ok(written.has("pending") && written.has("completed"), "the scan must see the engine's own statuses");
+    const refused = [...written].filter((status) => !allowed.has(status)).sort();
+    assert.deepEqual(refused, [], "Add these statuses to voice_pending_actions_status_check in a new migration.");
+  });
+
   it("every allowed exception still exists, so the list cannot rot", () => {
     for (const path of ALLOWED.keys()) {
       assert.match(readFileSync(join(SRC, path), "utf8"), /\bvoicePendingAction\b/, `${path} no longer needs its exception`);
