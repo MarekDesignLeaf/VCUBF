@@ -1,4 +1,3 @@
-import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import {
@@ -12,6 +11,12 @@ import {
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
 import { normalizeEmail, normalizePhone, phoneNumberSchema } from "../lib/contactNormalization.js";
+import {
+  cancelReviewedAction,
+  claimReviewedAction,
+  prepareReviewedAction,
+  type ReviewedActionDefinition,
+} from "../lib/executionEngine.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -271,8 +276,15 @@ export async function updateContact(user: AuthedUser, id: string, rawInput: unkn
 
 const archiveContactSchema = z.object({ confirmed: z.boolean().optional() });
 const pendingContactArchivePayloadSchema = z.object({ contactId: z.string().uuid(), displayName: z.string().min(1) });
-const PENDING_CONTACT_ARCHIVE = "archive_contact";
-const PENDING_CONTACT_ARCHIVE_LIFETIME_MS = 5 * 60 * 1000;
+// The reviewed-action lifecycle (prepare → yes → claim once → execute →
+// resolve) lives in the Execution Engine; this service keeps the lookup, the
+// preview, the archive itself and its audit entries.
+const CONTACT_ARCHIVE_REVIEW: ReviewedActionDefinition<z.infer<typeof pendingContactArchivePayloadSchema>> = {
+  actionType: "archive_contact",
+  lifetimeMs: 5 * 60 * 1000,
+  payloadSchema: pendingContactArchivePayloadSchema,
+  claimedStatus: "archiving",
+};
 
 export async function archiveContact(user: AuthedUser, id: string, rawInput: unknown): Promise<ServiceResult<unknown>> {
   if (!canManageContacts(user)) {
@@ -310,13 +322,6 @@ export async function archiveContact(user: AuthedUser, id: string, rawInput: unk
   return ok(200, { contact: archived, message: `${existing.displayName} was archived. Its source and client link were preserved.` });
 }
 
-async function expirePendingContactArchives(user: AuthedUser, now = new Date()) {
-  await prisma.voicePendingAction.updateMany({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CONTACT_ARCHIVE, status: "pending", expiresAt: { lte: now } },
-    data: { status: "expired", payload: Prisma.DbNull, resolvedAt: now },
-  });
-}
-
 export async function prepareVoiceContactArchive(user: AuthedUser, contactName: string): Promise<ServiceResult<unknown>> {
   const matches = await findContactsByName(user, contactName);
   if (!matches.length) return fail(404, "CONTACT_NOT_FOUND", `No active contact matches "${contactName}".`);
@@ -325,20 +330,9 @@ export async function prepareVoiceContactArchive(user: AuthedUser, contactName: 
   });
   const previewResult = await archiveContact(user, matches[0].id, { confirmed: false });
   if (previewResult.ok || previewResult.error !== "CONFIRMATION_REQUIRED") return previewResult;
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + PENDING_CONTACT_ARCHIVE_LIFETIME_MS);
-  await prisma.$transaction(async (tx) => {
-    await tx.voicePendingAction.updateMany({
-      where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CONTACT_ARCHIVE, status: "pending" },
-      data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
-    });
-    await tx.voicePendingAction.create({ data: {
-      companyId: user.companyId,
-      userId: user.id,
-      actionType: PENDING_CONTACT_ARCHIVE,
-      payload: { contactId: matches[0].id, displayName: matches[0].displayName },
-      expiresAt,
-    } });
+  const { expiresAt } = await prepareReviewedAction(user, CONTACT_ARCHIVE_REVIEW, {
+    contactId: matches[0].id,
+    displayName: matches[0].displayName,
   });
   return ok(202, {
     confirmationRequired: true,
@@ -349,33 +343,24 @@ export async function prepareVoiceContactArchive(user: AuthedUser, contactName: 
 }
 
 export async function confirmVoiceContactArchive(user: AuthedUser): Promise<ServiceResult<unknown>> {
-  const now = new Date();
-  await expirePendingContactArchives(user, now);
-  const pending = await prisma.voicePendingAction.findFirst({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CONTACT_ARCHIVE, status: "pending", expiresAt: { gt: now } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!pending) return fail(409, "NO_PENDING_CONTACT_ARCHIVE", "There is no contact deletion waiting for confirmation.");
-  const payload = pendingContactArchivePayloadSchema.safeParse(pending.payload);
-  if (!payload.success) {
-    await prisma.voicePendingAction.update({ where: { id: pending.id }, data: { status: "failed", payload: Prisma.DbNull, resolvedAt: now } });
-    return fail(409, "PENDING_CONTACT_ARCHIVE_INVALID", "The reviewed contact deletion is no longer valid. Start it again.");
+  const claimed = await claimReviewedAction(user, CONTACT_ARCHIVE_REVIEW);
+  if (!claimed.ok) {
+    if (claimed.reason === "raced") {
+      return fail(409, "NO_PENDING_CONTACT_ARCHIVE", "That contact deletion is no longer awaiting confirmation.");
+    }
+    if (claimed.reason === "invalid") {
+      return fail(409, "PENDING_CONTACT_ARCHIVE_INVALID", "The reviewed contact deletion is no longer valid. Start it again.");
+    }
+    return fail(409, "NO_PENDING_CONTACT_ARCHIVE", "There is no contact deletion waiting for confirmation.");
   }
-  const claimed = await prisma.voicePendingAction.updateMany({ where: { id: pending.id, status: "pending", expiresAt: { gt: now } }, data: { status: "archiving" } });
-  if (!claimed.count) return fail(409, "NO_PENDING_CONTACT_ARCHIVE", "That contact deletion is no longer awaiting confirmation.");
-  const result = await archiveContact(user, payload.data.contactId, { confirmed: true });
-  await prisma.voicePendingAction.update({ where: { id: pending.id }, data: { status: result.ok ? "completed" : "failed", payload: Prisma.DbNull, resolvedAt: new Date() } });
+  const result = await archiveContact(user, claimed.payload.contactId, { confirmed: true });
+  await claimed.complete(result.ok);
   return result;
 }
 
 export async function cancelVoiceContactArchive(user: AuthedUser): Promise<ServiceResult<unknown>> {
-  const now = new Date();
-  await expirePendingContactArchives(user, now);
-  const cancelled = await prisma.voicePendingAction.updateMany({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CONTACT_ARCHIVE, status: "pending" },
-    data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
-  });
-  return cancelled.count
+  const cancelled = await cancelReviewedAction(user, CONTACT_ARCHIVE_REVIEW.actionType);
+  return cancelled
     ? ok(200, { message: "Contact deletion was cancelled. Nothing was changed." })
     : fail(409, "NO_PENDING_CONTACT_ARCHIVE", "There is no contact deletion waiting to be cancelled.");
 }
