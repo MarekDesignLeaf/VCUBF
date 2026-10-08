@@ -212,6 +212,18 @@ describe("execution engine — the reviewed-action state machine", () => {
     await claimed.complete(true);
   });
 
+  it("uses the replaced status the action type's existing rows know", async () => {
+    const named: ReviewedActionDefinition<{ note: string }> = { ...REVIEW, replacedStatus: "replaced" };
+    await prepareReviewedAction(user, named, { note: "first" });
+    await prepareReviewedAction(user, named, { note: "second" });
+    const replaced = await prisma.voicePendingAction.findFirst({
+      where: { companyId: user.companyId, userId: user.id, actionType: REVIEW.actionType, status: "replaced" },
+    });
+    assert.ok(replaced);
+    assert.equal(replaced.payload, null);
+    await cancelReviewedAction(user, REVIEW.actionType);
+  });
+
   it("never crosses user or tenant", async () => {
     await prepareReviewedAction(user, REVIEW, { note: "mine" });
     const stranger = { id: user.id, companyId: "20000000-0000-0000-0000-000000000002" };
