@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   AGENT_TOOL_CATALOGUE,
   TOOL_CATALOGUE_FINGERPRINT,
+  TOOL_CATALOGUE_FINGERPRINTS,
   TOOL_CATALOGUE_VERSION,
   toolCatalogueFingerprint,
 } from "../src/agents/toolCatalogue.js";
@@ -101,12 +102,30 @@ describe("agent tool catalogue (parity with the deterministic core)", () => {
     }
   });
 
-  it("cannot change without a conscious version bump", () => {
-    assert.match(TOOL_CATALOGUE_VERSION, /^\d+\.\d+\.\d+$/);
+  it("cannot change without a new entry in the version ledger", () => {
+    const entries = Object.entries(TOOL_CATALOGUE_FINGERPRINTS);
+    // The current version is the ledger's last entry and names this document.
+    assert.equal(entries[entries.length - 1][0], TOOL_CATALOGUE_VERSION);
     assert.equal(
       toolCatalogueFingerprint(),
       TOOL_CATALOGUE_FINGERPRINT,
-      "The tool catalogue changed. Review the change, bump TOOL_CATALOGUE_VERSION, and set TOOL_CATALOGUE_FINGERPRINT to the new value from toolCatalogueFingerprint() — in the same commit."
+      "The tool catalogue changed. Append a NEW version to TOOL_CATALOGUE_FINGERPRINTS with the value of toolCatalogueFingerprint() — never edit an existing entry."
     );
+    // No two versions may name the same document, and no document two versions.
+    const versions = entries.map(([version]) => version);
+    const fingerprints = entries.map(([, fingerprint]) => fingerprint);
+    assert.equal(new Set(versions).size, versions.length);
+    assert.equal(new Set(fingerprints).size, fingerprints.length);
+    for (const [version, fingerprint] of entries) {
+      assert.match(version, /^\d+\.\d+\.\d+$/);
+      assert.match(fingerprint, /^[0-9a-f]{64}$/, `${version}: a ledger entry must be a real fingerprint`);
+    }
+    // Versions strictly ascend, so the ledger only ever grows at the end.
+    const numeric = versions.map((version) => version.split(".").map(Number));
+    for (let i = 1; i < numeric.length; i += 1) {
+      const [a, b] = [numeric[i - 1], numeric[i]];
+      const ascending = a[0] < b[0] || (a[0] === b[0] && (a[1] < b[1] || (a[1] === b[1] && a[2] < b[2])));
+      assert.ok(ascending, `ledger versions must strictly ascend: ${versions[i - 1]} before ${versions[i]}`);
+    }
   });
 });

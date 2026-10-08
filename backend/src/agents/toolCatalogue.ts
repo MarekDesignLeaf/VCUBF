@@ -26,12 +26,22 @@ import { isVoiceActionName, voiceActionSchemas } from "../lib/voiceActionCatalog
 import { EMMA_CAPABILITIES, type EmmaCapability } from "../lib/emmaSurfaceCatalogue.js";
 
 /**
- * Bump the minor version for a compatible addition (a new tool, a new optional
- * field) and the major version for anything an existing consumer could trip
- * over (a removed tool, a renamed field, a narrowed schema). The fingerprint
- * test below makes forgetting this a failing build, not a silent drift.
+ * The version ledger: every catalogue version ever shipped, paired with the
+ * fingerprint of exactly the document it named. Append-only — a change to the
+ * catalogue adds a NEW entry (minor for a compatible addition, major for
+ * anything a consumer could trip over) and never edits an old one, so no two
+ * different catalogues can share a version. The test enforces that the last
+ * entry matches the computed fingerprint and that versions strictly ascend;
+ * an agent run additionally records the fingerprint itself, so an audited
+ * proposal identifies its tool set even against a rewritten ledger.
  */
-export const TOOL_CATALOGUE_VERSION = "1.0.0";
+export const TOOL_CATALOGUE_FINGERPRINTS = {
+  "1.0.0": "b70815b9548f2cbd030e403dc64088ff6005f3a04c0644a6c139ecc0ff8d9afe",
+} as const satisfies Record<string, string>;
+
+const ledger = Object.entries(TOOL_CATALOGUE_FINGERPRINTS);
+export const TOOL_CATALOGUE_VERSION = ledger[ledger.length - 1][0];
+export const TOOL_CATALOGUE_FINGERPRINT = ledger[ledger.length - 1][1];
 
 export interface AgentTool {
   /** The model-facing name — exactly the executable action name. */
@@ -125,10 +135,3 @@ export function toolCatalogueFingerprint(): string {
   return createHash("sha256").update(toolCatalogueDocument()).digest("hex");
 }
 
-/**
- * The fingerprint of the catalogue this version number was given to. The test
- * compares it against the computed one, so any change to a tool — new action,
- * changed schema, changed risk — fails until both the version above and this
- * fingerprint are updated in the same, reviewable commit.
- */
-export const TOOL_CATALOGUE_FINGERPRINT = "b70815b9548f2cbd030e403dc64088ff6005f3a04c0644a6c139ecc0ff8d9afe";
