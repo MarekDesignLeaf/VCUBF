@@ -32,7 +32,7 @@ import {
   type StoredGmailCredential,
   type GmailComposeInput,
 } from "../connectors/gmailAdapter.js";
-import { recentAuditedSend, recentReplyOrAudited, repeatNote, replyFingerprint, sendFingerprint } from "../lib/repeatedSend.js";
+import { emailRecipients, recentAuditedSend, recentReplyOrAudited, repeatNote, replyFingerprint, sendFingerprint } from "../lib/repeatedSend.js";
 import {
   COMPLETE_GMAIL_OAUTH_ACTION,
   CREATE_GMAIL_DRAFT_ACTION,
@@ -907,7 +907,7 @@ export async function sendGmailMessageNow(
   }
   // Who it goes to and what it says, as a keyed hash: the review says when the
   // same email went out shortly before, and the send records it for the next one.
-  const fingerprint = sendFingerprint({ recipients: [...message.to, ...message.cc, ...message.bcc], subject: message.subject, body: message.body });
+  const fingerprint = sendFingerprint({ recipients: emailRecipients(message), subject: message.subject, body: message.body });
   const repeat = parsed.data.confirmed ? null : await recentAuditedSend(user.companyId, SEND_GMAIL_MESSAGE_ACTION.actionName, fingerprint);
   const preview = {
     sourceId, provider: "gmail",
