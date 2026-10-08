@@ -159,6 +159,10 @@ describe("execution engine — the reviewed-action state machine", () => {
     const winners = [first, second].filter((outcome) => outcome.ok);
     assert.equal(winners.length, 1, "exactly one claim must win");
     assert.ok(winners[0].ok);
+    // The loser saw the review waiting and lost it: a duplicate yes, not an
+    // empty queue.
+    const loser = [first, second].find((outcome) => !outcome.ok);
+    assert.equal(loser && !loser.ok && loser.reason, "raced");
     await winners[0].complete(false);
     const row = await prisma.voicePendingAction.findUnique({ where: { id: winners[0].id } });
     assert.equal(row?.status, "failed");

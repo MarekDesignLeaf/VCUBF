@@ -154,7 +154,8 @@ export type ClaimedReviewedAction<Payload> =
       ok: false;
       /**
        * none — nothing is waiting (or it expired);
-       * raced — another confirmation claimed it first;
+       * raced — a review was waiting when this yes arrived, but another
+       * confirmation claimed it (or a cancel removed it) first;
        * invalid — the review cannot be executed as approved (its stored
        * payload no longer parses, or pre-lock duplicates tie on createdAt and
        * the approved preview is ambiguous); it was marked failed and has to
@@ -178,6 +179,14 @@ export async function claimReviewedAction<Payload>(
   definition: ReviewedActionDefinition<Payload>,
   clock?: Date
 ): Promise<ClaimedReviewedAction<Payload>> {
+  // Whether a review was waiting when this yes arrived, read before queueing
+  // on the lock. A confirmation that then finds nothing lost to another
+  // confirmation (or a cancel) of that review: "raced", not "none", so callers
+  // keep telling a duplicate yes from a queue that never had a review.
+  const seenBeforeLock = await prisma.voicePendingAction.findFirst({
+    where: { ...scope(user, definition.actionType), status: "pending", expiresAt: { gt: clock ?? new Date() } },
+    select: { id: true },
+  });
   const outcome = await prisma.$transaction(async (tx) => {
     // The same lock preparation takes: selection, claim and stale-row cleanup
     // must act on one consistent picture of the queue, or a second
@@ -197,7 +206,15 @@ export async function claimReviewedAction<Payload>(
       where: { ...scope(user, definition.actionType), status: "pending", expiresAt: { gt: now } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
-    if (!pending) return { ok: false, reason: "none" } as const;
+    if (!pending) {
+      // The review seen before the lock was taken by another confirmation or
+      // cancelled meanwhile: "raced". Had it merely run out of time, there is
+      // simply nothing to confirm: "none".
+      const seen = seenBeforeLock
+        ? await tx.voicePendingAction.findUnique({ where: { id: seenBeforeLock.id }, select: { status: true } })
+        : null;
+      return { ok: false, reason: seen && seen.status !== "expired" ? "raced" : "none" } as const;
+    }
 
     // Pre-lock duplicates can share a millisecond createdAt, and a random id
     // is no evidence of which preview the user actually saw last. An
