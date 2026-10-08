@@ -91,7 +91,8 @@ export async function prepareReviewedAction<Payload>(
     // visible. A transaction-scoped advisory lock on (user, action type)
     // serialises them; the lock releases itself with the transaction. A hash
     // collision between queues only serialises two unrelated preparations.
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${user.companyId + ":" + user.id}), hashtext(${definition.actionType}))`;
+    // (The ::text cast is for Prisma, which cannot deserialise a void column.)
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${user.companyId + ":" + user.id}), hashtext(${definition.actionType}))::text`;
     await tx.voicePendingAction.updateMany({
       where: { ...scope(user, definition.actionType), status: "pending" },
       data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
