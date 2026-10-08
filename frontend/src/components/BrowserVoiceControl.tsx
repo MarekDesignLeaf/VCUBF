@@ -1213,6 +1213,17 @@ export function BrowserVoiceControl() {
     return () => window.clearInterval(handle);
   }, [enabled, silence]);
 
+  /**
+   * The reply has started to sound. From now on talking over it counts, and
+   * the first moments measure how loud its own echo is in this room, so its
+   * own voice is never taken for someone interrupting.
+   */
+  const startHearing = useCallback(() => {
+    echoFloor.current = 0;
+    calibrateUntil.current = Date.now() + BARGE_IN_CALIBRATE_MS;
+    audible.current = true;
+  }, []);
+
   const speak = useCallback((text: string) => {
     if (!text || companionOwnsVoice) return;
     currentPlayback?.stop();
@@ -1227,8 +1238,9 @@ export function BrowserVoiceControl() {
     speakingUntil.current = Date.now() + PENDING_SPEECH_HOLD_MS;
     echoGuardUntil.current = Date.now() + PENDING_SPEECH_HOLD_MS + ECHO_TAIL_MS;
     // Fresh for every reply: the residue depends on volume, distance and the room.
+    // Measured once the reply is actually heard (startHearing), not while it is
+    // still being fetched: only then is there any residue to measure.
     echoFloor.current = 0;
-    calibrateUntil.current = Date.now() + BARGE_IN_CALIBRATE_MS;
     spokenText.current = [text, ...spokenText.current].slice(0, 3);
 
     void (async () => {
@@ -1242,7 +1254,7 @@ export function BrowserVoiceControl() {
         const playing = audio.duration * 1000;
         speakingUntil.current = Date.now() + playing + SPEAKING_GRACE_MS;
         echoGuardUntil.current = Date.now() + playing + ECHO_TAIL_MS;
-        audible.current = true;
+        startHearing();
         audio.onEnded(() => {
           if (generation === speechGeneration) audible.current = false;
           speakingUntil.current = Date.now() + SPEAKING_GRACE_MS;
@@ -1271,7 +1283,7 @@ export function BrowserVoiceControl() {
         const estimated = (text.split(/\s+/).length / (3 * speechRate)) * 1000;
         speakingUntil.current = Date.now() + estimated + SPEAKING_GRACE_MS;
         echoGuardUntil.current = Date.now() + estimated + ECHO_TAIL_MS;
-        utterance.onstart = () => { if (generation === speechGeneration) audible.current = true; };
+        utterance.onstart = () => { if (generation === speechGeneration) startHearing(); };
         utterance.onend = () => {
           if (generation === speechGeneration) audible.current = false;
           speakingUntil.current = Date.now() + SPEAKING_GRACE_MS;
@@ -1280,7 +1292,7 @@ export function BrowserVoiceControl() {
         window.speechSynthesis.speak(utterance);
       } catch { /* Speech output is optional. */ }
     })();
-  }, [language, speechRate, companionOwnsVoice]);
+  }, [language, speechRate, companionOwnsVoice, startHearing]);
 
 
   const phrases = learningPhrases(language);

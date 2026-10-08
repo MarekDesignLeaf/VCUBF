@@ -198,14 +198,19 @@ async function clashes(user: AuthedUser, target: WriteTarget, slot: Slot, exclud
       ],
     },
     orderBy: [{ startAt: "asc" }, { startDate: "asc" }],
-    // Enough that the review can say how many there are, not only the first few.
-    take: 50,
+    // Enough that the review can say how many there are, not only the first
+    // few; one more than are kept shows when there are even more than that.
+    take: CLASHES_KEPT + 1,
   });
-  return timed.map((event) => ({
+  const clashes = timed.slice(0, CLASHES_KEPT).map((event) => ({
     title: event.summary || "Untitled event",
     ...(event.startAt ? { start: localDateTime(event.startAt, target.calendar.timeZone) } : { date: event.startDate }),
   }));
+  // Spread into the preview: "clashesTruncated" says the list stops short.
+  return { clashes, ...(timed.length > CLASHES_KEPT ? { clashesTruncated: true } : {}) };
 }
+
+const CLASHES_KEPT = 50;
 
 async function audit(user: AuthedUser, action: ActionContract, input: Record<string, unknown>, outcome: { result: "success" | "rejected" | "error"; error?: string; confirmed?: boolean; dataAfter?: Record<string, unknown> }) {
   await recordAudit({
@@ -298,7 +303,7 @@ export async function createCalendarEvent(user: AuthedUser, raw: unknown): Promi
       ...(slot.allDay ? {} : { durationMinutes: Math.round((slotInstants(slot, timeZone).end.getTime() - slotInstants(slot, timeZone).start.getTime()) / 60_000) }),
       ...(durationAssumed ? { durationAssumed: true } : {}),
       ...(input.location ? { location: input.location } : {}),
-      clashes: await clashes(user, target.data, slot),
+      ...await clashes(user, target.data, slot),
       othersNotified: false,
     };
     await audit(user, CREATE_GOOGLE_CALENDAR_EVENT_ACTION, { ...auditInput, confirmed: false }, { result: "rejected", error: "CONFIRMATION_REQUIRED" });
@@ -459,7 +464,7 @@ export async function moveCalendarEvent(user: AuthedUser, raw: unknown): Promise
         title: live.summary || "Untitled event",
         from: slotSummary(from, user.voiceLanguage),
         to: slotSummary(to, user.voiceLanguage),
-        clashes: await clashes(user, target.data, to, event.id),
+        ...await clashes(user, target.data, to, event.id),
         attendeeCount: live.attendees?.length ?? 0,
         othersNotified: false,
       };
@@ -508,7 +513,11 @@ export async function cancelCalendarEvent(user: AuthedUser, raw: unknown): Promi
     const done = await prisma.externalCalendarEvent.findFirst({
       where: { id: input.calendar_event_id, companyId: user.companyId, connectorSourceId: target.data.source.id, externalCalendarRecordId: target.data.calendar.id, isDeleted: true },
     });
-    if (done) return ok(200, { eventId: done.externalEventId, title: done.summary, alreadyCancelled: true });
+    if (done) {
+      // Recorded like any other confirmed cancellation, so a retry after a lost answer is in the history too.
+      await audit(user, CANCEL_GOOGLE_CALENDAR_EVENT_ACTION, { sourceId: target.data.source.id, calendarEventId: done.id, confirmed: true }, { result: "success", confirmed: true, dataAfter: { eventId: done.externalEventId, alreadyCancelled: true } });
+      return ok(200, { eventId: done.externalEventId, title: done.summary, alreadyCancelled: true });
+    }
   }
   const found = await findEvent(user, target.data, input);
   if (!found.ok) return found;
