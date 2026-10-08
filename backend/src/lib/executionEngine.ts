@@ -142,7 +142,7 @@ export type ClaimedReviewedAction<Payload> =
 export async function claimReviewedAction<Payload>(
   user: ActingUser,
   definition: ReviewedActionDefinition<Payload>,
-  now = new Date()
+  clock?: Date
 ): Promise<ClaimedReviewedAction<Payload>> {
   const outcome = await prisma.$transaction(async (tx) => {
     // The same lock preparation takes: selection, claim and stale-row cleanup
@@ -151,6 +151,10 @@ export async function claimReviewedAction<Payload>(
     // cleanup. Under the lock, a preparation serialises entirely before or
     // after this claim — never between its statements.
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${user.companyId + ":" + user.id}), hashtext(${definition.actionType}))::text`;
+    // The clock is read after the lock is held: a confirmation that waited
+    // here must not treat a review that expired during the wait as still
+    // valid. An explicit clock stays as given, for deterministic tests.
+    const now = clock ?? new Date();
     await tx.voicePendingAction.updateMany({
       where: { ...scope(user, definition.actionType), status: "pending", expiresAt: { lte: now } },
       data: { status: "expired", payload: Prisma.DbNull, resolvedAt: now },

@@ -163,6 +163,32 @@ describe("execution engine — the reviewed-action state machine", () => {
     assert.equal(row?.status, "failed");
   });
 
+  it("a confirmation that waited on the lock does not execute a review that expired meanwhile", async () => {
+    // The review has about a second to live; the lock is held for longer.
+    await prepareReviewedAction(user, REVIEW, { note: "dying" }, { now: new Date(Date.now() - REVIEW.lifetimeMs + 1000) });
+    let lockHeld!: () => void;
+    const held = new Promise<void>((resolve) => { lockHeld = resolve; });
+    const holder = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${user.companyId + ":" + user.id}), hashtext(${REVIEW.actionType}))::text`;
+      lockHeld();
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+    });
+    await held;
+    // The claim now waits on the lock while the review expires.
+    const claimed = await claimReviewedAction(user, REVIEW);
+    await holder;
+    assert.equal(claimed.ok, false);
+    assert.equal(!claimed.ok && claimed.reason, "none");
+    const row = await prisma.voicePendingAction.findFirst({
+      where: { companyId: user.companyId, userId: user.id, actionType: REVIEW.actionType, status: "expired" },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.ok(row, "the review that expired during the wait must be marked expired");
+    await prisma.voicePendingAction.deleteMany({
+      where: { companyId: user.companyId, userId: user.id, actionType: REVIEW.actionType },
+    });
+  });
+
   it("an expired review cannot be confirmed and reports as not pending", async () => {
     await prepareReviewedAction(user, REVIEW, { note: "late" }, { now: new Date(Date.now() - REVIEW.lifetimeMs - 1000) });
     assert.equal(await hasReviewedActionPending(user, REVIEW.actionType), false);
