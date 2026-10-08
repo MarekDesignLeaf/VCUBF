@@ -7,7 +7,7 @@ Secretary runs on Railway: server, database and speech transcription. On the own
 | File | Installed as | What it does |
 |---|---|---|
 | `Open-SecretaryRailway.ps1` | `%LOCALAPPDATA%\VCUBF\SecretaryWeb\Open-SecretaryRailway.ps1`, desktop icon **Secretary (Railway)** | Exchanges the DPAPI-protected `device.key` for a session and opens the window. The repository copy matches the installed one. |
-| `VCUBF-Panel.ps1` | `%LOCALAPPDATA%\VCUBF\SecretaryWeb\VCUBF-Panel.ps1`, desktop icon **VCUBF - ovladani a stav** | The control and status window. Starts, stops and restarts the Secretary window (and with it Alfonzo); reports the Railway server with its build, the web application and the internet connection; **Diagnostika** names the first thing missing. |
+| `VCUBF-Panel.ps1` | `%LOCALAPPDATA%\VCUBF\SecretaryWeb\VCUBF-Panel.ps1`, desktop icon **VCUBF - ovladani a stav** | The control and status window. Starts, stops and restarts the Secretary window (and with it Alfonzo); reports the Railway server with its build, the web application and the connection the window's speech recognition needs (Google); **Diagnostika** names the first thing missing. |
 
 Install or update the control window with:
 

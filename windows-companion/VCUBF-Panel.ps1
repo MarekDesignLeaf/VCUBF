@@ -53,10 +53,24 @@ function Get-WindowProcesses {
 
 function Test-Window { (Get-WindowProcesses).Count -gt 0 }
 
+# The launcher signs in over the network before it opens any window, which can
+# take several seconds; while it does, Start must not run a second one, or two
+# windows race for the same profile.
+function Get-LauncherProcesses {
+    @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine.ToLowerInvariant().Contains('open-secretaryrailway.ps1') })
+}
+
+function Test-Launching { (Get-LauncherProcesses).Count -gt 0 }
+
 $script:startedAt = [datetime]::MinValue
 
+# Pending from the click until the window appears: the launcher may not be
+# visible as a process yet in the first moment, so the click itself counts too.
+function Test-StartPending { (Test-Launching) -or (((Get-Date) - $script:startedAt).TotalSeconds -lt 30) }
+
 function Start-SecretaryWindow {
-    if (Test-Window) { return }
+    if ((Test-Window) -or (Test-StartPending)) { return }
     if (-not (Test-Path -LiteralPath $launcher)) {
         [void][System.Windows.Forms.MessageBox]::Show("Spouštěč Secretary chybí:`n$launcher", 'VCUBF — ovládání a stav', 'OK', 'Error')
         return
@@ -76,6 +90,10 @@ function Wait-WindowGone([int]$seconds) {
 }
 
 function Stop-SecretaryWindow {
+    # A launch still signing in is stopped too, or it would open the window
+    # again a moment after Stop.
+    Get-LauncherProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    $script:startedAt = [datetime]::MinValue
     if (-not (Test-Window)) { return }
     # Asked to close first, so Chrome shuts down cleanly and leaves nothing
     # half-written in its profile; whatever is still running after that is ended.
@@ -98,6 +116,12 @@ function Restart-SecretaryWindow {
 
 # --- Railway and the internet ------------------------------------------------
 
+# The internet row checks what the Secretary window itself needs beyond Railway:
+# the browser's speech recognition, which goes to Google. Asked over HTTPS
+# through the system proxy, as Chrome does, so a network that needs a proxy is
+# not reported as offline.
+$googleProbe = 'https://www.google.com/generate_204'
+
 # Checked without blocking: a request is started on one tick of the window's
 # timer and read on a later one, so a slow or missing connection never freezes
 # the window.
@@ -107,13 +131,11 @@ $script:probes = $null
 $script:status = @{ Server = $null; Build = ''; ServerDetail = ''; Web = $null; Internet = $null }
 
 function Start-Probes {
-    $tcp = New-Object Net.Sockets.TcpClient
     $script:probes = @{
         Since  = Get-Date
         Server = $http.GetStringAsync("$server/health")
         Web    = $http.GetAsync("$frontend/index.html", [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead)
-        Tcp    = $tcp
-        Net    = $tcp.ConnectAsync('api.openai.com', 443)
+        Net    = $http.GetAsync($googleProbe, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead)
     }
 }
 
@@ -135,13 +157,11 @@ function Read-Server($task) {
     }
 }
 
-function Read-Web($task) {
-    if (Test-Succeeded $task) {
-        $script:status.Web = $task.Result.IsSuccessStatusCode
-        $task.Result.Dispose()
-    } else {
-        $script:status.Web = $false
-    }
+function Test-Answered($task) {
+    if (-not (Test-Succeeded $task)) { return $false }
+    $ok = $task.Result.IsSuccessStatusCode
+    $task.Result.Dispose()
+    return $ok
 }
 
 # Reads whatever has finished; anything still running after eight seconds
@@ -153,9 +173,8 @@ function Read-Probes {
     $done = @($tasks | Where-Object { $_.IsCompleted }).Count -eq $tasks.Count
     if (-not $done -and -not $late) { return $false }
     Read-Server $script:probes.Server
-    Read-Web $script:probes.Web
-    $script:status.Internet = Test-Succeeded $script:probes.Net
-    try { $script:probes.Tcp.Close() } catch { }
+    $script:status.Web = Test-Answered $script:probes.Web
+    $script:status.Internet = Test-Answered $script:probes.Net
     $script:probes = $null
     return $true
 }
@@ -171,7 +190,7 @@ function Get-Report {
     [void]$lines.Add('')
     $checks = @(
         @{ Name = 'Připojení k internetu'; Ok = $script:status.Internet; Detail = '';
-           Why = 'Bez internetu Alfonzo nerozumí ani nemluví a Secretary se nenačte.' },
+           Why = 'Rozpoznávání řeči v okně Secretary jde přes Google; bez spojení Alfonzo neslyší. Pokud nejde ani server, chybí internet úplně.' },
         @{ Name = 'Server na Railway'; Ok = $script:status.Server; Detail = $(if ($script:status.Build) { "verze $(Get-ShortBuild)" } else { $script:status.ServerDetail });
            Why = 'Data, oprávnění a přepis řeči jsou na serveru. Restartuje se na Railway, ne z tohoto počítače.' },
         @{ Name = 'Aplikace na Railway'; Ok = $script:status.Web; Detail = '';
@@ -314,7 +333,7 @@ $refreshWindowRow = {
     if (Test-Window) {
         $script:startedAt = [datetime]::MinValue
         Set-Row $localRow 'green' 'běží — Alfonzo je v okně Secretary'
-    } elseif (((Get-Date) - $script:startedAt).TotalSeconds -lt 30) {
+    } elseif (Test-StartPending) {
         Set-Row $localRow 'amber' 'spouští se…'
     } else {
         Set-Row $localRow 'red' 'zavřeno — Alfonzo neposlouchá, dejte Spustit'
@@ -329,7 +348,7 @@ $refreshRailwayRows = {
         if (-not (Read-Probes)) { return }
         if ($script:status.Server) { Set-Row $serverRow 'green' "běží — verze $(Get-ShortBuild)" } else { Set-Row $serverRow 'red' 'neodpovídá' }
         if ($script:status.Web) { Set-Row $webRow 'green' 'běží' } else { Set-Row $webRow 'red' 'neodpovídá' }
-        if ($script:status.Internet) { Set-Row $netRow 'green' 'připojeno' } else { Set-Row $netRow 'red' 'bez připojení — Alfonzo nerozumí ani nemluví' }
+        if ($script:status.Internet) { Set-Row $netRow 'green' 'připojeno' } else { Set-Row $netRow 'red' 'bez spojení s Googlem — Alfonzo neslyší' }
     }
     if ((Get-Date) -ge $script:nextProbe) {
         Start-Probes
