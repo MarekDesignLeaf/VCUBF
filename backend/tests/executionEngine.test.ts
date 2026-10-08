@@ -72,14 +72,53 @@ describe("execution engine — the reviewed-action state machine", () => {
     await cancelReviewedAction(user, REVIEW.actionType);
   });
 
-  it("claiming the newest review cancels stale duplicates, timestamp ties included", async () => {
+  it("claiming cancels a stale older duplicate and executes the newest review", async () => {
     await prepareReviewedAction(user, REVIEW, { note: "current" });
+    // A stale duplicate from before the engine serialised preparations.
+    const stale = await prisma.voicePendingAction.create({
+      data: {
+        companyId: user.companyId,
+        userId: user.id,
+        actionType: REVIEW.actionType,
+        payload: { note: "stale" },
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt: new Date(Date.now() - 60_000),
+      },
+    });
+    // Two simultaneous confirmations over that queue: exactly one executes,
+    // and what executes is the newest review, never the stale duplicate.
+    const [first, second] = await Promise.all([
+      claimReviewedAction(user, REVIEW),
+      claimReviewedAction(user, REVIEW),
+    ]);
+    const winners = [first, second].filter((outcome) => outcome.ok);
+    assert.equal(winners.length, 1, "exactly one of two simultaneous confirmations must win");
+    assert.ok(winners[0].ok);
+    assert.equal(winners[0].payload.note, "current");
+    const staleRow = await prisma.voicePendingAction.findUnique({ where: { id: stale.id } });
+    assert.equal(staleRow?.status, "cancelled");
+    assert.equal(staleRow?.payload, null);
+    await winners[0].complete(true);
+  });
+
+  it("a timestamp tie between duplicates is ambiguous: the yes executes neither", async () => {
+    await prepareReviewedAction(user, REVIEW, { note: "tied current" });
     const current = await prisma.voicePendingAction.findFirst({
       where: { companyId: user.companyId, userId: user.id, actionType: REVIEW.actionType, status: "pending" },
     });
     assert.ok(current);
-    // Stale duplicates from before the advisory lock shipped: one plainly
-    // older, one sharing the claimed row's millisecond timestamp (lower id).
+    // A pre-lock duplicate sharing the millisecond createdAt: which preview
+    // the yes refers to cannot be told, so neither may execute.
+    const tied = await prisma.voicePendingAction.create({
+      data: {
+        companyId: user.companyId,
+        userId: user.id,
+        actionType: REVIEW.actionType,
+        payload: { note: "tied duplicate" },
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt: current.createdAt,
+      },
+    });
     const older = await prisma.voicePendingAction.create({
       data: {
         companyId: user.companyId,
@@ -90,26 +129,24 @@ describe("execution engine — the reviewed-action state machine", () => {
         createdAt: new Date(Date.now() - 60_000),
       },
     });
-    const tied = await prisma.voicePendingAction.create({
-      data: {
-        id: "00000000-0000-4000-8000-000000000042",
-        companyId: user.companyId,
-        userId: user.id,
-        actionType: REVIEW.actionType,
-        payload: { note: "stale tie" },
-        expiresAt: new Date(Date.now() + 60_000),
-        createdAt: current.createdAt,
-      },
-    });
     const claimed = await claimReviewedAction(user, REVIEW);
-    assert.ok(claimed.ok);
-    assert.equal(claimed.payload.note, "current");
-    for (const stale of [older, tied]) {
-      const row = await prisma.voicePendingAction.findUnique({ where: { id: stale.id } });
-      assert.equal(row?.status, "cancelled");
+    assert.equal(claimed.ok, false);
+    assert.equal(!claimed.ok && claimed.reason, "invalid");
+    for (const id of [current.id, tied.id]) {
+      const row = await prisma.voicePendingAction.findUnique({ where: { id } });
+      assert.equal(row?.status, "failed");
       assert.equal(row?.payload, null);
     }
-    await claimed.complete(true);
+    const olderRow = await prisma.voicePendingAction.findUnique({ where: { id: older.id } });
+    assert.equal(olderRow?.status, "cancelled");
+    // Nothing is left to claim; preparing again restores a confirmable state.
+    const retried = await claimReviewedAction(user, REVIEW);
+    assert.equal(!retried.ok && retried.reason, "none");
+    await prepareReviewedAction(user, REVIEW, { note: "fresh" });
+    const fresh = await claimReviewedAction(user, REVIEW);
+    assert.ok(fresh.ok);
+    assert.equal(fresh.payload.note, "fresh");
+    await fresh.complete(true);
   });
 
   it("of two simultaneous confirmations exactly one wins", async () => {

@@ -15,10 +15,13 @@
  * speculatively now.
  *
  * Guarantees the lifecycle makes, identical to the copies it replaces:
- *  - one review per user and action type: preparing cancels the previous one;
+ *  - one review per user and action type: preparing cancels the previous one,
+ *    and an advisory lock serialises overlapping preparations and claims;
  *  - a review expires on its own; an expired review cannot be confirmed;
  *  - a claim succeeds exactly once, so two simultaneous confirmations cannot
- *    both execute (the loser sees "raced");
+ *    both execute, and a stale duplicate (from before the lock shipped) can
+ *    never be claimed — if duplicates tie on createdAt, the approved preview
+ *    is ambiguous and neither executes;
  *  - a stored payload that no longer parses fails the review instead of
  *    executing something half-read;
  *  - resolved reviews drop their payload: message text does not outlive the
@@ -123,8 +126,10 @@ export type ClaimedReviewedAction<Payload> =
       /**
        * none — nothing is waiting (or it expired);
        * raced — another confirmation claimed it first;
-       * invalid — the stored payload no longer parses, and the review was
-       * marked failed, so it has to be prepared again.
+       * invalid — the review cannot be executed as approved (its stored
+       * payload no longer parses, or pre-lock duplicates tie on createdAt and
+       * the approved preview is ambiguous); it was marked failed and has to
+       * be prepared again.
        */
       reason: "none" | "raced" | "invalid";
     };
@@ -139,41 +144,63 @@ export async function claimReviewedAction<Payload>(
   definition: ReviewedActionDefinition<Payload>,
   now = new Date()
 ): Promise<ClaimedReviewedAction<Payload>> {
-  await expireReviewedActions(user, definition.actionType, now);
-  // Newest first, with the id as tie-break: createdAt has millisecond
-  // precision, so two pre-lock duplicates can share a timestamp. The ordering
-  // makes (createdAt, id) a total order, and the cleanup below cancels exactly
-  // what ranks under the claimed review in it.
-  const pending = await prisma.voicePendingAction.findFirst({
-    where: { ...scope(user, definition.actionType), status: "pending", expiresAt: { gt: now } },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-  });
-  if (!pending) return { ok: false, reason: "none" };
+  const outcome = await prisma.$transaction(async (tx) => {
+    // The same lock preparation takes: selection, claim and stale-row cleanup
+    // must act on one consistent picture of the queue, or a second
+    // confirmation could claim a stale duplicate between a claim and its
+    // cleanup. Under the lock, a preparation serialises entirely before or
+    // after this claim — never between its statements.
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${user.companyId + ":" + user.id}), hashtext(${definition.actionType}))::text`;
+    await tx.voicePendingAction.updateMany({
+      where: { ...scope(user, definition.actionType), status: "pending", expiresAt: { lte: now } },
+      data: { status: "expired", payload: Prisma.DbNull, resolvedAt: now },
+    });
+    const pending = await tx.voicePendingAction.findFirst({
+      where: { ...scope(user, definition.actionType), status: "pending", expiresAt: { gt: now } },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    if (!pending) return { ok: false, reason: "none" } as const;
 
-  const claimed = await prisma.voicePendingAction.updateMany({
-    where: { id: pending.id, status: "pending", expiresAt: { gt: now } },
-    data: { status: definition.claimedStatus ?? "executing" },
-  });
-  if (!claimed.count) return { ok: false, reason: "raced" };
+    // Pre-lock duplicates can share a millisecond createdAt, and a random id
+    // is no evidence of which preview the user actually saw last. An
+    // ambiguous approval executes nothing (approval binding): the tied
+    // reviews fail, anything older is cancelled, and the caller is asked to
+    // prepare again.
+    const tie = await tx.voicePendingAction.findFirst({
+      where: { ...scope(user, definition.actionType), status: "pending", createdAt: pending.createdAt, id: { not: pending.id } },
+      select: { id: true },
+    });
+    if (tie) {
+      await tx.voicePendingAction.updateMany({
+        where: { ...scope(user, definition.actionType), status: "pending", createdAt: pending.createdAt },
+        data: { status: "failed", payload: Prisma.DbNull, resolvedAt: now },
+      });
+      await tx.voicePendingAction.updateMany({
+        where: { ...scope(user, definition.actionType), status: "pending" },
+        data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
+      });
+      return { ok: false, reason: "invalid" } as const;
+    }
 
-  // Belt to the advisory lock's braces: should a stale duplicate pending row
-  // exist (rows written before the lock shipped, mid-deploy overlap), it is
-  // cancelled now, so a later yes can never claim a stale review. Cancelled is
-  // exactly what ranks under the claimed review in the (createdAt, id) total
-  // order — including a duplicate sharing its millisecond timestamp — while a
-  // review legitimately prepared after the claim ranks above it and survives,
-  // so its caller's fresh preview can still be confirmed.
-  await prisma.voicePendingAction.updateMany({
-    where: {
-      ...scope(user, definition.actionType),
-      status: "pending",
-      OR: [
-        { createdAt: { lt: pending.createdAt } },
-        { createdAt: pending.createdAt, id: { lt: pending.id } },
-      ],
-    },
-    data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
+    const claimed = await tx.voicePendingAction.updateMany({
+      where: { id: pending.id, status: "pending", expiresAt: { gt: now } },
+      data: { status: definition.claimedStatus ?? "executing" },
+    });
+    if (!claimed.count) return { ok: false, reason: "raced" } as const;
+
+    // Belt to the lock's braces: any row still pending is a stale duplicate
+    // (written before the lock shipped, or during a mid-deploy overlap) and
+    // ranks under the claimed newest, so a later yes can never claim it. A
+    // review prepared after this claim serialises after the transaction and
+    // is untouched.
+    await tx.voicePendingAction.updateMany({
+      where: { ...scope(user, definition.actionType), status: "pending" },
+      data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
+    });
+    return { ok: true, pending } as const;
   });
+  if (!outcome.ok) return outcome;
+  const pending = outcome.pending;
 
   const parsed = definition.payloadSchema.safeParse(pending.payload);
   if (!parsed.success) {
