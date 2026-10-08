@@ -75,11 +75,26 @@ describe("model gateway", () => {
     });
     assert.equal(response.status, 200);
     assert.equal(seenUrl, "https://api.openai.com/v1/responses");
-    const headers = seenInit.headers as Record<string, string>;
-    assert.equal(headers.Authorization, "Bearer test-only-key");
-    assert.equal(headers["Content-Type"], "application/json");
+    const headers = new Headers(seenInit.headers);
+    assert.equal(headers.get("authorization"), "Bearer test-only-key");
+    assert.equal(headers.get("content-type"), "application/json");
     // A default timeout is applied when the caller brings no signal of its own.
     assert.ok(seenInit.signal instanceof AbortSignal);
+  });
+
+  it("keeps headers given as a Headers instance or as tuples", async () => {
+    process.env.OPENAI_API_KEY = "test-only-key";
+    let seen: Headers = new Headers();
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      seen = new Headers(init?.headers);
+      return new Response("", { status: 200 });
+    }) as typeof fetch;
+    await modelRequest("translation", "/v1/responses", { headers: new Headers({ "Content-Type": "application/json" }) });
+    assert.equal(seen.get("content-type"), "application/json");
+    assert.equal(seen.get("authorization"), "Bearer test-only-key");
+    await modelRequest("translation", "/v1/responses", { headers: [["X-Check", "yes"]] });
+    assert.equal(seen.get("x-check"), "yes");
+    assert.equal(seen.get("authorization"), "Bearer test-only-key");
   });
 
   it("keeps a caller-owned signal instead of its default", async () => {

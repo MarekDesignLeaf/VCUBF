@@ -69,7 +69,10 @@ const OPENAI_BASE_URL = "https://api.openai.com";
 export async function modelRequest(task: ModelTask, path: string, init: RequestInit = {}): Promise<Response> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
-  const headers = { ...((init.headers as Record<string, string>) ?? {}), Authorization: `Bearer ${key}` };
+  // Headers normalises every RequestInit form (plain object, Headers, tuple
+  // array); spreading a Headers instance would silently drop its entries.
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${key}`);
   const signal = init.signal ?? AbortSignal.timeout(taskTimeoutMs(task));
   const startedAt = Date.now();
   try {
