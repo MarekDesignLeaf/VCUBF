@@ -141,8 +141,10 @@ Nic z popisu projektu se neruší; mění se jen pořadí a to, že **každá** 
 ### F0 — Konsolidace (žádná změna chování)
 1. `modelGateway.ts` — 5 volání AI jedním místem; běhový log nese model, trvání a tokeny. **Hotovo: PR #32.**
 2. Katalog nástrojů v1 + test parity s kontrakty. **Hotovo (F0.2):** `backend/src/agents/toolCatalogue.ts` — 94 nástrojů nad spustitelnými akcemi, JSON Schema ze Zod schémat (41 přísných, zbytek validuje služba), druh read/write/external/administration z katalogu schopností (9 čtecích), riziko + oprávnění + firemní vypínač z kontraktů, obsahový otisk vynucující vědomé verzování.
-3. `executionEngine.ts`; 7 kopií potvrzování se převede po jedné (pořadí: oznámení → klienti → kontakty → spustitelné akce → kalendář → WhatsApp → Gmail), stávající testy jako pojistka.
+3. `executionEngine.ts`; 7 kopií potvrzování se převede po jedné (pořadí: oznámení → klienti → kontakty → spustitelné akce → kalendář → WhatsApp → Gmail), stávající testy jako pojistka. **Rozpracováno (F0.3a, PR #34):** stavový stroj revidovaných akcí nad `VoicePendingAction` — poradní zámek serializuje překrývající se přípravy i převzetí, převzetí je atomické (výběr + převzetí + úklid duplikátů v jedné transakci), nejednoznačná shoda časů mezi duplikáty neprovede nic a žádá novou přípravu; oznámení migrována jako první.
 4. Zmrazení vzoru: nové schopnosti jen přes katalog + engine.
+
+**Známé omezení zděděné ze všech 7 kopií (Codex, PR #34):** hlasové potvrzení dnes přebírá *nejnovější* připravenou revizi bez identifikátoru — při dvou překrývajících se přípravách téhož uživatele s různým obsahem může pořadí HTTP odpovědí zobrazit starší náhled jako poslední. Engine to zmenšuje (serializace, nejednoznačné shody neprovedou nic), ale úplně to uzavře až vrstva E: „ano" váže otisk konkrétního návrhu (F1/F2), ne poslední řádek v tabulce. Záměrně se neřeší v F0 — změnilo by to chování potvrzovacích API.
 
 **Akceptace:** celá sada testů zelená; mluvené chování beze změny (živě ověří Marek); běhové logy nesou model, trvání a tokeny — cena na běh přibude v auditu s `AgentRun` (F1).
 
