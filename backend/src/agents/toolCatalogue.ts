@@ -30,10 +30,13 @@ import { EMMA_CAPABILITIES, type EmmaCapability } from "../lib/emmaSurfaceCatalo
  * fingerprint of exactly the document it named. Append-only — a change to the
  * catalogue adds a NEW entry (minor for a compatible addition, major for
  * anything a consumer could trip over) and never edits an old one, so no two
- * different catalogues can share a version. The test enforces that the last
- * entry matches the computed fingerprint and that versions strictly ascend;
- * an agent run additionally records the fingerprint itself, so an audited
- * proposal identifies its tool set even against a rewritten ledger.
+ * different catalogues can share a version. Three layers hold that: the test
+ * checks the last entry against the computed document and that versions
+ * strictly ascend; CI (check-ledger-append-only.mjs) compares this ledger
+ * with the one on master and fails when a shipped entry was changed or
+ * removed — the one place the previous ledger genuinely exists; and an agent
+ * run records the fingerprint itself, so an audited proposal identifies its
+ * tool set even against a rewritten history.
  */
 export const TOOL_CATALOGUE_FINGERPRINTS = {
   "1.0.0": "b70815b9548f2cbd030e403dc64088ff6005f3a04c0644a6c139ecc0ff8d9afe",
