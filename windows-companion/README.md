@@ -1,5 +1,26 @@
 # VCUBF Alfonzo for Windows 11
 
+## Current setup (October 2026): Secretary on Railway, Alfonzo in the window
+
+Secretary runs on Railway: server, database and speech transcription. On the owner's PC only one thing runs, the **Secretary window**: Chrome in app mode with its own profile, signed in with this PC's device key. Alfonzo listens and speaks inside that window, so the Python voice runtime below is not used.
+
+| File | Installed as | What it does |
+|---|---|---|
+| `Open-SecretaryRailway.ps1` | `%LOCALAPPDATA%\VCUBF\SecretaryWeb\Open-SecretaryRailway.ps1`, desktop icon **Secretary (Railway)** | Exchanges the DPAPI-protected `device.key` for a session and opens the window. The repository copy matches the installed one. |
+| `VCUBF-Panel.ps1` | `%LOCALAPPDATA%\VCUBF\SecretaryWeb\VCUBF-Panel.ps1`, desktop icon **VCUBF - ovladani a stav** | The control and status window. Starts, stops and restarts the Secretary window (and with it Alfonzo); reports the Railway server with its build, the web application and the connection the window's speech recognition needs (Google); **Diagnostika** names the first thing missing. |
+
+Install or update the control window with:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-Panel.ps1
+```
+
+It copies `VCUBF-Panel.ps1` and points the existing desktop shortcut at it, printing the previous target. Nothing is deleted. `VCUBF-Panel.ps1 -Check` prints the same status once without opening a window.
+
+The panel deliberately has no microphone switch, and it starts nothing that belongs on Railway. The two older panels it replaces stay on disk: `C:\VCUBF\vcubf-panel.ps1` ran a local copy (localhost, local PostgreSQL, local Whisper), and the 26 September Railway panel drove the Python voice runtime, which would now be a second Alfonzo next to the one in the window.
+
+## Python voice runtime and legacy companion
+
 > **Note (September 2026):** the current Windows runtime is **Alfonzo Voice v2** — install it with `Install-VoiceV2.ps1` and see `../docs/VOICE_V2_SETUP.md`. `Install-VoiceV2.ps1` removes this legacy companion's autostart and shortcut. The description below applies to the legacy `Install.ps1` companion (Windows Speech Recognizer + OpenAI Realtime), which remains only as a fallback where Voice v2 is not installed.
 
 Native Windows tray companion for VCUBF. It uses the locally installed Windows Speech Recognizer for the configurable wake word (`Alfonzo` by default), then starts a hands-free Realtime conversation or falls back to the audited text-assistant path. The editable review dialog remains available when hands-free mode is disabled.
