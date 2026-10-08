@@ -16,8 +16,8 @@ jedním místem (`backend/src/lib/modelGateway.ts`), které určuje model, časo
 limit a loguje trvání a tokeny.
 
 Zatím nedodáno: agentní runtime (orchestrátor a specialisté) podle
-masterdokumentu agentní správy z 8. 10. 2026 (projektový dokument
-`claude/masterdokument-agentni-sprava-2026-10-08.md`), pgvector pro dlouhodobou
+masterdokumentu agentní správy z 8. 10. 2026
+(`docs/AGENT_MASTERPLAN_2026-10-08.md`), pgvector pro dlouhodobou
 paměť (poznámky Emmy dnes ukládá `AssistantMemory` v PostgreSQL bez vektorového
 vyhledávání), migrace webu na Next.js a Flutter mobilní klient. Realtime
 adaptér zůstává přechodovým zvukovým kanálem přesně podle bodu 2 níže.
@@ -138,7 +138,7 @@ potvrzených výsledků akcí.
 ### Fáze 2 — orchestrátor a paměť
 
 Agentní runtime jako TS modul (katalog nástrojů, Execution Engine, stínový
-režim, Control Tower) podle masterdokumentu agentní správy; Model Gateway je
+režim, Control Tower) podle `docs/AGENT_MASTERPLAN_2026-10-08.md`; Model Gateway je
 dodána. Redis a pgvector až podle prokázané potřeby. Přechod nesmí změnit
 žádnou veřejnou Action Contract ani business validaci.
 
