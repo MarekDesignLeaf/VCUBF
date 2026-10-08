@@ -23,6 +23,17 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
+      # The tool-catalogue version ledger may only grow: entries that shipped
+      # on master must survive unchanged. Checked against master itself,
+      # because no in-repo test can see the previous ledger.
+      - name: Tool catalogue ledger is append-only
+        run: |
+          git fetch --no-tags --depth=1 origin master
+          if git show origin/master:backend/src/agents/toolCatalogue.ts > /tmp/ledger-base.ts 2>/dev/null; then
+            node scripts/check-ledger-append-only.mjs /tmp/ledger-base.ts src/agents/toolCatalogue.ts
+          else
+            echo "No catalogue on master yet; nothing to compare."
+          fi
       - run: npm run prisma:generate
       - run: npm run build
       - run: npm run test:embedded
