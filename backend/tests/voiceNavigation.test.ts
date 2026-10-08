@@ -15,6 +15,15 @@ describe("voice application navigation", () => {
     assert.equal(resolveVoicePage("somewhere imaginary"), undefined);
   });
 
+  it("names the assistant's permissions page without the old name, and still finds it by it", () => {
+    assert.equal(voicePageLabel("emma_permissions", "cs-CZ"), "Oprávnění asistenta");
+    assert.equal(voicePageLabel("emma_permissions", "pl-PL"), "Uprawnienia asystenta");
+    assert.equal(resolveVoicePage("Oprávnění asistenta"), "emma_permissions");
+    assert.equal(resolveVoicePage("Uprawnienia asystenta"), "emma_permissions");
+    assert.equal(resolveVoicePage("oprávnění Emmy"), "emma_permissions");
+    assert.equal(resolveVoicePage("uprawnienia Emmy"), "emma_permissions");
+  });
+
   it("uses the selected language for navigation labels and replies", () => {
     assert.equal(voicePageLabel("quotes", "pl-PL"), "Oferty");
     assert.equal(voicePageLabel("services", "pl-PL"), "Usługi");

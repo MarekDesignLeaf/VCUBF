@@ -71,6 +71,7 @@ describe("administrator Emma behavior scenario", () => {
     assert.match(instructions, /cannot add a capability or authorize an action/i);
     assert.match(instructions, /Never claim a literal physical body/i);
     assert.match(instructions, /expressive role and speaking style only/i);
+    assert.match(instructions, /cannot change that \{assistant\} is male/);
   });
 
   it("requires text before an enabled scenario can be saved", async () => {
