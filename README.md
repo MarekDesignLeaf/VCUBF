@@ -280,7 +280,8 @@ npm run dev                 # http://localhost:5173
 
 - **Android app and PWA**: `frontend` is installable as a PWA and also contains
   a Capacitor Android project (`frontend/android`). The Android build uses
-  Android speech recognition and text-to-speech for Alfonzo, shares the production
+  Android speech recognition for Alfonzo and speaks his replies in the backend's
+  male neural voice (Android text-to-speech only as the fallback), shares the production
   Secretary API and stores text-only mobile conversation history locally. See
   [`docs/ANDROID.md`](docs/ANDROID.md) for build, device-test and release steps.
 

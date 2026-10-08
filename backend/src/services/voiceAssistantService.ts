@@ -98,6 +98,17 @@ The JSON must contain only facts explicitly supplied by the user. Never invent a
 ${EMMA_EXECUTABLE_ACTION_GUIDE}`.trim();
 
 /**
+ * The assistant speaks with a male voice, so he must also speak of himself as
+ * a man. Czech and Polish mark the speaker's gender in the past tense and in
+ * adjectives ("připravil jsem" against "připravila jsem"), and nothing told the
+ * model which to use: a male voice could say feminine words. The rule stands
+ * whatever name the assistant is given and whatever persona the administrator's
+ * scenario describes, because the voice does not change with either.
+ */
+export const SELF_REFERENCE_RULE =
+  "{assistant} is male and speaks with a male voice. Whenever a language marks the speaker's grammatical gender, refer to yourself only in masculine forms (Czech: připravil jsem, rozuměl jsem, jsem připraven; Polish: przygotowałem, zrozumiałem, jestem gotowy). Never use feminine forms for yourself, whatever name you are given or persona you are asked to play.";
+
+/**
  * Only the language switched on is understood. The deterministic grammar is
  * already chosen by it; this keeps the model from acting on a sentence in
  * another language either. Names, addresses and the text of a message are not
@@ -323,6 +334,7 @@ export async function interpretVoiceRequest(input: {
       ...(model.startsWith("gpt-5") ? { reasoning: { effort: model.startsWith("gpt-5.4") ? "none" : "minimal" } } : {}),
       max_output_tokens: 500,
       instructions: withAssistantName(`You are {assistant}, the concise voice interface for a business operating system.
+${SELF_REFERENCE_RULE}
 Reply exclusively in the user's current language (${input.language}). Do not mix in words, number readings, sentence fragments or grammar from any other language. Previous conversation excerpts may be in an older language; never copy their language after the current language has changed. Address the user naturally when useful; their name is ${input.userName}.
 ${activeLanguageRule(input.language)}
 Never claim an action happened unless kind is command and the backend later confirms it.

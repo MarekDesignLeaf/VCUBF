@@ -142,9 +142,9 @@ export async function evaluateEmmaCommand(user: AuthedUser, command: ParsedComma
   if (!blockedCapabilityId) return { allowed: true as const, capabilityId };
   const capability = EMMA_CAPABILITIES.find((item) => item.id === blockedCapabilityId)!;
   const message = user.voiceLanguage === "pl-PL"
-    ? `Administrator wyłączył dla Emmy uprawnienie: ${capability.label}.`
+    ? `Administrator wyłączył asystentowi uprawnienie: ${capability.label}.`
     : user.voiceLanguage === "cs-CZ"
-      ? `Správce vypnul Emmě oprávnění: ${capability.label}.`
+      ? `Správce asistentovi vypnul oprávnění: ${capability.label}.`
       : `The administrator has disabled this {assistant} capability: ${capability.label}.`;
   return { allowed: false as const, capabilityId: blockedCapabilityId, message };
 }

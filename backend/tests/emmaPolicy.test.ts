@@ -68,6 +68,29 @@ describe("company Emma capability policy", () => {
     assert.equal(policyAudit?.result, "success");
   });
 
+  it("says a disabled capability without the old assistant name, in Czech and Polish", async () => {
+    // Quotes are still disabled by the previous test.
+    const as = (voiceLanguage: string) => evaluateEmmaCommand({
+      id: adminUser.id,
+      companyId: adminUser.companyId,
+      email: adminUser.email,
+      displayName: adminUser.displayName,
+      role: adminUser.role,
+      permissions: adminUser.permissions,
+      mustChangePassword: adminUser.mustChangePassword,
+      voiceWakeWord: adminUser.voiceWakeWord,
+      voiceContinuous: adminUser.voiceContinuous,
+      voiceLanguage,
+    }, { intent: "navigate", entities: { page: "quotes" } } as Parameters<typeof evaluateEmmaCommand>[1]);
+    const czech = await as("cs-CZ");
+    const polish = await as("pl-PL");
+    assert.equal(czech.allowed, false);
+    assert.equal(polish.allowed, false);
+    assert.match(String((czech as { message?: string }).message), /^Správce asistentovi vypnul oprávnění: /);
+    assert.match(String((polish as { message?: string }).message), /^Administrator wyłączył asystentowi uprawnienie: /);
+    assert.doesNotMatch(`${(czech as { message?: string }).message} ${(polish as { message?: string }).message}`, /Emm/);
+  });
+
   it("always permits safe cancellation of a pending action", async () => {
     const decision = await evaluateEmmaCommand({
       id: adminUser.id,

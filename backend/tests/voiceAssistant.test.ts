@@ -34,6 +34,10 @@ describe("voice assistant interpretation", () => {
       assert.match(body.instructions, /send WhatsApp to INTERNATIONAL_PHONE/);
       assert.match(body.instructions, /prepare_invoice_for_client/);
       assert.match(body.instructions, /Never use list clients for this request/);
+      // The voice is male, so the words must be too.
+      assert.match(body.instructions, /is male and speaks with a male voice/);
+      assert.match(body.instructions, /refer to yourself only in masculine forms \(Czech: připravil jsem/);
+      assert.doesNotMatch(body.instructions, /\{assistant\} is male/);
       return new Response(
         JSON.stringify({
           output: [

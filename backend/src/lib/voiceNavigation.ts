@@ -48,7 +48,7 @@ export type VoicePage = keyof typeof VOICE_PAGE_ROUTES;
 const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoicePage, string>>>> = {
   "pl-PL": {
     dashboard: "Panel główny", setup: "Pierwsza konfiguracja", forgot_password: "Odzyskiwanie hasła", reset_password: "Ustaw nowe hasło",
-    account: "Konto", emma_permissions: "Uprawnienia Emmy", notifications: "Powiadomienia", data_quality: "Jakość danych", metrics: "Wskaźniki firmy",
+    account: "Konto", emma_permissions: "Uprawnienia asystenta", notifications: "Powiadomienia", data_quality: "Jakość danych", metrics: "Wskaźniki firmy",
     leads: "Potencjalni klienci", clients: "Klienci", contacts: "Kontakty", documents: "Dokumenty", jobs: "Zlecenia", tasks: "Zadania",
     enquiries: "Zapytania", communication_intake: "Przychodząca komunikacja", communications: "Komunikacja", photos: "Zdjęcia",
     photo_selection: "Wybór zdjęć", business_context: "Kontekst firmy", industries: "Branże", connectors: "Integracje", company: "Firma",
@@ -57,7 +57,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
   },
   "cs-CZ": {
     dashboard: "Přehled", setup: "První nastavení", forgot_password: "Obnovení hesla", reset_password: "Nastavit nové heslo",
-    account: "Účet", emma_permissions: "Oprávnění Emmy", notifications: "Oznámení", data_quality: "Kvalita dat", metrics: "Firemní metriky", leads: "Poptávky",
+    account: "Účet", emma_permissions: "Oprávnění asistenta", notifications: "Oznámení", data_quality: "Kvalita dat", metrics: "Firemní metriky", leads: "Poptávky",
     clients: "Klienti", contacts: "Kontakty", documents: "Dokumenty", jobs: "Zakázky", tasks: "Úkoly", enquiries: "Dotazy",
     communication_intake: "Příjem komunikace", communications: "Komunikace", photos: "Fotografie", photo_selection: "Výběr fotografií",
     business_context: "Kontext firmy", industries: "Obory", connectors: "Konektory", company: "Firma", website_audit: "Audit webu",
@@ -219,6 +219,8 @@ const PAGE_ALIASES: Record<string, VoicePage> = {
   klienty: "clients", zakaznici: "clients", zakazniky: "clients",
   zamestnanci: "employees", zamestnance: "employees", lide: "employees", lidi: "employees",
   "opravneni asistenta": "emma_permissions", "opravneni": "emma_permissions",
+  // The page was once spoken as Emma's; those words still find it.
+  "opravneni emmy": "emma_permissions", "uprawnienia emmy": "emma_permissions",
   "pravidla uceni": "learning", "hlasove aliasy": "voice_aliases",
   rozvrh: "calendar", "volna mista": "recruitment", "nabor lidi": "recruitment",
   "kontrola kvality": "data_quality", metriky: "metrics", "vykon firmy": "metrics",

@@ -1,13 +1,13 @@
 # VCUBF Secretary for Android
 
-The Android application is the same Secretary workspace connected to the production API. It uses the phone's native speech recognition and text to speech for Alfonzo; it does not use the Windows companion, pairing code or any Windows-only microphone process.
+The Android application is the same Secretary workspace connected to the production API. It uses the phone's native speech recognition for Alfonzo, and speaks his replies in the same male neural voice as the desktop; it does not use the Windows companion, pairing code or any Windows-only microphone process.
 
 ## What works on the phone
 
 - Sign in with the same Secretary account and work with the same CRM data, permissions, connectors, confirmations and audit trail.
 - Use all responsive Secretary pages, forms, lists, documents, quotes, invoices and connector workflows.
 - Enable Alfonzo once to approve Android microphone permission. On subsequent sign-ins on that phone, Alfonzo resumes listening automatically.
-- Say the configured wake word (default: `Alfonzo`) followed by an instruction. The recognised text is sent through the same Assistant and command API as desktop Alfonzo. Alfonzo speaks her response through Android text-to-speech and stores the visible text transcript locally on the phone. Audio is never stored.
+- Say the configured wake word (default: `Alfonzo`) followed by an instruction. The recognised text is sent through the same Assistant and command API as desktop Alfonzo. Alfonzo speaks his response in the backend's male neural voice (`POST /command/speak`, the voice the desktop uses), because Android's own voices carry no gender and are usually a woman's. When Secretary cannot be reached or the clip does not start within ten seconds, Android text-to-speech says it instead, in parts of at most 3,800 characters because Android refuses longer text. The visible text transcript is stored locally on the phone. Audio is never stored.
 - Change language and wake word in Secretary Account; the next listening turn uses the saved preference.
 
 Android restricts continuous microphone access to the foreground app. Alfonzo therefore listens while VCUBF Secretary is open and visible. Pausing Alfonzo or leaving the app stops microphone use. A system-wide always-on hotword service would require a separate Android foreground-service permission and battery policy review; it is intentionally not claimed by this build.

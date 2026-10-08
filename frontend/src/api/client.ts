@@ -84,6 +84,32 @@ async function download(path: string, mayRetry = true): Promise<Blob> {
   return res.blob();
 }
 
+/**
+ * One reply spoken in the backend's neural voice, which is male, as audio.
+ *
+ * The time allowed grows with the text, because a long reply takes longer to
+ * synthesise, but stays short for a short one: a phone with a dead connection
+ * should fall back to its own voice in seconds, not wait half a minute.
+ */
+async function spokenAudio(text: string, language: string, mayRetry = true): Promise<Blob> {
+  const token = getToken();
+  const timeoutMs = Math.min(30_000, 6_000 + text.length * 5);
+  const res = await fetch(`${API_URL}/command/speak`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ text, language }),
+    ...(typeof AbortSignal.timeout === "function" ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+  });
+  if (res.status === 401 && mayRetry) {
+    const refreshed = await refreshSessionOnce();
+    if (refreshed) return spokenAudio(text, language, false);
+  }
+  if (!res.ok) throw new ApiError(res.status, "SPEECH_UNAVAILABLE");
+  const audio = await res.blob();
+  if (audio.size === 0) throw new ApiError(res.status, "SPEECH_UNAVAILABLE");
+  return audio;
+}
+
 export interface LoginResponse {
   token: string;
   user: {
@@ -2371,6 +2397,7 @@ export const api = {
     voiceConversations: (limit = 10) => request<VoiceConversation[]>(`/command/voice-conversations?limit=${limit}`),
     navigation: () => request<SecretaryNavigationCatalogue>("/command/navigation"),
     download: (path: string) => download(path),
+    spokenAudio: (text: string, language: string) => spokenAudio(text, language),
     controlVoice: (control: "pause" | "resume" | "end_conversation") =>
       request<VoiceDeviceState>("/command/voice-state/control", {
         method: "POST",
