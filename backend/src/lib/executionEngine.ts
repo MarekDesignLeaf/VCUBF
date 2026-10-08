@@ -86,6 +86,12 @@ export async function prepareReviewedAction<Payload>(
   const now = options.now ?? new Date();
   const expiresAt = new Date(now.getTime() + definition.lifetimeMs);
   await prisma.$transaction(async (tx) => {
+    // Two overlapping preparations must not both leave a pending review: under
+    // READ COMMITTED both cancel-sweeps can run before either insert is
+    // visible. A transaction-scoped advisory lock on (user, action type)
+    // serialises them; the lock releases itself with the transaction. A hash
+    // collision between queues only serialises two unrelated preparations.
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${user.companyId + ":" + user.id}), hashtext(${definition.actionType}))`;
     await tx.voicePendingAction.updateMany({
       where: { ...scope(user, definition.actionType), status: "pending" },
       data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
@@ -144,6 +150,14 @@ export async function claimReviewedAction<Payload>(
     data: { status: definition.claimedStatus ?? "executing" },
   });
   if (!claimed.count) return { ok: false, reason: "raced" };
+
+  // Belt to the advisory lock's braces: should an older duplicate pending row
+  // exist (rows written before the lock shipped, mid-deploy overlap), it is
+  // cancelled now, so a later yes can never claim a stale review.
+  await prisma.voicePendingAction.updateMany({
+    where: { ...scope(user, definition.actionType), status: "pending", id: { not: pending.id } },
+    data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
+  });
 
   const parsed = definition.payloadSchema.safeParse(pending.payload);
   if (!parsed.success) {

@@ -60,6 +60,18 @@ describe("execution engine — the reviewed-action state machine", () => {
     assert.equal(!retried.ok && retried.reason, "none");
   });
 
+  it("of two simultaneous preparations exactly one review survives", async () => {
+    await Promise.all([
+      prepareReviewedAction(user, REVIEW, { note: "overlap a" }),
+      prepareReviewedAction(user, REVIEW, { note: "overlap b" }),
+    ]);
+    const pending = await prisma.voicePendingAction.findMany({
+      where: { companyId: user.companyId, userId: user.id, actionType: REVIEW.actionType, status: "pending" },
+    });
+    assert.equal(pending.length, 1, "overlapping preparations must leave exactly one pending review");
+    await cancelReviewedAction(user, REVIEW.actionType);
+  });
+
   it("of two simultaneous confirmations exactly one wins", async () => {
     await prepareReviewedAction(user, REVIEW, { note: "raced" });
     const [first, second] = await Promise.all([
