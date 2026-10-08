@@ -129,7 +129,7 @@ describe("voice assistant interpretation", () => {
   it("creates a short-lived realtime client secret without exposing the server key", async () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
     globalThis.fetch = async (_url, init) => {
-      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer server-only-test-key");
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer server-only-test-key");
       const body = JSON.parse(String(init?.body));
       assert.equal(body.session.type, "realtime");
       return new Response(JSON.stringify({ value: "ek_test_ephemeral", expires_at: 1234, session: { model: "gpt-realtime-1.5" } }), { status: 200 });
@@ -144,7 +144,7 @@ describe("voice assistant interpretation", () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
     globalThis.fetch = async (url, init) => {
       assert.equal(String(url), "https://api.openai.com/v1/audio/transcriptions");
-      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer server-only-test-key");
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer server-only-test-key");
       const form = init?.body as FormData;
       // gpt-4o-transcribe is the default: it hears short Czech and English
       // commands measurably better than whisper-1. It does treat the prompt as

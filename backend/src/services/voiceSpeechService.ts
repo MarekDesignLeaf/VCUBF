@@ -11,6 +11,8 @@
  *   OPENAI_TTS_VOICE  optional, one of MALE_VOICES, default "onyx"
  */
 
+import { modelFor, modelRequest } from "../lib/modelGateway.js";
+
 /**
  * OpenAI voices that sound like a man.
  *
@@ -86,12 +88,11 @@ function openAiSpeed(rate: number): number {
  * stable.
  */
 export async function speakReply(text: string, _language: string, rate = 1): Promise<SpokenReply | null> {
-  const key = process.env.OPENAI_API_KEY?.trim();
   const trimmed = text.trim().slice(0, MAX_SPOKEN_REPLY);
-  if (!key || !trimmed) return null;
+  if (!process.env.OPENAI_API_KEY?.trim() || !trimmed) return null;
   // The pieces are synthesised together, so a long reply waits about as long as
   // its longest piece; MP3 frames concatenate cleanly, so they play as one reply.
-  const spoken = await Promise.all(speechChunks(trimmed).map((chunk) => speakChunk(key, chunk, rate)));
+  const spoken = await Promise.all(speechChunks(trimmed).map((chunk) => speakChunk(chunk, rate)));
   if (!spoken.length || spoken.some((piece) => !piece)) return null;
   return { audio: Buffer.concat(spoken.map((piece) => piece!.audio)), contentType: spoken[0]!.contentType };
 }
@@ -105,10 +106,10 @@ const CACHE_ENTRIES = 200;
 const spokenCache = new Map<string, SpokenReply>();
 
 function cacheKey(text: string, rate: number) {
-  return [process.env.OPENAI_TTS_MODEL?.trim() || "tts-1", assistantVoice(), openAiSpeed(rate), text].join("\u0000");
+  return [modelFor("speech"), assistantVoice(), openAiSpeed(rate), text].join("\u0000");
 }
 
-async function speakChunk(key: string, trimmed: string, rate: number): Promise<SpokenReply | null> {
+async function speakChunk(trimmed: string, rate: number): Promise<SpokenReply | null> {
   const cacheable = trimmed.length <= CACHEABLE_TEXT;
   const id = cacheable ? cacheKey(trimmed, rate) : "";
   const cached = cacheable ? spokenCache.get(id) : undefined;
@@ -118,7 +119,7 @@ async function speakChunk(key: string, trimmed: string, rate: number): Promise<S
     spokenCache.set(id, cached);
     return cached;
   }
-  const spoken = await synthesise(key, trimmed, rate);
+  const spoken = await synthesise(trimmed, rate);
   if (spoken && cacheable) {
     spokenCache.set(id, spoken);
     if (spokenCache.size > CACHE_ENTRIES) spokenCache.delete(spokenCache.keys().next().value!);
@@ -126,15 +127,17 @@ async function speakChunk(key: string, trimmed: string, rate: number): Promise<S
   return spoken;
 }
 
-async function synthesise(key: string, trimmed: string, rate: number): Promise<SpokenReply | null> {
+async function synthesise(trimmed: string, rate: number): Promise<SpokenReply | null> {
+  // The pieces of one reply abort together, so the controller stays here and
+  // the gateway's default timeout is not used.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SPEECH_TIMEOUT_MS);
   try {
-    const response = await fetch("https://api.openai.com/v1/audio/speech", {
+    const response = await modelRequest("speech", "/v1/audio/speech", {
       method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: process.env.OPENAI_TTS_MODEL?.trim() || "tts-1",
+        model: modelFor("speech"),
         voice: assistantVoice(),
         input: trimmed,
         response_format: "mp3",

@@ -3,6 +3,7 @@ import { PROGRAM_KNOWLEDGE } from "../lib/programKnowledge.js";
 import { VOICE_LANGUAGES, VOICE_LANGUAGE_LABELS, isVoiceLanguage } from "../lib/voiceLanguages.js";
 import type { AssistantContext } from "./assistantMemoryService.js";
 import { buildEmmaBehaviorInstructions } from "./emmaBehaviorService.js";
+import { modelFor, modelRequest, recordUsage } from "../lib/modelGateway.js";
 import { EMMA_EXECUTABLE_ACTION_GUIDE } from "../lib/emmaExecutableActionCatalogue.js";
 import { DEFAULT_ASSISTANT_NAME, withAssistantName } from "../lib/assistantName.js";
 import { assistantRealtimeVoice } from "./voiceSpeechService.js";
@@ -259,7 +260,7 @@ export async function transcribeVoiceAudio(
   // treat the prompt as an instruction and can echo it back when the audio
   // carries no speech (seen as "context: ### {assistant} ###"); isPromptEcho() below
   // turns that into "heard nothing" instead of a command.
-  const model = process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe";
+  const model = modelFor("transcription");
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(audio)], { type: "audio/wav" }), "emma-command.wav");
   form.append("model", model);
@@ -280,14 +281,16 @@ export async function transcribeVoiceAudio(
 
   form.append("prompt", prompt);
 
-  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+  const response = await modelRequest("transcription", "/v1/audio/transcriptions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}` },
     body: form,
-    signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error(`OPENAI_TRANSCRIPTION_FAILED_${response.status}`);
-  const payload = z.object({ text: z.string() }).parse(await response.json());
+  const parsed = await response.json();
+  // The transcription is the highest-volume AI call (every heard stretch of
+  // speech), so its token usage is exactly what the cost decision needs.
+  recordUsage("transcription", (parsed as { usage?: unknown })?.usage);
+  const payload = z.object({ text: z.string() }).parse(parsed);
   const text = payload.text.trim();
   if (isPromptEcho(text, prompt)) return { text: "", model };
   // Silence is a normal outcome of always-on listening, not an error. Whisper
@@ -313,7 +316,7 @@ export async function interpretVoiceRequest(input: {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
 
-  const model = process.env.OPENAI_VOICE_MODEL ?? "gpt-5.4-mini";
+  const model = modelFor("interpretation");
   const history = (input.history ?? []).slice(-6);
   const contextJson = JSON.stringify(input.memoryContext ?? { persistentMemories: [], recentConversations: [] });
   const behaviorInstructions = buildEmmaBehaviorInstructions(input.behaviorScenario);
@@ -321,13 +324,11 @@ export async function interpretVoiceRequest(input: {
   const programGuidance = needsProgramKnowledge
     ? `\nUse this implemented application map when the user asks how to do something, where a feature is, what a page means, or how to reach an outcome. Guide step by step and never invent UI:\nTreat its UI details as exact source-of-truth, not as examples. Quote control labels verbatim. Do not infer a conventional New button, editable line-item grid, confirmation, field or workflow that the map does not state. If a requested UI detail is absent, say it is not described instead of guessing.\n${PROGRAM_KNOWLEDGE}`
     : "";
-  const configuredTimeout = Number(process.env.OPENAI_VOICE_TIMEOUT_MS ?? "8000");
-  const interpretationTimeoutMs = Number.isFinite(configuredTimeout)
-    ? Math.max(3_000, Math.min(15_000, Math.trunc(configuredTimeout)))
-    : 8_000;
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  // The timeout lives in the gateway (taskTimeoutMs): interpretation sits in a
+  // spoken exchange, so its clamp stays configurable there.
+  const response = await modelRequest("interpretation", "/v1/responses", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model,
       store: false,
@@ -383,11 +384,12 @@ ${supportedCommands}${programGuidance}${behaviorInstructions}`, input.assistantN
         },
       },
     }),
-    signal: AbortSignal.timeout(interpretationTimeoutMs),
   });
 
   if (!response.ok) throw new Error(`OPENAI_REQUEST_FAILED_${response.status}`);
-  const raw = outputText(await response.json());
+  const parsed = await response.json();
+  recordUsage("interpretation", (parsed as { usage?: unknown })?.usage);
+  const raw = outputText(parsed);
   if (!raw) throw new Error("OPENAI_EMPTY_RESPONSE");
   return assistantResultSchema.parse(JSON.parse(raw));
 }
@@ -395,11 +397,11 @@ ${supportedCommands}${programGuidance}${behaviorInstructions}`, input.assistantN
 export async function createRealtimeClientSession(behaviorScenario?: string): Promise<RealtimeClientSession> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
-  const model = process.env.OPENAI_REALTIME_MODEL ?? "gpt-realtime-1.5";
+  const model = modelFor("realtime_session");
   const behaviorInstructions = buildEmmaBehaviorInstructions(behaviorScenario);
-  const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+  const response = await modelRequest("realtime_session", "/v1/realtime/client_secrets", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       session: {
         type: "realtime",
@@ -408,7 +410,6 @@ export async function createRealtimeClientSession(behaviorScenario?: string): Pr
         audio: { output: { voice: assistantRealtimeVoice() } },
       },
     }),
-    signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`OPENAI_REALTIME_SESSION_FAILED_${response.status}`);
   const payload: any = await response.json();

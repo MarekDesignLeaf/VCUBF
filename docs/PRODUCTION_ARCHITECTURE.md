@@ -10,13 +10,17 @@ Z tohoto dokumentu je již dodáno: hlas výhradně přes OpenAI (wake word,
 přepis i řeč; Porcupine, Deepgram, NPU Whisper a ElevenLabs byly 26. 9. 2026
 odstraněny), jednotný jazyk rozhraní i Emmy v osmi lokalizacích (en-GB, en-US, cs, pl, fr,
 de, es, it), vynucený stav aktivace wake wordem, katalog menu s automatickým
-testem úplnosti a Windows runtime Voice v2 (`docs/VOICE_V2_SETUP.md`).
+testem úplnosti a Windows runtime Voice v2 (`docs/VOICE_V2_SETUP.md`). Od
+8. 10. 2026 je dodána centrální Model Gateway: každé volání AI modelu odchází
+jedním místem (`backend/src/lib/modelGateway.ts`), které určuje model, časový
+limit a loguje trvání a tokeny.
 
-Zatím nedodáno: samostatný Alfonzo Voice Orchestrator (FastAPI/LangGraph), Redis
-pro krátkodobý stav relace, pgvector pro dlouhodobou paměť (poznámky Emmy dnes
-ukládá `AssistantMemory` v PostgreSQL bez vektorového vyhledávání), migrace
-webu na Next.js a Flutter mobilní klient. Realtime adaptér zůstává přechodovým
-řešením přesně podle bodu 2 níže.
+Zatím nedodáno: agentní runtime (orchestrátor a specialisté) podle
+masterdokumentu agentní správy z 8. 10. 2026
+(`docs/AGENT_MASTERPLAN_2026-10-08.md`), pgvector pro dlouhodobou
+paměť (poznámky Emmy dnes ukládá `AssistantMemory` v PostgreSQL bez vektorového
+vyhledávání), migrace webu na Next.js a Flutter mobilní klient. Realtime
+adaptér zůstává přechodovým zvukovým kanálem přesně podle bodu 2 níže.
 
 ## Produktový kontrakt
 
@@ -42,10 +46,9 @@ Následující vlastnosti jsou regresní brány pro každou změnu:
 Webová pracovní plocha / mobilní klient
                   │  HTTPS + WebSocket
                   ▼
-       Alfonzo Voice Orchestrator (session, language, tools, memory)
-                  │
-                  ▼
-Stávající Secretary business API (práva, validace, audit, data, konektory)
+Stávající Secretary backend (práva, validace, audit, data, konektory)
+   ├─ Model Gateway — všechna volání AI (dodáno 8. 10. 2026)
+   └─ Agentní runtime — orchestrátor + specialisté, in-process modul (F1+)
                   │
        ┌──────────┴──────────┐
        ▼                     ▼
@@ -70,10 +73,13 @@ Proto se postupuje po vrstvách:
 1. **Business jádro zůstává.** Node API a Prisma zůstávají autoritativní pro
    data, Action Contracts, práva, audit a konektory. PostgreSQL musí být
    připravené pro Neon a rozšíření `pgvector`.
-2. **Alfonzo Voice Orchestrator se přidává jako oddělená služba.** Cílová
-   implementace je FastAPI + LangGraph, komunikující se Secretary přes
-   verzované HTTP/WebSocket tool kontrakty. Dokud není nasazen, existující
-   Realtime adaptér zůstává funkčním přechodovým řešením.
+2. **Agentní runtime se přidává jako TypeScript modul uvnitř stávajícího
+   backendu** (rozhodnutí 8. 10. 2026; nahrazuje dřívější záměr samostatné
+   služby FastAPI + LangGraph, která by zdvojila oprávnění, audit a tenant
+   izolaci přes síťovou hranici). Orchestrátor a specialisté sdílejí proces,
+   transakce a testy se Secretary; model navrhuje, Execution Engine vykonává.
+   Nástroje agentů jsou verzovaný katalog nad stávajícími akcemi. Existující
+   Realtime adaptér zůstává přechodovým zvukovým kanálem, nikdy orchestrátorem.
 3. **Poskytovatelé hlasu jsou nahraditelní adaptéry.** Produkční výchozí volby
    jsou od 26. 9. 2026 výhradně OpenAI: wake word přes přepis OpenAI, STT
    OpenAI (`gpt-4o-transcribe`) a TTS OpenAI. Žádný z nich nesmí být natvrdo
@@ -131,8 +137,9 @@ potvrzených výsledků akcí.
 
 ### Fáze 2 — orchestrátor a paměť
 
-FastAPI/LangGraph sidecar, provider adaptéry, Redis pro session, pgvector pro
-dlouhodobou paměť a přesně auditovaný `remember_fact`. Přechod nesmí změnit
+Agentní runtime jako TS modul (katalog nástrojů, Execution Engine, stínový
+režim, Control Tower) podle `docs/AGENT_MASTERPLAN_2026-10-08.md`; Model Gateway je
+dodána. Redis a pgvector až podle prokázané potřeby. Přechod nesmí změnit
 žádnou veřejnou Action Contract ani business validaci.
 
 ### Fáze 3 — mobil a škálování
