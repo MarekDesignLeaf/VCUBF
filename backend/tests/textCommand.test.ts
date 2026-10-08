@@ -46,6 +46,40 @@ describe("command/text", () => {
     assert.equal(res.body.error, "INVALID_AUDIO");
   });
 
+  it("a reviewed executable action that no longer validates fails instead of running; cancel reports what it cancelled", async () => {
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } });
+    const say = (text: string) => request(app).post("/command/text").set("Authorization", `Bearer ${adminToken}`).send({ text });
+    const seed = (parameters: Record<string, unknown>) => prisma.voicePendingAction.create({
+      data: {
+        companyId: admin.companyId,
+        userId: admin.id,
+        actionType: "emma_universal_action",
+        payload: { action: "merge_clients", parameters },
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+
+    // Stored parameters the action's schema no longer accepts are never executed.
+    const broken = await seed({ primary_client_name: "Only One" });
+    const refused = await say("yes");
+    assert.equal(refused.status, 409, JSON.stringify(refused.body));
+    assert.equal(refused.body.intent, "confirm_execute_action");
+    assert.equal(refused.body.error, "PENDING_ACTION_INVALID");
+    const brokenRow = await prisma.voicePendingAction.findUniqueOrThrow({ where: { id: broken.id } });
+    assert.equal(brokenRow.status, "failed");
+    assert.equal(brokenRow.payload, null);
+
+    // A no cancels the waiting review and says that something was cancelled.
+    const waiting = await seed({ primary_client_name: "First", duplicate_client_name: "Second" });
+    const cancelled = await say("cancel action");
+    assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
+    assert.equal(cancelled.body.intent, "cancel_execute_action");
+    assert.deepEqual(cancelled.body.data, { cancelled: true });
+    const waitingRow = await prisma.voicePendingAction.findUniqueOrThrow({ where: { id: waiting.id } });
+    assert.equal(waitingRow.status, "cancelled");
+    assert.equal(waitingRow.payload, null);
+  });
+
   it("previews and confirms a client via a text command and audits it", async () => {
     const preview = await request(app)
       .post("/command/text")

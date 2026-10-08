@@ -1,11 +1,17 @@
 import type { AuthedUser } from "../middleware/auth.js";
 import { EMMA_EXECUTABLE_ACTIONS, type EmmaExecutableActionName, type EmmaExecutableActionRequest } from "../lib/emmaExecutableActionCatalogue.js";
 import { validateVoiceActionParameters } from "../lib/voiceActionCatalogue.js";
-import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { isValidPhoneNumberFormat } from "../lib/contactNormalization.js";
 import { fail, ok, type ServiceResult } from "./result.js";
+import {
+  cancelReviewedAction,
+  claimReviewedAction,
+  peekReviewedAction,
+  prepareReviewedAction,
+  type ReviewedActionDefinition,
+} from "../lib/executionEngine.js";
 import { gmailAccountLabel, matchGmailAccounts } from "../lib/gmailAccountChoice.js";
 import * as clientService from "./clientService.js";
 import * as jobService from "./jobService.js";
@@ -680,27 +686,33 @@ async function executeEmmaActionDirect(
   return fail(500, "EMMA_ACTION_NOT_IMPLEMENTED", `{assistant} action ${unimplementedAction} is not implemented.`);
 }
 
-const PENDING_ACTION_TYPE = "emma_universal_action";
-const PENDING_TTL_MS = 10 * 60 * 1000;
+// The reviewed-action lifecycle (prepare → yes → claim once → execute →
+// resolve) lives in the Execution Engine. A stored request is re-validated on
+// the way out exactly as before: an action no longer in the catalogue, or
+// parameters its schema no longer accepts, fail the review instead of running.
+const reviewedRequestSchema = z.object({ action: z.string() }).passthrough().transform((request, ctx) => {
+  if (!Object.prototype.hasOwnProperty.call(EMMA_EXECUTABLE_ACTIONS, request.action)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["action"], message: "The reviewed action is not executable." });
+    return z.NEVER;
+  }
+  const validated = validateVoiceActionParameters(request.action, (request as { parameters?: unknown }).parameters);
+  if (!validated.success) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["parameters"], message: validated.message });
+    return z.NEVER;
+  }
+  return { ...request, parameters: validated.data } as unknown as EmmaExecutableActionRequest;
+});
 
-async function expirePending(user: AuthedUser) {
-  await prisma.voicePendingAction.updateMany({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_ACTION_TYPE, status: "pending", expiresAt: { lte: new Date() } },
-    data: { status: "expired", payload: Prisma.DbNull, resolvedAt: new Date() },
-  });
-}
-
-async function pendingAction(user: AuthedUser) {
-  await expirePending(user);
-  return prisma.voicePendingAction.findFirst({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_ACTION_TYPE, status: "pending", expiresAt: { gt: new Date() } },
-    orderBy: { createdAt: "desc" },
-  });
-}
+const EXECUTABLE_ACTION_REVIEW: ReviewedActionDefinition<EmmaExecutableActionRequest> = {
+  actionType: "emma_universal_action",
+  lifetimeMs: 10 * 60 * 1000,
+  payloadSchema: reviewedRequestSchema,
+  replacedStatus: "replaced",
+};
 
 export async function getPendingEmmaActionName(user: AuthedUser): Promise<EmmaExecutableActionName | undefined> {
-  const pending = await pendingAction(user);
-  const payload = pending?.payload as { action?: string } | null;
+  const pending = await peekReviewedAction(user, EXECUTABLE_ACTION_REVIEW.actionType);
+  const payload = pending?.payload as { action?: string } | null | undefined;
   return payload?.action && Object.prototype.hasOwnProperty.call(EMMA_EXECUTABLE_ACTIONS, payload.action)
     ? payload.action as EmmaExecutableActionName
     : undefined;
@@ -730,53 +742,28 @@ export async function executeEmmaAction(user: AuthedUser, request: EmmaExecutabl
     ? { ...sanitized, parameters: reviewed as Record<string, unknown> }
     : sanitized;
 
-  await prisma.$transaction([
-    prisma.voicePendingAction.updateMany({
-      where: { companyId: user.companyId, userId: user.id, actionType: PENDING_ACTION_TYPE, status: "pending" },
-      data: { status: "replaced", payload: Prisma.DbNull, resolvedAt: new Date() },
-    }),
-    prisma.voicePendingAction.create({
-      data: {
-        companyId: user.companyId,
-        userId: user.id,
-        actionType: PENDING_ACTION_TYPE,
-        status: "pending",
-        payload: awaiting as unknown as Prisma.InputJsonValue,
-        expiresAt: new Date(Date.now() + PENDING_TTL_MS),
-      },
-    }),
-  ]);
+  await prepareReviewedAction(user, EXECUTABLE_ACTION_REVIEW, awaiting);
   return result;
 }
 
 export async function confirmPendingEmmaAction(user: AuthedUser): Promise<ServiceResult<unknown>> {
-  const pending = await pendingAction(user);
-  if (!pending) return fail(409, "NO_PENDING_ACTION", "There is no reviewed {assistant} action waiting for confirmation.");
-  const request = pending.payload as unknown as EmmaExecutableActionRequest;
-  if (!request?.action || !Object.prototype.hasOwnProperty.call(EMMA_EXECUTABLE_ACTIONS, request.action)) {
-    await prisma.voicePendingAction.update({ where: { id: pending.id }, data: { status: "failed", payload: Prisma.DbNull, resolvedAt: new Date() } });
-    return fail(409, "PENDING_ACTION_INVALID");
+  const claimed = await claimReviewedAction(user, EXECUTABLE_ACTION_REVIEW);
+  if (!claimed.ok) {
+    if (claimed.reason === "raced") return fail(409, "PENDING_ACTION_ALREADY_RESOLVED");
+    if (claimed.reason === "invalid") {
+      // Parameters the schema rejects keep their validation wording; an
+      // action outside the catalogue (or an ambiguous review) carries none.
+      const parameterIssue = claimed.issues?.find((issue) => issue.path[0] === "parameters");
+      return fail(409, "PENDING_ACTION_INVALID", parameterIssue?.message);
+    }
+    return fail(409, "NO_PENDING_ACTION", "There is no reviewed {assistant} action waiting for confirmation.");
   }
-  const validated = validateVoiceActionParameters(request.action, request.parameters);
-  if (!validated.success) {
-    await prisma.voicePendingAction.update({ where: { id: pending.id }, data: { status: "failed", payload: Prisma.DbNull, resolvedAt: new Date() } });
-    return fail(409, "PENDING_ACTION_INVALID", validated.message);
-  }
-  const claimed = await prisma.voicePendingAction.updateMany({ where: { id: pending.id, status: "pending" }, data: { status: "executing" } });
-  if (claimed.count !== 1) return fail(409, "PENDING_ACTION_ALREADY_RESOLVED");
-  const result = await executeEmmaActionDirect(user, { ...request, parameters: validated.data }, true);
-  await prisma.voicePendingAction.update({
-    where: { id: pending.id },
-    data: { status: result.ok ? "completed" : "failed", payload: Prisma.DbNull, resolvedAt: new Date() },
-  });
+  const result = await executeEmmaActionDirect(user, claimed.payload, true);
+  await claimed.complete(result.ok);
   return result;
 }
 
 export async function cancelPendingEmmaAction(user: AuthedUser): Promise<ServiceResult<unknown>> {
-  await expirePending(user);
-  const cancelled = await prisma.voicePendingAction.updateMany({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_ACTION_TYPE, status: "pending" },
-    data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: new Date() },
-  });
-  return ok(200, { cancelled: cancelled.count > 0 });
+  const cancelled = await cancelReviewedAction(user, EXECUTABLE_ACTION_REVIEW.actionType);
+  return ok(200, { cancelled });
 }
