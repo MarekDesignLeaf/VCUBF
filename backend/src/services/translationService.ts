@@ -50,7 +50,12 @@ export function resolveTargetLanguage(raw: string): VoiceLanguage | undefined {
   return resolveVoiceLanguage(value) ?? resolveSpokenLanguageName(value);
 }
 
-const responseSchema = z.object({ output_text: z.string().optional(), output: z.array(z.any()).optional() });
+const responseSchema = z.object({ status: z.string().optional(), output_text: z.string().optional(), output: z.array(z.any()).optional() });
+
+/** Output tokens for translating this text: about one per two characters, plus room to think. */
+export function translationTokenBudget(text: string): number {
+  return Math.min(32_000, 4_000 + Math.ceil(text.length / 2));
+}
 
 function outputText(payload: z.infer<typeof responseSchema>): string {
   if (typeof payload.output_text === "string") return payload.output_text;
@@ -82,7 +87,9 @@ export async function translateForSending(text: string, rawTargetLanguage: strin
       body: JSON.stringify({
         model,
         store: false,
-        max_output_tokens: 4_000,
+        // Room for the whole message: a long email needs more than a short
+        // reply. A translation that still runs out is refused below.
+        max_output_tokens: translationTokenBudget(body),
         instructions:
           `Translate the user's message into ${label}. Return only the translation, with no preamble, `
           + "no quotation marks around it and no commentary. Translate faithfully: do not answer the message, "
@@ -101,6 +108,11 @@ export async function translateForSending(text: string, rawTargetLanguage: strin
   }
 
   const parsed = responseSchema.safeParse(payload);
+  // A translation cut short would be read back and sent as if it were the
+  // whole message; the end of what was dictated would silently be missing.
+  if (parsed.success && parsed.data.status === "incomplete") {
+    throw new TranslationUnavailable("TRANSLATION_FAILED", "The translation was cut short, so nothing is sent.");
+  }
   const translated = parsed.success ? outputText(parsed.data).trim() : "";
   if (!translated) throw new TranslationUnavailable("TRANSLATION_FAILED", "The translation came back empty.");
   return { text: translated, targetLanguage, targetLanguageLabel: label, model };

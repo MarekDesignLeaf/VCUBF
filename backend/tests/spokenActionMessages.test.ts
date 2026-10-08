@@ -58,6 +58,14 @@ describe("Spoken reviews", () => {
     assert.doesNotMatch(spokenReview("send_email", { ...email, alreadySent: undefined }, "cs-CZ")!, /Pozor/);
   });
 
+  it("counts the clashes it does not name, so the list is never heard as complete when it is not", () => {
+    const clashes = ["A", "B", "C", "D", "E"].map((title) => ({ title }));
+    const preview = { title: "Prohlídka", date: tomorrow(), start: "08:00", end: "09:00", timeZone: ZONE, clashes };
+    assert.match(spokenReview("create_calendar_event", preview, "cs-CZ")!, /v kalendáři: A, B, C a ještě 2\./);
+    assert.match(spokenReview("create_calendar_event", preview, "en-GB")!, /already has A, B, C and 2 more at that time\./);
+    assert.match(spokenReview("create_calendar_event", { ...preview, clashes: clashes.slice(0, 3) }, "pl-PL")!, /jest już: A, B, C\./);
+  });
+
   it("reads a calendar entry back with the day, time, an assumed length and clashes", () => {
     const day = tomorrow();
     const spoken = spokenReview("create_calendar_event", {

@@ -190,11 +190,16 @@ async function clashes(user: AuthedUser, target: WriteTarget, slot: Slot, exclud
       ...(excludeId ? { id: { not: excludeId } } : {}),
       OR: [
         { startAt: { lt: end }, endAt: { gt: start } },
+        // All-day events: one that starts within the slot's days, or one that
+        // started earlier and is still running on its first day (Google's end
+        // date is the day after the last).
         { startDate: { lt: slot.allDay ? slot.endDate : addDays(slot.endDate, 1), gte: slot.date } },
+        { startDate: { lt: slot.date }, endDate: { gt: slot.date } },
       ],
     },
     orderBy: [{ startAt: "asc" }, { startDate: "asc" }],
-    take: 10,
+    // Enough that the review can say how many there are, not only the first few.
+    take: 50,
   });
   return timed.map((event) => ({
     title: event.summary || "Untitled event",
@@ -496,6 +501,15 @@ export async function cancelCalendarEvent(user: AuthedUser, raw: unknown): Promi
   const target = await writeTarget(user);
   if (!target.ok) return target;
   const timeZone = target.data.calendar.timeZone;
+  // A confirmed cancellation retried after it succeeded (a lost answer, a
+  // repeated request) finds the event already cancelled: that is the outcome
+  // asked for, not "not found".
+  if (input.confirmed && input.calendar_event_id) {
+    const done = await prisma.externalCalendarEvent.findFirst({
+      where: { id: input.calendar_event_id, companyId: user.companyId, connectorSourceId: target.data.source.id, externalCalendarRecordId: target.data.calendar.id, isDeleted: true },
+    });
+    if (done) return ok(200, { eventId: done.externalEventId, title: done.summary, alreadyCancelled: true });
+  }
   const found = await findEvent(user, target.data, input);
   if (!found.ok) return found;
   const event = found.data;

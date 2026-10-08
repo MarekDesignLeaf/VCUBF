@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, afterEach, before, describe, it } from "node:test";
 import request from "supertest";
 import { prisma } from "../src/db.js";
+import { translateForSending, translationTokenBudget } from "../src/services/translationService.js";
 import { createServer } from "../src/server.js";
 import { resetDb, seedCompanyAndAdmin } from "./setup.js";
 
@@ -144,6 +145,19 @@ describe("Dictated in Czech, sent in English", () => {
     // Not a lesser version of the request: sending the Czech to someone who was
     // promised English is the wrong outcome, not a partial one.
     assert.equal(sent, undefined);
+  });
+
+  it("refuses a translation that was cut short instead of sending the first half", async () => {
+    let budget = 0;
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      budget = JSON.parse(String(init?.body)).max_output_tokens;
+      return Response.json({ status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output_text: "Hello, the garden work will" });
+    }) as typeof globalThis.fetch;
+    const long = "Dobrý den. ".repeat(3000);
+    await assert.rejects(translateForSending(long, "en-GB"), (error: { reason?: string }) => error.reason === "TRANSLATION_FAILED");
+    assert.equal(budget, translationTokenBudget(long.trim()), "a long message is given room for all of it");
+    assert.ok(translationTokenBudget(long) > translationTokenBudget("Ahoj."));
+    assert.equal(translationTokenBudget("x".repeat(500_000)), 32_000);
   });
 
   it("refuses a language it does not know rather than guessing one", async () => {

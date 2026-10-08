@@ -1030,6 +1030,13 @@ export function BrowserVoiceControl() {
   // Deliberately separate from speakingUntil: that one ends the moment she is cut off,
   // this one has to outlive it.
   const echoGuardUntil = useRef(0);
+  /**
+   * True only while a reply is actually being heard. Talking over her is
+   * judged only then: while a review is still being fetched there is nothing
+   * to interrupt, and cutting it then would throw the review away unheard and
+   * let a "yes" through for something nobody has heard.
+   */
+  const audible = useRef(false);
   // What she is currently saying, so her own voice can be told from an
   // interruption.
   // The last few replies, not just the newest: echo arrives late, so the tail of one
@@ -1165,6 +1172,7 @@ export function BrowserVoiceControl() {
    */
   const silence = useCallback(() => {
     speechGeneration += 1;
+    audible.current = false;
     currentPlayback?.stop();
     currentPlayback = null;
     try { window.speechSynthesis?.cancel(); } catch { /* not everywhere */ }
@@ -1189,7 +1197,7 @@ export function BrowserVoiceControl() {
     if (!enabled) return;
     let loudFor = 0;
     const handle = window.setInterval(() => {
-      if (Date.now() >= speakingUntil.current) { loudFor = 0; return; }
+      if (!audible.current || Date.now() >= speakingUntil.current) { loudFor = 0; return; }
       const level = micLevel.current;
       if (Date.now() < calibrateUntil.current) {
         echoFloor.current = Math.max(echoFloor.current, level);
@@ -1215,6 +1223,7 @@ export function BrowserVoiceControl() {
     // the assistant hears herself — or hears a "yes" before the review has been
     // heard. The hold is replaced by the real length once the audio arrives.
     const generation = ++speechGeneration;
+    audible.current = false;
     speakingUntil.current = Date.now() + PENDING_SPEECH_HOLD_MS;
     echoGuardUntil.current = Date.now() + PENDING_SPEECH_HOLD_MS + ECHO_TAIL_MS;
     // Fresh for every reply: the residue depends on volume, distance and the room.
@@ -1233,7 +1242,9 @@ export function BrowserVoiceControl() {
         const playing = audio.duration * 1000;
         speakingUntil.current = Date.now() + playing + SPEAKING_GRACE_MS;
         echoGuardUntil.current = Date.now() + playing + ECHO_TAIL_MS;
+        audible.current = true;
         audio.onEnded(() => {
+          if (generation === speechGeneration) audible.current = false;
           speakingUntil.current = Date.now() + SPEAKING_GRACE_MS;
           echoGuardUntil.current = Date.now() + ECHO_TAIL_MS;
         });
@@ -1260,7 +1271,9 @@ export function BrowserVoiceControl() {
         const estimated = (text.split(/\s+/).length / (3 * speechRate)) * 1000;
         speakingUntil.current = Date.now() + estimated + SPEAKING_GRACE_MS;
         echoGuardUntil.current = Date.now() + estimated + ECHO_TAIL_MS;
+        utterance.onstart = () => { if (generation === speechGeneration) audible.current = true; };
         utterance.onend = () => {
+          if (generation === speechGeneration) audible.current = false;
           speakingUntil.current = Date.now() + SPEAKING_GRACE_MS;
           echoGuardUntil.current = Date.now() + ECHO_TAIL_MS;
         };
