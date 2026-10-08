@@ -72,25 +72,43 @@ describe("execution engine — the reviewed-action state machine", () => {
     await cancelReviewedAction(user, REVIEW.actionType);
   });
 
-  it("claiming the newest review cancels a stale older duplicate", async () => {
+  it("claiming the newest review cancels stale duplicates, timestamp ties included", async () => {
     await prepareReviewedAction(user, REVIEW, { note: "current" });
-    // A stale duplicate from before the advisory lock shipped: older, pending.
-    const stale = await prisma.voicePendingAction.create({
+    const current = await prisma.voicePendingAction.findFirst({
+      where: { companyId: user.companyId, userId: user.id, actionType: REVIEW.actionType, status: "pending" },
+    });
+    assert.ok(current);
+    // Stale duplicates from before the advisory lock shipped: one plainly
+    // older, one sharing the claimed row's millisecond timestamp (lower id).
+    const older = await prisma.voicePendingAction.create({
       data: {
         companyId: user.companyId,
         userId: user.id,
         actionType: REVIEW.actionType,
-        payload: { note: "stale" },
+        payload: { note: "stale older" },
         expiresAt: new Date(Date.now() + 60_000),
         createdAt: new Date(Date.now() - 60_000),
+      },
+    });
+    const tied = await prisma.voicePendingAction.create({
+      data: {
+        id: "00000000-0000-4000-8000-000000000042",
+        companyId: user.companyId,
+        userId: user.id,
+        actionType: REVIEW.actionType,
+        payload: { note: "stale tie" },
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt: current.createdAt,
       },
     });
     const claimed = await claimReviewedAction(user, REVIEW);
     assert.ok(claimed.ok);
     assert.equal(claimed.payload.note, "current");
-    const staleRow = await prisma.voicePendingAction.findUnique({ where: { id: stale.id } });
-    assert.equal(staleRow?.status, "cancelled");
-    assert.equal(staleRow?.payload, null);
+    for (const stale of [older, tied]) {
+      const row = await prisma.voicePendingAction.findUnique({ where: { id: stale.id } });
+      assert.equal(row?.status, "cancelled");
+      assert.equal(row?.payload, null);
+    }
     await claimed.complete(true);
   });
 

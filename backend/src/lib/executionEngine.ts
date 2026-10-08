@@ -140,9 +140,13 @@ export async function claimReviewedAction<Payload>(
   now = new Date()
 ): Promise<ClaimedReviewedAction<Payload>> {
   await expireReviewedActions(user, definition.actionType, now);
+  // Newest first, with the id as tie-break: createdAt has millisecond
+  // precision, so two pre-lock duplicates can share a timestamp. The ordering
+  // makes (createdAt, id) a total order, and the cleanup below cancels exactly
+  // what ranks under the claimed review in it.
   const pending = await prisma.voicePendingAction.findFirst({
     where: { ...scope(user, definition.actionType), status: "pending", expiresAt: { gt: now } },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   });
   if (!pending) return { ok: false, reason: "none" };
 
@@ -152,17 +156,21 @@ export async function claimReviewedAction<Payload>(
   });
   if (!claimed.count) return { ok: false, reason: "raced" };
 
-  // Belt to the advisory lock's braces: should an older duplicate pending row
+  // Belt to the advisory lock's braces: should a stale duplicate pending row
   // exist (rows written before the lock shipped, mid-deploy overlap), it is
-  // cancelled now, so a later yes can never claim a stale review. Only rows
-  // that predate the claimed one — a review legitimately prepared after the
-  // claim must survive, or its caller's fresh preview could never be confirmed.
+  // cancelled now, so a later yes can never claim a stale review. Cancelled is
+  // exactly what ranks under the claimed review in the (createdAt, id) total
+  // order — including a duplicate sharing its millisecond timestamp — while a
+  // review legitimately prepared after the claim ranks above it and survives,
+  // so its caller's fresh preview can still be confirmed.
   await prisma.voicePendingAction.updateMany({
     where: {
       ...scope(user, definition.actionType),
       status: "pending",
-      id: { not: pending.id },
-      createdAt: { lt: pending.createdAt },
+      OR: [
+        { createdAt: { lt: pending.createdAt } },
+        { createdAt: pending.createdAt, id: { lt: pending.id } },
+      ],
     },
     data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
   });
