@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { modelFor, modelRequest, recordUsage } from "../lib/modelGateway.js";
 import { VOICE_LANGUAGE_LABELS, resolveSpokenLanguageName, resolveVoiceLanguage, type VoiceLanguage } from "../lib/voiceLanguages.js";
 
 /**
@@ -76,14 +77,14 @@ export async function translateForSending(text: string, rawTargetLanguage: strin
 
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new TranslationUnavailable("TRANSLATION_NOT_CONFIGURED");
-  const model = process.env.OPENAI_TRANSLATION_MODEL ?? "gpt-5.4-mini";
+  const model = modelFor("translation");
   const label = VOICE_LANGUAGE_LABELS[targetLanguage];
 
   let payload: unknown;
   try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await modelRequest("translation", "/v1/responses", {
       method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
         store: false,
@@ -99,10 +100,10 @@ export async function translateForSending(text: string, rawTargetLanguage: strin
           + `${label}, return it unchanged.`,
         input: body,
       }),
-      signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) throw new Error(`OPENAI_TRANSLATION_FAILED_${response.status}`);
     payload = await response.json();
+    recordUsage("translation", (payload as { usage?: unknown })?.usage);
   } catch (error) {
     throw new TranslationUnavailable("TRANSLATION_FAILED", error instanceof Error ? error.message : "translation request failed");
   }
