@@ -286,7 +286,11 @@ export async function transcribeVoiceAudio(
     body: form,
   });
   if (!response.ok) throw new Error(`OPENAI_TRANSCRIPTION_FAILED_${response.status}`);
-  const payload = z.object({ text: z.string() }).parse(await response.json());
+  const parsed = await response.json();
+  // The transcription is the highest-volume AI call (every heard stretch of
+  // speech), so its token usage is exactly what the cost decision needs.
+  recordUsage("transcription", (parsed as { usage?: unknown })?.usage);
+  const payload = z.object({ text: z.string() }).parse(parsed);
   const text = payload.text.trim();
   if (isPromptEcho(text, prompt)) return { text: "", model };
   // Silence is a normal outcome of always-on listening, not an error. Whisper
