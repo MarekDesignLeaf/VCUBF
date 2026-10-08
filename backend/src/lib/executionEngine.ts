@@ -50,6 +50,12 @@ export interface ReviewedActionDefinition<Payload> {
    * type because existing rows and tests know the current words.
    */
   claimedStatus?: string;
+  /**
+   * The status a review gets when a newer preparation supersedes it
+   * (default "cancelled"). Kept per action type for the same reason: the
+   * client-creation and executable-action queues write "replaced".
+   */
+  replacedStatus?: string;
 }
 
 function scope(user: ActingUser, actionType: string) {
@@ -98,7 +104,7 @@ export async function prepareReviewedAction<Payload>(
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${user.companyId + ":" + user.id}), hashtext(${definition.actionType}))::text`;
     await tx.voicePendingAction.updateMany({
       where: { ...scope(user, definition.actionType), status: "pending" },
-      data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
+      data: { status: definition.replacedStatus ?? "cancelled", payload: Prisma.DbNull, resolvedAt: now },
     });
     await tx.voicePendingAction.create({
       data: {

@@ -4,6 +4,13 @@ import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
 import { ARCHIVE_CLIENT_ACTION, CREATE_CLIENT_ACTION, UPDATE_CLIENT_ACTION, type ActionContract } from "../lib/actionContracts.js";
 import { normalizeEmail, phoneNumberSchema } from "../lib/contactNormalization.js";
+import {
+  cancelReviewedAction,
+  claimReviewedAction,
+  hasReviewedActionPending,
+  prepareReviewedAction,
+  type ReviewedActionDefinition,
+} from "../lib/executionEngine.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -56,10 +63,23 @@ const pendingCreatePayloadSchema = createClientSchema.extend({
   email_primary: z.string().email(),
   phone_primary: z.string().min(1),
 });
-const PENDING_CLIENT_CREATE = "create_client";
-const PENDING_CLIENT_CREATE_LIFETIME_MS = 5 * 60 * 1000;
-const PENDING_CLIENT_ARCHIVE = "archive_client";
-const PENDING_CLIENT_ARCHIVE_LIFETIME_MS = 5 * 60 * 1000;
+
+// The reviewed-action lifecycle (prepare → yes → claim once → execute →
+// resolve) lives in the Execution Engine; this service keeps what is its own:
+// the validation wording, the duplicate checks, the previews, the execution
+// and the audit entries recorded by createClient/archiveClient.
+const CLIENT_CREATE_REVIEW: ReviewedActionDefinition<z.infer<typeof pendingCreatePayloadSchema>> = {
+  actionType: "create_client",
+  lifetimeMs: 5 * 60 * 1000,
+  payloadSchema: pendingCreatePayloadSchema,
+  replacedStatus: "replaced",
+};
+const CLIENT_ARCHIVE_REVIEW: ReviewedActionDefinition<z.infer<typeof pendingArchivePayloadSchema>> = {
+  actionType: "archive_client",
+  lifetimeMs: 5 * 60 * 1000,
+  payloadSchema: pendingArchivePayloadSchema,
+  claimedStatus: "archiving",
+};
 
 function createClientValidationFailure(rawInput: unknown, error: z.ZodError): FailureResult {
   const input = rawInput && typeof rawInput === "object" ? rawInput as Record<string, unknown> : {};
@@ -259,20 +279,8 @@ export async function createClient(
   return ok(201, client);
 }
 
-async function expirePendingClientCreations(user: AuthedUser, now = new Date()) {
-  await prisma.voicePendingAction.updateMany({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_CREATE, status: "pending", expiresAt: { lte: now } },
-    data: { status: "expired", payload: Prisma.DbNull, resolvedAt: now },
-  });
-}
-
 export async function hasPendingVoiceClientCreation(user: AuthedUser) {
-  const now = new Date();
-  await expirePendingClientCreations(user, now);
-  return Boolean(await prisma.voicePendingAction.findFirst({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_CREATE, status: "pending", expiresAt: { gt: now } },
-    select: { id: true },
-  }));
+  return hasReviewedActionPending(user, CLIENT_CREATE_REVIEW.actionType);
 }
 
 export async function prepareVoiceClientCreation(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
@@ -298,17 +306,7 @@ export async function prepareVoiceClientCreation(user: AuthedUser, rawInput: unk
   }
 
   const payload = pendingCreatePayloadSchema.parse(data);
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + PENDING_CLIENT_CREATE_LIFETIME_MS);
-  await prisma.$transaction(async (tx) => {
-    await tx.voicePendingAction.updateMany({
-      where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_CREATE, status: "pending" },
-      data: { status: "replaced", payload: Prisma.DbNull, resolvedAt: now },
-    });
-    await tx.voicePendingAction.create({
-      data: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_CREATE, payload, expiresAt },
-    });
-  });
+  const { expiresAt } = await prepareReviewedAction(user, CLIENT_CREATE_REVIEW, payload);
   return ok(202, {
     confirmationRequired: true,
     expiresAt: expiresAt.toISOString(),
@@ -318,41 +316,26 @@ export async function prepareVoiceClientCreation(user: AuthedUser, rawInput: unk
 }
 
 export async function confirmVoiceClientCreation(user: AuthedUser): Promise<ServiceResult<unknown>> {
-  const now = new Date();
-  await expirePendingClientCreations(user, now);
-  const pending = await prisma.voicePendingAction.findFirst({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_CREATE, status: "pending", expiresAt: { gt: now } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!pending) return fail(409, "NO_PENDING_CLIENT_CREATE", "There is no client waiting for confirmation.");
-  const payload = pendingCreatePayloadSchema.safeParse(pending.payload);
-  if (!payload.success) {
-    await prisma.voicePendingAction.update({ where: { id: pending.id }, data: { status: "failed", payload: Prisma.DbNull, resolvedAt: now } });
-    return fail(409, "PENDING_CLIENT_CREATE_INVALID", "The reviewed client details are no longer valid. Start again.");
+  const claimed = await claimReviewedAction(user, CLIENT_CREATE_REVIEW);
+  if (!claimed.ok) {
+    if (claimed.reason === "raced") {
+      return fail(409, "NO_PENDING_CLIENT_CREATE", "That client is no longer waiting for confirmation.");
+    }
+    if (claimed.reason === "invalid") {
+      return fail(409, "PENDING_CLIENT_CREATE_INVALID", "The reviewed client details are no longer valid. Start again.");
+    }
+    return fail(409, "NO_PENDING_CLIENT_CREATE", "There is no client waiting for confirmation.");
   }
-  const claimed = await prisma.voicePendingAction.updateMany({
-    where: { id: pending.id, status: "pending", expiresAt: { gt: now } },
-    data: { status: "executing" },
-  });
-  if (!claimed.count) return fail(409, "NO_PENDING_CLIENT_CREATE", "That client is no longer waiting for confirmation.");
-  const result = await createClient(user, payload.data, { required: true, confirmed: true });
-  await prisma.voicePendingAction.update({
-    where: { id: pending.id },
-    data: { status: result.ok ? "completed" : "failed", payload: Prisma.DbNull, resolvedAt: new Date() },
-  });
+  const result = await createClient(user, claimed.payload, { required: true, confirmed: true });
+  await claimed.complete(result.ok);
   return result.ok
-    ? ok(result.httpStatus, { ...(result.data as Record<string, unknown>), message: `${payload.data.display_name} was created as a client.` })
+    ? ok(result.httpStatus, { ...(result.data as Record<string, unknown>), message: `${claimed.payload.display_name} was created as a client.` })
     : result;
 }
 
 export async function cancelVoiceClientCreation(user: AuthedUser): Promise<ServiceResult<unknown>> {
-  const now = new Date();
-  await expirePendingClientCreations(user, now);
-  const cancelled = await prisma.voicePendingAction.updateMany({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_CREATE, status: "pending" },
-    data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
-  });
-  return cancelled.count
+  const cancelled = await cancelReviewedAction(user, CLIENT_CREATE_REVIEW.actionType);
+  return cancelled
     ? ok(200, { message: "Client creation was cancelled. Nothing was changed." })
     : fail(409, "NO_PENDING_CLIENT_CREATE", "There is no client waiting to be cancelled.");
 }
@@ -454,13 +437,6 @@ export async function archiveClient(user: AuthedUser, id: string, rawInput: unkn
   return ok(200, { client: archived, preservedRecords: existing._count, message: `${existing.displayName} was archived. Related records were preserved.` });
 }
 
-async function expirePendingClientArchives(user: AuthedUser, now = new Date()) {
-  await prisma.voicePendingAction.updateMany({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_ARCHIVE, status: "pending", expiresAt: { lte: now } },
-    data: { status: "expired", payload: Prisma.DbNull, resolvedAt: now },
-  });
-}
-
 export async function prepareVoiceClientArchive(user: AuthedUser, clientName: string): Promise<ServiceResult<unknown>> {
   const matches = await findClientsByName(user, clientName);
   if (matches.length === 0) return fail(404, "CLIENT_NOT_FOUND", `No active client matches "${clientName}".`);
@@ -472,22 +448,9 @@ export async function prepareVoiceClientArchive(user: AuthedUser, clientName: st
   const previewResult = await archiveClient(user, matches[0].id, { confirmed: false });
   if (previewResult.ok || previewResult.error !== "CONFIRMATION_REQUIRED") return previewResult;
 
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + PENDING_CLIENT_ARCHIVE_LIFETIME_MS);
-  await prisma.$transaction(async (tx) => {
-    await tx.voicePendingAction.updateMany({
-      where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_ARCHIVE, status: "pending" },
-      data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
-    });
-    await tx.voicePendingAction.create({
-      data: {
-        companyId: user.companyId,
-        userId: user.id,
-        actionType: PENDING_CLIENT_ARCHIVE,
-        payload: { clientId: matches[0].id, displayName: matches[0].displayName },
-        expiresAt,
-      },
-    });
+  const { expiresAt } = await prepareReviewedAction(user, CLIENT_ARCHIVE_REVIEW, {
+    clientId: matches[0].id,
+    displayName: matches[0].displayName,
   });
   return ok(202, {
     confirmationRequired: true,
@@ -498,40 +461,25 @@ export async function prepareVoiceClientArchive(user: AuthedUser, clientName: st
 }
 
 export async function confirmVoiceClientArchive(user: AuthedUser): Promise<ServiceResult<unknown>> {
-  const now = new Date();
-  await expirePendingClientArchives(user, now);
-  const pending = await prisma.voicePendingAction.findFirst({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_ARCHIVE, status: "pending", expiresAt: { gt: now } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!pending) return fail(409, "NO_PENDING_CLIENT_ARCHIVE", "There is no client deletion waiting for confirmation.");
-  const payload = pendingArchivePayloadSchema.safeParse(pending.payload);
-  if (!payload.success) {
-    await prisma.voicePendingAction.update({ where: { id: pending.id }, data: { status: "failed", payload: Prisma.DbNull, resolvedAt: now } });
-    return fail(409, "PENDING_CLIENT_ARCHIVE_INVALID", "The reviewed client deletion is no longer valid. Start it again.");
+  const claimed = await claimReviewedAction(user, CLIENT_ARCHIVE_REVIEW);
+  if (!claimed.ok) {
+    if (claimed.reason === "raced") {
+      return fail(409, "NO_PENDING_CLIENT_ARCHIVE", "That client deletion is no longer awaiting confirmation.");
+    }
+    if (claimed.reason === "invalid") {
+      return fail(409, "PENDING_CLIENT_ARCHIVE_INVALID", "The reviewed client deletion is no longer valid. Start it again.");
+    }
+    return fail(409, "NO_PENDING_CLIENT_ARCHIVE", "There is no client deletion waiting for confirmation.");
   }
-  const claimed = await prisma.voicePendingAction.updateMany({
-    where: { id: pending.id, status: "pending", expiresAt: { gt: now } },
-    data: { status: "archiving" },
-  });
-  if (!claimed.count) return fail(409, "NO_PENDING_CLIENT_ARCHIVE", "That client deletion is no longer awaiting confirmation.");
 
-  const result = await archiveClient(user, payload.data.clientId, { confirmed: true });
-  await prisma.voicePendingAction.update({
-    where: { id: pending.id },
-    data: { status: result.ok ? "completed" : "failed", payload: Prisma.DbNull, resolvedAt: new Date() },
-  });
+  const result = await archiveClient(user, claimed.payload.clientId, { confirmed: true });
+  await claimed.complete(result.ok);
   return result;
 }
 
 export async function cancelVoiceClientArchive(user: AuthedUser): Promise<ServiceResult<unknown>> {
-  const now = new Date();
-  await expirePendingClientArchives(user, now);
-  const cancelled = await prisma.voicePendingAction.updateMany({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_CLIENT_ARCHIVE, status: "pending" },
-    data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
-  });
-  return cancelled.count
+  const cancelled = await cancelReviewedAction(user, CLIENT_ARCHIVE_REVIEW.actionType);
+  return cancelled
     ? ok(200, { message: "Client deletion was cancelled. Nothing was changed." })
     : fail(409, "NO_PENDING_CLIENT_ARCHIVE", "There is no client deletion waiting to be cancelled.");
 }
