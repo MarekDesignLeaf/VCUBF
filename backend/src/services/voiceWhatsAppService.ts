@@ -1,6 +1,13 @@
-import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { SEND_WHATSAPP_MESSAGE_ACTION } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import {
+  cancelReviewedAction,
+  claimReviewedAction,
+  hasReviewedActionPending,
+  prepareReviewedAction,
+  type ReviewedActionDefinition,
+} from "../lib/executionEngine.js";
 import { recentAuditedSend, repeatNote, sendFingerprint } from "../lib/repeatedSend.js";
 import { validateWhatsAppConfiguration, WhatsAppBusinessAdapterError } from "../connectors/whatsappBusinessAdapter.js";
 import type { AuthedUser } from "../middleware/auth.js";
@@ -9,28 +16,24 @@ import { sendWhatsAppMessage, sendWhatsAppMessageSchema } from "./whatsappBusine
 import { fail, ok, type ServiceResult } from "./result.js";
 import { TranslationUnavailable, translateOutgoingMessage } from "./translationService.js";
 
-const PENDING_WHATSAPP_ACTION = "send_whatsapp_message";
-const PENDING_WHATSAPP_LIFETIME_MS = 5 * 60 * 1000;
 /** The language spoken messages leave in unless the user dictates in English. */
 const MESSAGE_LANGUAGE = "en-GB";
 
 type WhatsAppMessage = { to: string; body: string };
 
+// The reviewed-action lifecycle (prepare → yes → claim once → send → resolve)
+// lives in the Execution Engine; this service keeps the permission wording,
+// the source choice, the translation, the preview, the send and its audit.
+const WHATSAPP_MESSAGE_REVIEW: ReviewedActionDefinition<WhatsAppMessage> = {
+  actionType: "send_whatsapp_message",
+  lifetimeMs: 5 * 60 * 1000,
+  payloadSchema: sendWhatsAppMessageSchema.transform((message): WhatsAppMessage => ({ to: message.to, body: message.body })) as z.ZodType<WhatsAppMessage, z.ZodTypeDef, unknown>,
+  claimedStatus: "sending",
+  completedStatus: "sent",
+};
+
 function canManageConnectors(user: AuthedUser) {
   return user.permissions.includes("connectors.manage");
-}
-
-async function expirePendingMessages(user: AuthedUser, now = new Date()) {
-  await prisma.voicePendingAction.updateMany({
-    where: {
-      companyId: user.companyId,
-      userId: user.id,
-      actionType: PENDING_WHATSAPP_ACTION,
-      status: "pending",
-      expiresAt: { lte: now },
-    },
-    data: { status: "expired", payload: Prisma.DbNull, resolvedAt: now },
-  });
 }
 
 async function eligibleSource(user: AuthedUser): Promise<ServiceResult<{ id: string; displayName: string }>> {
@@ -58,24 +61,8 @@ async function eligibleSource(user: AuthedUser): Promise<ServiceResult<{ id: str
   return ok(200, enabled[0]);
 }
 
-function messageFromPayload(payload: unknown): WhatsAppMessage | undefined {
-  const parsed = sendWhatsAppMessageSchema.safeParse(payload);
-  return parsed.success ? { to: parsed.data.to, body: parsed.data.body } : undefined;
-}
-
 export async function hasPendingVoiceWhatsAppMessage(user: AuthedUser) {
-  const now = new Date();
-  await expirePendingMessages(user, now);
-  return Boolean(await prisma.voicePendingAction.findFirst({
-    where: {
-      companyId: user.companyId,
-      userId: user.id,
-      actionType: PENDING_WHATSAPP_ACTION,
-      status: "pending",
-      expiresAt: { gt: now },
-    },
-    select: { id: true },
-  }));
+  return hasReviewedActionPending(user, WHATSAPP_MESSAGE_REVIEW.actionType);
 }
 
 export async function prepareVoiceWhatsAppMessage(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
@@ -98,33 +85,13 @@ export async function prepareVoiceWhatsAppMessage(user: AuthedUser, rawInput: un
       if (!(error instanceof TranslationUnavailable)) throw error;
       // A new message was asked for, so an older one still waiting for a yes
       // is withdrawn: the next yes must not send something else.
-      await prisma.voicePendingAction.updateMany({
-        where: { companyId: user.companyId, userId: user.id, actionType: PENDING_WHATSAPP_ACTION, status: "pending" },
-        data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: new Date() },
-      });
+      await cancelReviewedAction(user, WHATSAPP_MESSAGE_REVIEW.actionType);
       return fail(503, error.reason, error.message);
     }
   }
 
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + PENDING_WHATSAPP_LIFETIME_MS);
   const payload: WhatsAppMessage = { to: parsed.data.to, body };
-  await prisma.$transaction(async (tx) => {
-    await tx.voicePendingAction.updateMany({
-      where: { companyId: user.companyId, userId: user.id, actionType: PENDING_WHATSAPP_ACTION, status: "pending" },
-      data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
-    });
-    await tx.voicePendingAction.create({
-      data: {
-        companyId: user.companyId,
-        userId: user.id,
-        sourceId: source.data.id,
-        actionType: PENDING_WHATSAPP_ACTION,
-        payload: payload as Prisma.InputJsonValue,
-        expiresAt,
-      },
-    });
-  });
+  const { expiresAt } = await prepareReviewedAction(user, WHATSAPP_MESSAGE_REVIEW, payload, { sourceId: source.data.id });
   await recordAudit({
     companyId: user.companyId,
     userId: user.id,
@@ -147,43 +114,27 @@ export async function prepareVoiceWhatsAppMessage(user: AuthedUser, rawInput: un
 
 export async function confirmVoiceWhatsAppMessage(user: AuthedUser): Promise<ServiceResult<unknown>> {
   if (!canManageConnectors(user)) return fail(403, "MISSING_PERMISSION", "Connector management permission is required to send WhatsApp messages.");
-  const now = new Date();
-  await expirePendingMessages(user, now);
-  const pending = await prisma.voicePendingAction.findFirst({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_WHATSAPP_ACTION, status: "pending", expiresAt: { gt: now } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!pending) return fail(409, "NO_PENDING_WHATSAPP_MESSAGE", "There is no WhatsApp message waiting for confirmation.");
-  const claimed = await prisma.voicePendingAction.updateMany({
-    where: { id: pending.id, status: "pending", expiresAt: { gt: now } },
-    data: { status: "sending" },
-  });
-  if (!claimed.count) return fail(409, "NO_PENDING_WHATSAPP_MESSAGE", "That WhatsApp message is no longer waiting for confirmation.");
-
-  const message = messageFromPayload(pending.payload);
-  if (!message || !pending.sourceId) {
-    await prisma.voicePendingAction.update({ where: { id: pending.id }, data: { status: "failed", payload: Prisma.DbNull, resolvedAt: new Date() } });
+  const claimed = await claimReviewedAction(user, WHATSAPP_MESSAGE_REVIEW);
+  if (!claimed.ok) {
+    if (claimed.reason === "raced") return fail(409, "NO_PENDING_WHATSAPP_MESSAGE", "That WhatsApp message is no longer waiting for confirmation.");
+    if (claimed.reason === "invalid") return fail(409, "PENDING_WHATSAPP_MESSAGE_INVALID", "The reviewed WhatsApp message is no longer valid.");
+    return fail(409, "NO_PENDING_WHATSAPP_MESSAGE", "There is no WhatsApp message waiting for confirmation.");
+  }
+  if (!claimed.sourceId) {
+    // The source the review was prepared on is gone: nothing to send through.
+    await claimed.complete(false);
     return fail(409, "PENDING_WHATSAPP_MESSAGE_INVALID", "The reviewed WhatsApp message is no longer valid.");
   }
-  const result = await sendWhatsAppMessage(user, pending.sourceId, { ...message, confirmed: true });
-  const resolvedAt = new Date();
-  await prisma.voicePendingAction.update({
-    where: { id: pending.id },
-    data: { status: result.ok ? "sent" : "failed", payload: Prisma.DbNull, resolvedAt },
-  });
+  const result = await sendWhatsAppMessage(user, claimed.sourceId, { ...claimed.payload, confirmed: true });
+  await claimed.complete(result.ok);
   if (!result.ok) return result;
   return ok(result.httpStatus, { ...(result.data as Record<string, unknown>), message: "WhatsApp message sent." });
 }
 
 export async function cancelVoiceWhatsAppMessage(user: AuthedUser): Promise<ServiceResult<unknown>> {
   if (!canManageConnectors(user)) return fail(403, "MISSING_PERMISSION", "Connector management permission is required to cancel a WhatsApp message.");
-  const now = new Date();
-  await expirePendingMessages(user, now);
-  const cancelled = await prisma.voicePendingAction.updateMany({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_WHATSAPP_ACTION, status: "pending" },
-    data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
-  });
-  return cancelled.count
+  const cancelled = await cancelReviewedAction(user, WHATSAPP_MESSAGE_REVIEW.actionType);
+  return cancelled
     ? ok(200, { message: "The pending WhatsApp message was cancelled and removed." })
     : fail(409, "NO_PENDING_WHATSAPP_MESSAGE", "There is no WhatsApp message waiting to be cancelled.");
 }

@@ -153,6 +153,10 @@ describe("Emma connector commands", () => {
     assert.equal(confirmed.body.intent, "confirm_whatsapp_message");
     assert.equal(confirmed.body.data.messageId, "wamid.test");
     assert.equal(sends, 1);
+    // The delivered review is resolved as sent, and the message text is gone.
+    const delivered = await prisma.voicePendingAction.findFirstOrThrow({ where: { actionType: "send_whatsapp_message" }, orderBy: { createdAt: "desc" } });
+    assert.equal(delivered.status, "sent");
+    assert.equal(delivered.payload, null);
 
     // Dictating it again is reviewed with a note that exactly this already went.
     const repeated = await request(app)

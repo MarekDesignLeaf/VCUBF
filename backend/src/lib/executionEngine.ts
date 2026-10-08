@@ -59,6 +59,11 @@ export interface ReviewedActionDefinition<Payload> {
    * client-creation and executable-action queues write "replaced".
    */
   replacedStatus?: string;
+  /**
+   * The status a successfully executed review is resolved with (default
+   * "completed"). The message queues record "sent".
+   */
+  completedStatus?: string;
 }
 
 function scope(user: ActingUser, actionType: string) {
@@ -268,11 +273,11 @@ export async function claimReviewedAction<Payload>(
     id: pending.id,
     payload: parsed.data,
     sourceId: pending.sourceId,
-    complete: (succeeded: boolean) => resolveReviewedAction(pending.id, succeeded ? "completed" : "failed"),
+    complete: (succeeded: boolean) => resolveReviewedAction(pending.id, succeeded ? definition.completedStatus ?? "completed" : "failed"),
   };
 }
 
-async function resolveReviewedAction(id: string, status: "completed" | "failed"): Promise<void> {
+async function resolveReviewedAction(id: string, status: string): Promise<void> {
   await prisma.voicePendingAction.update({
     where: { id },
     data: { status, payload: Prisma.DbNull, resolvedAt: new Date() },

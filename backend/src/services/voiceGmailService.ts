@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import type { z } from "zod";
 import { createGmailDraftSchema, sendGmailMessageNow } from "./gmailConnectorService.js";
 import { prisma } from "../db.js";
 import {
@@ -9,14 +9,18 @@ import {
   type ActionContract,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
+import {
+  cancelReviewedAction,
+  claimReviewedAction,
+  hasReviewedActionPending,
+  prepareReviewedAction,
+  type ReviewedActionDefinition,
+} from "../lib/executionEngine.js";
 import { emailRecipients, recentAuditedSend, repeatNote, sendFingerprint } from "../lib/repeatedSend.js";
 import { chooseGmailSendingAccount, gmailAccountLabel } from "../lib/gmailAccountChoice.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 import { TranslationUnavailable, translateOutgoingMessage } from "./translationService.js";
-
-const PENDING_GMAIL_ACTION = "send_gmail_message";
-const PENDING_GMAIL_LIFETIME_MS = 5 * 60 * 1000;
 
 type GmailMessage = {
   to: string[];
@@ -24,6 +28,17 @@ type GmailMessage = {
   bcc: string[];
   subject: string;
   body: string;
+};
+
+// The reviewed-action lifecycle (prepare → yes → claim once → send → resolve)
+// lives in the Execution Engine; this service keeps the permission wording,
+// the account choice, the translation, the preview, the send and its audit.
+const GMAIL_MESSAGE_REVIEW: ReviewedActionDefinition<GmailMessage> = {
+  actionType: "send_gmail_message",
+  lifetimeMs: 5 * 60 * 1000,
+  payloadSchema: createGmailDraftSchema as z.ZodType<GmailMessage, z.ZodTypeDef, unknown>,
+  claimedStatus: "sending",
+  completedStatus: "sent",
 };
 
 /** The language spoken messages leave in unless the user dictates in English. */
@@ -76,19 +91,6 @@ async function recordFailure(user: AuthedUser, action: Pick<ActionContract, "act
   });
 }
 
-async function expirePendingMessages(user: AuthedUser, now = new Date()) {
-  await prisma.voicePendingAction.updateMany({
-    where: {
-      companyId: user.companyId,
-      userId: user.id,
-      actionType: PENDING_GMAIL_ACTION,
-      status: "pending",
-      expiresAt: { lte: now },
-    },
-    data: { status: "expired", payload: Prisma.DbNull, resolvedAt: now },
-  });
-}
-
 async function eligibleGmailSource(user: AuthedUser, from?: string) {
   const sources = await prisma.connectorSource.findMany({
     where: { companyId: user.companyId, connectorKey: "gmail", isActive: true },
@@ -125,26 +127,8 @@ async function eligibleGmailSource(user: AuthedUser, from?: string) {
   return ok(200, choice.source);
 }
 
-function messageFromPayload(payload: unknown): GmailMessage | undefined {
-  const parsed = createGmailDraftSchema.safeParse(payload);
-  return parsed.success ? parsed.data : undefined;
-}
-
 export async function hasPendingVoiceGmailMessage(user: AuthedUser) {
-  const now = new Date();
-  await expirePendingMessages(user, now);
-  return Boolean(
-    await prisma.voicePendingAction.findFirst({
-      where: {
-        companyId: user.companyId,
-        userId: user.id,
-        actionType: PENDING_GMAIL_ACTION,
-        status: "pending",
-        expiresAt: { gt: now },
-      },
-      select: { id: true },
-    })
-  );
+  return hasReviewedActionPending(user, GMAIL_MESSAGE_REVIEW.actionType);
 }
 
 export async function prepareVoiceGmailMessage(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
@@ -173,33 +157,13 @@ export async function prepareVoiceGmailMessage(user: AuthedUser, rawInput: unkno
   if (!english.ok) {
     // A new email was asked for, so an older one still waiting for a yes is
     // withdrawn: the next yes must not send something else than was just said.
-    await prisma.voicePendingAction.updateMany({
-      where: { companyId: user.companyId, userId: user.id, actionType: PENDING_GMAIL_ACTION, status: "pending" },
-      data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: new Date() },
-    });
+    await cancelReviewedAction(user, GMAIL_MESSAGE_REVIEW.actionType);
     await recordFailure(user, PREPARE_VOICE_GMAIL_MESSAGE_ACTION, english.error);
     return english;
   }
   const toSend: GmailMessage = english.data.message;
 
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + PENDING_GMAIL_LIFETIME_MS);
-  await prisma.$transaction(async (tx) => {
-    await tx.voicePendingAction.updateMany({
-      where: { companyId: user.companyId, userId: user.id, actionType: PENDING_GMAIL_ACTION, status: "pending" },
-      data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
-    });
-    await tx.voicePendingAction.create({
-      data: {
-        companyId: user.companyId,
-        userId: user.id,
-        actionType: PENDING_GMAIL_ACTION,
-        sourceId: sourceResult.data.id,
-        payload: toSend as Prisma.InputJsonValue,
-        expiresAt,
-      },
-    });
-  });
+  const { expiresAt } = await prepareReviewedAction(user, GMAIL_MESSAGE_REVIEW, toSend, { sourceId: sourceResult.data.id });
 
   await recordAudit({
     companyId: user.companyId,
@@ -234,62 +198,38 @@ export async function confirmVoiceGmailMessage(user: AuthedUser): Promise<Servic
     return fail(403, "MISSING_PERMISSION", "Connector management permission is required to send email.");
   }
 
-  const now = new Date();
-  await expirePendingMessages(user, now);
-  const pending = await prisma.voicePendingAction.findFirst({
-    where: {
-      companyId: user.companyId,
-      userId: user.id,
-      actionType: PENDING_GMAIL_ACTION,
-      status: "pending",
-      expiresAt: { gt: now },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!pending) {
+  const claimed = await claimReviewedAction(user, GMAIL_MESSAGE_REVIEW);
+  if (!claimed.ok) {
+    if (claimed.reason === "invalid") {
+      await recordFailure(user, CONFIRM_VOICE_GMAIL_MESSAGE_ACTION, "PENDING_GMAIL_MESSAGE_INVALID");
+      return fail(409, "PENDING_GMAIL_MESSAGE_INVALID", "The reviewed email is no longer valid. Please prepare it again.");
+    }
     await recordFailure(user, CONFIRM_VOICE_GMAIL_MESSAGE_ACTION, "NO_PENDING_GMAIL_MESSAGE");
-    return fail(409, "NO_PENDING_GMAIL_MESSAGE", "There is no email waiting for confirmation. Please ask me to prepare it again.");
+    return claimed.reason === "raced"
+      ? fail(409, "NO_PENDING_GMAIL_MESSAGE", "That email is no longer waiting for confirmation.")
+      : fail(409, "NO_PENDING_GMAIL_MESSAGE", "There is no email waiting for confirmation. Please ask me to prepare it again.");
   }
-
-  const claimed = await prisma.voicePendingAction.updateMany({
-    where: { id: pending.id, status: "pending", expiresAt: { gt: now } },
-    data: { status: "sending" },
-  });
-  if (!claimed.count) {
-    await recordFailure(user, CONFIRM_VOICE_GMAIL_MESSAGE_ACTION, "NO_PENDING_GMAIL_MESSAGE");
-    return fail(409, "NO_PENDING_GMAIL_MESSAGE", "That email is no longer waiting for confirmation.");
-  }
-
-  const message = messageFromPayload(pending.payload);
-  if (!message || !pending.sourceId) {
-    await prisma.voicePendingAction.update({
-      where: { id: pending.id },
-      data: { status: "failed", payload: Prisma.DbNull, resolvedAt: new Date() },
-    });
+  const message = claimed.payload;
+  if (!claimed.sourceId) {
+    // The account the review was prepared on is gone: nothing to send through.
+    await claimed.complete(false);
     await recordFailure(user, CONFIRM_VOICE_GMAIL_MESSAGE_ACTION, "PENDING_GMAIL_MESSAGE_INVALID");
     return fail(409, "PENDING_GMAIL_MESSAGE_INVALID", "The reviewed email is no longer valid. Please prepare it again.");
   }
 
-  const result = await sendGmailMessageNow(user, pending.sourceId, { ...message, confirmed: true });
+  const result = await sendGmailMessageNow(user, claimed.sourceId, { ...message, confirmed: true });
   const resolvedAt = new Date();
+  await claimed.complete(result.ok);
   if (!result.ok) {
-    await prisma.voicePendingAction.update({
-      where: { id: pending.id },
-      data: { status: "failed", payload: Prisma.DbNull, resolvedAt },
-    });
     await recordFailure(user, CONFIRM_VOICE_GMAIL_MESSAGE_ACTION, result.error);
     return result;
   }
 
-  await prisma.voicePendingAction.update({
-    where: { id: pending.id },
-    data: { status: "sent", payload: Prisma.DbNull, resolvedAt },
-  });
   await recordAudit({
     companyId: user.companyId,
     userId: user.id,
     actionName: CONFIRM_VOICE_GMAIL_MESSAGE_ACTION.actionName,
-    inputPayload: { sourceId: pending.sourceId, ...messageSummary(message) },
+    inputPayload: { sourceId: claimed.sourceId, ...messageSummary(message) },
     dataAfter: { sentAt: resolvedAt },
     riskLevel: CONFIRM_VOICE_GMAIL_MESSAGE_ACTION.riskLevel,
     confirmationRequired: true,
@@ -305,13 +245,8 @@ export async function cancelVoiceGmailMessage(user: AuthedUser): Promise<Service
     return fail(403, "MISSING_PERMISSION", "Connector management permission is required to cancel a prepared email.");
   }
 
-  const now = new Date();
-  await expirePendingMessages(user, now);
-  const cancelled = await prisma.voicePendingAction.updateMany({
-    where: { companyId: user.companyId, userId: user.id, actionType: PENDING_GMAIL_ACTION, status: "pending" },
-    data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
-  });
-  if (!cancelled.count) {
+  const cancelled = await cancelReviewedAction(user, GMAIL_MESSAGE_REVIEW.actionType);
+  if (!cancelled) {
     await recordFailure(user, CANCEL_VOICE_GMAIL_MESSAGE_ACTION, "NO_PENDING_GMAIL_MESSAGE");
     return fail(409, "NO_PENDING_GMAIL_MESSAGE", "There is no email waiting to be cancelled.");
   }
