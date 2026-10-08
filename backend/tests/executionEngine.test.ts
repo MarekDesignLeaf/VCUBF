@@ -243,6 +243,24 @@ describe("execution engine — the reviewed-action state machine", () => {
     await claimed.complete(true);
   });
 
+  it("resolves a successful review with the action type's completed status", async () => {
+    const named: ReviewedActionDefinition<{ note: string }> = { ...REVIEW, claimedStatus: "sending", completedStatus: "sent" };
+    await prepareReviewedAction(user, named, { note: "message" });
+    const claimed = await claimReviewedAction(user, named);
+    assert.ok(claimed.ok);
+    assert.equal((await prisma.voicePendingAction.findUnique({ where: { id: claimed.id } }))?.status, "sending");
+    await claimed.complete(true);
+    const sent = await prisma.voicePendingAction.findUnique({ where: { id: claimed.id } });
+    assert.equal(sent?.status, "sent");
+    assert.equal(sent?.payload, null);
+    // A failed send is still "failed", whatever the success word is.
+    await prepareReviewedAction(user, named, { note: "message 2" });
+    const second = await claimReviewedAction(user, named);
+    assert.ok(second.ok);
+    await second.complete(false);
+    assert.equal((await prisma.voicePendingAction.findUnique({ where: { id: second.id } }))?.status, "failed");
+  });
+
   it("uses the replaced status the action type's existing rows know", async () => {
     const named: ReviewedActionDefinition<{ note: string }> = { ...REVIEW, replacedStatus: "replaced" };
     await prepareReviewedAction(user, named, { note: "first" });
