@@ -287,10 +287,13 @@ describe("Writing to Google Calendar after review", () => {
     assert.equal(staged.isDeleted, true);
 
     // The same confirmed cancellation sent again (a lost answer) is the outcome asked for, not "not found".
+    const auditedBefore = await prisma.auditLog.count({ where: { actionName: "cancel_google_calendar_event", result: "success", confirmed: true } });
     const retried = await route("/cancel", { calendar_event_id: staged.id, etag: staged.sourceEtag ?? "\"x\"", confirmed: true });
     assert.equal(retried.status, 200, JSON.stringify(retried.body));
     assert.equal(retried.body.alreadyCancelled, true);
     assert.equal(writes.length, 1, "nothing more is written to Google");
+    const audited = await prisma.auditLog.count({ where: { actionName: "cancel_google_calendar_event", result: "success", confirmed: true } });
+    assert.equal(audited, auditedBefore + 1, "the retry is in the audit trail too");
 
     const repeating = await route("/cancel", { event: "porada" });
     assert.equal(repeating.status, 409);

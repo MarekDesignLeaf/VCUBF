@@ -90,12 +90,15 @@ function spokenLanguage(label: unknown, lang: Locale) {
   return value ? (lang === "cs" ? `v jazyce ${value}` : lang === "pl" ? `w języku ${value}` : `in ${value}`) : "";
 }
 
-function clashSentence(clashes: unknown, lang: Locale) {
+function clashSentence(clashes: unknown, lang: Locale, truncated = false) {
   if (!Array.isArray(clashes) || !clashes.length) return "";
   const titles = clashes.slice(0, 3).map((clash: Row) => `${clash.title}${clash.start?.time ? ` (${clash.start.time})` : ""}`).join(", ");
-  // Only three are named; the rest are counted, so the list is never heard as complete when it is not.
+  // Only three are named; the rest are counted, so the list is never heard as
+  // complete when it is not. Past the listed limit the count is "more than".
   const more = clashes.length - 3;
-  const rest = more > 0 ? (lang === "cs" ? ` a ještě ${more}` : lang === "pl" ? ` i jeszcze ${more}` : ` and ${more} more`) : "";
+  const rest = more <= 0 ? ""
+    : truncated ? (lang === "cs" ? ` a ještě víc než ${more}` : lang === "pl" ? ` i jeszcze ponad ${more}` : ` and over ${more} more`)
+      : (lang === "cs" ? ` a ještě ${more}` : lang === "pl" ? ` i jeszcze ${more}` : ` and ${more} more`);
   return lang === "cs" ? ` Pozor, v tu dobu už je v kalendáři: ${titles}${rest}.`
     : lang === "pl" ? ` Uwaga, w tym czasie w kalendarzu jest już: ${titles}${rest}.`
       : ` Note that the calendar already has ${titles}${rest} at that time.`;
@@ -179,7 +182,7 @@ export function spokenReview(action: string, preview: Row | undefined, language:
       const assumed = preview.durationAssumed
         ? (lang === "cs" ? " Délku jste neřekl, počítám hodinu." : lang === "pl" ? " Nie podano długości, liczę godzinę." : " No length was given, so I have allowed one hour.")
         : "";
-      const clash = clashSentence(preview.clashes, lang);
+      const clash = clashSentence(preview.clashes, lang, preview.clashesTruncated === true);
       if (lang === "cs") return `Zapíšu „${quote(preview.title)}“ ${when}.${assumed}${clash} Mám to zapsat?`;
       if (lang === "pl") return `Zapiszę „${quote(preview.title)}” ${when}.${assumed}${clash} Czy mam to zapisać?`;
       return `I will put “${quote(preview.title)}” in the calendar ${when}.${assumed}${clash} Shall I add it?`;
@@ -187,7 +190,7 @@ export function spokenReview(action: string, preview: Row | undefined, language:
     case "move_calendar_event": {
       const from = spokenSlot(preview.from, preview.timeZone, lang);
       const to = spokenSlot(preview.to, preview.timeZone, lang);
-      const clash = clashSentence(preview.clashes, lang);
+      const clash = clashSentence(preview.clashes, lang, preview.clashesTruncated === true);
       if (lang === "cs") return `Přesunu „${quote(preview.title)}“. Teď: ${from}. Nově: ${to}.${clash} Mám ji přesunout?`;
       if (lang === "pl") return `Przeniosę „${quote(preview.title)}”. Teraz: ${from}. Nowy termin: ${to}.${clash} Czy mam przenieść?`;
       return `I will move “${quote(preview.title)}”. Now: ${from}. New time: ${to}.${clash} Shall I move it?`;

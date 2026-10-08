@@ -64,6 +64,9 @@ describe("Spoken reviews", () => {
     assert.match(spokenReview("create_calendar_event", preview, "cs-CZ")!, /v kalendáři: A, B, C a ještě 2\./);
     assert.match(spokenReview("create_calendar_event", preview, "en-GB")!, /already has A, B, C and 2 more at that time\./);
     assert.match(spokenReview("create_calendar_event", { ...preview, clashes: clashes.slice(0, 3) }, "pl-PL")!, /jest już: A, B, C\./);
+    // More than the review lists: the count says so instead of sounding exact.
+    assert.match(spokenReview("create_calendar_event", { ...preview, clashesTruncated: true }, "cs-CZ")!, /A, B, C a ještě víc než 2\./);
+    assert.match(spokenReview("create_calendar_event", { ...preview, clashesTruncated: true }, "en-GB")!, /A, B, C and over 2 more at that time/);
   });
 
   it("reads a calendar entry back with the day, time, an assumed length and clashes", () => {
