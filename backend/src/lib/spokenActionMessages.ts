@@ -93,9 +93,12 @@ function spokenLanguage(label: unknown, lang: Locale) {
 function clashSentence(clashes: unknown, lang: Locale) {
   if (!Array.isArray(clashes) || !clashes.length) return "";
   const titles = clashes.slice(0, 3).map((clash: Row) => `${clash.title}${clash.start?.time ? ` (${clash.start.time})` : ""}`).join(", ");
-  return lang === "cs" ? ` Pozor, v tu dobu už je v kalendáři: ${titles}.`
-    : lang === "pl" ? ` Uwaga, w tym czasie w kalendarzu jest już: ${titles}.`
-      : ` Note that the calendar already has ${titles} at that time.`;
+  // Only three are named; the rest are counted, so the list is never heard as complete when it is not.
+  const more = clashes.length - 3;
+  const rest = more > 0 ? (lang === "cs" ? ` a ještě ${more}` : lang === "pl" ? ` i jeszcze ${more}` : ` and ${more} more`) : "";
+  return lang === "cs" ? ` Pozor, v tu dobu už je v kalendáři: ${titles}${rest}.`
+    : lang === "pl" ? ` Uwaga, w tym czasie w kalendarzu jest już: ${titles}${rest}.`
+      : ` Note that the calendar already has ${titles}${rest} at that time.`;
 }
 
 /** "3 minutes ago", in the words each language counts minutes with. */

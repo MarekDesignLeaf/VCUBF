@@ -155,12 +155,31 @@ export function isPromptEcho(text: string, prompt: string): boolean {
   const promptWords = new Set(fold(prompt));
   if (promptWords.size === 0) return false;
   const joinedHeard = heard.join(" ");
-  const joinedPrompt = [...fold(prompt)].join(" ");
-  if (heard.length >= 3 && joinedPrompt.includes(joinedHeard)) return true;
+  // An echo runs across the prompt's list: three or more of its phrases in a
+  // row. One phrase, or the wake word and one phrase, is exactly what a person
+  // says ("Alfonzo, vytvoř klienta", a learned alias), so it is kept.
+  if (heard.length >= 3 && longestPromptRun(heard, prompt.split(/[.,;]/).map(fold).filter((phrase) => phrase.length)) >= 3) return true;
   if (/^(context|kontext|prompt|vocabulary|slovnik)\b/.test(joinedHeard)) return true;
   if (heard.length < 6) return false;
   const overlap = heard.filter((word) => promptWords.has(word)).length / heard.length;
   return overlap >= 0.85;
+}
+
+/**
+ * How many of the prompt's phrases the heard words cover when they appear in
+ * the prompt word for word (0 when they do not). Every place they occur is
+ * tried, and the widest is returned.
+ */
+function longestPromptRun(heard: string[], phrases: string[][]): number {
+  const words: string[] = [];
+  const phraseOf: number[] = [];
+  phrases.forEach((phrase, index) => { for (const word of phrase) { words.push(word); phraseOf.push(index); } });
+  let widest = 0;
+  for (let start = 0; start + heard.length <= words.length; start += 1) {
+    if (!heard.every((word, offset) => words[start + offset] === word)) continue;
+    widest = Math.max(widest, new Set(phraseOf.slice(start, start + heard.length)).size);
+  }
+  return widest;
 }
 
 /**

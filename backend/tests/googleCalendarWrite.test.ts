@@ -286,10 +286,33 @@ describe("Writing to Google Calendar after review", () => {
     const staged = await prisma.externalCalendarEvent.findFirstOrThrow({ where: { externalEventId: "cancelme0000000000001" } });
     assert.equal(staged.isDeleted, true);
 
+    // The same confirmed cancellation sent again (a lost answer) is the outcome asked for, not "not found".
+    const retried = await route("/cancel", { calendar_event_id: staged.id, etag: staged.sourceEtag ?? "\"x\"", confirmed: true });
+    assert.equal(retried.status, 200, JSON.stringify(retried.body));
+    assert.equal(retried.body.alreadyCancelled, true);
+    assert.equal(writes.length, 1, "nothing more is written to Google");
+
     const repeating = await route("/cancel", { event: "porada" });
     assert.equal(repeating.status, 409);
     assert.equal(repeating.body.error, "CALENDAR_RECURRING_NOT_SUPPORTED");
     assert.equal(writes.length, 1);
+  });
+
+  it("counts an all-day event that started earlier and is still running as a clash", async () => {
+    const day = tomorrow();
+    // Three days, from the day before to the day after: Google's end date is the day after the last.
+    await prisma.externalCalendarEvent.create({
+      data: {
+        companyId: TEST_COMPANY_ID, connectorSourceId: sourceId, externalCalendarRecordId: calendarRecordId, externalEventId: "holiday00000000000001",
+        sourceEtag: nextEtag(), status: "confirmed", summary: "Dovolená", startDate: addDays(day, -1), endDate: addDays(day, 2), timeZone: ZONE,
+      },
+    });
+    const asked = await action("create_calendar_event", { title: "Měření zahrady", date: "zítra", time: "10:00" });
+    assert.equal(asked.body.error, "CONFIRMATION_REQUIRED", JSON.stringify(asked.body));
+    assert.ok(asked.body.data.preview.clashes.some((clash: { title: string }) => clash.title === "Dovolená"), JSON.stringify(asked.body.data.preview.clashes));
+    assert.match(asked.body.message, /Dovolená/);
+    await prisma.voicePendingAction.deleteMany({});
+    await prisma.externalCalendarEvent.deleteMany({ where: { externalEventId: "holiday00000000000001" } });
   });
 
   it("asks which event when the words fit more than one", async () => {

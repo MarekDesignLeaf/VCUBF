@@ -18,6 +18,19 @@ describe("GPT transcription must not execute its own vocabulary prompt", () => {
     assert.equal(isPromptEcho("Emma. vytvoř klienta, nový klient, zakázka, nabídka, faktura, úkol, poptávka", PROMPT), true);
   });
 
+  it("keeps a command that is one vocabulary phrase, with or without the wake word", () => {
+    // These are word for word in the prompt, and are still exactly what people say.
+    const prompt = "Alfonzo. vytvoř klienta, nový klient, zakázka, nabídka, faktura, úkol. nová zakázka pro klienta, přidej fotku k zakázce";
+    assert.equal(isPromptEcho("Alfonzo, vytvoř klienta", prompt), false);
+    assert.equal(isPromptEcho("vytvoř klienta", prompt), false);
+    assert.equal(isPromptEcho("Nová zakázka pro klienta", prompt), false, "a learned alias of several words");
+    assert.equal(isPromptEcho("Alfonzo nová zakázka pro klienta", prompt), false);
+    assert.equal(isPromptEcho("create client", "Alfonzo. create client, new client, job, quote"), false);
+    // Running across the list is still the model reading the prompt back.
+    assert.equal(isPromptEcho("vytvoř klienta, nový klient, zakázka", prompt), true);
+    assert.equal(isPromptEcho("Alfonzo. vytvoř klienta, nový klient", prompt), true);
+  });
+
   it("keeps real commands that happen to use vocabulary words", () => {
     assert.equal(isPromptEcho("Emmo, vytvoř klienta Roger Novák", PROMPT), false);
     assert.equal(isPromptEcho("ukaž faktury", PROMPT), false);
