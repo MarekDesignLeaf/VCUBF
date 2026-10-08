@@ -64,6 +64,18 @@ export async function recentAuditedSend(companyId: string, actionName: string, f
   return match ? alreadySent(match.createdAt, now) : null;
 }
 
+/**
+ * An email's recipients with their role kept: the same addresses moved between
+ * To, Cc and Bcc is a different email, because who sees whom changes.
+ */
+export function emailRecipients(message: { to: string[]; cc: string[]; bcc: string[] }): string[] {
+  return [
+    ...message.to.map((address) => `to:${address.trim()}`),
+    ...message.cc.map((address) => `cc:${address.trim()}`),
+    ...message.bcc.map((address) => `bcc:${address.trim()}`),
+  ];
+}
+
 /** A reply is "the same" when it answers the same received message with the same words. */
 export function replyFingerprint(intakeId: string, body: string): string {
   return sendFingerprint({ recipients: [`reply-to:${intakeId}`], body });

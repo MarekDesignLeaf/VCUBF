@@ -9,7 +9,7 @@ import {
   type ActionContract,
 } from "../lib/actionContracts.js";
 import { recordAudit } from "../lib/audit.js";
-import { recentAuditedSend, repeatNote, sendFingerprint } from "../lib/repeatedSend.js";
+import { emailRecipients, recentAuditedSend, repeatNote, sendFingerprint } from "../lib/repeatedSend.js";
 import { chooseGmailSendingAccount, gmailAccountLabel } from "../lib/gmailAccountChoice.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
@@ -213,7 +213,7 @@ export async function prepareVoiceGmailMessage(user: AuthedUser, rawInput: unkno
   });
   // The same email to the same recipients shortly before is said in the review.
   const repeat = await recentAuditedSend(user.companyId, SEND_GMAIL_MESSAGE_ACTION.actionName, sendFingerprint({
-    recipients: [...toSend.to, ...toSend.cc, ...toSend.bcc], subject: toSend.subject, body: toSend.body,
+    recipients: emailRecipients(toSend), subject: toSend.subject, body: toSend.body,
   }));
   return ok(202, {
     confirmationRequired: true,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { REPEAT_WINDOW_MS, recentReply, repeatNote, sendFingerprint } from "../src/lib/repeatedSend.js";
+import { emailRecipients, REPEAT_WINDOW_MS, recentReply, repeatNote, sendFingerprint } from "../src/lib/repeatedSend.js";
 
 // Recognising "the same message again" after a request that got no answer in
 // time. The fingerprint is what the audit keeps instead of the words.
@@ -13,6 +13,14 @@ describe("Recognising a repeated send", () => {
     assert.notEqual(sendFingerprint({ recipients: ["jan@example.com"], subject: "Plot", body: "We will come on Monday." }), base);
     assert.notEqual(sendFingerprint({ recipients: ["jan@example.com", "eva@example.com"], subject: "Fence", body: "We will come on Monday." }), base);
     assert.match(base, /^[0-9a-f]{64}$/);
+  });
+
+  it("keeps whether an address is To, Cc or Bcc: moving one is a different email", () => {
+    const sent = sendFingerprint({ recipients: emailRecipients({ to: ["jan@example.com"], cc: [], bcc: ["eva@example.com"] }), subject: "Plot", body: "Hi." });
+    const swapped = sendFingerprint({ recipients: emailRecipients({ to: ["eva@example.com"], cc: [], bcc: ["jan@example.com"] }), subject: "Plot", body: "Hi." });
+    const reordered = sendFingerprint({ recipients: emailRecipients({ to: ["JAN@example.com"], cc: [], bcc: [" eva@example.com"] }), subject: "Plot", body: "Hi." });
+    assert.notEqual(swapped, sent);
+    assert.equal(reordered, sent);
   });
 
   it("depends on the server's key, so a guessed message cannot be matched against the audit", () => {
