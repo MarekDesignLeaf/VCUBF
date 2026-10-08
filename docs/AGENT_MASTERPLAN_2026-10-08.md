@@ -25,7 +25,7 @@ Tento dokument přebírá všechny plánované funkce z popisu projektu VCUBF Se
 | Data (Digital Twin v zárodku) | 52 Prisma modelů: klienti, poptávky, zakázky, úkoly, nabídky, faktury+platby, kapacita, nábor, portfolio, dokumenty, komunikace, playbooky, paměť, učení |
 | Učení | aliasy, naučené příkazy, pravidla, scénář chování (podřízený bezpečnosti) |
 
-**Co chybí (a tento dokument dodává):** ~~brána modelů~~ (dodána, PR #32), verzovaný katalog nástrojů, jeden vykonávací engine (potvrzování má dnes 7 kopií), agentní smyčka, stínový režim, Control Tower, události + dlouhé procesy, oddělené predikce, simulátor rozhodnutí.
+**Co chybí (a tento dokument dodává):** ~~brána modelů~~ (dodána, PR #32), ~~verzovaný katalog nástrojů~~ (dodán, F0.2), jeden vykonávací engine (potvrzování má dnes 7 kopií), agentní smyčka, stínový režim, Control Tower, události + dlouhé procesy, oddělené predikce, simulátor rozhodnutí.
 
 **AI dnes:** 5 volání OpenAI (porozumění, přepis, hlas, překlad, starý realtime), od PR #32 všechna přes Model Gateway. Jeden model, jedno volání na požadavek, model nic neprovádí.
 
@@ -140,7 +140,7 @@ Nic z popisu projektu se neruší; mění se jen pořadí a to, že **každá** 
 
 ### F0 — Konsolidace (žádná změna chování)
 1. `modelGateway.ts` — 5 volání AI jedním místem; běhový log nese model, trvání a tokeny. **Hotovo: PR #32.**
-2. Katalog nástrojů v1 + test parity s kontrakty.
+2. Katalog nástrojů v1 + test parity s kontrakty. **Hotovo (F0.2):** `backend/src/agents/toolCatalogue.ts` — 94 nástrojů nad spustitelnými akcemi, JSON Schema ze Zod schémat (41 přísných, zbytek validuje služba), druh read/write/external/administration z katalogu schopností (9 čtecích), riziko + oprávnění + firemní vypínač z kontraktů, obsahový otisk vynucující vědomé verzování.
 3. `executionEngine.ts`; 7 kopií potvrzování se převede po jedné (pořadí: oznámení → klienti → kontakty → spustitelné akce → kalendář → WhatsApp → Gmail), stávající testy jako pojistka.
 4. Zmrazení vzoru: nové schopnosti jen přes katalog + engine.
 
