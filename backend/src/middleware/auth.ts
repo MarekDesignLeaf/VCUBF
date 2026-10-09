@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import { prisma } from "../db.js";
 import { idempotencyGuard } from "./idempotency.js";
+import { safeModeGate } from "../lib/safeMode.js";
 
 export interface AuthedUser {
   id: string;
@@ -26,6 +27,8 @@ declare global {
     interface Request {
       user?: AuthedUser;
       rawBody?: Buffer;
+      /** The company's emergency stop, read with the user (see lib/safeMode.ts). */
+      safeModeSince?: Date | null;
     }
   }
 }
@@ -65,10 +68,14 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const token = header.slice("Bearer ".length);
     const payload = jwt.verify(token, JWT_SECRET) as { sub: string; authVersion?: number; purpose?: string };
     if (payload.purpose) throw new Error("PURPOSE_RESTRICTED_TOKEN");
-    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: { company: { select: { safeModeSince: true } } },
+    });
     if (!user || !user.isActive || payload.authVersion !== user.authVersion) {
       return res.status(401).json({ error: "MISSING_PERMISSION", message: "Invalid or inactive user" });
     }
+    req.safeModeSince = user.company.safeModeSince;
     req.user = {
       id: user.id,
       companyId: user.companyId,
@@ -87,7 +94,10 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     // recognised as repeated: the key is scoped to the company, and this is
     // where the company becomes known. Every authenticated route passes through
     // here, so the guarantee cannot be forgotten at an individual route.
-    return idempotencyGuard(req, res, next);
+    // The emergency stop is checked here for the same reason, after the
+    // idempotency guard: a retry of a request finished before the stop gets
+    // its original answer, and a refusal is never kept for replay.
+    return idempotencyGuard(req, res, () => safeModeGate(req, res, next));
   } catch {
     return res.status(401).json({ error: "MISSING_PERMISSION", message: "Invalid token" });
   }

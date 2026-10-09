@@ -101,9 +101,27 @@ async function request<T>(path: string, options: RequestInit = {}, mayRetry = tr
   const body = isJson ? await res.json() : undefined;
 
   if (!res.ok) {
+    // The emergency stop can be switched on from another device at any time;
+    // the first refused write tells the shell to show it straight away.
+    if (res.status === 423 && body?.error === "SAFE_MODE_ACTIVE") notifySafeModeChanged();
     throw new ApiError(res.status, body?.error ?? "UNKNOWN_ERROR", body?.message, body);
   }
   return body as T;
+}
+
+/** Fired when the emergency stop may have changed; the layout re-reads it. */
+export const SAFE_MODE_EVENT = "vcuf:safe-mode";
+export function notifySafeModeChanged() {
+  try {
+    window.dispatchEvent(new Event(SAFE_MODE_EVENT));
+  } catch {
+    // No window (tests): nothing to notify.
+  }
+}
+
+export interface SafeModeState {
+  enabled: boolean;
+  since: string | null;
 }
 
 async function download(path: string, mayRetry = true): Promise<Blob> {
@@ -1830,6 +1848,11 @@ export const api = {
   company: {
     get: () => request<CompanyProfile>("/company"),
     update: (name: string) => request<CompanyProfile>("/company", { method: "PUT", body: JSON.stringify({ name }) }),
+    safeMode: () => request<SafeModeState>("/company/safe-mode"),
+    setSafeMode: (enabled: boolean, reason?: string) => request<SafeModeState>("/company/safe-mode", {
+      method: "PUT",
+      body: JSON.stringify({ enabled, ...(reason ? { reason } : {}) }),
+    }),
     emmaPolicy: () => request<EmmaPolicy>("/company/emma-policy"),
     updateEmmaPolicy: (disabledCapabilities: string[]) => request<EmmaPolicy>("/company/emma-policy", {
       method: "PUT",

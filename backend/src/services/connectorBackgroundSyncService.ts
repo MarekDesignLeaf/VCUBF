@@ -82,6 +82,9 @@ export async function runConnectorBackgroundSyncOnce(
         isActive: true,
         isEnabled: true,
         credential: { isNot: null },
+        // Emergency stop: a company in safe mode is not synced; nothing is
+        // written for it until the administrator lifts the stop.
+        company: { safeModeSince: null },
         OR: [
           { connectorKey: "gmail", configuredScopes: { has: "read:messages" } },
           { connectorKey: "google_contacts", configuredScopes: { has: "read:contacts" } },
@@ -136,6 +139,7 @@ export async function runConnectorBackgroundSyncOnce(
             companyId: source.companyId,
             isActive: true,
             isEnabled: true,
+            company: { safeModeSince: null },
             OR: [{ lastSyncAt: null }, { lastSyncAt: { lt: cutoff } }],
           },
           data: { lastSyncAt: now, lastSyncStatus: "error", lastErrorCode: "CONNECTOR_AUTOMATION_ACTOR_REQUIRED" },
@@ -150,6 +154,9 @@ export async function runConnectorBackgroundSyncOnce(
           companyId: source.companyId,
           isActive: true,
           isEnabled: true,
+          // Checked again per source: a stop switched on while this sweep
+          // runs halts the rest of it.
+          company: { safeModeSince: null },
           OR: [{ lastSyncAt: null }, { lastSyncAt: { lt: cutoff } }],
         },
         data: { lastSyncAt: now, lastSyncStatus: "syncing", lastErrorCode: null },

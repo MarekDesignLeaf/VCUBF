@@ -32,6 +32,7 @@ export function EmployeeEdit() {
   const [accessProfiles, setAccessProfiles] = useState<AccessProfile[]>(FALLBACK_ACCESS_PROFILES);
   const [skills, setSkills] = useState("");
   const [weeklyCapacityHours, setWeeklyCapacityHours] = useState("40");
+  const [deactivatePreview, setDeactivatePreview] = useState<Record<string, unknown> | null>(null);
   const [isActive, setIsActive] = useState(true);
 
   const [preview, setPreview] = useState<Record<string, unknown> | null>(null);
@@ -153,6 +154,21 @@ export function EmployeeEdit() {
     } finally { setSubmitting(false); }
   }
 
+  // Deactivation on its own: a request that changes nothing else, so it is
+  // also accepted while the emergency stop is on (containment).
+  async function deactivate(confirmed: boolean) {
+    if (!id) return;
+    setSubmitting(true); setError(null);
+    try {
+      await api.employees.update(id, { is_active: false, confirmed });
+      setDeactivatePreview(null);
+      if (confirmed) navigate("/employees");
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "CONFIRMATION_REQUIRED") setDeactivatePreview((err.details?.preview as Record<string, unknown>) ?? null);
+      else setError(err instanceof ApiError ? err.message : "Could not deactivate the account.");
+    } finally { setSubmitting(false); }
+  }
+
   if (!loaded) return <p>Loading…</p>;
 
   const canAssignAdministrator = user?.role === "administrator" || user?.role === "admin";
@@ -239,6 +255,18 @@ export function EmployeeEdit() {
             {submitting ? "Checking…" : "Review changes"}
           </button>
         </form>
+      )}
+      {!isNew && isActive && (
+        <section style={{ maxWidth: 480, marginTop: 32 }}>
+          <h2>Deactivate account</h2>
+          <p className="hint">Signs the account out and blocks sign-in; nothing else about it changes. Also possible during an emergency stop.</p>
+          {deactivatePreview ? <div className="warning-banner">
+            <strong>Confirm deactivation:</strong>
+            <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.85rem" }}>{JSON.stringify(deactivatePreview, null, 2)}</pre>
+            <button type="button" onClick={() => deactivate(true)} disabled={submitting}>Confirm deactivation</button>{" "}
+            <button type="button" onClick={() => setDeactivatePreview(null)} disabled={submitting}>Cancel</button>
+          </div> : <button type="button" onClick={() => deactivate(false)} disabled={submitting}>Review deactivation</button>}
+        </section>
       )}
       {!isNew && (
         <section style={{ maxWidth: 480, marginTop: 32 }}>

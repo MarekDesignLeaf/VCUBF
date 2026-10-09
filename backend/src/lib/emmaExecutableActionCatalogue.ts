@@ -225,6 +225,7 @@ export const EMMA_NON_DIRECT_ACTIONS = {
   send_quote_pdf: { executionClass: "interactive", note: "Recipients, subject, body and the PDF attachment are reviewed in the quote page before the confirmed send." },
   send_invoice_pdf: { executionClass: "interactive", note: "Recipients, subject, body and the PDF attachment are reviewed in the invoice page before the confirmed send." },
   update_notification_thresholds: { executionClass: "interactive", note: "Threshold days are edited in Company settings by an administrator; not a spoken command." },
+  set_company_safe_mode: { executionClass: "interactive", note: "The emergency stop is switched by an administrator in Company settings; Secretary has no tool to switch it, so it cannot lift a stop by itself (masterplan layer H)." },
   unmerge_clients: { executionClass: "interactive", note: "Reversal of a specific recorded merge is chosen from the Data Quality merge history and confirmed there." },
 } as const;
 

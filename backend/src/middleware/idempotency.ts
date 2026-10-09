@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { prisma } from "../db.js";
+import { SAFE_MODE_ACTIVE } from "../lib/safeMode.js";
 
 /**
  * Write idempotency — VCUBF Master Documentation section 43.
@@ -105,7 +106,11 @@ export async function idempotencyGuard(req: Request, res: Response, next: NextFu
   };
 
   res.on("finish", () => {
-    const keepable = capturedStatus > 0 && capturedStatus < 500;
+    // An emergency-stop refusal is not an outcome of the request: once the
+    // stop is lifted, a retry with the same key must be carried out.
+    const refusedBySafeMode = capturedStatus === 423
+      && typeof captured === "object" && captured !== null && (captured as { error?: unknown }).error === SAFE_MODE_ACTIVE;
+    const keepable = capturedStatus > 0 && capturedStatus < 500 && !refusedBySafeMode;
     const finish = keepable
       ? prisma.idempotencyRecord.updateMany({
           where: { companyId, key },

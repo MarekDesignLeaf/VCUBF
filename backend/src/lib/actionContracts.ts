@@ -194,6 +194,17 @@ export const UPDATE_EMMA_COMPANY_POLICY_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
 };
 
+export const SET_COMPANY_SAFE_MODE_ACTION: ActionContract = {
+  actionName: "set_company_safe_mode",
+  purpose:
+    "Switch the company's emergency stop on or off. While it is on, nothing new is changed or sent for the company — no write, message, calendar change, confirmation of a waiting review or scheduled send — while reading, audit, sign-in and the switch itself keep working. Only an administrator sets it; Secretary has no tool for it.",
+  requiredPermission: "company.manage",
+  riskLevel: 4,
+  confirmationRequired: false,
+  dataSources: ["user_input", "companies.safe_mode_since"],
+  possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
+};
+
 export const UPDATE_EMMA_BEHAVIOR_SCENARIO_ACTION: ActionContract = {
   actionName: "update_emma_behavior_scenario",
   purpose: "Allow a company administrator to define {assistant}'s company-wide conversational style and persona for every new assistant session.",

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
+import { safeModeSince } from "../lib/safeMode.js";
 import { SEND_NOTIFICATION_DIGEST_ACTION, UPDATE_NOTIFICATION_DIGEST_PREFERENCES_ACTION } from "../lib/actionContracts.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { resolveSendableGmailSource, sendThroughGmailSource } from "./gmailConnectorService.js";
@@ -162,11 +163,15 @@ function alreadySentToday(lastSentAt: Date | null, now: Date) {
  */
 export async function runNotificationDigestSweep(now = new Date()): Promise<DigestSweepSummary> {
   const candidates = await prisma.user.findMany({
-    where: { digestEnabled: true, isActive: true, digestHourUtc: { lte: now.getUTCHours() } },
+    // Emergency stop: no scheduled email leaves a company in safe mode.
+    where: { digestEnabled: true, isActive: true, digestHourUtc: { lte: now.getUTCHours() }, company: { safeModeSince: null } },
   });
   const summary: DigestSweepSummary = { considered: candidates.length, sent: 0, skipped: 0, failed: 0 };
   for (const candidate of candidates) {
     if (alreadySentToday(candidate.digestLastSentAt, now)) { summary.skipped += 1; continue; }
+    // Checked again per email: a stop switched on while this sweep runs
+    // halts the rest of it.
+    if (await safeModeSince(candidate.companyId)) { summary.skipped += 1; continue; }
     const actor: AuthedUser = {
       id: candidate.id,
       companyId: candidate.companyId,

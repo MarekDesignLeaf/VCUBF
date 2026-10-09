@@ -32,6 +32,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { Prisma } from "@prisma/client";
 import type { z } from "zod";
 import { prisma } from "../db.js";
+import { assertNotInSafeMode } from "./safeMode.js";
 
 /** The engine needs no more identity than tenant and user. */
 export interface ActingUser {
@@ -243,6 +244,12 @@ export async function claimReviewedAction<Payload>(
   definition: ReviewedActionDefinition<Payload>,
   clock?: Date
 ): Promise<ClaimedReviewedAction<Payload>> {
+  // Emergency stop (layer H): no yes executes anything while the company is in
+  // safe mode, whatever path it came by. Checked before anything is touched,
+  // so the review keeps waiting and can still be cancelled or approved once
+  // the stop is lifted. The error handler answers 423 SAFE_MODE_ACTIVE.
+  await assertNotInSafeMode(user.companyId);
+
   // Whether a review was waiting when this yes arrived, read before queueing
   // on the lock. A confirmation that then finds nothing lost to another
   // confirmation (or a cancel) of that review: "raced", not "none", so callers

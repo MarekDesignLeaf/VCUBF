@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, type CompanyProfile } from "../api/client";
 import { NotificationThresholdsForm } from "../components/NotificationThresholdsForm";
+import { SafeModeCard } from "../components/SafeModeCard";
+import { useAuth } from "../context/useAuth";
 
 export function CompanySettings() {
   const [company, setCompany] = useState<CompanyProfile | null>(null);
@@ -9,6 +11,8 @@ export function CompanySettings() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const { user } = useAuth();
+  const isAdministrator = user?.role === "administrator" || user?.role === "admin";
 
   useEffect(() => {
     api.company.get().then((value) => { setCompany(value); setName(value.name); }).catch(() => setError("Could not load the company profile."));
@@ -38,6 +42,7 @@ export function CompanySettings() {
       {message && <div className="success-banner">{message}</div>}
       <button type="submit" disabled={saving}>{saving ? "Saving…" : "Save company profile"}</button>
     </form>
+    {isAdministrator && <SafeModeCard />}
     <NotificationThresholdsForm />
   </div>;
 }
