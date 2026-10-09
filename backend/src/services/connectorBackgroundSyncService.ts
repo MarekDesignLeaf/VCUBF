@@ -82,6 +82,9 @@ export async function runConnectorBackgroundSyncOnce(
         isActive: true,
         isEnabled: true,
         credential: { isNot: null },
+        // Emergency stop: a company in safe mode is not synced; nothing is
+        // written for it until the administrator lifts the stop.
+        company: { safeModeSince: null },
         OR: [
           { connectorKey: "gmail", configuredScopes: { has: "read:messages" } },
           { connectorKey: "google_contacts", configuredScopes: { has: "read:contacts" } },

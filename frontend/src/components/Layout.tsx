@@ -4,6 +4,7 @@ import { useAuth } from "../context/useAuth";
 import { MobileVoiceControl } from "./MobileVoiceControl";
 import { BrowserVoiceControl } from "./BrowserVoiceControl";
 import { DesignLeafCredit } from "./DesignLeafCredit";
+import { SafeModeBanner } from "./SafeModeBanner";
 import { isAndroidNative } from "../lib/platform";
 import { appLanguage, languageLabel, menuText, type MenuKey } from "../i18n";
 import { useAssistantName, withAssistantName } from "../assistantName";
@@ -177,6 +178,7 @@ export function Layout() {
             <span>Secretary</span>
           </div>
         </header>
+        <SafeModeBanner language={language} canManage={isAdministrator} />
         {user?.permissions?.includes("voice.execute") && <section className="assistant-area" aria-label={`${assistantName} assistant controls`}>
           {/* One place to type, not two: the voice panel has its own input, and a second
               box below it sending to the same endpoint only asked which one to use. */}

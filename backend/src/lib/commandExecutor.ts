@@ -27,6 +27,8 @@ import * as googleCalendarConnectorService from "../services/googleCalendarConne
 import { buildCommandUiAction, completedVoiceCommandMessage, openingVoiceLabelMessage, openingVoicePageMessage, type CommandUiAction } from "./voiceNavigation.js";
 import { getNavigationCatalogue } from "./navigationCatalogue.js";
 import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction, getPendingEmmaActionName } from "../services/emmaExecutableActionService.js";
+import { SAFE_MODE_ACTIVE, safeModeMessage, safeModeSince } from "./safeMode.js";
+import { commandAllowedInSafeMode } from "./safeModeCommands.js";
 import { spokenCancelled, spokenChannelMessages, spokenCompleted, spokenError, spokenOutcome, spokenReview } from "./spokenActionMessages.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
@@ -195,6 +197,20 @@ export async function dispatchParsedCommand(
   options: { confirmedWorkflow?: boolean } = {},
 ): Promise<CommandResponse> {
   let response: CommandResponse;
+
+  // Emergency stop (layer H): voice, text and playbook commands all arrive
+  // here. While the company is in safe mode only reads, withdrawals and the
+  // speaker's own voice settings run; everything else is refused in words.
+  if (!commandAllowedInSafeMode(command) && await safeModeSince(user.companyId)) {
+    return {
+      intent: command.intent,
+      interpreted: command.entities,
+      ok: false,
+      httpStatus: 423,
+      error: SAFE_MODE_ACTIVE,
+      message: safeModeMessage(user.voiceLanguage),
+    };
+  }
 
   switch (command.intent) {
     case "set_speech_rate": {

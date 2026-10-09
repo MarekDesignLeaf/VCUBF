@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import { recordAudit } from "../../lib/audit.js";
+import { SET_COMPANY_SAFE_MODE_ACTION } from "../../lib/actionContracts.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { getEmmaPolicy, isAdministrator, updateEmmaPolicy, updateEmmaPolicySchema } from "../../services/emmaPolicyService.js";
@@ -43,6 +44,55 @@ companyRouter.put("/", requirePermission("company.manage"), async (req, res) => 
     result: "success",
   });
   res.json(company);
+});
+
+// Emergency stop (masterplan layer H). Everyone signed in may see whether it
+// is on — the interface warns before anyone tries to change something — but
+// only an administrator switches it, and every switch is audited at risk 4.
+const safeModeSchema = z.object({ enabled: z.boolean(), reason: z.string().trim().max(500).optional() });
+
+async function safeModeView(companyId: string) {
+  const company = await prisma.company.findUnique({ where: { id: companyId }, select: { safeModeSince: true } });
+  return company ? { enabled: company.safeModeSince !== null, since: company.safeModeSince } : null;
+}
+
+companyRouter.get("/safe-mode", async (req, res) => {
+  const view = await safeModeView(req.user!.companyId);
+  if (!view) return res.status(404).json({ error: "COMPANY_NOT_FOUND" });
+  res.set("Cache-Control", "no-store");
+  return res.json(view);
+});
+
+companyRouter.put("/safe-mode", requirePermission(SET_COMPANY_SAFE_MODE_ACTION.requiredPermission), async (req, res) => {
+  const user = req.user!;
+  if (!isAdministrator(user)) {
+    return res.status(403).json({ error: "ADMINISTRATOR_REQUIRED", message: "Only a company administrator can switch the emergency stop." });
+  }
+  const parsed = safeModeSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
+  const before = await safeModeView(user.companyId);
+  if (!before) return res.status(404).json({ error: "COMPANY_NOT_FOUND" });
+  // Conditional update: two administrators switching at once change it once,
+  // and only a real change is audited.
+  const changed = await prisma.company.updateMany({
+    where: { id: user.companyId, safeModeSince: parsed.data.enabled ? null : { not: null } },
+    data: { safeModeSince: parsed.data.enabled ? new Date() : null },
+  });
+  const after = await safeModeView(user.companyId);
+  if (changed.count > 0) {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: SET_COMPANY_SAFE_MODE_ACTION.actionName,
+      inputPayload: { enabled: parsed.data.enabled, reason: parsed.data.reason ?? null },
+      dataBefore: before,
+      dataAfter: after,
+      riskLevel: SET_COMPANY_SAFE_MODE_ACTION.riskLevel,
+      result: "success",
+    });
+  }
+  res.set("Cache-Control", "no-store");
+  return res.json(after);
 });
 
 companyRouter.get("/emma-policy", requirePermission("company.manage"), async (req, res) => {

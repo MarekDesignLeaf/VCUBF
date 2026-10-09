@@ -162,7 +162,8 @@ function alreadySentToday(lastSentAt: Date | null, now: Date) {
  */
 export async function runNotificationDigestSweep(now = new Date()): Promise<DigestSweepSummary> {
   const candidates = await prisma.user.findMany({
-    where: { digestEnabled: true, isActive: true, digestHourUtc: { lte: now.getUTCHours() } },
+    // Emergency stop: no scheduled email leaves a company in safe mode.
+    where: { digestEnabled: true, isActive: true, digestHourUtc: { lte: now.getUTCHours() }, company: { safeModeSince: null } },
   });
   const summary: DigestSweepSummary = { considered: candidates.length, sent: 0, skipped: 0, failed: 0 };
   for (const candidate of candidates) {

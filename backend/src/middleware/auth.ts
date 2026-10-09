@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import { prisma } from "../db.js";
 import { idempotencyGuard } from "./idempotency.js";
+import { safeModeGate } from "../lib/safeMode.js";
 
 export interface AuthedUser {
   id: string;
@@ -87,7 +88,10 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     // recognised as repeated: the key is scoped to the company, and this is
     // where the company becomes known. Every authenticated route passes through
     // here, so the guarantee cannot be forgotten at an individual route.
-    return idempotencyGuard(req, res, next);
+    // The emergency stop is checked first, for the same reason; a refused
+    // write then leaves no idempotency record behind to replay the refusal
+    // once the stop is lifted.
+    return safeModeGate(req, res, () => idempotencyGuard(req, res, next));
   } catch {
     return res.status(401).json({ error: "MISSING_PERMISSION", message: "Invalid token" });
   }

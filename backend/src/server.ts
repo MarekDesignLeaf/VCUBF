@@ -42,6 +42,7 @@ import { devicePairingRouter } from "./modules/auth/devicePairing.js";
 import { voiceStateRouter } from "./modules/command/voiceState.js";
 import { companyRouter } from "./modules/company/routes.js";
 import { startConnectorBackgroundSync } from "./services/connectorBackgroundSyncService.js";
+import { SafeModeActiveError, safeModeMessage } from "./lib/safeMode.js";
 import { ASSISTANT_NAME_TOKEN, assistantNameFor, withAssistantName } from "./lib/assistantName.js";
 
 export function createServer() {
@@ -126,9 +127,12 @@ export function createServer() {
   app.use("/invoices", invoicesRouter);
 
   // Fallback error handler — the system must fail safely, never crash silently.
-  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (err && typeof err === "object" && "type" in err && err.type === "entity.too.large") {
       return res.status(413).json({ error: "PAYLOAD_TOO_LARGE", message: "The request body is too large." });
+    }
+    if (err instanceof SafeModeActiveError) {
+      return res.status(423).json({ error: err.code, message: safeModeMessage(req.user?.voiceLanguage) });
     }
     if (err && typeof err === "object" && "code" in err && ["P1001", "P1002", "P2024"].includes(String(err.code))) {
       console.error("Database temporarily unavailable", err);
