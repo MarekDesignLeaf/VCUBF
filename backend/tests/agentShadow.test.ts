@@ -22,6 +22,7 @@ type Call = { name: string; arguments: string };
 let modelOutput: Call[] = [];
 let modelStatus = 200;
 let modelIncomplete: string | undefined;
+let modelGate: Promise<void> | undefined;
 let modelRequests: Array<Record<string, unknown>> = [];
 let otherRequests: string[] = [];
 
@@ -37,6 +38,7 @@ function installModel() {
       return originalFetch(input, init);
     }
     modelRequests.push(JSON.parse(String(init?.body)));
+    if (modelGate) await modelGate;
     if (modelStatus !== 200) return new Response("unavailable", { status: modelStatus });
     return Response.json({
       status: modelIncomplete ? "incomplete" : "completed",
@@ -258,6 +260,32 @@ describe("agent in shadow (F1)", () => {
     await settleShadowRuns();
     const run = await prisma.agentRun.findFirstOrThrow();
     assert.equal(run.agreement, "invalid_proposal");
+  });
+
+  it("a selected request the shadow has no capacity for is recorded against availability", async () => {
+    let release!: () => void;
+    modelGate = new Promise<void>((resolve) => { release = resolve; });
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } });
+    const input = {
+      user: { id: admin.id, companyId: admin.companyId },
+      channel: "text" as const,
+      language: "en-GB",
+      text: "list clients",
+      actual: { intent: "list_clients", key: "list_clients", entities: {} },
+    };
+    // Two planner calls are held open; the third selected request finds no capacity.
+    assert.ok(observeShadow(input));
+    assert.ok(observeShadow(input));
+    assert.ok(observeShadow(input));
+    release();
+    modelGate = undefined;
+    await settleShadowRuns();
+    assert.equal(modelRequests.length, 2, "the skipped request calls no model");
+    const runs = await prisma.agentRun.findMany({ orderBy: { createdAt: "asc" } });
+    assert.equal(runs.length, 3);
+    const skipped = runs.filter((run) => run.errorCode === "SHADOW_CAPACITY");
+    assert.equal(skipped.length, 1);
+    assert.equal(skipped[0].agreement, "error");
   });
 
   it("confirmation turns get no shadow run", async () => {

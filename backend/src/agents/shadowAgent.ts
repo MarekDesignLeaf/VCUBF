@@ -324,6 +324,49 @@ function errorCode(error: unknown): string {
   return "ERROR";
 }
 
+/** The fields every run records, whatever happened to it. */
+function runRecord(input: ShadowInput) {
+  return {
+    companyId: input.user.companyId,
+    userId: input.user.id,
+    mode: "shadow",
+    channel: input.channel,
+    language: input.language,
+    inputFingerprint: requestFingerprint(input.text),
+    catalogueVersion: TOOL_CATALOGUE_VERSION,
+    catalogueFingerprint: TOOL_CATALOGUE_FINGERPRINT,
+    toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT,
+    build: buildId(),
+    model: modelFor("agent_plan"),
+    parserIntent: input.actual.intent,
+    parserAction: input.actual.key,
+  };
+}
+
+/**
+ * A request the sample selected but the shadow could not take, because two
+ * runs were already in flight. It is recorded as an error with no model call:
+ * a request skipped under load would otherwise vanish from the error rate, and
+ * acceptance could be earned on quiet moments only.
+ */
+async function recordCapacitySkip(input: ShadowInput): Promise<void> {
+  try {
+    await prisma.agentRun.create({
+      data: {
+        ...runRecord(input),
+        status: "error",
+        errorCode: "SHADOW_CAPACITY",
+        steps: 0,
+        proposedTools: [] as unknown as Prisma.InputJsonValue,
+        agreement: "error",
+        durationMs: 0,
+      },
+    });
+  } catch (error) {
+    console.error("[agent-shadow] could not record a capacity skip", error instanceof Error ? error.message : error);
+  }
+}
+
 /** One shadow run, recorded. Never throws: the shadow must not touch the request it watches. */
 export async function runShadow(input: ShadowInput): Promise<void> {
   const startedAt = Date.now();
@@ -350,23 +393,11 @@ export async function runShadow(input: ShadowInput): Promise<void> {
   try {
     await prisma.agentRun.create({
       data: {
-        companyId: input.user.companyId,
-        userId: input.user.id,
-        mode: "shadow",
-        channel: input.channel,
-        language: input.language,
-        inputFingerprint: requestFingerprint(input.text),
-        catalogueVersion: TOOL_CATALOGUE_VERSION,
-        catalogueFingerprint: TOOL_CATALOGUE_FINGERPRINT,
-        toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT,
-        build: buildId(),
-        model: modelFor("agent_plan"),
+        ...runRecord(input),
         status: budgetExceeded ? "budget_exceeded" : failure ? "error" : "completed",
         errorCode: failure ?? (planned!.overBudget ? "STEP_BUDGET" : null),
         steps: stored.length,
         proposedTools: stored as unknown as Prisma.InputJsonValue,
-        parserIntent: input.actual.intent,
-        parserAction: input.actual.key,
         agreement: failure ? "error" : compareWithParser(planned!.proposals, input.actual),
         tokensIn: tokensIn ?? null,
         tokensOut: tokensOut ?? null,
@@ -378,7 +409,9 @@ export async function runShadow(input: ShadowInput): Promise<void> {
   }
 }
 
-const inFlight = new Set<Promise<void>>();
+/** Planner calls in flight (the capacity limit) and every pending write (for settling). */
+const planning = new Set<Promise<void>>();
+const pending = new Set<Promise<void>>();
 
 function sampleRate(): number {
   const rate = Number(process.env.AGENT_SHADOW_SAMPLE_RATE ?? "0");
@@ -388,23 +421,30 @@ function sampleRate(): number {
 /**
  * Give a handled request a shadow run, in the background. Returns at once;
  * the returned promise exists for tests. Nothing happens when the shadow is
- * off, the request is a confirmation turn, no model key is configured, or two
- * runs are already in flight.
+ * off, the request is a confirmation turn, or no model key is configured.
+ * With two runs already in flight, a selected request is recorded as a
+ * capacity skip without a model call.
  */
 export function observeShadow(input: ShadowInput): Promise<void> | undefined {
   const rate = sampleRate();
   if (rate <= 0 || Math.random() >= rate) return undefined;
   if (isApprovalTurn(input.actual.intent)) return undefined;
   if (!process.env.OPENAI_API_KEY?.trim()) return undefined;
-  if (inFlight.size >= MAX_IN_FLIGHT) return undefined;
-  const run: Promise<void> = runShadow(input).finally(() => inFlight.delete(run));
-  inFlight.add(run);
+  // Over capacity, the selected request is still recorded — as a skip that
+  // counts against availability — but no model is called.
+  const overCapacity = planning.size >= MAX_IN_FLIGHT;
+  const run: Promise<void> = (overCapacity ? recordCapacitySkip(input) : runShadow(input)).finally(() => {
+    planning.delete(run);
+    pending.delete(run);
+  });
+  if (!overCapacity) planning.add(run);
+  pending.add(run);
   return run;
 }
 
 /** Wait for every shadow run in flight (tests, graceful shutdown). */
 export async function settleShadowRuns(): Promise<void> {
-  await Promise.allSettled([...inFlight]);
+  await Promise.allSettled([...pending]);
 }
 
 const AGREEING: ShadowAgreement[] = ["match", "both_none"];
