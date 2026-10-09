@@ -1977,7 +1977,9 @@ export function BrowserVoiceControl() {
 
       {interim ? <p className="voice-interim">{interim}</p> : null}
       {heard ? <p className="voice-heard"><strong>{copy.heard}:</strong> {heard}</p> : null}
-      {answer ? <p className="voice-answer"><strong>{copy.answered}:</strong> {answer}</p> : null}
+      {/* Keyed by the text, so a new answer starts at its top rather than where the
+          last one was scrolled to. */}
+      {answer ? <p className="voice-answer" key={answer}><strong>{copy.answered}:</strong> {answer}</p> : null}
 
       <form
         className="voice-typed"
