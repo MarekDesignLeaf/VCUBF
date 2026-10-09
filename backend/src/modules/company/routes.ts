@@ -70,21 +70,32 @@ companyRouter.put("/safe-mode", requirePermission(SET_COMPANY_SAFE_MODE_ACTION.r
   }
   const parsed = safeModeSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
-  const before = await safeModeView(user.companyId);
-  if (!before) return res.status(404).json({ error: "COMPANY_NOT_FOUND" });
-  // Conditional update: two administrators switching at once change it once,
-  // and only a real change is audited.
-  const changed = await prisma.company.updateMany({
-    where: { id: user.companyId, safeModeSince: parsed.data.enabled ? null : { not: null } },
-    data: { safeModeSince: parsed.data.enabled ? new Date() : null },
+  const enabled = parsed.data.enabled;
+  // The row is locked while it is read and switched: two administrators
+  // switching at once are serialised, only a real change is written and
+  // audited, and the audit records exactly the state each one changed.
+  const outcome = await prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ safe_mode_since: Date | null }>>`
+      SELECT "safe_mode_since" FROM "companies" WHERE "id" = ${user.companyId} FOR UPDATE`;
+    if (rows.length === 0) return null;
+    const previous = rows[0].safe_mode_since;
+    const before = { enabled: previous !== null, since: previous };
+    if (before.enabled === enabled) return { before, after: before, changed: false };
+    const updated = await tx.company.update({
+      where: { id: user.companyId },
+      data: { safeModeSince: enabled ? new Date() : null },
+      select: { safeModeSince: true },
+    });
+    return { before, after: { enabled: updated.safeModeSince !== null, since: updated.safeModeSince }, changed: true };
   });
-  const after = await safeModeView(user.companyId);
-  if (changed.count > 0) {
+  if (!outcome) return res.status(404).json({ error: "COMPANY_NOT_FOUND" });
+  const { before, after } = outcome;
+  if (outcome.changed) {
     await recordAudit({
       companyId: user.companyId,
       userId: user.id,
       actionName: SET_COMPANY_SAFE_MODE_ACTION.actionName,
-      inputPayload: { enabled: parsed.data.enabled, reason: parsed.data.reason ?? null },
+      inputPayload: { enabled, reason: parsed.data.reason ?? null },
       dataBefore: before,
       dataAfter: after,
       riskLevel: SET_COMPANY_SAFE_MODE_ACTION.riskLevel,

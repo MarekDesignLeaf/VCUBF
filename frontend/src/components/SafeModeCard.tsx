@@ -36,6 +36,7 @@ export function SafeModeCard() {
       While it is on, nothing new is changed or sent for the company: no edits, no emails or WhatsApp messages,
       no calendar changes, no confirmation of a waiting action and no scheduled digest or connector sync.
       Reading, the audit log, signing in and questions to the assistant keep working. Inbound WhatsApp messages are still recorded.
+      While it is on, an administrator can still deactivate an account, give it a new temporary password or switch a connector off.
     </p>
     <p><strong>{state.enabled ? `On since ${new Date(state.since ?? "").toLocaleString()}` : "Off — normal operation."}</strong></p>
     <label>Reason (recorded in the audit log)

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
+import { safeModeSince } from "../lib/safeMode.js";
 import { SEND_NOTIFICATION_DIGEST_ACTION, UPDATE_NOTIFICATION_DIGEST_PREFERENCES_ACTION } from "../lib/actionContracts.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { resolveSendableGmailSource, sendThroughGmailSource } from "./gmailConnectorService.js";
@@ -168,6 +169,9 @@ export async function runNotificationDigestSweep(now = new Date()): Promise<Dige
   const summary: DigestSweepSummary = { considered: candidates.length, sent: 0, skipped: 0, failed: 0 };
   for (const candidate of candidates) {
     if (alreadySentToday(candidate.digestLastSentAt, now)) { summary.skipped += 1; continue; }
+    // Checked again per email: a stop switched on while this sweep runs
+    // halts the rest of it.
+    if (await safeModeSince(candidate.companyId)) { summary.skipped += 1; continue; }
     const actor: AuthedUser = {
       id: candidate.id,
       companyId: candidate.companyId,

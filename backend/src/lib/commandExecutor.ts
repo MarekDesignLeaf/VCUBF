@@ -27,7 +27,7 @@ import * as googleCalendarConnectorService from "../services/googleCalendarConne
 import { buildCommandUiAction, completedVoiceCommandMessage, openingVoiceLabelMessage, openingVoicePageMessage, type CommandUiAction } from "./voiceNavigation.js";
 import { getNavigationCatalogue } from "./navigationCatalogue.js";
 import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction, getPendingEmmaActionName } from "../services/emmaExecutableActionService.js";
-import { SAFE_MODE_ACTIVE, safeModeMessage, safeModeSince } from "./safeMode.js";
+import { SAFE_MODE_ACTIVE, SafeModeActiveError, safeModeMessage, safeModeSince } from "./safeMode.js";
 import { commandAllowedInSafeMode } from "./safeModeCommands.js";
 import { spokenCancelled, spokenChannelMessages, spokenCompleted, spokenError, spokenOutcome, spokenReview } from "./spokenActionMessages.js";
 
@@ -191,26 +191,45 @@ function notUnderstoodMessage(language: string) {
   return messages[language.slice(0, 2).toLowerCase()] ?? messages.en;
 }
 
+function safeModeRefusal(user: AuthedUser, command: ParsedCommand): CommandResponse {
+  return {
+    intent: command.intent,
+    interpreted: command.entities,
+    ok: false,
+    httpStatus: 423,
+    error: SAFE_MODE_ACTIVE,
+    message: safeModeMessage(user.voiceLanguage),
+  };
+}
+
+/**
+ * Voice, text and playbook commands all arrive here. While the company is in
+ * safe mode (emergency stop, layer H) only reads, withdrawals and the
+ * speaker's own voice settings run; everything else is refused in words. A
+ * stop switched on while a command was already past this check is caught when
+ * the engine refuses the claim, and answered the same way, so the caller
+ * still audits the command and a playbook still records its run.
+ */
 export async function dispatchParsedCommand(
   user: AuthedUser,
   command: ParsedCommand,
   options: { confirmedWorkflow?: boolean } = {},
 ): Promise<CommandResponse> {
-  let response: CommandResponse;
-
-  // Emergency stop (layer H): voice, text and playbook commands all arrive
-  // here. While the company is in safe mode only reads, withdrawals and the
-  // speaker's own voice settings run; everything else is refused in words.
-  if (!commandAllowedInSafeMode(command) && await safeModeSince(user.companyId)) {
-    return {
-      intent: command.intent,
-      interpreted: command.entities,
-      ok: false,
-      httpStatus: 423,
-      error: SAFE_MODE_ACTIVE,
-      message: safeModeMessage(user.voiceLanguage),
-    };
+  if (!commandAllowedInSafeMode(command) && await safeModeSince(user.companyId)) return safeModeRefusal(user, command);
+  try {
+    return await dispatchAllowedCommand(user, command, options);
+  } catch (error) {
+    if (error instanceof SafeModeActiveError) return safeModeRefusal(user, command);
+    throw error;
   }
+}
+
+async function dispatchAllowedCommand(
+  user: AuthedUser,
+  command: ParsedCommand,
+  options: { confirmedWorkflow?: boolean },
+): Promise<CommandResponse> {
+  let response: CommandResponse;
 
   switch (command.intent) {
     case "set_speech_rate": {

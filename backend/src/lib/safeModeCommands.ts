@@ -20,10 +20,17 @@ const ALLOWED_IN_SAFE_MODE = new Set<ParsedCommand["intent"]>([
   "set_voice_language", "set_speech_rate",
 ]);
 
+/**
+ * The speaker's own voice settings (language, rate, assistant name, hotword),
+ * by whichever command they arrive — the same change the account form makes
+ * through /auth/voice-preferences, which also stays open.
+ */
+const OWN_VOICE_SETTINGS = "action.update_voice_preferences";
+
 const modeById = new Map(EMMA_CAPABILITIES.map((capability) => [capability.id, capability.mode]));
 
 export function commandAllowedInSafeMode(command: ParsedCommand): boolean {
   if (ALLOWED_IN_SAFE_MODE.has(command.intent)) return true;
   const ids = capabilityIdsForCommand(command);
-  return ids.length > 0 && ids.every((id) => modeById.get(id) === "read");
+  return ids.length > 0 && ids.every((id) => id === OWN_VOICE_SETTINGS || modeById.get(id) === "read");
 }

@@ -24,6 +24,7 @@ describe("emergency stop (safe mode)", () => {
   let adminToken: string;
   let workerToken: string;
   let admin: { id: string; companyId: string };
+  let workerId: string;
 
   const as = (token: string) => ({ Authorization: `Bearer ${token}` });
   const text = (value: string) => request(app).post("/command/text").set(as(adminToken)).send({ text: value });
@@ -34,6 +35,7 @@ describe("emergency stop (safe mode)", () => {
     await resetDb();
     const seeded = await seedCompanyAndAdmin();
     admin = { id: seeded.admin.id, companyId: seeded.admin.companyId };
+    workerId = seeded.worker.id;
     adminToken = (await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" })).body.token;
     workerToken = (await request(app).post("/auth/login").send({ email: "worker@test.local", password: "Password123!" })).body.token;
   });
@@ -49,22 +51,43 @@ describe("emergency stop (safe mode)", () => {
     assert.equal(commandAllowedInSafeMode(command({ intent: "set_speech_rate", entities: { direction: "faster" } })), true);
     assert.equal(commandAllowedInSafeMode(command({ intent: "execute_action", entities: { action: "get_unpaid_invoices", parameters: {} } })), true);
     assert.equal(commandAllowedInSafeMode(command({ intent: "execute_action", entities: { action: "set_task_status", parameters: {} } })), false);
+    // The speaker's own voice settings, by whichever command they arrive.
+    assert.equal(commandAllowedInSafeMode(command({ intent: "execute_action", entities: { action: "set_assistant_name", parameters: {} } })), true);
+    assert.equal(commandAllowedInSafeMode(command({ intent: "execute_action", entities: { action: "set_speech_rate", parameters: {} } })), true);
     assert.equal(commandAllowedInSafeMode(command({ intent: "create_client", entities: { display_name: "X" } })), false);
     assert.equal(commandAllowedInSafeMode(command({ intent: "confirm_create_client", entities: {} })), false);
     assert.equal(commandAllowedInSafeMode(command({ intent: "confirm_gmail_message", entities: {} })), false);
     assert.equal(commandAllowedInSafeMode(command({ intent: "prepare_whatsapp_message", entities: {} })), false);
   });
 
-  it("lets only the way out, the way in, commands and voice bookkeeping write over HTTP", () => {
-    assert.equal(mutationAllowedInSafeMode("GET", "/crm/clients"), true);
-    assert.equal(mutationAllowedInSafeMode("PUT", "/company/safe-mode"), true);
-    assert.equal(mutationAllowedInSafeMode("POST", "/auth/change-password"), true);
-    assert.equal(mutationAllowedInSafeMode("POST", "/command/text"), true);
-    assert.equal(mutationAllowedInSafeMode("DELETE", "/command/voice-state/history"), true);
-    assert.equal(mutationAllowedInSafeMode("POST", "/crm/clients"), false);
-    assert.equal(mutationAllowedInSafeMode("PUT", "/company"), false);
-    assert.equal(mutationAllowedInSafeMode("POST", "/command/aliases"), false);
-    assert.equal(mutationAllowedInSafeMode("POST", "/notifications/digest/send"), false);
+  it("lets only the way out, the way in, commands, voice bookkeeping and containment write over HTTP", () => {
+    const allowed = (method: string, path: string, extra: { body?: unknown; role?: string } = {}) =>
+      mutationAllowedInSafeMode({ method, path, role: "field_worker", ...extra });
+    assert.equal(allowed("GET", "/crm/clients"), true);
+    assert.equal(allowed("PUT", "/company/safe-mode"), true);
+    assert.equal(allowed("POST", "/auth/change-password"), true);
+    assert.equal(allowed("POST", "/command/text"), true);
+    assert.equal(allowed("PUT", "/command/voice-state"), true);
+    assert.equal(allowed("POST", "/crm/clients"), false);
+    assert.equal(allowed("PUT", "/company"), false);
+    assert.equal(allowed("POST", "/command/aliases"), false);
+    assert.equal(allowed("POST", "/notifications/digest/send"), false);
+    // Evidence stays: the voice history cannot be cleared during a stop.
+    assert.equal(allowed("DELETE", "/command/voice-state/history"), false);
+    // No new device credentials, whatever the spelling.
+    assert.equal(allowed("POST", "/auth/device/approve"), false);
+    assert.equal(allowed("POST", "/Auth/Device/Approve"), false);
+    assert.equal(allowed("POST", "/auth/device/key"), true);
+    // Containment: administrators only, and only steps that take access away.
+    const admin = { role: "administrator" };
+    assert.equal(allowed("POST", "/connectors/sources/abc/disable", admin), true);
+    assert.equal(allowed("POST", "/connectors/sources/abc/disable"), false);
+    assert.equal(allowed("POST", "/connectors/sources/abc/enable", admin), false);
+    assert.equal(allowed("POST", "/crm/employees/abc/reset-password", admin), true);
+    assert.equal(allowed("PUT", "/crm/employees/abc", { ...admin, body: { is_active: false } }), true);
+    assert.equal(allowed("PUT", "/crm/employees/abc", { ...admin, body: { is_active: true } }), false);
+    assert.equal(allowed("PUT", "/crm/employees/abc", { ...admin, body: { is_active: false, role: "administrator" } }), false);
+    assert.equal(allowed("PUT", "/crm/employees/abc", { body: { is_active: false } }), false);
   });
 
   it("is visible to everyone signed in, but only an administrator switches it", async () => {
@@ -133,6 +156,16 @@ describe("emergency stop (safe mode)", () => {
 
     // The administrator's own settings are writes too.
     assert.equal((await request(app).put("/company").set(as(adminToken)).send({ name: "Renamed During Stop" })).status, 423);
+    // So is clearing the voice history: it may be the only record of the incident.
+    assert.equal((await request(app).delete("/command/voice-state/history").set(as(adminToken))).status, 423);
+
+    // Containment still works: an administrator can take an account's access away…
+    const deactivated = await request(app).put(`/crm/employees/${workerId}`).set(as(adminToken)).send({ is_active: false });
+    assert.equal(deactivated.status, 200, JSON.stringify(deactivated.body));
+    assert.equal((await request(app).get("/company/safe-mode").set(as(workerToken))).status, 401);
+    // …but not give it back, nor change anything else in the same request.
+    const reactivated = await request(app).put(`/crm/employees/${workerId}`).set(as(adminToken)).send({ is_active: true });
+    assert.equal(reactivated.status, 423);
   });
 
   it("switching off resumes normal operation, and the waiting review can run again", async () => {
@@ -143,6 +176,12 @@ describe("emergency stop (safe mode)", () => {
 
     const write = await request(app).post("/crm/clients").set(as(adminToken)).send({ display_name: "After Stop" });
     assert.equal(write.status, 201, JSON.stringify(write.body));
+    // A write refused during the stop is carried out when retried with the
+    // same key afterwards: the refusal was never kept for replay.
+    const retried = await request(app).post("/crm/clients").set(as(adminToken)).set("Idempotency-Key", "safe-mode-1")
+      .send({ display_name: "Blocked Client" });
+    assert.equal(retried.status, 201, JSON.stringify(retried.body));
+    assert.equal(await prisma.client.count({ where: { displayName: "Blocked Client" } }), 1);
     const claimed = await claimReviewedAction(admin, REVIEW);
     assert.equal(claimed.ok, true);
     if (claimed.ok) await claimed.complete(true);

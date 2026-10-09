@@ -153,6 +153,9 @@ export async function runConnectorBackgroundSyncOnce(
           companyId: source.companyId,
           isActive: true,
           isEnabled: true,
+          // Checked again per source: a stop switched on while this sweep
+          // runs halts the rest of it.
+          company: { safeModeSince: null },
           OR: [{ lastSyncAt: null }, { lastSyncAt: { lt: cutoff } }],
         },
         data: { lastSyncAt: now, lastSyncStatus: "syncing", lastErrorCode: null },
