@@ -38,6 +38,12 @@ export interface RealtimeClientSession {
 export interface VoiceTranscription {
   text: string;
   model: string;
+  /**
+   * Why speech came back as nothing: the model read its own prompt back, or
+   * the text had the shape of a hallucination. Said to the user ("heard, but
+   * not recognised") instead of the sentence silently vanishing.
+   */
+  dropped?: "prompt_echo" | "hallucination";
 }
 
 const supportedCommands = `
@@ -230,7 +236,28 @@ export async function transcribeVoiceAudio(
   if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
 
   form.append("prompt", prompt);
+  let text = await requestTranscription(form);
+  if (isPromptEcho(text, prompt)) {
+    // The smaller 4o models answer unclear or short speech with the prompt
+    // (seen 9. 10.: a spoken command came back as the vocabulary list and the
+    // user saw nothing at all). Asking once more without the prompt costs a
+    // second call only in this case, and gives back what was actually said.
+    form.delete("prompt");
+    const retried = await requestTranscription(form);
+    console.log(`[transcription] prompt echo, retried without prompt: ${retried && !isPromptEcho(retried, prompt) ? "recognised" : "nothing"}`);
+    if (!retried || isPromptEcho(retried, prompt)) return { text: "", model, dropped: "prompt_echo" };
+    text = retried;
+  }
+  // Silence is a normal outcome of always-on listening, not an error. Whisper
+  // invents plausible sentences from near-silent audio (observed: Czech website
+  // names), so anything shaped like a hallucination becomes empty text and the
+  // caller simply ignores it.
+  if (isLikelyHallucination(text)) return { text: "", model, ...(text ? { dropped: "hallucination" as const } : {}) };
+  return { text, model };
+}
 
+/** One transcription request; the text, trimmed. */
+async function requestTranscription(form: FormData): Promise<string> {
   const response = await modelRequest("transcription", "/v1/audio/transcriptions", {
     method: "POST",
     body: form,
@@ -240,15 +267,7 @@ export async function transcribeVoiceAudio(
   // The transcription is the highest-volume AI call (every heard stretch of
   // speech), so its token usage is exactly what the cost decision needs.
   recordUsage("transcription", (parsed as { usage?: unknown })?.usage);
-  const payload = z.object({ text: z.string() }).parse(parsed);
-  const text = payload.text.trim();
-  if (isPromptEcho(text, prompt)) return { text: "", model };
-  // Silence is a normal outcome of always-on listening, not an error. Whisper
-  // invents plausible sentences from near-silent audio (observed: Czech website
-  // names), so anything shaped like a hallucination becomes empty text and the
-  // caller simply ignores it.
-  if (isLikelyHallucination(text)) return { text: "", model };
-  return { text, model };
+  return z.object({ text: z.string() }).parse(parsed).text.trim();
 }
 
 export async function interpretVoiceRequest(input: {

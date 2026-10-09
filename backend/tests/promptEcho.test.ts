@@ -44,13 +44,47 @@ describe("GPT transcription must not execute its own vocabulary prompt", () => {
     globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
       const form = init?.body as FormData;
       sentModel = String(form.get("model"));
-      return new Response(JSON.stringify({ text: String(form.get("prompt")) }), {
+      // Echoes the prompt when given one; without it, the audio holds nothing.
+      const prompt = form.get("prompt");
+      return new Response(JSON.stringify({ text: prompt === null ? "" : String(prompt) }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     }) as typeof fetch;
     const result = await transcribeVoiceAudio(Buffer.alloc(64), "cs-CZ", "Emma");
     assert.equal(result.text, "");
+    assert.equal(result.dropped, "prompt_echo", "the client is told something was heard but not recognised");
     assert.equal(sentModel, process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe");
+  });
+
+  it("asks once more without the prompt when the model echoes it, and keeps what was really said", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    const prompts: Array<string | null> = [];
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      const form = init?.body as FormData;
+      const prompt = form.get("prompt");
+      prompts.push(prompt === null ? null : String(prompt));
+      // With the prompt the model reads it back; without it, it hears the command.
+      const text = prompt === null ? "Alfonzo, ukaž zakázky na zítra" : String(prompt);
+      return new Response(JSON.stringify({ text }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as typeof fetch;
+    const result = await transcribeVoiceAudio(Buffer.alloc(64), "cs-CZ", "Alfonzo");
+    assert.equal(result.text, "Alfonzo, ukaž zakázky na zítra");
+    assert.equal(result.dropped, undefined);
+    assert.equal(prompts.length, 2);
+    assert.ok(prompts[0] && prompts[0].includes("Alfonzo"), "the first request carries the prompt");
+    assert.equal(prompts[1], null, "the retry carries none");
+  });
+
+  it("does not retry a real command", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ text: "Alfonzo, vytvoř klienta Roger Novák" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as typeof fetch;
+    const result = await transcribeVoiceAudio(Buffer.alloc(64), "cs-CZ", "Alfonzo");
+    assert.equal(result.text, "Alfonzo, vytvoř klienta Roger Novák");
+    assert.equal(calls, 1);
   });
 });
