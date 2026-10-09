@@ -77,6 +77,7 @@ const catalogueKinds = new Map(AGENT_TOOL_CATALOGUE.map((tool) => [tool.name as 
 export type ShadowAgreement =
   | "match"
   | "extra_calls"
+  | "arguments_differ"
   | "mismatch"
   | "both_none"
   | "agent_only"
@@ -84,11 +85,13 @@ export type ShadowAgreement =
   | "invalid_proposal"
   | "error";
 
-/** What the parser did, reduced to names: the intent, and a key to compare on. */
+/** What the parser did: the intent, a key to compare on, and — in memory only — its entities. */
 export interface ParserOutcome {
   intent: string;
   /** "execute_action:NAME" for an executable action, the intent otherwise, null when nothing was to be done. */
   key: string | null;
+  /** What the command was given. Compared in memory, never stored (D4). */
+  entities?: unknown;
 }
 
 export interface ProposedTool {
@@ -98,6 +101,11 @@ export interface ProposedTool {
   key: string | null;
   valid: boolean;
   argumentsFingerprint: string;
+}
+
+/** A proposal as compared: the stored record plus, in memory only, what it would be given. */
+export interface Proposal extends ProposedTool {
+  entities?: unknown;
 }
 
 export interface ShadowInput {
@@ -110,10 +118,41 @@ export interface ShadowInput {
   actual: ParserOutcome;
 }
 
+/** An executable action's parameters as its schema reads them, so both sides compare alike. */
+function actionEntities(action: string, parameters: unknown) {
+  const validated = validateVoiceActionParameters(action, parameters);
+  return { action, parameters: validated.success ? validated.data : parameters };
+}
+
 export function parserOutcomeOf(command: ParsedCommand): ParserOutcome {
   if (command.intent === "unrecognized") return { intent: command.intent, key: null };
-  if (command.intent === "execute_action") return { intent: command.intent, key: `execute_action:${command.entities.action}` };
-  return { intent: command.intent, key: command.intent };
+  if (command.intent === "execute_action") {
+    return {
+      intent: command.intent,
+      key: `execute_action:${command.entities.action}`,
+      entities: actionEntities(command.entities.action, command.entities.parameters),
+    };
+  }
+  return { intent: command.intent, key: command.intent, entities: command.entities };
+}
+
+/** Text compared as said: case, surrounding and repeated whitespace aside. Keys sorted, absent values dropped. */
+function canonical(value: unknown): unknown {
+  if (typeof value === "string") return value.trim().replace(/\s+/g, " ").toLowerCase();
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value)
+        .filter((key) => (value as Record<string, unknown>)[key] !== undefined)
+        .sort()
+        .map((key) => [key, canonical((value as Record<string, unknown>)[key])]),
+    );
+  }
+  return value;
+}
+
+function sameEntities(left: unknown, right: unknown) {
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
 }
 
 /** Confirmation turns ("yes", "cancel email") mean nothing without the review they answer. */
@@ -134,7 +173,7 @@ function argumentsFingerprint(raw: string): string {
   return createHmac("sha256", fingerprintKey()).update(raw).digest("hex");
 }
 
-function proposalFrom(name: string, rawArguments: string): ProposedTool {
+function proposalFrom(name: string, rawArguments: string): Proposal {
   const fingerprint = argumentsFingerprint(rawArguments);
   let args: unknown;
   try {
@@ -148,28 +187,40 @@ function proposalFrom(name: string, rawArguments: string): ProposedTool {
     // The parser is the authority on what a canonical command means.
     const parsed = parseTextCommand(canonical, CANONICAL_COMMAND);
     const outcome = parserOutcomeOf(parsed);
-    return { tool: name, kind: "command", key: outcome.key, valid: outcome.key !== null, argumentsFingerprint: fingerprint };
+    return { tool: name, kind: "command", key: outcome.key, valid: outcome.key !== null, argumentsFingerprint: fingerprint, entities: outcome.entities };
   }
   const kind = catalogueKinds.get(name);
   if (!kind) return { tool: name, kind: "unknown", key: null, valid: false, argumentsFingerprint: fingerprint };
   const validated = validateVoiceActionParameters(name, args);
-  return { tool: name, kind, key: `execute_action:${name}`, valid: validated.success, argumentsFingerprint: fingerprint };
+  return {
+    tool: name,
+    kind,
+    key: `execute_action:${name}`,
+    valid: validated.success,
+    argumentsFingerprint: fingerprint,
+    entities: actionEntities(name, args),
+  };
 }
 
 /**
  * Strict on purpose: the rate this feeds decides whether the agent may act.
  * Any call the parser or the action's schema would refuse makes the whole
- * proposal invalid, and a match means exactly the one thing the parser did —
- * the right action with further calls beside it is "extra_calls", which counts
- * against the rate like a mismatch.
+ * proposal invalid. A match means exactly the one thing the parser did, given
+ * the same values — schemas alone cannot tell, because many actions are
+ * validated only by their owning service, so the proposal's arguments are
+ * compared with what the parser actually received ("arguments_differ"
+ * otherwise). The right action with further calls beside it is "extra_calls".
+ * All of these count against the rate.
  */
-export function compareWithParser(proposals: ProposedTool[], actual: ParserOutcome): ShadowAgreement {
+export function compareWithParser(proposals: Proposal[], actual: ParserOutcome): ShadowAgreement {
   if (proposals.some((proposal) => !proposal.valid || proposal.key === null)) return "invalid_proposal";
   const proposedKeys = proposals.map((proposal) => proposal.key);
   if (actual.key === null) return proposedKeys.length === 0 ? "both_none" : "agent_only";
   if (proposedKeys.length === 0) return "parser_only";
   if (!proposedKeys.includes(actual.key)) return "mismatch";
-  return proposedKeys.length === 1 ? "match" : "extra_calls";
+  if (proposedKeys.length > 1) return "extra_calls";
+  if (actual.entities !== undefined && !sameEntities(proposals[0].entities, actual.entities)) return "arguments_differ";
+  return "match";
 }
 
 function instructions(language: string) {
@@ -182,8 +233,15 @@ Never invent names, identifiers, addresses, dates, amounts or message text. Keep
 The user speaks ${language}.`;
 }
 
+/** The model stopped before finishing — most often the output budget. Never compared as a plan. */
+class IncompletePlan extends Error {
+  constructor(readonly reason: string, readonly tokensIn?: number, readonly tokensOut?: number) {
+    super(`INCOMPLETE_${reason}`);
+  }
+}
+
 interface Plan {
-  proposals: ProposedTool[];
+  proposals: Proposal[];
   tokensIn?: number;
   tokensOut?: number;
   overBudget: boolean;
@@ -208,23 +266,28 @@ async function plan(input: ShadowInput): Promise<Plan> {
   });
   if (!response.ok) throw new Error(`HTTP_${response.status}`);
   const body = (await response.json()) as {
+    status?: string;
+    incomplete_details?: { reason?: string } | null;
     output?: Array<{ type?: string; name?: string; arguments?: string }>;
     usage?: { input_tokens?: number; output_tokens?: number };
   };
   recordUsage("agent_plan", body.usage);
+  const tokensIn = typeof body.usage?.input_tokens === "number" ? body.usage.input_tokens : undefined;
+  const tokensOut = typeof body.usage?.output_tokens === "number" ? body.usage.output_tokens : undefined;
+  // A truncated answer is not a plan: an empty one would otherwise score as
+  // "neither would act", and a partial one as if it were complete.
+  if (body.status !== undefined && body.status !== "completed") {
+    throw new IncompletePlan(body.incomplete_details?.reason ?? body.status, tokensIn, tokensOut);
+  }
   const calls = (body.output ?? []).filter((item) => item.type === "function_call" && typeof item.name === "string");
   const proposals = calls
     .slice(0, AGENT_RUN_BUDGET.maxSteps)
     .map((call) => proposalFrom(call.name!, typeof call.arguments === "string" ? call.arguments : ""));
-  return {
-    proposals,
-    tokensIn: typeof body.usage?.input_tokens === "number" ? body.usage.input_tokens : undefined,
-    tokensOut: typeof body.usage?.output_tokens === "number" ? body.usage.output_tokens : undefined,
-    overBudget: calls.length > AGENT_RUN_BUDGET.maxSteps,
-  };
+  return { proposals, tokensIn, tokensOut, overBudget: calls.length > AGENT_RUN_BUDGET.maxSteps };
 }
 
 function errorCode(error: unknown): string {
+  if (error instanceof IncompletePlan) return error.reason === "max_output_tokens" ? "OUTPUT_BUDGET" : error.message;
   if (error instanceof Error) {
     if (error.name === "TimeoutError" || error.name === "AbortError") return "TIMEOUT";
     if (error.message === "OPENAI_NOT_CONFIGURED" || error.message.startsWith("HTTP_")) return error.message;
@@ -238,11 +301,24 @@ export async function runShadow(input: ShadowInput): Promise<void> {
   const startedAt = Date.now();
   let planned: Plan | undefined;
   let failure: string | undefined;
+  let tokensIn: number | undefined;
+  let tokensOut: number | undefined;
   try {
     planned = await plan(input);
+    ({ tokensIn, tokensOut } = planned);
   } catch (error) {
     failure = errorCode(error);
+    if (error instanceof IncompletePlan) ({ tokensIn, tokensOut } = error);
   }
+  const budgetExceeded = failure === "OUTPUT_BUDGET" || (!failure && planned!.overBudget);
+  // Only the record of each call is kept; what it would have been given stays in memory (D4).
+  const stored: ProposedTool[] = (planned?.proposals ?? []).map(({ tool, kind, key, valid, argumentsFingerprint }) => ({
+    tool,
+    kind,
+    key,
+    valid,
+    argumentsFingerprint,
+  }));
   try {
     await prisma.agentRun.create({
       data: {
@@ -256,15 +332,15 @@ export async function runShadow(input: ShadowInput): Promise<void> {
         catalogueFingerprint: TOOL_CATALOGUE_FINGERPRINT,
         toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT,
         model: modelFor("agent_plan"),
-        status: failure ? "error" : planned!.overBudget ? "budget_exceeded" : "completed",
+        status: budgetExceeded ? "budget_exceeded" : failure ? "error" : "completed",
         errorCode: failure ?? (planned!.overBudget ? "STEP_BUDGET" : null),
-        steps: planned ? planned.proposals.length : 0,
-        proposedTools: (planned?.proposals ?? []) as unknown as Prisma.InputJsonValue,
+        steps: stored.length,
+        proposedTools: stored as unknown as Prisma.InputJsonValue,
         parserIntent: input.actual.intent,
         parserAction: input.actual.key,
         agreement: failure ? "error" : compareWithParser(planned!.proposals, input.actual),
-        tokensIn: planned?.tokensIn ?? null,
-        tokensOut: planned?.tokensOut ?? null,
+        tokensIn: tokensIn ?? null,
+        tokensOut: tokensOut ?? null,
         durationMs: Date.now() - startedAt,
       },
     });

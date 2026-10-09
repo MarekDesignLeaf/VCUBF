@@ -8,6 +8,7 @@ import {
   compareWithParser,
   observeShadow,
   settleShadowRuns,
+  type Proposal,
   type ProposedTool,
 } from "../src/agents/shadowAgent.js";
 import { AGENT_TOOL_CATALOGUE } from "../src/agents/toolCatalogue.js";
@@ -18,6 +19,7 @@ const app = createServer();
 type Call = { name: string; arguments: string };
 let modelOutput: Call[] = [];
 let modelStatus = 200;
+let modelIncomplete: string | undefined;
 let modelRequests: Array<Record<string, unknown>> = [];
 let otherRequests: string[] = [];
 
@@ -35,6 +37,8 @@ function installModel() {
     modelRequests.push(JSON.parse(String(init?.body)));
     if (modelStatus !== 200) return new Response("unavailable", { status: modelStatus });
     return Response.json({
+      status: modelIncomplete ? "incomplete" : "completed",
+      ...(modelIncomplete ? { incomplete_details: { reason: modelIncomplete } } : {}),
       output: modelOutput.map((call, index) => ({ type: "function_call", call_id: `call_${index}`, ...call })),
       usage: { input_tokens: 9_800, output_tokens: 42 },
     });
@@ -61,6 +65,7 @@ describe("agent in shadow (F1)", () => {
     await settleShadowRuns();
     modelOutput = [];
     modelStatus = 200;
+    modelIncomplete = undefined;
     modelRequests = [];
     otherRequests = [];
     process.env.AGENT_SHADOW_SAMPLE_RATE = "1";
@@ -134,6 +139,8 @@ describe("agent in shadow (F1)", () => {
       ["run_command", "create_client", true],
       ["send_whatsapp", "execute_action:send_whatsapp", true],
     ]);
+    // What each call would have been given is compared in memory and never kept.
+    assert.ok(proposed.every((tool) => !("entities" in tool)), JSON.stringify(proposed));
     await prisma.voicePendingAction.deleteMany({});
   });
 
@@ -147,6 +154,45 @@ describe("agent in shadow (F1)", () => {
     assert.equal(run.status, "error");
     assert.equal(run.errorCode, "HTTP_500");
     assert.equal(run.agreement, "error");
+  });
+
+  it("the right command with other values is not a match", async () => {
+    modelOutput = [{
+      name: "run_command",
+      arguments: JSON.stringify({ canonical_command: "create client Values Differ, email someone.else@example.com, phone 07700 900444" }),
+    }];
+    const prepared = await say("create client Values Differ, email values.differ@example.com, phone 07700 900444");
+    assert.equal(prepared.status, 202, JSON.stringify(prepared.body));
+    await settleShadowRuns();
+    const run = await prisma.agentRun.findFirstOrThrow();
+    assert.equal(run.agreement, "arguments_differ");
+    assert.ok(!JSON.stringify(run).includes("someone.else@example.com"));
+    await prisma.voicePendingAction.deleteMany({});
+  });
+
+  it("the same command and values, said differently in case and spacing, is a match", async () => {
+    modelOutput = [{
+      name: "run_command",
+      arguments: JSON.stringify({ canonical_command: "create client values  same, email Values.Same@example.com, phone 07700 900555" }),
+    }];
+    await say("create client Values Same, email values.same@example.com, phone 07700 900555");
+    await settleShadowRuns();
+    const run = await prisma.agentRun.findFirstOrThrow();
+    assert.equal(run.agreement, "match");
+    await prisma.voicePendingAction.deleteMany({});
+  });
+
+  it("a plan cut off by the output budget is recorded as such, never compared", async () => {
+    modelIncomplete = "max_output_tokens";
+    modelOutput = [];
+    await say("list clients");
+    await settleShadowRuns();
+    const run = await prisma.agentRun.findFirstOrThrow();
+    assert.equal(run.status, "budget_exceeded");
+    assert.equal(run.errorCode, "OUTPUT_BUDGET");
+    // An empty truncated answer must not count as "neither would act".
+    assert.equal(run.agreement, "error");
+    assert.equal(run.tokensIn, 9_800);
   });
 
   it("keeps to the step budget", async () => {
@@ -204,7 +250,18 @@ describe("agent in shadow (F1)", () => {
   });
 
   it("compares proposals with the parser outcome", () => {
-    const proposal = (key: string | null, valid = key !== null): ProposedTool => ({ tool: "t", kind: "write", key, valid, argumentsFingerprint: "f" });
+    const proposal = (key: string | null, valid = key !== null, entities?: unknown): Proposal => ({ tool: "t", kind: "write", key, valid, argumentsFingerprint: "f", entities });
+    const job = { intent: "create_job", key: "create_job", entities: { title: "Garden", client_name: "Jane Smith" } };
+    assert.equal(compareWithParser([proposal("create_job", true, { client_name: "jane  smith", title: "Garden " })], job), "match");
+    assert.equal(compareWithParser([proposal("create_job", true, { client_name: "John Smith", title: "Garden" })], job), "arguments_differ");
+    // A service-validated action given nothing differs from what the parser received.
+    assert.equal(
+      compareWithParser(
+        [proposal("execute_action:create_website_audit", true, { action: "create_website_audit", parameters: {} })],
+        { intent: "execute_action", key: "execute_action:create_website_audit", entities: { action: "create_website_audit", parameters: { website_url: "https://example.com", pages: ["/"] } } },
+      ),
+      "arguments_differ",
+    );
     assert.equal(compareWithParser([], { intent: "assistant_reply", key: null }), "both_none");
     assert.equal(compareWithParser([proposal("create_job")], { intent: "assistant_plan", key: null }), "agent_only");
     assert.equal(compareWithParser([], { intent: "create_job", key: "create_job" }), "parser_only");
