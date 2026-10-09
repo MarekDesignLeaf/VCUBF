@@ -415,6 +415,34 @@ describe("agent in shadow (F1)", () => {
     assert.equal(summary.body.byLanguage["cs-CZ"].assistant.met, false);
   });
 
+  it("accepts nothing when the deployment build cannot be identified", async () => {
+    const saved = { railway: process.env.RAILWAY_GIT_COMMIT_SHA, github: process.env.GITHUB_SHA };
+    delete process.env.RAILWAY_GIT_COMMIT_SHA;
+    delete process.env.GITHUB_SHA;
+    try {
+      assert.equal(buildId(), "local");
+      const admin = await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } });
+      const base = {
+        companyId: admin.companyId, userId: admin.id, mode: "shadow", channel: "text", language: "cs-CZ",
+        inputFingerprint: "f", catalogueVersion: "1.0.0", catalogueFingerprint: "c", toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT,
+        build: "local", model: "gpt-5.4-mini", status: "completed", steps: 1, proposedTools: [], durationMs: 1,
+      };
+      // Runs that would otherwise be accepted outright.
+      await prisma.agentRun.createMany({
+        data: [
+          ...Array.from({ length: 60 }, () => ({ ...base, agreement: "match", parserIntent: "create_job", parserAction: "create_job" })),
+          ...Array.from({ length: 50 }, () => ({ ...base, agreement: "both_none", parserIntent: "assistant_reply", parserAction: null })),
+        ],
+      });
+      const summary = await request(app).get("/audit/agent-shadow").set("Authorization", `Bearer ${token}`);
+      assert.deepEqual(summary.body.acceptance.accepted, []);
+      assert.deepEqual(summary.body.byLanguage["cs-CZ"].text.unmet, ["deployment build is not identified"]);
+    } finally {
+      if (saved.railway !== undefined) process.env.RAILWAY_GIT_COMMIT_SHA = saved.railway;
+      if (saved.github !== undefined) process.env.GITHUB_SHA = saved.github;
+    }
+  });
+
   it("compares proposals with the parser outcome", () => {
     const proposal = (key: string | null, valid = key !== null, entities?: unknown): Proposal => ({ tool: "t", kind: "write", key, valid, argumentsFingerprint: "f", entities });
     const job = { intent: "create_job", key: "create_job", entities: { title: "Garden", client_name: "Jane Smith" } };

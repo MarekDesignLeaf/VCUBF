@@ -516,7 +516,7 @@ function emptyTally(): Tally {
   return { total: 0, errors: 0, parserRejected: 0, agreeing: 0, actionableCompared: 0, actionableMatches: 0, byAgreement: {} };
 }
 
-function verdict(bucket: Tally) {
+function verdict(bucket: Tally, buildIdentified: boolean) {
   const compared = bucket.total - bucket.errors - bucket.parserRejected;
   const rate = compared > 0 ? bucket.agreeing / compared : null;
   const actionableRate = bucket.actionableCompared > 0 ? bucket.actionableMatches / bucket.actionableCompared : null;
@@ -530,6 +530,9 @@ function verdict(bucket: Tally) {
   }
   if (actionableRate === null || actionableRate < AGENT_ACCEPTANCE.requiredActionableRate) unmet.push("agreement on actions below 95 %");
   if (errorRate === null || errorRate > AGENT_ACCEPTANCE.maxErrorRate) unmet.push("planner errors above 5 %");
+  // The build is what separates measurements of different code. Without a
+  // real commit id every revision shares one cohort, so nothing is accepted.
+  if (!buildIdentified) unmet.push("deployment build is not identified");
   return {
     compared,
     agreementRate: rate,
@@ -543,6 +546,7 @@ function verdict(bucket: Tally) {
 
 export async function shadowSummary(companyId: string, since?: Date) {
   const cohort = { model: modelFor("agent_plan"), toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT, build: buildId() };
+  const buildIdentified = cohort.build !== "local";
   const scope = { companyId, mode: "shadow", ...(since ? { createdAt: { gte: since } } : {}) };
   const [groups, allRuns] = await Promise.all([
     prisma.agentRun.groupBy({
@@ -592,11 +596,11 @@ export async function shadowSummary(companyId: string, since?: Date) {
   const byLanguage: Record<string, Record<string, ReturnType<typeof verdict> & { total: number; errors: number; parserRejected: number; byAgreement: Record<string, number> }>> = {};
   const accepted: Array<{ language: string; channel: string }> = [];
   for (const { language, channel, tally } of segments) {
-    const result = { total: tally.total, errors: tally.errors, parserRejected: tally.parserRejected, byAgreement: tally.byAgreement, ...verdict(tally) };
+    const result = { total: tally.total, errors: tally.errors, parserRejected: tally.parserRejected, byAgreement: tally.byAgreement, ...verdict(tally, buildIdentified) };
     (byLanguage[language] ??= {})[channel] = result;
     if (result.met) accepted.push({ language, channel });
   }
-  const all = verdict(overall);
+  const all = verdict(overall, buildIdentified);
   return {
     cohort,
     total: overall.total,
