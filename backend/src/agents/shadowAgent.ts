@@ -27,6 +27,7 @@ import { createHash, createHmac } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db.js";
+import { buildId } from "../lib/buildInfo.js";
 import { CANONICAL_COMMAND_FORMS } from "../lib/canonicalCommands.js";
 import { CANONICAL_COMMAND, parseTextCommand, type ParsedCommand } from "../lib/commandParser.js";
 import { modelFor, modelRequest, recordUsage } from "../lib/modelGateway.js";
@@ -338,7 +339,7 @@ export async function runShadow(input: ShadowInput): Promise<void> {
         catalogueVersion: TOOL_CATALOGUE_VERSION,
         catalogueFingerprint: TOOL_CATALOGUE_FINGERPRINT,
         toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT,
-        plannerFingerprint: AGENT_PLANNER_FINGERPRINT,
+        build: buildId(),
         model: modelFor("agent_plan"),
         status: budgetExceeded ? "budget_exceeded" : failure ? "error" : "completed",
         errorCode: failure ?? (planned!.overBudget ? "STEP_BUDGET" : null),
@@ -388,22 +389,6 @@ export async function settleShadowRuns(): Promise<void> {
 
 const AGREEING: ShadowAgreement[] = ["match", "both_none"];
 
-/**
- * The planner and its judge, fingerprinted: the instructions, the request,
- * how proposals are read and how they are compared, and the budgets. Proposal
- * values are deliberately not stored, so old runs cannot be judged again —
- * a change to any of these therefore starts a new cohort instead of being
- * vouched for by agreements measured under the old behaviour. (A change to a
- * comment in these functions starts one too: conservative by design.)
- */
-export const AGENT_PLANNER_FINGERPRINT = createHash("sha256")
-  .update(
-    [instructions, plan, proposalFrom, actionEntities, canonical, compareWithParser]
-      .map((part) => String(part))
-      .concat(JSON.stringify(AGENT_RUN_BUDGET))
-      .join("\n"),
-  )
-  .digest("hex");
 
 /**
  * The acceptance view of the shadow (F1): how often the agent's proposal
@@ -411,16 +396,15 @@ export const AGENT_PLANNER_FINGERPRINT = createHash("sha256")
  * rate; everything else — including an invalid proposal — counts against it.
  *
  * Only the current cohort counts: runs of the model, the exact tool set and
- * the planner in use now. A new model, a changed catalogue or a changed
- * prompt or comparison starts from zero, so earlier observations can never
- * vouch for a configuration nobody has measured.
+ * the deployed build in use now. The build covers everything a fingerprint of
+ * selected functions cannot — the prompt, how proposals are read and judged,
+ * and everything those call (the parser, the action schemas). Proposal values
+ * are deliberately not stored, so old runs cannot be judged again; a new
+ * build therefore starts from zero, and acceptance needs its 100 compared
+ * requests on one build. Earlier observations never vouch for unmeasured code.
  */
 export async function shadowSummary(companyId: string, since?: Date) {
-  const cohort = {
-    model: modelFor("agent_plan"),
-    toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT,
-    plannerFingerprint: AGENT_PLANNER_FINGERPRINT,
-  };
+  const cohort = { model: modelFor("agent_plan"), toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT, build: buildId() };
   const scope = { companyId, mode: "shadow", ...(since ? { createdAt: { gte: since } } : {}) };
   const [groups, allRuns] = await Promise.all([
     prisma.agentRun.groupBy({

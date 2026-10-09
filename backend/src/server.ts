@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { buildId } from "./lib/buildInfo.js";
 // Express 4 does not forward rejected promises from async route handlers to
 // the error middleware by itself. Without this patch, a transient database
 // outage can terminate the whole local backend instead of returning a safe
@@ -86,7 +87,7 @@ export function createServer() {
 
   app.get("/health", (_req, res) => res.json({
     status: "ok",
-    build: (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "local").slice(0, 12),
+    build: buildId(),
   }));
 
   app.use("/auth", authRouter);

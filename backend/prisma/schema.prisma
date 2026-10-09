@@ -349,8 +349,9 @@ model VoicePendingAction {
 // does not exist yet, so cost is derived later rather than guessed here. The
 // catalogue version names the governed tool set; the toolset fingerprint is the
 // exact tool list the model was shown (catalogue plus the parser bridge); the
-// planner fingerprint covers the prompt, proposal reading and comparison. The
-// three together with the model form the cohort an acceptance rate is about.
+// build is the deployed commit, covering the prompt and how proposals are read
+// and judged. Model, tool set and build form the cohort an acceptance rate is
+// about.
 model AgentRun {
   id                   String   @id @default(uuid())
   companyId            String   @map("company_id")
@@ -362,7 +363,7 @@ model AgentRun {
   catalogueVersion     String   @map("catalogue_version")
   catalogueFingerprint String   @map("catalogue_fingerprint")
   toolsetFingerprint   String   @map("toolset_fingerprint")
-  plannerFingerprint   String   @map("planner_fingerprint")
+  build                String
   model                String
   status               String
   errorCode            String?  @map("error_code")
@@ -381,7 +382,7 @@ model AgentRun {
 
   @@index([companyId, createdAt])
   @@index([companyId, mode, agreement])
-  @@index([companyId, mode, model, toolsetFingerprint, plannerFingerprint], map: "agent_runs_cohort_idx")
+  @@index([companyId, mode, model, toolsetFingerprint, build], map: "agent_runs_cohort_idx")
   @@map("agent_runs")
 }
 

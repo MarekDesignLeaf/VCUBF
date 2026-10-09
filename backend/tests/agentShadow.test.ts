@@ -4,7 +4,6 @@ import request from "supertest";
 import { createServer } from "../src/server.js";
 import { prisma } from "../src/db.js";
 import {
-  AGENT_PLANNER_FINGERPRINT,
   AGENT_RUN_BUDGET,
   compareWithParser,
   observeShadow,
@@ -13,6 +12,7 @@ import {
   type ProposedTool,
 } from "../src/agents/shadowAgent.js";
 import { AGENT_TOOL_CATALOGUE } from "../src/agents/toolCatalogue.js";
+import { buildId } from "../src/lib/buildInfo.js";
 import { resetDb, seedCompanyAndAdmin } from "./setup.js";
 
 const app = createServer();
@@ -246,13 +246,13 @@ describe("agent in shadow (F1)", () => {
     await say("list clients");
     await settleShadowRuns();
 
-    // Runs of another model or another planner are shown but never counted toward acceptance.
+    // Runs of another model or another build are shown but never counted toward acceptance.
     const counted = await prisma.agentRun.findFirstOrThrow();
     await prisma.agentRun.create({
       data: { ...counted, id: undefined, model: "some-earlier-model", agreement: "match", proposedTools: [] },
     });
     await prisma.agentRun.create({
-      data: { ...counted, id: undefined, plannerFingerprint: "an-earlier-planner", agreement: "match", proposedTools: [] },
+      data: { ...counted, id: undefined, build: "an-earlier-b", agreement: "match", proposedTools: [] },
     });
 
     const summary = await request(app).get("/audit/agent-shadow").set("Authorization", `Bearer ${token}`);
@@ -260,7 +260,8 @@ describe("agent in shadow (F1)", () => {
     assert.equal(summary.body.total, 2);
     assert.equal(summary.body.otherCohortRuns, 2);
     assert.equal(summary.body.cohort.model, "gpt-5.4-mini");
-    assert.equal(summary.body.cohort.plannerFingerprint, AGENT_PLANNER_FINGERPRINT);
+    assert.equal(summary.body.cohort.build, buildId());
+    assert.equal(counted.build, buildId());
     assert.deepEqual(summary.body.byAgreement, { match: 1, parser_only: 1 });
     assert.equal(summary.body.agreementRate, 0.5);
     assert.equal(summary.body.acceptance.met, false);
