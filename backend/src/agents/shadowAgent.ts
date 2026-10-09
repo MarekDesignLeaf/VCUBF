@@ -25,6 +25,7 @@
 
 import { createHash, createHmac } from "node:crypto";
 import type { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "../db.js";
 import { CANONICAL_COMMAND_FORMS } from "../lib/canonicalCommands.js";
 import { CANONICAL_COMMAND, parseTextCommand, type ParsedCommand } from "../lib/commandParser.js";
@@ -44,6 +45,8 @@ export const AGENT_RUN_BUDGET = { maxSteps: 6, maxOutputTokens: 600 } as const;
 const MAX_IN_FLIGHT = 2;
 
 const COMMAND_BRIDGE = "run_command";
+/** The bridge's arguments, held to the same shape the tool declares to the model. */
+const bridgeArgumentsSchema = z.object({ canonical_command: z.string().trim().min(1) }).strict();
 
 type FunctionTool = { type: "function"; name: string; description: string; parameters: Record<string, unknown> };
 
@@ -185,10 +188,11 @@ function proposalFrom(name: string, rawArguments: string): Proposal {
     args = undefined;
   }
   if (name === COMMAND_BRIDGE) {
-    const canonical = args && typeof args === "object" ? (args as { canonical_command?: unknown }).canonical_command : undefined;
-    if (typeof canonical !== "string" || !canonical.trim()) return { tool: name, kind: "command", key: null, valid: false, argumentsFingerprint: fingerprint };
+    // The whole argument object, as declared: one canonical command, nothing beside it.
+    const bridge = bridgeArgumentsSchema.safeParse(args);
+    if (!bridge.success) return { tool: name, kind: "command", key: null, valid: false, argumentsFingerprint: fingerprint };
     // The parser is the authority on what a canonical command means.
-    const parsed = parseTextCommand(canonical, CANONICAL_COMMAND);
+    const parsed = parseTextCommand(bridge.data.canonical_command, CANONICAL_COMMAND);
     const outcome = parserOutcomeOf(parsed);
     return { tool: name, kind: "command", key: outcome.key, valid: outcome.key !== null, argumentsFingerprint: fingerprint, entities: outcome.entities };
   }
@@ -334,6 +338,7 @@ export async function runShadow(input: ShadowInput): Promise<void> {
         catalogueVersion: TOOL_CATALOGUE_VERSION,
         catalogueFingerprint: TOOL_CATALOGUE_FINGERPRINT,
         toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT,
+        plannerFingerprint: AGENT_PLANNER_FINGERPRINT,
         model: modelFor("agent_plan"),
         status: budgetExceeded ? "budget_exceeded" : failure ? "error" : "completed",
         errorCode: failure ?? (planned!.overBudget ? "STEP_BUDGET" : null),
@@ -384,16 +389,38 @@ export async function settleShadowRuns(): Promise<void> {
 const AGREEING: ShadowAgreement[] = ["match", "both_none"];
 
 /**
+ * The planner and its judge, fingerprinted: the instructions, the request,
+ * how proposals are read and how they are compared, and the budgets. Proposal
+ * values are deliberately not stored, so old runs cannot be judged again —
+ * a change to any of these therefore starts a new cohort instead of being
+ * vouched for by agreements measured under the old behaviour. (A change to a
+ * comment in these functions starts one too: conservative by design.)
+ */
+export const AGENT_PLANNER_FINGERPRINT = createHash("sha256")
+  .update(
+    [instructions, plan, proposalFrom, actionEntities, canonical, compareWithParser]
+      .map((part) => String(part))
+      .concat(JSON.stringify(AGENT_RUN_BUDGET))
+      .join("\n"),
+  )
+  .digest("hex");
+
+/**
  * The acceptance view of the shadow (F1): how often the agent's proposal
  * agrees with what the parser did. Errors are counted but excluded from the
  * rate; everything else — including an invalid proposal — counts against it.
  *
- * Only the current cohort counts: runs of the model and the exact tool set in
- * use now. A new model or a changed catalogue starts from zero, so earlier
- * observations can never vouch for a configuration nobody has measured.
+ * Only the current cohort counts: runs of the model, the exact tool set and
+ * the planner in use now. A new model, a changed catalogue or a changed
+ * prompt or comparison starts from zero, so earlier observations can never
+ * vouch for a configuration nobody has measured.
  */
 export async function shadowSummary(companyId: string, since?: Date) {
-  const cohort = { model: modelFor("agent_plan"), toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT };
+  const cohort = {
+    model: modelFor("agent_plan"),
+    toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT,
+    plannerFingerprint: AGENT_PLANNER_FINGERPRINT,
+  };
   const scope = { companyId, mode: "shadow", ...(since ? { createdAt: { gte: since } } : {}) };
   const [groups, allRuns] = await Promise.all([
     prisma.agentRun.groupBy({

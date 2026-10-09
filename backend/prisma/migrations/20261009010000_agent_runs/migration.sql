@@ -14,6 +14,7 @@ CREATE TABLE "agent_runs" (
   "catalogue_version" TEXT NOT NULL,
   "catalogue_fingerprint" TEXT NOT NULL,
   "toolset_fingerprint" TEXT NOT NULL,
+  "planner_fingerprint" TEXT NOT NULL,
   "model" TEXT NOT NULL,
   "status" TEXT NOT NULL,
   "error_code" TEXT,
@@ -32,6 +33,7 @@ CREATE TABLE "agent_runs" (
 
 CREATE INDEX "agent_runs_company_id_created_at_idx" ON "agent_runs"("company_id", "created_at");
 CREATE INDEX "agent_runs_company_id_mode_agreement_idx" ON "agent_runs"("company_id", "mode", "agreement");
+CREATE INDEX "agent_runs_cohort_idx" ON "agent_runs"("company_id", "mode", "model", "toolset_fingerprint", "planner_fingerprint");
 
 ALTER TABLE "agent_runs"
   ADD CONSTRAINT "agent_runs_company_id_fkey"
