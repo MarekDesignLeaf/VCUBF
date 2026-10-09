@@ -182,14 +182,28 @@ function records(text: string): ParsedCommand | undefined {
     // "for <service>" first: the e-mail and phone fields would swallow it.
     const forMatch = rest.match(/\bfor\s+(.+)$/i);
     let service: string | undefined;
+    // The canonical order puts e-mail and phone after the service
+    // ("create lead NAME for SERVICE, email EMAIL, phone PHONE"): take them
+    // out of the service too, or they would be stored as part of it.
+    let fromService: { email?: string; phone?: string } = {};
     if (forMatch) {
-      service = forMatch[1].trim();
+      // Only labelled, comma-separated fields: "telephone repair" is a service.
+      if (/,\s*(?:email|phone)(?!\p{L})/iu.test(forMatch[1])) {
+        const trailing = extractContact(forMatch[1], { email: ["email"], phone: ["phone"] });
+        service = nameOnly(trailing.rest) || undefined;
+        fromService = { email: trailing.email, phone: trailing.phone };
+      } else {
+        service = forMatch[1].trim();
+      }
       rest = rest.slice(0, forMatch.index).trim();
     }
     const contact = extractContact(rest, { email: ["email"], phone: ["phone"] });
     const name = nameOnly(contact.rest);
     if (!name) return { intent: "unrecognized", entities: {} };
-    return { intent: "create_lead", entities: { name, service_requested: service, email: contact.email, phone: contact.phone } };
+    return {
+      intent: "create_lead",
+      entities: { name, service_requested: service, email: contact.email ?? fromService.email, phone: contact.phone ?? fromService.phone },
+    };
   }
 
   m = text.match(/^(?:create|add|new)\s+job\s+(.+?)\s+for\s+(.+)$/i);

@@ -33,6 +33,7 @@
  */
 
 import type { Prisma } from "@prisma/client";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import type { AuthedUser } from "../middleware/auth.js";
@@ -290,6 +291,17 @@ const TASK_STATUS_WORDS: Record<string, Record<Locale, string>> = {
   cancelled: { cs: "zrušený", pl: "anulowane", en: "cancelled" },
 };
 
+/** How a logged contact happened, in words; the direction is said separately. */
+const CHANNEL_WORDS: Record<string, Record<Locale, string>> = {
+  phone_call: { cs: "hovor", pl: "rozmowa telefoniczna", en: "a call" },
+  email: { cs: "e-mail", pl: "e-mail", en: "an e-mail" },
+  whatsapp: { cs: "zpráva na WhatsAppu", pl: "wiadomość WhatsApp", en: "a WhatsApp message" },
+  sms: { cs: "SMS", pl: "SMS", en: "a text message" },
+  messenger: { cs: "zpráva", pl: "wiadomość", en: "a message" },
+  in_person: { cs: "osobní schůzka", pl: "spotkanie osobiste", en: "a meeting" },
+  other: { cs: "jiný kontakt", pl: "inny kontakt", en: "another contact" },
+};
+
 /** ", e-mail …, telefon …" — only the values the command carries. */
 function contactDetails(lang: Locale, details: { name?: string; email?: string; phone?: string }) {
   const words = lang === "cs" ? { name: "jméno", email: "e-mail", phone: "telefon" }
@@ -360,7 +372,13 @@ function commandPhrase(command: ParsedCommand, lang: Locale): string | undefined
     }
     case "log_communication": {
       const e = command.entities;
-      return pick(`Záznam komunikace (${e.channel}) s klientem ${e.client_name}: ${q(e.summary)}`, `Zapis komunikacji (${e.channel}) z klientem ${e.client_name}: ${q(e.summary)}`, `Logged ${e.channel} with client ${e.client_name}: ${q(e.summary)}`);
+      const channel = CHANNEL_WORDS[e.channel]?.[lang] ?? e.channel;
+      const inbound = e.direction === "inbound";
+      return pick(
+        `Záznam: ${channel} ${inbound ? "od klienta" : "klientovi"} ${e.client_name}: ${q(e.summary)}`,
+        `Zapis: ${channel} ${inbound ? "od klienta" : "do klienta"} ${e.client_name}: ${q(e.summary)}`,
+        `Record of ${channel} ${inbound ? "from" : "to"} client ${e.client_name}: ${q(e.summary)}`,
+      );
     }
     default:
       return undefined;
@@ -552,7 +570,9 @@ async function handleAction(
     return "This tool is never part of a proposal: an administrator does it directly. Do not call it again.";
   }
   if (state.scope && !state.scope.tools.has(action)) {
+    // Outside the chosen roles: refused, and named, so the user hears it is not part of the proposal.
     record(state, { ...call, key, valid: true, use: "refused" }, fingerprint);
+    state.leftOut.push(humanize(action));
     return "That tool is not available for this request. Use only the tools you are shown.";
   }
   const validated = validateVoiceActionParameters(action, parameters);
@@ -615,6 +635,7 @@ async function handleCommand(state: PlanState, canonical: string, command: Parse
   }
   if (state.scope && !state.scope.intents.has(command.intent)) {
     record(state, { ...call, valid: true, use: "refused" }, fingerprint);
+    if (!isReadCommand(command.intent)) state.leftOut.push(humanize(command.intent));
     return "That command is not available for this request. Use only the commands listed for it.";
   }
   if (isReadCommand(command.intent)) {
@@ -689,6 +710,10 @@ function scopedBridge(forms: readonly string[]): FunctionTool {
   };
 }
 
+function toolsetFingerprintOf(tools: readonly FunctionTool[]): string {
+  return createHash("sha256").update(JSON.stringify(tools)).digest("hex");
+}
+
 /** The tools the model is shown: the chosen roles' tools, or the whole catalogue. */
 export function toolsFor(scope: SpecialistScope | undefined): readonly FunctionTool[] {
   if (!scope) return AGENT_FUNCTION_TOOLS;
@@ -712,8 +737,12 @@ Use at most ${AGENT_ACT_BUDGET.maxCalls} tool calls in total. The user speaks ${
 // ---------------------------------------------------------------------------
 // The orchestrator's first decision (F3): which specialists plan the request.
 
-/** The routing call may use at most this much of the run's time. */
-const ROUTE_TIMEOUT_MS = 4_000;
+/**
+ * The routing call may use at most this much of the run's time, and never what
+ * the planner needs: with less than a second to spare it is skipped and the
+ * whole catalogue plans.
+ */
+const ROUTE_TIMEOUT_MS = 2_500;
 
 const routeSchema = z.object({ specialists: z.array(z.enum([...SPECIALIST_IDS, "other"])) }).strict();
 
@@ -721,7 +750,7 @@ function routerInstructions() {
   return `You route a business request to Secretary's specialists. Choose every specialist the request needs, including one that only supplies information (a client's e-mail address or phone number comes from crm).
 ${SPECIALIST_IDS.map((id) => `- ${id}: ${SPECIALISTS[id].covers}`).join("\n")}
 - other: anything none of them covers — quotes, invoices, payments, documents, recruitment, employees, photos, the website, services, playbooks, settings and connectors.
-If any part of the request is "other", include "other". Answer only with the JSON.`;
+A specialist can do only what its line says; anything else (for example changing a client's details) is other. If any part of the request is "other", include "other". Answer only with the JSON.`;
 }
 
 function outputText(output: ModelOutputItem[] | undefined): string {
@@ -740,6 +769,12 @@ function outputText(output: ModelOutputItem[] | undefined): string {
 async function route(state: PlanState, input: AgentInput, deadline: number): Promise<void> {
   const remaining = deadline - Date.now();
   if (remaining < 1_000) throw new AgentPlanError("TIMEOUT");
+  const budget = Math.min(ROUTE_TIMEOUT_MS, remaining - AGENT_ACT_BUDGET.minimumTimeMs);
+  if (budget < 1_000) {
+    // Not enough time for both: the planner goes first, with the whole catalogue.
+    state.route = { tool: "choose_specialists", kind: "orchestrator", key: "skipped", valid: true, argumentsFingerprint: argumentsFingerprint(""), use: "route" };
+    return;
+  }
   const model = modelFor("agent_plan");
   let raw = "";
   let chosen: Array<SpecialistId | "other"> | undefined;
@@ -747,7 +782,7 @@ async function route(state: PlanState, input: AgentInput, deadline: number): Pro
     const response = await modelRequest("agent_plan", "/v1/responses", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(Math.min(remaining, ROUTE_TIMEOUT_MS)),
+      signal: AbortSignal.timeout(budget),
       body: JSON.stringify({
         model,
         store: false,
@@ -919,7 +954,8 @@ async function recordRun(
         inputFingerprint: requestFingerprint(input.text),
         catalogueVersion: TOOL_CATALOGUE_VERSION,
         catalogueFingerprint: TOOL_CATALOGUE_FINGERPRINT,
-        toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT,
+        // What this run was actually shown: a specialist plan sees a subset.
+        toolsetFingerprint: state.scope ? toolsetFingerprintOf(toolsFor(state.scope)) : AGENT_TOOLSET_FINGERPRINT,
         build: buildId(),
         model: modelFor("agent_plan"),
         status: outcome.status,

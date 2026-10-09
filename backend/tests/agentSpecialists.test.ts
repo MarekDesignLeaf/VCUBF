@@ -54,11 +54,22 @@ describe("specialists (F3)", () => {
     assert.deepEqual(scopeOf(["scheduling", "communication"]).specialists, ["communication", "scheduling"], "roles keep one order");
   });
 
+  it("the CRM role's lead form keeps e-mail and phone out of the service", () => {
+    assert.deepEqual(parseTextCommand(SPECIALISTS.crm.examples[1], CANONICAL_COMMAND), {
+      intent: "create_lead",
+      entities: { name: "Jan Novy", service_requested: "hedge trimming", email: "jan@example.com", phone: "07700 900123" },
+    });
+    assert.deepEqual(parseTextCommand("create lead Jan Novy for telephone repair", CANONICAL_COMMAND).entities, { name: "Jan Novy", service_requested: "telephone repair", email: undefined, phone: undefined });
+  });
+
   it("reads a proposed command out in the user's language, with the values the parser read", () => {
     assert.equal(describeCommandStep("create job Hedge trim for Petra Novak", "cs-CZ"), "Nová zakázka „Hedge trim“ pro klienta Petra Novak");
     assert.equal(describeCommandStep("create task Prepare materials, assigned to Daniel, due 2026-10-12", "en-GB"), "New task “Prepare materials” for Daniel, due 2026-10-12");
     assert.equal(describeCommandStep("create client Jan Novy, email jan@example.com, phone 07700 900123", "pl-PL"), "Nowy klient Jan Novy, e-mail jan@example.com, telefon 07700 900123");
     assert.equal(describeCommandStep("set job Hedge trim as dokonceno", "cs-CZ"), "Zakázka „Hedge trim“ do stavu „dokonceno“");
+    // Who contacted whom is part of the record, so it is said.
+    assert.equal(describeCommandStep("log email from Petra Novak: asked for a quote", "cs-CZ"), "Záznam: e-mail od klienta Petra Novak: „asked for a quote“");
+    assert.equal(describeCommandStep("log call with Petra Novak: agreed Friday", "en-GB"), "Record of a call to client Petra Novak: “agreed Friday”");
     // A command without its own wording is read out exactly as it will run.
     assert.equal(describeCommandStep("log photo hedge.jpg: finished hedge", "cs-CZ"), "příkaz „log photo hedge.jpg: finished hedge“");
   });

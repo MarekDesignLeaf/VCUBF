@@ -25,6 +25,8 @@ let agentStatus = 200;
 let agentRequests: Array<Record<string, any>> = [];
 /** What the orchestrator's routing call answers; "other" plans with the whole catalogue. */
 let routing: unknown = { specialists: ["other"] };
+/** A routing call that fails: an HTTP status, or text that is not JSON at all. */
+let routingFailure: { status: number } | { raw: string } | undefined;
 let routingRequests = 0;
 
 const originalFetch = globalThis.fetch;
@@ -56,7 +58,9 @@ function installModel() {
     // The orchestrator's routing call asks for the "specialists" format.
     if (body.text?.format?.name === "specialists") {
       routingRequests += 1;
-      return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(routing) }] }], usage: { input_tokens: 400, output_tokens: 10 } });
+      if (routingFailure && "status" in routingFailure) return new Response("unavailable", { status: routingFailure.status });
+      const text = routingFailure && "raw" in routingFailure ? routingFailure.raw : JSON.stringify(routing);
+      return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text }] }], usage: { input_tokens: 400, output_tokens: 10 } });
     }
     interpretationCalls += 1;
     return Response.json({ output: [{ content: [{ text: JSON.stringify(interpretation) }] }] });
@@ -101,6 +105,7 @@ describe("agent proposals (F2b)", () => {
     agentStatus = 200;
     agentRequests = [];
     routing = { specialists: ["other"] };
+    routingFailure = undefined;
     routingRequests = 0;
   });
 
@@ -308,7 +313,11 @@ describe("agent proposals (F2b)", () => {
     ]];
     const proposed = await say("Book the fence repair for Petra");
     assert.equal(proposed.status, 409, JSON.stringify(proposed.body));
-    assert.equal(proposed.body.message, "I propose one step: 1. New job “Fence repair” for client Petra Novak. Shall I carry it out?");
+    assert.equal(
+      proposed.body.message,
+      "I propose one step: 1. New job “Fence repair” for client Petra Novak. I left out of the proposal: send email, convert lead. You would do that yourself. Shall I carry it out?",
+      "what the chosen roles cannot do is named, never silently dropped",
+    );
     assert.equal(routingRequests, 1);
 
     const shown = (agentRequests[0].tools as Array<{ name: string; description: string }>);
@@ -321,6 +330,7 @@ describe("agent proposals (F2b)", () => {
     const calls = run.proposedTools as Array<{ use: string; key: string; tool: string }>;
     assert.deepEqual(calls.map((call) => call.use), ["route", "refused", "refused", "read", "step"]);
     assert.equal(calls[0].key, "scheduling");
+    assert.notEqual(run.toolsetFingerprint, AGENT_TOOLSET_FINGERPRINT, "the run records the subset it was shown");
     const prepared = await prisma.auditLog.findFirstOrThrow({ where: { actionName: "execute_agent_proposal", interpretedIntent: "agent_proposal" }, orderBy: { createdAt: "desc" } });
     assert.deepEqual((prepared.inputPayload as { specialists: string[] }).specialists, ["scheduling"]);
 
@@ -329,17 +339,26 @@ describe("agent proposals (F2b)", () => {
   });
 
   it("a request that is partly outside the roles, or a routing failure, plans with the whole catalogue", async () => {
-    for (const answer of [{ specialists: ["crm", "other"] }, { specialists: [] }, "not json"]) {
+    const cases: Array<{ answer?: unknown; failure?: { status: number } | { raw: string }; valid: boolean }> = [
+      { answer: { specialists: ["crm", "other"] }, valid: true },
+      { answer: { specialists: [] }, valid: true },
+      { answer: "a string, not the schema", valid: false },
+      { failure: { raw: "not json at all" }, valid: false },
+      { failure: { status: 500 }, valid: false },
+    ];
+    for (const { answer, failure, valid } of cases) {
       routing = answer;
+      routingFailure = failure;
       agentRequests = [];
       agentRounds = [{ text: "Nothing to change." }];
       const reply = await say("Who is Petra and what did we quote her?");
       assert.equal(reply.status, 200, JSON.stringify(reply.body));
-      assert.equal(agentRequests[0].tools.length, AGENT_FUNCTION_TOOLS.length, JSON.stringify(answer));
+      assert.equal(agentRequests[0].tools.length, AGENT_FUNCTION_TOOLS.length, JSON.stringify({ answer, failure }));
       const run = await prisma.agentRun.findFirstOrThrow({ where: { mode: "proposal" }, orderBy: { createdAt: "desc" } });
       const route = (run.proposedTools as Array<{ key: string; valid: boolean }>)[0];
       assert.equal(route.key, "general");
-      assert.equal(route.valid, answer !== "not json");
+      assert.equal(route.valid, valid, JSON.stringify({ answer, failure }));
+      assert.equal(run.toolsetFingerprint, AGENT_TOOLSET_FINGERPRINT, "the whole catalogue was shown");
     }
   });
 
@@ -373,10 +392,12 @@ describe("agent proposals (F2b)", () => {
     assert.equal((await latestProposal())?.status, "cancelled");
 
     agentRequests = [];
+    routingRequests = 0;
     const plan = await say("Set up the hedge job for Petra and remind me to call her");
     assert.equal(plan.status, 200);
     assert.equal(plan.body.kind, "plan");
     assert.equal(agentRequests.length, 0, "the agent is not asked while it is off");
+    assert.equal(routingRequests, 0, "nor is the orchestrator");
     const withdrawn = await prisma.auditLog.findFirstOrThrow({ where: { actionName: "execute_agent_proposal", errorMessage: "AGENT_OFF" } });
     assert.equal(withdrawn.result, "rejected");
   });

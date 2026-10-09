@@ -85,6 +85,24 @@ describe("Agent Control Tower", () => {
     assert.deepEqual(body.lastDay, { runs: 2, errors: 1, tokensIn: 200, tokensOut: 20 });
   });
 
+  it("shows the orchestrator's routing as the specialists it chose, not as a tool (F3)", async () => {
+    await prisma.agentRun.create({
+      data: run(admin.companyId, admin.id, {
+        mode: "proposal", channel: "assistant", parserIntent: "assistant_plan", agreement: "not_compared",
+        proposedTools: [
+          { tool: "choose_specialists", kind: "orchestrator", key: "communication+scheduling", valid: true, argumentsFingerprint: "r1", use: "route" },
+          { tool: "run_command", kind: "command", key: "list_clients", valid: true, argumentsFingerprint: "c1", use: "read" },
+        ],
+      }),
+    });
+    const res = await request(app).get("/audit/control-tower").set("Authorization", `Bearer ${adminToken}`);
+    const acting = res.body.recentRuns.find((entry: { parserIntent: string }) => entry.parserIntent === "assistant_plan");
+    assert.deepEqual(acting.proposedTools, [
+      { tool: "specialists: communication+scheduling", kind: "orchestrator", valid: true },
+      { tool: "run_command", kind: "command", valid: true },
+    ]);
+  });
+
   it("reflects the emergency stop", async () => {
     const on = await request(app).put("/company/safe-mode").set("Authorization", `Bearer ${adminToken}`).send({ enabled: true });
     assert.equal(on.status, 200);

@@ -25,15 +25,25 @@ interface StoredProposal {
   tool?: unknown;
   kind?: unknown;
   valid?: unknown;
+  use?: unknown;
+  key?: unknown;
 }
 
-/** Only the names and kinds of proposed tools; their argument fingerprints mean nothing to a reader. */
+/**
+ * Only the names and kinds of proposed tools; their argument fingerprints mean
+ * nothing to a reader. The orchestrator's routing (F3) is not a tool: it is
+ * shown as the specialists it chose ("specialists: scheduling", "general").
+ */
 function proposedToolNames(value: unknown): Array<{ tool: string; kind: string; valid: boolean }> {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((entry: StoredProposal) =>
-    typeof entry?.tool === "string"
+  return value.flatMap((entry: StoredProposal) => {
+    if (entry?.use === "route") {
+      return [{ tool: `specialists: ${typeof entry.key === "string" ? entry.key : "?"}`, kind: "orchestrator", valid: entry.valid === true }];
+    }
+    return typeof entry?.tool === "string"
       ? [{ tool: entry.tool, kind: typeof entry.kind === "string" ? entry.kind : "unknown", valid: entry.valid === true }]
-      : []);
+      : [];
+  });
 }
 
 export async function controlTowerOverview(companyId: string, now = new Date()) {
