@@ -124,6 +124,62 @@ export interface SafeModeState {
   since: string | null;
 }
 
+/** Agent Control Tower (backend: GET /audit/control-tower). Read only; no message text. */
+export interface ControlTowerRun {
+  id: string;
+  createdAt: string;
+  mode: string;
+  channel: string;
+  language: string;
+  status: string;
+  errorCode: string | null;
+  steps: number;
+  proposedTools: Array<{ tool: string; kind: string; valid: boolean }>;
+  parserIntent: string;
+  parserAction: string | null;
+  agreement: string;
+  model: string;
+  build: string;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  durationMs: number;
+  userName: string;
+}
+
+export interface ControlTowerOverview {
+  generatedAt: string;
+  build: string;
+  safeMode: SafeModeState;
+  shadow: { enabled: boolean; sampleRate: number; model: string; modelKeyConfigured: boolean; runsInFlight: number; maxInFlight: number };
+  models: Array<{ task: string; model: string }>;
+  pendingReviews: Array<{ actionType: string; waiting: number; oldestCreatedAt: string | null; nextExpiresAt: string | null }>;
+  lastDay: { runs: number; errors: number; tokensIn: number; tokensOut: number };
+  recentRuns: ControlTowerRun[];
+}
+
+export interface ShadowSegmentVerdict {
+  total: number;
+  errors: number;
+  parserRejected: number;
+  compared: number;
+  agreementRate: number | null;
+  actionableCompared: number;
+  actionableAgreementRate: number | null;
+  errorRate: number | null;
+  met: boolean;
+  unmet: string[];
+}
+
+/** Shadow acceptance (backend: GET /audit/agent-shadow). */
+export interface AgentShadowSummary {
+  cohort: { model: string; toolsetFingerprint: string; build: string };
+  total: number;
+  compared: number;
+  otherCohortRuns: number;
+  byLanguage: Record<string, Record<string, ShadowSegmentVerdict>>;
+  acceptance: { requiredRate: number; requiredSample: number; accepted: Array<{ language: string; channel: string }> };
+}
+
 async function download(path: string, mayRetry = true): Promise<Blob> {
   const token = getToken();
   const res = await fetch(`${API_URL}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
@@ -1845,6 +1901,10 @@ export const api = {
   setup: (data: { company_name: string; administrator_name: string; administrator_email: string; administrator_password: string }) =>
     request<LoginResponse>("/auth/setup", { method: "POST", body: JSON.stringify(data) }),
   me: () => request<LoginResponse["user"]>("/auth/me"),
+  audit: {
+    controlTower: () => request<ControlTowerOverview>("/audit/control-tower"),
+    agentShadow: () => request<AgentShadowSummary>("/audit/agent-shadow"),
+  },
   company: {
     get: () => request<CompanyProfile>("/company"),
     update: (name: string) => request<CompanyProfile>("/company", { method: "PUT", body: JSON.stringify({ name }) }),

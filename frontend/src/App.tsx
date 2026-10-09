@@ -37,6 +37,7 @@ const DataQuality = lazy(() => import("./pages/DataQuality").then(({ DataQuality
 const Portfolio = lazy(() => import("./pages/Portfolio").then(({ Portfolio }) => ({ default: Portfolio })));
 const PhotoSelection = lazy(() => import("./pages/PhotoSelection").then(({ PhotoSelection }) => ({ default: PhotoSelection })));
 const MemoryModel = lazy(() => import("./pages/MemoryModel").then(({ MemoryModel }) => ({ default: MemoryModel })));
+const AgentControlTower = lazy(() => import("./pages/AgentControlTower").then(({ AgentControlTower }) => ({ default: AgentControlTower })));
 const BusinessContext = lazy(() => import("./pages/BusinessContext").then(({ BusinessContext }) => ({ default: BusinessContext })));
 const WebsiteAudits = lazy(() => import("./pages/WebsiteAudits").then(({ WebsiteAudits }) => ({ default: WebsiteAudits })));
 const WebsiteContentProposals = lazy(() => import("./pages/WebsiteContentProposals").then(({ WebsiteContentProposals }) => ({ default: WebsiteContentProposals })));
@@ -115,6 +116,7 @@ function ApplicationRoutes() {
             <Route path="/portfolio" element={<Portfolio />} />
             <Route path="/photo-selection" element={<PhotoSelection />} />
             <Route path="/memory-model" element={<MemoryModel />} />
+            <Route path="/agents" element={<AgentControlTower />} />
             <Route path="/business-context" element={<BusinessContext />} />
             <Route path="/website-audits" element={<WebsiteAudits />} />
             <Route path="/website-content" element={<WebsiteContentProposals />} />

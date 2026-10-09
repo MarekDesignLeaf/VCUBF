@@ -3,6 +3,7 @@ import { prisma } from "../../db.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { shadowSummary } from "../../agents/shadowAgent.js";
+import { controlTowerOverview } from "../../agents/controlTower.js";
 
 export const auditRouter = Router();
 
@@ -25,4 +26,12 @@ auditRouter.get("/log", async (req, res) => {
 // window, so failures cannot be filtered out of the verdict.
 auditRouter.get("/agent-shadow", async (req, res) => {
   res.json(await shadowSummary(req.user!.companyId));
+});
+
+// GET /audit/control-tower — Agent Control Tower v1 (masterplan layer I, §57):
+// build, models, shadow and emergency-stop state, what waits for a yes (counts
+// only, never the payload) and the latest agent runs (fingerprints only, D4).
+auditRouter.get("/control-tower", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(await controlTowerOverview(req.user!.companyId));
 });

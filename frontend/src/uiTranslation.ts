@@ -9,7 +9,7 @@ const PAGE_MENU_KEYS: Record<string, MenuKey> = {
   "Business Context": "businessContext", Industries: "industries", Connectors: "connectors",
   "Website Audit": "websiteAudit", "Website Content": "websiteContent", Company: "company", Employees: "employees",
   Calendar: "calendar", Services: "services", Quotes: "quotes", Invoices: "invoices", Recruitment: "recruitment",
-  Playbooks: "playbooks", Learning: "learning", "{assistant} memory": "emmaMemory",
+  Playbooks: "playbooks", Learning: "learning", "{assistant} memory": "emmaMemory", "Agent control tower": "agents",
 };
 const templateCache = new WeakMap<Record<string, string>, Array<{ pattern: RegExp; translated: string }>>();
 const sentenceSegmentCache = new WeakMap<Record<string, string>, Array<[string, string]>>();
