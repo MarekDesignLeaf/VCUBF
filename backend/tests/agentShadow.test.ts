@@ -422,6 +422,10 @@ describe("agent in shadow (F1)", () => {
     const summary = await request(app).get("/audit/agent-shadow").set("Authorization", `Bearer ${token}`);
     assert.equal(summary.status, 200);
     assert.deepEqual(summary.body.acceptance.accepted, [{ language: "cs-CZ", channel: "text" }]);
+    // A time window cannot narrow the verdict: there is none to ask for.
+    const windowed = await request(app).get(`/audit/agent-shadow?since=${new Date(Date.now() + 60_000).toISOString()}`).set("Authorization", `Bearer ${token}`);
+    assert.deepEqual(windowed.body.acceptance.accepted, summary.body.acceptance.accepted);
+    assert.equal(windowed.body.total, summary.body.total);
     assert.ok(summary.body.byLanguage["en-GB"].text.unmet.includes("agreement on actions below 95 %"), JSON.stringify(summary.body.byLanguage["en-GB"]));
     assert.ok(summary.body.byLanguage["pl-PL"].text.unmet.includes("planner errors above 5 %"), JSON.stringify(summary.body.byLanguage["pl-PL"]));
     assert.equal(summary.body.byLanguage["cs-CZ"].assistant.met, false);

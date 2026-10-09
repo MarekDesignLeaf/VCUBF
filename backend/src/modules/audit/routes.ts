@@ -21,11 +21,8 @@ auditRouter.get("/log", async (req, res) => {
 // GET /audit/agent-shadow — how often the agent in shadow agrees with what the
 // parser actually did (masterplan F1 acceptance: ≥ 95 % on ≥ 100 requests).
 // Counts and token totals only; agent runs hold no message text.
+// Always over the whole current cohort (model, tool set, build): no time
+// window, so failures cannot be filtered out of the verdict.
 auditRouter.get("/agent-shadow", async (req, res) => {
-  const raw = typeof req.query.since === "string" ? req.query.since : undefined;
-  const since = raw ? new Date(raw) : undefined;
-  if (since && Number.isNaN(since.getTime())) {
-    return res.status(400).json({ error: "VALIDATION_FAILED", message: "since must be an ISO date." });
-  }
-  res.json(await shadowSummary(req.user!.companyId, since));
+  res.json(await shadowSummary(req.user!.companyId));
 });

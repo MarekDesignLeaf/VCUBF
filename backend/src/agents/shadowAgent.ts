@@ -544,10 +544,12 @@ function verdict(bucket: Tally, buildIdentified: boolean) {
   };
 }
 
-export async function shadowSummary(companyId: string, since?: Date) {
+export async function shadowSummary(companyId: string) {
   const cohort = { model: modelFor("agent_plan"), toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT, build: buildId() };
   const buildIdentified = cohort.build !== "local";
-  const scope = { companyId, mode: "shadow", ...(since ? { createdAt: { gte: since } } : {}) };
+  // Always the whole current cohort: a time window could leave out the
+  // failures and keep the successes, so there is none.
+  const scope = { companyId, mode: "shadow" };
   const [groups, allRuns] = await Promise.all([
     prisma.agentRun.groupBy({
       by: ["language", "channel", "agreement", "parserAction"],
