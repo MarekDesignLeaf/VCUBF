@@ -76,12 +76,17 @@ export interface ReviewedActionDefinition<Payload> {
  * request prepared or resolved, to hand the client for its next yes.
  */
 interface ApprovalBinding {
-  /** The review the client displayed last; a claim of its queue must claim exactly it. */
-  expectedReviewId?: string;
+  /**
+   * The review the client displayed last. undefined: the client does not take
+   * part (older clients) and the newest review is meant, as before. A string or
+   * null: strict — a yes approves exactly that review and nothing else, and
+   * null (nothing displayed) approves nothing.
+   */
+  expectedReviewId?: string | null;
   /** The review this request put up for a yes. */
   prepared?: { id: string; actionType: string; expiresAt: Date };
-  /** Whether this request claimed or cancelled a review. */
-  resolved?: boolean;
+  /** Reviews this request claimed, failed as invalid or cancelled. */
+  resolvedIds: Set<string>;
 }
 
 const approvalBinding = new AsyncLocalStorage<ApprovalBinding>();
@@ -92,12 +97,22 @@ const approvalBinding = new AsyncLocalStorage<ApprovalBinding>();
  * clients that send none are unaffected.
  */
 export async function runWithApprovalBinding<T>(
-  expectedReviewId: string | undefined,
+  expectedReviewId: string | null | undefined,
   work: () => Promise<T>,
-): Promise<{ result: T; prepared?: ApprovalBinding["prepared"]; resolved: boolean }> {
-  const binding: ApprovalBinding = { expectedReviewId };
+): Promise<{ result: T; prepared?: ApprovalBinding["prepared"]; resolvedIds: ReadonlySet<string> }> {
+  const binding: ApprovalBinding = { expectedReviewId, resolvedIds: new Set() };
   const result = await approvalBinding.run(binding, work);
-  return { result, prepared: binding.prepared, resolved: binding.resolved === true };
+  return { result, prepared: binding.prepared, resolvedIds: binding.resolvedIds };
+}
+
+/** Whether a review is still waiting for this user's yes. */
+export async function isReviewPending(user: ActingUser, id: string, now = new Date()): Promise<boolean> {
+  return Boolean(
+    await prisma.voicePendingAction.findFirst({
+      where: { id, companyId: user.companyId, userId: user.id, status: "pending", expiresAt: { gt: now } },
+      select: { id: true },
+    }),
+  );
 }
 
 function scope(user: ActingUser, actionType: string) {
@@ -263,19 +278,15 @@ export async function claimReviewedAction<Payload>(
       return { ok: false, reason: seen && seen.status !== "expired" ? "raced" : "none" } as const;
     }
 
-    // Approval binding: when the client says which review it showed, a yes
-    // approves that review and nothing else. A newer review of the same queue
-    // has not been heard, so it is not executed; the user is told the one they
-    // heard is no longer waiting. An id from another queue or user binds nothing here.
-    const expectedId = approvalBinding.getStore()?.expectedReviewId;
-    if (expectedId && expectedId !== pending.id) {
-      const expected = await tx.voicePendingAction.findUnique({
-        where: { id: expectedId },
-        select: { companyId: true, userId: true, actionType: true },
-      });
-      if (expected && expected.companyId === user.companyId && expected.userId === user.id && expected.actionType === definition.actionType) {
-        return { ok: false, reason: "raced", superseded: true } as const;
-      }
+    // Approval binding: when the client takes part, a yes approves exactly the
+    // review it displayed and nothing else — not a newer one of this queue, not
+    // the only one waiting in a queue the remembered review never belonged to,
+    // and nothing at all when the client displays none (null). What the user
+    // has not heard on this device is never executed by their yes; they are
+    // told it is no longer waiting and can ask for it again.
+    const binding = approvalBinding.getStore();
+    if (binding && binding.expectedReviewId !== undefined && binding.expectedReviewId !== pending.id) {
+      return { ok: false, reason: "raced", superseded: true } as const;
     }
 
     // Pre-lock duplicates can share a millisecond createdAt, and a random id
@@ -316,12 +327,9 @@ export async function claimReviewedAction<Payload>(
     });
     return { ok: true, pending } as const;
   });
-  // A claimed review, or one failed as invalid, is no longer waiting: the
-  // client's remembered review is spent.
-  if (outcome.ok || outcome.reason === "invalid") {
-    const binding = approvalBinding.getStore();
-    if (binding) binding.resolved = true;
-  }
+  // A claimed review is no longer waiting: if it was the remembered one, the
+  // client's memory is spent.
+  if (outcome.ok) approvalBinding.getStore()?.resolvedIds.add(outcome.pending.id);
   if (!outcome.ok) return outcome;
   const pending = outcome.pending;
 
@@ -350,13 +358,16 @@ async function resolveReviewedAction(id: string, status: string): Promise<void> 
 /** Cancel whatever review of this type is waiting. True when one was. */
 export async function cancelReviewedAction(user: ActingUser, actionType: string, now = new Date()): Promise<boolean> {
   await expireReviewedActions(user, actionType, now);
-  const cancelled = await prisma.voicePendingAction.updateMany({
+  const waiting = await prisma.voicePendingAction.findMany({
     where: { ...scope(user, actionType), status: "pending" },
+    select: { id: true },
+  });
+  if (waiting.length === 0) return false;
+  const cancelled = await prisma.voicePendingAction.updateMany({
+    where: { id: { in: waiting.map((row) => row.id) }, status: "pending" },
     data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
   });
-  if (cancelled.count > 0) {
-    const binding = approvalBinding.getStore();
-    if (binding) binding.resolved = true;
-  }
+  const binding = approvalBinding.getStore();
+  if (binding && cancelled.count > 0) for (const row of waiting) binding.resolvedIds.add(row.id);
   return cancelled.count > 0;
 }

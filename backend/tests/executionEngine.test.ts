@@ -328,7 +328,7 @@ describe("execution engine — the reviewed-action state machine", () => {
     assert.equal(refused.result.ok, false);
     assert.equal(!refused.result.ok && refused.result.reason, "raced");
     assert.equal(!refused.result.ok && refused.result.superseded, true);
-    assert.equal(refused.resolved, false);
+    assert.equal(refused.resolvedIds.size, 0);
     const untouched = await prisma.voicePendingAction.findUniqueOrThrow({ where: { id: second.result.id } });
     assert.equal(untouched.status, "pending", "the unheard review is neither executed nor consumed");
 
@@ -336,33 +336,41 @@ describe("execution engine — the reviewed-action state machine", () => {
     const approved = await runWithApprovalBinding(second.result.id, () => claimReviewedAction(user, REVIEW));
     assert.ok(approved.result.ok);
     assert.equal(approved.result.payload.note, "never heard");
-    assert.equal(approved.resolved, true);
+    assert.ok(approved.resolvedIds.has(second.result.id));
     await approved.result.complete(true);
   });
 
-  it("an id from another queue binds nothing; without an id the newest review is meant", async () => {
+  it("a strict yes approves nothing but the remembered review; without binding the newest is meant", async () => {
     const other: ReviewedActionDefinition<{ note: string }> = { ...REVIEW, actionType: "engine_test_other_queue" };
     const elsewhere = await prepareReviewedAction(user, other, { note: "other queue" });
-    await prepareReviewedAction(user, REVIEW, { note: "this queue" });
-    const crossQueue = await runWithApprovalBinding(elsewhere.id, () => claimReviewedAction(user, REVIEW));
-    assert.ok(crossQueue.result.ok);
-    assert.equal(crossQueue.result.payload.note, "this queue");
-    await crossQueue.result.complete(true);
+    const here = await prepareReviewedAction(user, REVIEW, { note: "this queue" });
 
-    await prepareReviewedAction(user, REVIEW, { note: "unbound" });
+    // A remembered review from another queue does not license this queue's review.
+    const crossQueue = await runWithApprovalBinding(elsewhere.id, () => claimReviewedAction(user, REVIEW));
+    assert.equal(!crossQueue.result.ok && crossQueue.result.reason, "raced");
+    // Nor does an id that names no review, nor "nothing displayed".
+    const unknown = await runWithApprovalBinding("00000000-0000-4000-8000-000000000000", () => claimReviewedAction(user, REVIEW));
+    assert.equal(unknown.result.ok, false);
+    const nothingShown = await runWithApprovalBinding(null, () => claimReviewedAction(user, REVIEW));
+    assert.equal(nothingShown.result.ok, false);
+    assert.equal((await prisma.voicePendingAction.findUniqueOrThrow({ where: { id: here.id } })).status, "pending");
+
+    // A client that does not take part keeps the old meaning: the newest review.
     const unbound = await runWithApprovalBinding(undefined, () => claimReviewedAction(user, REVIEW));
     assert.ok(unbound.result.ok);
+    assert.equal(unbound.result.payload.note, "this queue");
     await unbound.result.complete(true);
     await cancelReviewedAction(user, other.actionType);
   });
 
   it("a cancel resolves the remembered review", async () => {
     await prepareReviewedAction(user, REVIEW, { note: "to cancel" });
-    const cancelled = await runWithApprovalBinding(undefined, () => cancelReviewedAction(user, REVIEW.actionType));
+    const waiting = await prisma.voicePendingAction.findFirstOrThrow({ where: { companyId: user.companyId, userId: user.id, actionType: REVIEW.actionType, status: "pending" } });
+    const cancelled = await runWithApprovalBinding(waiting.id, () => cancelReviewedAction(user, REVIEW.actionType));
     assert.equal(cancelled.result, true);
-    assert.equal(cancelled.resolved, true);
+    assert.ok(cancelled.resolvedIds.has(waiting.id));
     const nothing = await runWithApprovalBinding(undefined, () => cancelReviewedAction(user, REVIEW.actionType));
-    assert.equal(nothing.resolved, false);
+    assert.equal(nothing.resolvedIds.size, 0);
   });
 
   it("never crosses user or tenant", async () => {

@@ -47,10 +47,11 @@ function refreshSessionOnce(): Promise<string | null> {
 
 /**
  * Approval binding: the review this client showed last. Every command carries
- * it, so a "yes" approves exactly the review the user heard — never a newer
- * one prepared meanwhile (by an overlapping request or another device). The
- * backend says what to remember: pendingReview with an id when a review was
- * put up, null when the review was claimed or cancelled, absent otherwise.
+ * it — null when nothing is shown — so a "yes" approves exactly the review the
+ * user heard here, never a newer one prepared meanwhile (an overlapping
+ * request, another device) and nothing when none was heard. The backend says
+ * what to remember: pendingReview with an id when a review was put up, null
+ * when the remembered one no longer waits, absent when it still does.
  */
 let shownReviewId: string | undefined;
 
@@ -2397,7 +2398,7 @@ export const api = {
           pendingReview?: PendingReview | null;
         }>("/command/text", {
           method: "POST",
-          body: JSON.stringify({ text, input_method: inputMethod, ...(shownReviewId ? { review_id: shownReviewId } : {}) }),
+          body: JSON.stringify({ text, input_method: inputMethod, review_id: shownReviewId ?? null }),
         });
         rememberReview(answer);
         return answer;
@@ -2410,7 +2411,7 @@ export const api = {
       try {
         const answer = await request<MobileAssistantResponse>("/command/assistant", {
           method: "POST",
-          body: JSON.stringify({ text, input_method: "voice_transcript", language, history, ...(shownReviewId ? { review_id: shownReviewId } : {}) }),
+          body: JSON.stringify({ text, input_method: "voice_transcript", language, history, review_id: shownReviewId ?? null }),
           signal,
         });
         rememberReview(answer);

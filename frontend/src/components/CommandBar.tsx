@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "../api/client";
+import { ApiError, api } from "../api/client";
 import { useAuth } from "../context/useAuth";
 import { appLanguage, type AppLanguage } from "../i18n";
 
@@ -41,9 +41,14 @@ export function CommandBar() {
         ...current,
       ].slice(0, 8));
       setText("");
-    } catch {
+    } catch (error) {
+      // A review waiting for "yes" (and other refusals) arrive as 409 with the
+      // sentence to show: show it, so a later "yes" approves what was read here.
+      const details = error instanceof ApiError && error.status !== 401 ? error.details : undefined;
+      const message = typeof details?.message === "string" ? details.message : copy.failed;
+      const intent = typeof details?.intent === "string" ? details.intent : "unrecognized";
       setHistory((current) => [
-        { id: crypto.randomUUID(), text: command, ok: false, intent: "unrecognized", message: copy.failed },
+        { id: crypto.randomUUID(), text: command, ok: false, intent, message },
         ...current,
       ].slice(0, 8));
     } finally {

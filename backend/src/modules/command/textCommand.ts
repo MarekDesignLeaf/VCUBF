@@ -23,7 +23,7 @@ import { getPendingEmmaActionName } from "../../services/emmaExecutableActionSer
 import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
 import { assistantNameFor } from "../../lib/assistantName.js";
 import { acceptedByService, observeShadow, parserOutcomeOf } from "../../agents/shadowAgent.js";
-import { runWithApprovalBinding } from "../../lib/executionEngine.js";
+import { isReviewPending, runWithApprovalBinding } from "../../lib/executionEngine.js";
 
 /**
  * The user's voice language as it is right now.
@@ -55,11 +55,13 @@ const commandSchema = z.object({
   text: z.string().min(1, "text is required"),
   input_method: z.enum(["text", "voice_transcript"]).default("text"),
   /**
-   * The review the client displayed last (pendingReview.id of an earlier
-   * answer). A yes then approves exactly that review — never a newer one the
-   * user has not heard. Optional: without it the newest review is meant.
+   * Approval binding. The review the client displayed last (pendingReview.id
+   * of an earlier answer), or null when it displays none. When present, a yes
+   * approves exactly that review — never a newer one, never one in another
+   * queue — and null approves nothing. Absent (older clients): the newest
+   * review is meant, as before.
    */
-  review_id: z.string().uuid().optional(),
+  review_id: z.string().uuid().nullable().optional(),
 });
 
 const assistantSchema = commandSchema.extend({
@@ -138,12 +140,19 @@ function outboundMessage(command: ParsedTextCommand) {
 
 /**
  * What the client should remember for its next yes: the review this request
- * put up (its id and expiry), null when this request claimed or cancelled the
- * review it held, nothing when neither happened (keep what you have).
+ * put up (its id and expiry); null when the review it remembered is no longer
+ * waiting (claimed, cancelled, expired or resolved elsewhere), so a stale id
+ * does not refuse every later yes; nothing when its review still waits.
  */
-function pendingReviewField(bound: { prepared?: { id: string; expiresAt: Date }; resolved: boolean }) {
+async function pendingReviewField(
+  user: AuthedUser,
+  expected: string | null | undefined,
+  bound: { prepared?: { id: string; expiresAt: Date }; resolvedIds: ReadonlySet<string> },
+) {
   if (bound.prepared) return { pendingReview: { id: bound.prepared.id, expiresAt: bound.prepared.expiresAt.toISOString() } };
-  if (bound.resolved) return { pendingReview: null };
+  if (typeof expected === "string" && (bound.resolvedIds.has(expected) || !(await isReviewPending(user, expected)))) {
+    return { pendingReview: null };
+  }
   return {};
 }
 
@@ -549,7 +558,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     kind: "action",
     assistantMessage: response.message,
     appliedAliases: alias.appliedRules,
-    ...pendingReviewField(bound),
+    ...(await pendingReviewField(user, parsedBody.data.review_id, bound)),
   });
 });
 
@@ -608,5 +617,5 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
   });
 
   observeShadow({ user, channel: "text", language: user.voiceLanguage, text: alias.resolvedText, actual: parserOutcomeOf(command, acceptedByService(response)) });
-  res.status(response.httpStatus).json({ ...response, uiAction, appliedAliases: alias.appliedRules, ...pendingReviewField(bound) });
+  res.status(response.httpStatus).json({ ...response, uiAction, appliedAliases: alias.appliedRules, ...(await pendingReviewField(user, parsedBody.data.review_id, bound)) });
 });
