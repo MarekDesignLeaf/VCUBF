@@ -41,6 +41,8 @@ export const COMMAND_POLICY = {
   execute_action: { category: "administration", mode: "write", description: "Dispatch an allowlisted Secretary action through its owning validated service." },
   confirm_execute_action: { category: "administration", mode: "write", description: "Confirm the single reviewed Secretary action waiting for this user." },
   cancel_execute_action: { category: "administration", mode: "write", description: "Cancel the single reviewed Secretary action waiting for this user." },
+  confirm_agent_proposal: { category: "administration", mode: "write", actionName: "execute_agent_proposal" },
+  cancel_agent_proposal: { category: "administration", mode: "write", actionName: "execute_agent_proposal" },
   create_client: { category: "customers", mode: "write", actionName: "create_client" },
   confirm_create_client: { category: "customers", mode: "write", actionName: "create_client" },
   cancel_create_client: { category: "customers", mode: "write", actionName: "create_client" },

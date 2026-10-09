@@ -32,6 +32,9 @@ export type ParsedCommand =
   | { intent: "execute_action"; entities: EmmaExecutableActionRequest }
   | { intent: "confirm_execute_action"; entities: { action: EmmaExecutableActionName } }
   | { intent: "cancel_execute_action"; entities: { action: EmmaExecutableActionName } }
+  // The one yes or no to a proposal the agent put together (masterplan F2b).
+  | { intent: "confirm_agent_proposal"; entities: Record<string, never> }
+  | { intent: "cancel_agent_proposal"; entities: Record<string, never> }
   | { intent: "create_client"; entities: { display_name: string; email_primary?: string; phone_primary?: string } }
   | { intent: "confirm_create_client"; entities: Record<string, never> }
   | { intent: "cancel_create_client"; entities: Record<string, never> }

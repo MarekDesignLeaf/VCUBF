@@ -46,13 +46,14 @@ export const AGENT_RUN_BUDGET = { maxSteps: 6, maxOutputTokens: 600 } as const;
 /** Shadow runs in flight per process; beyond this a request simply gets none. */
 const MAX_IN_FLIGHT = 2;
 
-const COMMAND_BRIDGE = "run_command";
+export const COMMAND_BRIDGE = "run_command";
 /** The bridge's arguments, held to the same shape the tool declares to the model. */
-const bridgeArgumentsSchema = z.object({ canonical_command: z.string().trim().min(1) }).strict();
+export const bridgeArgumentsSchema = z.object({ canonical_command: z.string().trim().min(1) }).strict();
 
-type FunctionTool = { type: "function"; name: string; description: string; parameters: Record<string, unknown> };
+export type FunctionTool = { type: "function"; name: string; description: string; parameters: Record<string, unknown> };
 
-const TOOLS: readonly FunctionTool[] = [
+/** The tools the agent is shown — the same set in shadow and when acting, so acceptance measures what acts. */
+export const AGENT_FUNCTION_TOOLS: readonly FunctionTool[] = [
   {
     type: "function",
     name: COMMAND_BRIDGE,
@@ -75,7 +76,7 @@ const TOOLS: readonly FunctionTool[] = [
 ];
 
 /** The exact tool list the model is shown, fingerprinted for every run. */
-export const AGENT_TOOLSET_FINGERPRINT = createHash("sha256").update(JSON.stringify(TOOLS)).digest("hex");
+export const AGENT_TOOLSET_FINGERPRINT = createHash("sha256").update(JSON.stringify(AGENT_FUNCTION_TOOLS)).digest("hex");
 
 const catalogueKinds = new Map(AGENT_TOOL_CATALOGUE.map((tool) => [tool.name as string, tool.kind as string]));
 
@@ -205,7 +206,7 @@ export function requestFingerprint(text: string): string {
   return createHmac("sha256", fingerprintKey()).update(text.trim().replace(/\s+/g, " ").toLowerCase()).digest("hex");
 }
 
-function argumentsFingerprint(raw: string): string {
+export function argumentsFingerprint(raw: string): string {
   return createHmac("sha256", fingerprintKey()).update(raw).digest("hex");
 }
 
@@ -309,7 +310,7 @@ async function plan(input: ShadowInput): Promise<Plan> {
       max_output_tokens: AGENT_RUN_BUDGET.maxOutputTokens,
       instructions: instructions(input.language),
       input: [...(input.history ?? []), { role: "user", content: input.text }],
-      tools: TOOLS,
+      tools: AGENT_FUNCTION_TOOLS,
       tool_choice: "auto",
       parallel_tool_calls: true,
     }),
