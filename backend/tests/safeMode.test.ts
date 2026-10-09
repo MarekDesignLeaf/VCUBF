@@ -85,6 +85,7 @@ describe("emergency stop (safe mode)", () => {
     assert.equal(allowed("POST", "/connectors/sources/abc/enable", admin), false);
     assert.equal(allowed("POST", "/crm/employees/abc/reset-password", admin), true);
     assert.equal(allowed("PUT", "/crm/employees/abc", { ...admin, body: { is_active: false } }), true);
+    assert.equal(allowed("PUT", "/crm/employees/abc", { ...admin, body: { is_active: false, confirmed: true } }), true);
     assert.equal(allowed("PUT", "/crm/employees/abc", { ...admin, body: { is_active: true } }), false);
     assert.equal(allowed("PUT", "/crm/employees/abc", { ...admin, body: { is_active: false, role: "administrator" } }), false);
     assert.equal(allowed("PUT", "/crm/employees/abc", { body: { is_active: false } }), false);
@@ -121,7 +122,13 @@ describe("emergency stop (safe mode)", () => {
       .send({ display_name: "Blocked Client" });
     assert.equal(write.status, 423, JSON.stringify(write.body));
     assert.equal(write.body.error, "SAFE_MODE_ACTIVE");
-    assert.equal(await prisma.idempotencyRecord.count({ where: { key: "safe-mode-1" } }), 0);
+    // The guard releases the key when the response finishes; give it a moment.
+    let kept = 1;
+    for (let attempt = 0; attempt < 20 && kept > 0; attempt += 1) {
+      kept = await prisma.idempotencyRecord.count({ where: { key: "safe-mode-1" } });
+      if (kept > 0) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(kept, 0);
     assert.equal(await prisma.client.count({ where: { displayName: "Blocked Client" } }), 0);
     // Reading still works.
     assert.equal((await request(app).get("/crm/clients").set(as(adminToken))).status, 200);
@@ -160,11 +167,14 @@ describe("emergency stop (safe mode)", () => {
     assert.equal((await request(app).delete("/command/voice-state/history").set(as(adminToken))).status, 423);
 
     // Containment still works: an administrator can take an account's access away…
-    const deactivated = await request(app).put(`/crm/employees/${workerId}`).set(as(adminToken)).send({ is_active: false });
+    const previewed = await request(app).put(`/crm/employees/${workerId}`).set(as(adminToken)).send({ is_active: false });
+    assert.equal(previewed.status, 409, JSON.stringify(previewed.body));
+    assert.equal(previewed.body.error, "CONFIRMATION_REQUIRED");
+    const deactivated = await request(app).put(`/crm/employees/${workerId}`).set(as(adminToken)).send({ is_active: false, confirmed: true });
     assert.equal(deactivated.status, 200, JSON.stringify(deactivated.body));
     assert.equal((await request(app).get("/company/safe-mode").set(as(workerToken))).status, 401);
     // …but not give it back, nor change anything else in the same request.
-    const reactivated = await request(app).put(`/crm/employees/${workerId}`).set(as(adminToken)).send({ is_active: true });
+    const reactivated = await request(app).put(`/crm/employees/${workerId}`).set(as(adminToken)).send({ is_active: true, confirmed: true });
     assert.equal(reactivated.status, 423);
   });
 

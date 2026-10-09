@@ -139,6 +139,7 @@ export async function runConnectorBackgroundSyncOnce(
             companyId: source.companyId,
             isActive: true,
             isEnabled: true,
+            company: { safeModeSince: null },
             OR: [{ lastSyncAt: null }, { lastSyncAt: { lt: cutoff } }],
           },
           data: { lastSyncAt: now, lastSyncStatus: "error", lastErrorCode: "CONNECTOR_AUTOMATION_ACTOR_REQUIRED" },

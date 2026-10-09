@@ -110,8 +110,11 @@ const ALLOWED_IN_SAFE_MODE: AllowedMutation[] = [
     pattern: /^\/crm\/employees\/[^/]+$/i,
     methods: ["PUT"],
     administratorOnly: true,
+    // The deactivation and its confirmation flag only: the service previews
+    // first and needs confirmed:true to apply, like every employee change.
     body: (body) => Boolean(body) && typeof body === "object" && !Array.isArray(body)
-      && Object.keys(body as object).length === 1 && (body as { is_active?: unknown }).is_active === false,
+      && Object.keys(body as object).every((key) => key === "is_active" || key === "confirmed")
+      && (body as { is_active?: unknown }).is_active === false,
     reason: "deactivating an account, and nothing else in the same request",
   },
   {
