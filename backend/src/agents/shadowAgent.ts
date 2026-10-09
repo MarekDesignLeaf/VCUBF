@@ -31,6 +31,7 @@ import { buildId } from "../lib/buildInfo.js";
 import { CANONICAL_COMMAND_FORMS } from "../lib/canonicalCommands.js";
 import { CANONICAL_COMMAND, parseTextCommand, type ParsedCommand } from "../lib/commandParser.js";
 import { modelFor, modelRequest, recordUsage } from "../lib/modelGateway.js";
+import { COMMAND_POLICY } from "../lib/emmaSurfaceCatalogue.js";
 import { validateVoiceActionParameters } from "../lib/voiceActionCatalogue.js";
 import { AGENT_TOOL_CATALOGUE, TOOL_CATALOGUE_FINGERPRINT, TOOL_CATALOGUE_VERSION } from "./toolCatalogue.js";
 
@@ -77,6 +78,17 @@ const TOOLS: readonly FunctionTool[] = [
 export const AGENT_TOOLSET_FINGERPRINT = createHash("sha256").update(JSON.stringify(TOOLS)).digest("hex");
 
 const catalogueKinds = new Map(AGENT_TOOL_CATALOGUE.map((tool) => [tool.name as string, tool.kind as string]));
+
+/**
+ * Catalogue tools that are also a parser intent of the same name (today only
+ * set_speech_rate: "speak faster" parses to the intent, not to a voice action).
+ * A proposal of such a tool is compared as that intent, with its validated
+ * parameters as the entities — the shapes are the same — so a compliant
+ * proposal can match. A test lists them, so a new overlap is reviewed.
+ */
+export const TOOLS_THAT_ARE_PARSER_INTENTS: readonly string[] = AGENT_TOOL_CATALOGUE.map((tool) => tool.name as string).filter(
+  (name) => Object.prototype.hasOwnProperty.call(COMMAND_POLICY, name),
+);
 
 export type ShadowAgreement =
   | "match"
@@ -217,6 +229,16 @@ function proposalFrom(name: string, rawArguments: string): Proposal {
   const kind = catalogueKinds.get(name);
   if (!kind) return { tool: name, kind: "unknown", key: null, valid: false, argumentsFingerprint: fingerprint };
   const validated = validateVoiceActionParameters(name, args);
+  if (TOOLS_THAT_ARE_PARSER_INTENTS.includes(name)) {
+    return {
+      tool: name,
+      kind,
+      key: name,
+      valid: validated.success,
+      argumentsFingerprint: fingerprint,
+      entities: validated.success ? validated.data : args,
+    };
+  }
   return {
     tool: name,
     kind,

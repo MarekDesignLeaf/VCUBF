@@ -8,6 +8,7 @@ import {
   AGENT_TOOLSET_FINGERPRINT,
   compareWithParser,
   observeShadow,
+  TOOLS_THAT_ARE_PARSER_INTENTS,
   settleShadowRuns,
   type Proposal,
   type ProposedTool,
@@ -300,6 +301,19 @@ describe("agent in shadow (F1)", () => {
     const run = await prisma.agentRun.findFirstOrThrow();
     assert.equal(run.errorCode, "OPENAI_NOT_CONFIGURED");
     assert.equal(run.agreement, "error");
+  });
+
+  it("a catalogue tool that is also a parser intent matches the parser's intent", async () => {
+    // A new overlap must be reviewed: its parameters have to have the intent's entity shape.
+    assert.deepEqual(TOOLS_THAT_ARE_PARSER_INTENTS, ["set_speech_rate"]);
+    modelOutput = [{ name: "set_speech_rate", arguments: JSON.stringify({ change: "faster" }) }];
+    const faster = await say("speak faster");
+    assert.equal(faster.body.intent, "set_speech_rate", JSON.stringify(faster.body));
+    await settleShadowRuns();
+    const run = await prisma.agentRun.findFirstOrThrow();
+    assert.equal(run.parserAction, "set_speech_rate");
+    assert.equal(run.agreement, "match");
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceSpeechRate: 1.15 } });
   });
 
   it("confirmation turns get no shadow run", async () => {
