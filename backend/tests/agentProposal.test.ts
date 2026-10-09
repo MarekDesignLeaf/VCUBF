@@ -170,11 +170,23 @@ describe("agent proposals (F2b)", () => {
     assert.equal(answer.body.pendingReview, undefined);
   });
 
-  it("never proposes administration or connector settings, and says what it left out", async () => {
-    agentRounds = [[{ name: "disconnect_gmail", arguments: "{}" }, command("create task Check the invoices")]];
-    const proposed = await say("Disconnect Gmail and add a task to check the invoices");
+  it("never proposes administration, connector settings or playbooks, by any route, and says what it left out", async () => {
+    agentRounds = [[
+      { name: "disconnect_gmail", arguments: "{}" },
+      // The same refusal through the command bridge's action form.
+      command('voice action disable_connector_source {"connector_key":"gmail"}'),
+      // A playbook would run stored steps that are neither read out nor checked here.
+      { name: "run_playbook", arguments: JSON.stringify({ playbook_name: "Morning" }) },
+      command("create task Check the invoices"),
+    ]];
+    const proposed = await say("Disconnect Gmail, run the morning playbook and add a task to check the invoices");
     assert.equal(proposed.status, 409, JSON.stringify(proposed.body));
-    assert.match(proposed.body.message, /^I propose one step: 1\. command “create task Check the invoices”\. I left out of the proposal: disconnect gmail\. You would do that yourself\. Shall I carry it out\?$/);
+    assert.equal(
+      proposed.body.message,
+      "I propose one step: 1. command “create task Check the invoices”. I left out of the proposal: disconnect gmail, disable connector source, run playbook. You would do that yourself. Shall I carry it out?",
+    );
+    const run = await prisma.agentRun.findFirstOrThrow({ where: { mode: "proposal" }, orderBy: { createdAt: "desc" } });
+    assert.deepEqual((run.proposedTools as Array<{ use: string }>).map((call) => call.use), ["refused", "refused", "refused", "step"]);
     const cancelled = await say("no", proposed.body.pendingReview.id);
     assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
     assert.equal(cancelled.body.intent, "cancel_agent_proposal");
@@ -215,12 +227,71 @@ describe("agent proposals (F2b)", () => {
     }
   });
 
+  it("a proposal and another review never wait side by side: the yes means the last thing read out", async () => {
+    const reviewClient = () => request(app).post("/command/text").set(as())
+      .send({ text: "create client Jan Novy, email jan@example.com, phone 07700 900123", input_method: "text" });
+    const waiting = () => prisma.voicePendingAction.findMany({ where: { status: "pending" }, select: { actionType: true } });
+
+    // A client review waits; a proposal replaces it.
+    assert.equal((await reviewClient()).status, 202);
+    agentRounds = [[command("create task Water the hedge")]];
+    const proposed = await say("Water the hedge and tell Petra");
+    assert.equal(proposed.status, 409, JSON.stringify(proposed.body));
+    assert.deepEqual((await waiting()).map((row) => row.actionType), ["agent_proposal"]);
+    const done = await say("yes");
+    assert.equal(done.body.intent, "confirm_agent_proposal", JSON.stringify(done.body));
+    assert.equal(await prisma.task.count({ where: { title: "Water the hedge" } }), 1);
+    assert.equal(await prisma.client.count({ where: { displayName: "Jan Novy" } }), 0);
+
+    // A proposal waits; a newer review replaces it.
+    agentRounds = [[command("create task Trim the hedge")]];
+    assert.equal((await say("Trim the hedge and tell Petra")).status, 409);
+    assert.equal((await reviewClient()).status, 202);
+    assert.equal((await latestProposal())?.status, "cancelled");
+    const created = await say("yes");
+    assert.equal(created.body.intent, "confirm_create_client", JSON.stringify(created.body));
+    assert.equal(await prisma.client.count({ where: { displayName: "Jan Novy" } }), 1);
+    assert.equal(await prisma.task.count({ where: { title: "Trim the hedge" } }), 0);
+  });
+
+  it("a capability the administrator switched off after the read-out is not carried out", async () => {
+    agentRounds = [[command("create task Pay the supplier")]];
+    const proposed = await say("Remind me to pay the supplier");
+    assert.equal(proposed.status, 409, JSON.stringify(proposed.body));
+    const policy = (disabled: string[]) => request(app).put("/company/emma-policy").set(as()).send({ disabled_capabilities: disabled });
+    assert.equal((await policy(["action.create_task"])).status, 200);
+    try {
+      const refused = await say("yes", proposed.body.pendingReview.id);
+      assert.equal(refused.status, 403, JSON.stringify(refused.body));
+      assert.equal(refused.body.error, "EMMA_CAPABILITY_DISABLED");
+      assert.match(refused.body.message, /^I carried out 0 of 1 steps\. 1\. Failed: /);
+      assert.equal(await prisma.task.count({ where: { title: "Pay the supplier" } }), 0);
+    } finally {
+      assert.equal((await policy([])).status, 200);
+    }
+  });
+
+  it("a proposal too long to be read out in full is not put up", async () => {
+    agentRounds = [[command(`create task ${"Inspect every hedge on the north boundary ".repeat(25).trim()}`)]];
+    const answer = await say("Plan the boundary inspection");
+    assert.equal(answer.status, 200, JSON.stringify(answer.body));
+    assert.equal(answer.body.kind, "reply");
+    assert.equal(answer.body.message, "The proposal would be too long to read out in full, so I have not prepared anything. Please split it into smaller requests.");
+    assert.equal(answer.body.pendingReview, undefined);
+    assert.equal((await prisma.voicePendingAction.count({ where: { status: "pending" } })), 0);
+    const run = await prisma.agentRun.findFirstOrThrow({ where: { mode: "proposal" }, orderBy: { createdAt: "desc" } });
+    assert.equal(run.errorCode, "PROPOSAL_TOO_LONG");
+  });
+
   it("a planner failure reads the plan out as before and changes nothing", async () => {
     agentStatus = 500;
+    const [jobsBefore, tasksBefore] = [await prisma.job.count(), await prisma.task.count()];
     const fallback = await say("Set up the hedge job for Petra and remind me to call her");
     assert.equal(fallback.status, 200, JSON.stringify(fallback.body));
     assert.equal(fallback.body.kind, "plan");
     assert.equal(fallback.body.message, "1. Create the job. 2. Add a task.");
+    assert.equal(await prisma.job.count(), jobsBefore);
+    assert.equal(await prisma.task.count(), tasksBefore);
     const run = await prisma.agentRun.findFirstOrThrow({ where: { mode: "proposal" }, orderBy: { createdAt: "desc" } });
     assert.equal(run.status, "error");
     assert.equal(run.errorCode, "HTTP_500");

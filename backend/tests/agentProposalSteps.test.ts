@@ -16,6 +16,7 @@ import { AGENT_TOOL_CATALOGUE } from "../src/agents/toolCatalogue.js";
 import { CANONICAL_COMMAND, parseTextCommand } from "../src/lib/commandParser.js";
 import { COMMAND_POLICY } from "../src/lib/emmaSurfaceCatalogue.js";
 import { commandAllowedInSafeMode } from "../src/lib/safeModeCommands.js";
+import { STANDALONE_REVIEW_TYPES } from "../src/lib/executionEngine.js";
 
 // The agent's proposal (masterplan F2b) without a database: what it may carry,
 // how it is read out, and that a stored proposal is executed only as read out.
@@ -46,9 +47,16 @@ describe("agent proposal steps (F2b)", () => {
         assert.ok(AGENT_NEVER_PROPOSES.has(tool.name), `${tool.name} governs a connector and must never be proposed`);
       }
     }
+    for (const name of ["run_playbook", "create_playbook", "update_playbook", "set_assistant_name", "set_hotword", "set_speech_rate", "archive_memory", "archive_learning_rule", "reactivate_learning_rule"]) {
+      assert.ok(AGENT_NEVER_PROPOSES.has(name), `${name} must never be proposed`);
+    }
     for (const name of AGENT_NEVER_PROPOSES) {
       assert.ok(AGENT_TOOL_CATALOGUE.some((tool) => tool.name === name), `${name} is not a catalogue tool`);
     }
+  });
+
+  it("a waiting proposal stands alone in the engine", () => {
+    assert.ok(STANDALONE_REVIEW_TYPES.has(AGENT_PROPOSAL_REVIEW.actionType));
   });
 
   it("carries only commands that change something at once, never a command with its own review or a language change", () => {

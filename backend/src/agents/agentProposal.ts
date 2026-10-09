@@ -32,7 +32,6 @@
  * fingerprints — never the text of a request, a read result or a message.
  */
 
-import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db.js";
@@ -90,21 +89,34 @@ export const AGENT_ACT_BUDGET = {
   minimumTimeMs: 4_000,
   /** What one read hands back to the model, at most. */
   readResultChars: 4_000,
+  /**
+   * The longest proposal that is put up. The Windows companion speaks at most
+   * 900 characters and shows the rest; a yes must never approve steps that
+   * were not heard, so a longer proposal is not put up at all.
+   */
+  maxProposalChars: 900,
 } as const;
 
 /** The tool catalogue by name. */
 const catalogueTools = new Map(AGENT_TOOL_CATALOGUE.map((tool) => [tool.name as string, tool]));
 
 /**
- * Tools an agent never proposes (§48): administration, and governance of the
- * connectors — what Secretary may reach and as whom. An administrator does
- * these directly. A test keeps every administration tool on this list.
+ * Tools an agent never proposes (§48):
+ *  - administration, and governance of the connectors — what Secretary may
+ *    reach and as whom; an administrator does these directly;
+ *  - playbooks — running one executes stored steps that are neither read out
+ *    nor checked step by step here, and writing one would store such steps;
+ *  - the assistant's own settings, memory and learning rules, which change how
+ *    Secretary hears and answers — only the user's explicit words do that.
+ * A test keeps every administration tool on this list.
  */
 export const AGENT_NEVER_PROPOSES: ReadonlySet<string> = new Set([
   ...AGENT_TOOL_CATALOGUE.filter((tool) => tool.kind === "administration").map((tool) => tool.name as string),
   "start_gmail_oauth", "start_google_contacts_oauth", "start_google_calendar_oauth", "start_google_drive_oauth", "start_google_photos_oauth",
   "disconnect_gmail", "disconnect_google_contacts", "disconnect_google_calendar", "disconnect_google_drive", "disconnect_google_photos",
   "disconnect_whatsapp", "enable_connector_source", "disable_connector_source", "update_connector_source", "set_default_email_account",
+  "run_playbook", "create_playbook", "update_playbook",
+  "set_assistant_name", "set_hotword", "set_speech_rate", "archive_memory", "archive_learning_rule", "reactivate_learning_rule",
 ]);
 
 /**
@@ -168,9 +180,13 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** What the yes approves: every step and the words it was read out with. */
+/**
+ * What the yes approves: every step and the words it was read out with. Keyed
+ * like every agent fingerprint, so a stored proposal cannot be rewritten
+ * together with a matching fingerprint without the server's secret.
+ */
 export function proposalFingerprint(steps: readonly ProposalStep[]): string {
-  return createHash("sha256").update(stableJson(steps)).digest("hex");
+  return argumentsFingerprint(`agent-proposal:${stableJson(steps)}`);
 }
 
 /** What a step does, without the words: two calls doing the same thing are one step. */
@@ -276,6 +292,14 @@ function leftOutSentence(names: readonly string[], lang: Locale) {
       : `I left out of the proposal: ${list}. You would do that yourself.`;
 }
 
+function tooLongMessage(lang: Locale) {
+  return lang === "cs"
+    ? "Návrh by byl moc dlouhý na to, abych vám ho celý přečetl, a tak jsem nic nepřipravil. Rozdělte to prosím na menší části."
+    : lang === "pl"
+      ? "Propozycja byłaby za długa, żeby przeczytać ją w całości, więc niczego nie przygotowałem. Podziel to proszę na mniejsze części."
+      : "The proposal would be too long to read out in full, so I have not prepared anything. Please split it into smaller requests.";
+}
+
 function czechSteps(count: number) {
   return count >= 2 && count <= 4 ? "kroky" : "kroků";
 }
@@ -376,6 +400,8 @@ interface CallRecord {
 interface PlanState {
   user: AuthedUser;
   language: string;
+  /** No tool runs after this (epoch milliseconds). */
+  deadline: number;
   steps: ProposalStep[];
   leftOut: string[];
   calls: CallRecord[];
@@ -516,6 +542,9 @@ async function handleCommand(state: PlanState, canonical: string, command: Parse
 }
 
 async function handleCall(state: PlanState, name: string, rawArguments: string): Promise<string> {
+  // A preview can take a while (a translation, a calendar lookup); past the
+  // deadline the caller has given up, and nothing more is done for it.
+  if (Date.now() > state.deadline) throw new AgentPlanError("TIMEOUT");
   const fingerprint = argumentsFingerprint(rawArguments);
   let args: unknown;
   try {
@@ -710,7 +739,7 @@ async function recordRun(
 export async function proposeWithAgent(input: AgentInput): Promise<AgentOutcome> {
   const startedAt = Date.now();
   const deadline = Math.min(input.deadline, startedAt + AGENT_ACT_BUDGET.deadlineMs);
-  const state: PlanState = { user: input.user, language: input.language, steps: [], leftOut: [], calls: [], tokensIn: 0, tokensOut: 0, rounds: 0 };
+  const state: PlanState = { user: input.user, language: input.language, deadline, steps: [], leftOut: [], calls: [], tokensIn: 0, tokensOut: 0, rounds: 0 };
   if (deadline - startedAt < AGENT_ACT_BUDGET.minimumTimeMs) {
     await recordRun(input, state, startedAt, { status: "error", errorCode: "NO_TIME_LEFT" });
     return { kind: "fallback", reason: "NO_TIME_LEFT" };
@@ -739,6 +768,17 @@ export async function proposeWithAgent(input: AgentInput): Promise<AgentOutcome>
   }
 
   const steps = state.steps;
+  const message = proposalMessage(steps, state.leftOut, input.language);
+  if (message.length > AGENT_ACT_BUDGET.maxProposalChars) {
+    await recordRun(input, state, startedAt, { status: "budget_exceeded", errorCode: "PROPOSAL_TOO_LONG" });
+    return { kind: "answer", message: tooLongMessage(lang) };
+  }
+  // The caller has given up by now: a proposal stored after that would wait
+  // for a yes to something nobody heard.
+  if (Date.now() > deadline) {
+    await recordRun(input, state, startedAt, { status: "budget_exceeded", errorCode: "TIMEOUT" });
+    return { kind: "fallback", reason: "TIMEOUT" };
+  }
   const fingerprint = proposalFingerprint(steps);
   await prepareReviewedAction(input.user, AGENT_PROPOSAL_REVIEW, { version: 1, fingerprint, steps });
   await recordAudit({
@@ -756,7 +796,7 @@ export async function proposeWithAgent(input: AgentInput): Promise<AgentOutcome>
   await recordRun(input, state, startedAt, { status: "completed" });
   return {
     kind: "proposal",
-    message: proposalMessage(steps, state.leftOut, input.language),
+    message,
     steps: steps.map((step) => step.description),
     fingerprint,
   };
@@ -845,7 +885,16 @@ export async function confirmAgentProposal(user: AuthedUser): Promise<ProposalRe
       if (!outcome.ok) break;
     }
   } catch (error) {
+    // A step threw instead of answering: what ran before it is still recorded.
     await claimed.complete(false);
+    await recordAudit({
+      ...audit,
+      inputPayload: { fingerprint, steps: steps.map(stepSummary) },
+      dataAfter: { outcomes: outcomes.map((outcome, index) => ({ step: index + 1, ok: outcome.ok, error: outcome.error })), thrownAtStep: outcomes.length + 1 },
+      confirmed: true,
+      result: "error",
+      errorMessage: "STEP_THREW",
+    });
     throw error;
   }
   const failed = outcomes.find((outcome) => !outcome.ok);
