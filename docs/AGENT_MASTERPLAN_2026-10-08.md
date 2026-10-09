@@ -180,6 +180,20 @@ Vypínač per firma; úkoly, kterým parser nerozumí a mají > 1 krok, jdou age
 ### F3 — Specialisté pro tři hlavní funkce
 Komunikační (e-mail + WhatsApp, angličtina), Plánovací (kalendář), CRM. Orchestrátor skládá jeden návrh napříč specialisty. **Akceptace:** scénáře nad třemi funkcemi, které Marek chce od začátku — jedna věta → jeden návrh → jedno ano.
 
+**F3a — orchestrátor a tři specialisté (vrstva D, §6) — PR #48:** `backend/src/agents/specialists.ts` + orchestrátor v `agentProposal.ts`. Specialista je role, ne proces: krátký pokyn a podmnožina nástrojů.
+- **Komunikační:** odeslat/odpovědět e-mailem a WhatsAppem, koncept, návrh odpovědi, vyřízení zpráv, převod zprávy na klienta; čtení zpráv, komunikace, follow-upů a nevyřízených poptávek; zápis hovoru/schůzky. Zprávy anglicky, adresy a čísla jen z přečtených záznamů nebo z úst uživatele.
+- **Plánovací:** zapsat/přesunout/zrušit událost v kalendáři, návrh termínu, kapacita, stav úkolu; kalendář, zakázky (nová, stav, přidělení), přetížení, úkoly. Nejdřív číst, pak jmenovat přesnou událost, zakázku nebo úkol.
+- **CRM:** klienti, kontakty a poptávky — vyhledání, nový klient, nová poptávka, převod poptávky, sloučení duplicit. Než něco vytvoří, hledá existující záznam; při dvou shodách to řekne.
+- Čtení klientů a kontaktů má každá role (adresy pocházejí z CRM).
+
+**Jak to běží:** orchestrátor nejdřív jedním krátkým voláním (strukturovaná odpověď, nejvýš 2,5 s a nikdy z času, který potřebuje plánovač — při méně než 1 s rezervy se směrování přeskočí) vybere role, které požadavek potřebuje. Plánovač pak vidí **jen nástroje a příkazové tvary těchto rolí** (most `run_command` dostane jen jejich kanonické tvary) a pokyny rolí — a mimo ně je to vynucené: volání mimo roli se odmítne, i kdyby ho model zkusil, a Alfonzo ho jmenuje mezi tím, co do návrhu nezařadil (nic se tiše neztratí). Role umí jen to, co má v popisu; cokoli dalšího (třeba úprava údajů klienta) router posílá jako „other“ na celý katalog. Výsledek je pořád **jeden návrh, jedno „ano“** jako v F2b. Požadavek, který spadá i mimo tři role („other“: nabídky, faktury, dokumenty, nábor, nastavení…), nic nevybráno, nebo selhané směrování → plánuje se s celým katalogem přesně jako v F2b (směrování je zúžení, nikdy brána). Rozhodnutí se zapíše na začátek běhu (`choose_specialists`, klíč rolí, `general` nebo `skipped`; Dohled nad agenty ho ukáže jako „specialists: …“), běh nese otisk přesně té sady nástrojů, kterou model viděl, a role jsou i v auditu přípravy návrhu.
+
+**Srozumitelnější kroky:** navrhované příkazy se čtou česky/polsky/anglicky jmennou frází s hodnotami z parseru („Nová zakázka „Plot“ pro klienta Petra Novak“, „Nový úkol …“, „Úprava klienta …“, „Úkol … do stavu hotový“), takže stejná slova slouží návrhu i výsledku („… – hotovo“). U záznamu komunikace zazní i směr (od klienta / klientovi) a druh kontaktu slovy. Příkaz bez vlastní formulace se čte doslova jako dřív. Oprava parseru: kanonický tvar „create lead NAME for SERVICE, email EMAIL, phone PHONE“ dřív uložil e-mail i telefon jako součást služby; teď je vytáhne (jen označená pole oddělená čárkou — „telephone repair“ zůstane službou).
+
+**Stín se nemění:** měří výběr nástrojů z celé sady; specialista vidí její podmnožinu, nikdy jiný nástroj.
+
+**Další krok F3:** živé scénáře nad třemi funkcemi (jedna věta → jeden návrh → jedno ano) — až bude agent zapnutý; podle nich doladit pokyny rolí. Oddělené smyčky specialistů (každý svým během) až kdyby jedna smyčka nestačila — dnes by jen prodloužily odpověď hlasu.
+
 ### F4 — Události, dlouhé procesy, Front Desk
 DomainEvent + WorkflowRun; proces nabídky (odeslání → urgence → schválení → záloha → termín); třídění příchozí komunikace s návrhy odpovědí. **Akceptace:** proces přežije redeploy backendu; urgence odejde jen po „ano“ nebo po explicitním automatickém pravidlu.
 

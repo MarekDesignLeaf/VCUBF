@@ -33,6 +33,7 @@
  */
 
 import type { Prisma } from "@prisma/client";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import type { AuthedUser } from "../middleware/auth.js";
@@ -61,8 +62,10 @@ import { validateVoiceActionParameters } from "../lib/voiceActionCatalogue.js";
 import { evaluateEmmaCommand } from "../services/emmaPolicyService.js";
 import { executeApprovedEmmaAction, executeEmmaAction, previewEmmaActionForProposal } from "../services/emmaExecutableActionService.js";
 import { agentMayActFor } from "./agentMode.js";
+import { scopeOf, SPECIALIST_IDS, SPECIALISTS, type SpecialistId, type SpecialistScope } from "./specialists.js";
 import {
   AGENT_FUNCTION_TOOLS,
+  type FunctionTool,
   AGENT_RUN_BUDGET,
   AGENT_TOOLSET_FINGERPRINT,
   argumentsFingerprint,
@@ -270,14 +273,122 @@ export function describeActionStep(action: string, parameters: Record<string, un
   const reviewed = preview ? spokenReview(action, preview, language) : undefined;
   if (reviewed) return withoutQuestion(reviewed);
   const lang = localeOf(language);
+  // The tool twin of the task status command reads the same way.
+  if (action === "set_task_status" && typeof parameters.task_title === "string" && typeof parameters.task_status === "string") {
+    const phrase = commandPhrase({ intent: "change_task_status", entities: { title: parameters.task_title, task_status: parameters.task_status as never } }, lang);
+    if (phrase) return phrase;
+  }
   const fields = Object.entries(parameters)
     .filter(([key, value]) => value !== undefined && key !== "confirmed")
     .map(([key, value]) => `${humanize(key)} ${quoted(value, lang)}`);
   return fields.length ? `${humanize(action)}: ${fields.join(", ")}` : humanize(action);
 }
 
+const TASK_STATUS_WORDS: Record<string, Record<Locale, string>> = {
+  open: { cs: "otevřený", pl: "otwarte", en: "open" },
+  in_progress: { cs: "rozpracovaný", pl: "w toku", en: "in progress" },
+  completed: { cs: "hotový", pl: "zakończone", en: "completed" },
+  cancelled: { cs: "zrušený", pl: "anulowane", en: "cancelled" },
+};
+
+/** How a logged contact happened, in words; the direction is said separately. */
+const CHANNEL_WORDS: Record<string, Record<Locale, string>> = {
+  phone_call: { cs: "hovor", pl: "rozmowa telefoniczna", en: "a call" },
+  email: { cs: "e-mail", pl: "e-mail", en: "an e-mail" },
+  whatsapp: { cs: "zpráva na WhatsAppu", pl: "wiadomość WhatsApp", en: "a WhatsApp message" },
+  sms: { cs: "SMS", pl: "SMS", en: "a text message" },
+  messenger: { cs: "zpráva", pl: "wiadomość", en: "a message" },
+  in_person: { cs: "osobní schůzka", pl: "spotkanie osobiste", en: "a meeting" },
+  other: { cs: "jiný kontakt", pl: "inny kontakt", en: "another contact" },
+};
+
+/** ", e-mail …, telefon …" — only the values the command carries. */
+function contactDetails(lang: Locale, details: { name?: string; email?: string; phone?: string }) {
+  const words = lang === "cs" ? { name: "jméno", email: "e-mail", phone: "telefon" }
+    : lang === "pl" ? { name: "nazwa", email: "e-mail", phone: "telefon" }
+      : { name: "name", email: "email", phone: "phone" };
+  return [
+    details.name ? `${words.name} ${quoted(details.name, lang)}` : "",
+    details.email ? `${words.email} ${details.email}` : "",
+    details.phone ? `${words.phone} ${details.phone}` : "",
+  ].filter(Boolean).join(", ");
+}
+
+/**
+ * A parser command as it is read out: what it will do, in the user's language,
+ * with the values the parser read from it — worded as a noun phrase,
+ * so the same words serve the proposal and, with "– done", the outcome.
+ * Commands without wording are read out literally.
+ */
+function commandPhrase(command: ParsedCommand, lang: Locale): string | undefined {
+  const q = (value: string) => quoted(value, lang);
+  const pick = (cs: string, pl: string, en: string) => (lang === "cs" ? cs : lang === "pl" ? pl : en);
+  const withDetails = (lead: string, details: string) => (details ? `${lead}, ${details}` : lead);
+  switch (command.intent) {
+    case "create_client": {
+      const e = command.entities;
+      return withDetails(pick(`Nový klient ${e.display_name}`, `Nowy klient ${e.display_name}`, `New client ${e.display_name}`), contactDetails(lang, { email: e.email_primary, phone: e.phone_primary }));
+    }
+    case "update_client": {
+      const e = command.entities;
+      const details = contactDetails(lang, { name: e.display_name, email: e.email_primary, phone: e.phone_primary });
+      return `${pick(`Úprava klienta ${e.client_name}`, `Zmiana klienta ${e.client_name}`, `Change to client ${e.client_name}`)}${details ? `: ${details}` : ""}`;
+    }
+    case "create_contact": {
+      const e = command.entities;
+      return withDetails(pick(`Nový kontakt ${e.display_name}`, `Nowy kontakt ${e.display_name}`, `New contact ${e.display_name}`), contactDetails(lang, { email: e.email, phone: e.phone }));
+    }
+    case "update_contact": {
+      const e = command.entities;
+      const details = contactDetails(lang, { name: e.display_name, email: e.email, phone: e.phone });
+      return `${pick(`Úprava kontaktu ${e.contact_name}`, `Zmiana kontaktu ${e.contact_name}`, `Change to contact ${e.contact_name}`)}${details ? `: ${details}` : ""}`;
+    }
+    case "create_lead": {
+      const e = command.entities;
+      const service = e.service_requested ? pick(` na ${q(e.service_requested)}`, ` na ${q(e.service_requested)}`, ` for ${q(e.service_requested)}`) : "";
+      return withDetails(pick(`Nová poptávka ${e.name}${service}`, `Nowe zapytanie ${e.name}${service}`, `New lead ${e.name}${service}`), contactDetails(lang, { email: e.email, phone: e.phone }));
+    }
+    case "convert_lead":
+      return pick(`Převod poptávky ${command.entities.lead_name} na klienta`, `Zamiana zapytania ${command.entities.lead_name} na klienta`, `Lead ${command.entities.lead_name} converted to a client`);
+    case "create_job":
+      return pick(`Nová zakázka ${q(command.entities.job_title)} pro klienta ${command.entities.client_name}`, `Nowe zlecenie ${q(command.entities.job_title)} dla klienta ${command.entities.client_name}`, `New job ${q(command.entities.job_title)} for client ${command.entities.client_name}`);
+    case "change_job_status":
+      return pick(`Zakázka ${q(command.entities.job_title)} do stavu ${q(command.entities.job_status)}`, `Zlecenie ${q(command.entities.job_title)} w stanie ${q(command.entities.job_status)}`, `Job ${q(command.entities.job_title)} set to ${q(command.entities.job_status)}`);
+    case "assign_job":
+      return pick(`Zakázka ${q(command.entities.job_title)} přidělená: ${command.entities.employee_name}`, `Zlecenie ${q(command.entities.job_title)} przydzielone: ${command.entities.employee_name}`, `Job ${q(command.entities.job_title)} assigned to ${command.entities.employee_name}`);
+    case "create_service": {
+      const category = command.entities.category ? pick(`, kategorie ${q(command.entities.category)}`, `, kategoria ${q(command.entities.category)}`, `, category ${q(command.entities.category)}`) : "";
+      return pick(`Nová služba ${q(command.entities.name)}${category}`, `Nowa usługa ${q(command.entities.name)}${category}`, `New service ${q(command.entities.name)}${category}`);
+    }
+    case "create_task": {
+      const e = command.entities;
+      const who = e.employee_name ? pick(` pro ${e.employee_name}`, ` dla ${e.employee_name}`, ` for ${e.employee_name}`) : "";
+      const due = e.due_at ? pick(`, termín ${e.due_at}`, `, termin ${e.due_at}`, `, due ${e.due_at}`) : "";
+      return pick(`Nový úkol ${q(e.title)}${who}${due}`, `Nowe zadanie ${q(e.title)}${who}${due}`, `New task ${q(e.title)}${who}${due}`);
+    }
+    case "change_task_status": {
+      const status = TASK_STATUS_WORDS[command.entities.task_status]?.[lang] ?? command.entities.task_status;
+      return pick(`Úkol ${q(command.entities.title)} do stavu ${status}`, `Zadanie ${q(command.entities.title)} w stanie ${status}`, `Task ${q(command.entities.title)} set to ${status}`);
+    }
+    case "log_communication": {
+      const e = command.entities;
+      const channel = CHANNEL_WORDS[e.channel]?.[lang] ?? e.channel;
+      const inbound = e.direction === "inbound";
+      return pick(
+        `Záznam: ${channel} ${inbound ? "od klienta" : "klientovi"} ${e.client_name}: ${q(e.summary)}`,
+        `Zapis: ${channel} ${inbound ? "od klienta" : "do klienta"} ${e.client_name}: ${q(e.summary)}`,
+        `Record of ${channel} ${inbound ? "from" : "to"} client ${e.client_name}: ${q(e.summary)}`,
+      );
+    }
+    default:
+      return undefined;
+  }
+}
+
 export function describeCommandStep(command: string, language: string): string {
   const lang = localeOf(language);
+  const phrase = commandPhrase(parseTextCommand(command, CANONICAL_COMMAND), lang);
+  if (phrase) return phrase;
   const lead = lang === "cs" ? "příkaz" : lang === "pl" ? "polecenie" : "command";
   return `${lead} ${quoted(command, lang)}`;
 }
@@ -385,7 +496,7 @@ function agentOffMessage(lang: Locale) {
 // ---------------------------------------------------------------------------
 // Planning: reads run, changes are collected.
 
-type CallUse = "read" | "step" | "refused" | "invalid";
+type CallUse = "route" | "read" | "step" | "refused" | "invalid";
 
 /** One tool call as recorded on the agent run: never its arguments, only their fingerprint (D4). */
 interface CallRecord {
@@ -400,6 +511,10 @@ interface CallRecord {
 interface PlanState {
   user: AuthedUser;
   language: string;
+  /** The specialists' tools when the orchestrator chose roles; undefined plans with the whole catalogue. */
+  scope?: SpecialistScope;
+  /** How the orchestrator routed the request, recorded ahead of the calls. */
+  route?: CallRecord;
   /** No tool runs after this (epoch milliseconds). */
   deadline: number;
   steps: ProposalStep[];
@@ -453,6 +568,12 @@ async function handleAction(
     record(state, { ...call, key, valid: true, use: "refused" }, fingerprint);
     state.leftOut.push(humanize(action));
     return "This tool is never part of a proposal: an administrator does it directly. Do not call it again.";
+  }
+  if (state.scope && !state.scope.tools.has(action)) {
+    // Outside the chosen roles: refused, and named, so the user hears it is not part of the proposal.
+    record(state, { ...call, key, valid: true, use: "refused" }, fingerprint);
+    state.leftOut.push(humanize(action));
+    return "That tool is not available for this request. Use only the tools you are shown.";
   }
   const validated = validateVoiceActionParameters(action, parameters);
   if (!validated.success) {
@@ -511,6 +632,11 @@ async function handleCommand(state: PlanState, canonical: string, command: Parse
   if (isApprovalTurn(command.intent)) {
     record(state, { ...call, valid: true, use: "refused" }, fingerprint);
     return "Approvals and cancellations come from the user, never from a tool call.";
+  }
+  if (state.scope && !state.scope.intents.has(command.intent)) {
+    record(state, { ...call, valid: true, use: "refused" }, fingerprint);
+    if (!isReadCommand(command.intent)) state.leftOut.push(humanize(command.intent));
+    return "That command is not available for this request. Use only the commands listed for it.";
   }
   if (isReadCommand(command.intent)) {
     const decision = await evaluateEmmaCommand(state.user, command);
@@ -573,7 +699,31 @@ async function handleCall(state: PlanState, name: string, rawArguments: string):
   return handleAction(state, tool.name, args, { tool: name, kind: tool.kind }, fingerprint);
 }
 
-function actingInstructions(language: string) {
+/** The command bridge as a role sees it: only the role's canonical forms. */
+function scopedBridge(forms: readonly string[]): FunctionTool {
+  const bridge = AGENT_FUNCTION_TOOLS.find((tool) => tool.name === COMMAND_BRIDGE)!;
+  return {
+    ...bridge,
+    description:
+      "Run one Secretary command, written in exactly one of the canonical forms below. Fill the placeholders only with values the user gave " +
+      "or a read returned; keep names and message text exactly as said.\n" + forms.join("\n"),
+  };
+}
+
+function toolsetFingerprintOf(tools: readonly FunctionTool[]): string {
+  return createHash("sha256").update(JSON.stringify(tools)).digest("hex");
+}
+
+/** The tools the model is shown: the chosen roles' tools, or the whole catalogue. */
+export function toolsFor(scope: SpecialistScope | undefined): readonly FunctionTool[] {
+  if (!scope) return AGENT_FUNCTION_TOOLS;
+  return [scopedBridge(scope.forms), ...AGENT_FUNCTION_TOOLS.filter((tool) => scope.tools.has(tool.name))];
+}
+
+function actingInstructions(language: string, scope: SpecialistScope | undefined) {
+  const roles = scope
+    ? `\nFor this request you work as these specialists, with only their tools:\n${scope.instructions}`
+    : "";
   return `You are the planning layer of Secretary, a business operating system. Carry out the user's request with the tools.
 Tools marked read, and ${COMMAND_BRIDGE} with a listing command, run at once and you see what they return: use them to find the exact records a step needs (names, titles, times, addresses, numbers) instead of guessing.
 Every other call changes something and is not run now: it becomes one step of a proposal that the user hears in full and approves with a single yes. Call each changing tool once, in the order the steps should run, all together once you know what they need, with the exact values the user gave or a read returned.
@@ -581,7 +731,102 @@ For a Secretary command, call ${COMMAND_BRIDGE} with one canonical command.
 Never invent names, identifiers, addresses, dates, amounts or message text. Keep names and message text exactly as the user said them; Secretary translates a message into the language it is sent in before the user hears it.
 If something a step needs cannot be found, call no changing tool at all and say in one short sentence what is missing.
 When the request needs no change, answer it in one or two short sentences using only what the reads returned.
-Use at most ${AGENT_ACT_BUDGET.maxCalls} tool calls in total. The user speaks ${language}; answer in that language.`;
+Use at most ${AGENT_ACT_BUDGET.maxCalls} tool calls in total. The user speaks ${language}; answer in that language.${roles}`;
+}
+
+// ---------------------------------------------------------------------------
+// The orchestrator's first decision (F3): which specialists plan the request.
+
+/**
+ * The routing call may use at most this much of the run's time, and never what
+ * the planner needs: with less than a second to spare it is skipped and the
+ * whole catalogue plans.
+ */
+const ROUTE_TIMEOUT_MS = 2_500;
+
+const routeSchema = z.object({ specialists: z.array(z.enum([...SPECIALIST_IDS, "other"])) }).strict();
+
+function routerInstructions() {
+  return `You route a business request to Secretary's specialists. Choose every specialist the request needs, including one that only supplies information (a client's e-mail address or phone number comes from crm).
+${SPECIALIST_IDS.map((id) => `- ${id}: ${SPECIALISTS[id].covers}`).join("\n")}
+- other: anything none of them covers — quotes, invoices, payments, documents, recruitment, employees, photos, the website, services, playbooks, settings and connectors.
+A specialist can do only what its line says; anything else (for example changing a client's details) is other. If any part of the request is "other", include "other". Answer only with the JSON.`;
+}
+
+function outputText(output: ModelOutputItem[] | undefined): string {
+  return (output ?? [])
+    .flatMap((item) => item.content ?? [])
+    .map((part) => (typeof part.text === "string" ? part.text : ""))
+    .join("")
+    .trim();
+}
+
+/**
+ * Choose the roles. A request wholly within the three roles is planned with
+ * only their tools; anything else — "other", nothing chosen, or a routing
+ * call that failed — is planned with the whole catalogue, exactly as before.
+ */
+async function route(state: PlanState, input: AgentInput, deadline: number): Promise<void> {
+  const remaining = deadline - Date.now();
+  if (remaining < 1_000) throw new AgentPlanError("TIMEOUT");
+  const budget = Math.min(ROUTE_TIMEOUT_MS, remaining - AGENT_ACT_BUDGET.minimumTimeMs);
+  if (budget < 1_000) {
+    // Not enough time for both: the planner goes first, with the whole catalogue.
+    state.route = { tool: "choose_specialists", kind: "orchestrator", key: "skipped", valid: true, argumentsFingerprint: argumentsFingerprint(""), use: "route" };
+    return;
+  }
+  const model = modelFor("agent_plan");
+  let raw = "";
+  let chosen: Array<SpecialistId | "other"> | undefined;
+  try {
+    const response = await modelRequest("agent_plan", "/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(budget),
+      body: JSON.stringify({
+        model,
+        store: false,
+        ...(model.startsWith("gpt-5") ? { reasoning: { effort: model.startsWith("gpt-5.4") ? "none" : "minimal" } } : {}),
+        max_output_tokens: 100,
+        instructions: routerInstructions(),
+        input: [...input.history, { role: "user", content: input.text }],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "specialists",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: { specialists: { type: "array", items: { type: "string", enum: [...SPECIALIST_IDS, "other"] } } },
+              required: ["specialists"],
+              additionalProperties: false,
+            },
+          },
+        },
+      }),
+    });
+    if (response.ok) {
+      const body = (await response.json()) as { output?: ModelOutputItem[]; usage?: { input_tokens?: number; output_tokens?: number } };
+      recordUsage("agent_plan", body.usage);
+      state.tokensIn += typeof body.usage?.input_tokens === "number" ? body.usage.input_tokens : 0;
+      state.tokensOut += typeof body.usage?.output_tokens === "number" ? body.usage.output_tokens : 0;
+      raw = outputText(body.output);
+      const parsed = routeSchema.safeParse(JSON.parse(raw));
+      if (parsed.success) chosen = parsed.data.specialists;
+    }
+  } catch {
+    // Routing is an optimisation of the tool set, never a gate: without it the whole catalogue plans.
+  }
+  const roles = chosen && chosen.length > 0 && !chosen.includes("other") ? (chosen as SpecialistId[]) : undefined;
+  state.scope = roles ? scopeOf(roles) : undefined;
+  state.route = {
+    tool: "choose_specialists",
+    kind: "orchestrator",
+    key: state.scope ? state.scope.specialists.join("+") : "general",
+    valid: chosen !== undefined,
+    argumentsFingerprint: argumentsFingerprint(raw),
+    use: "route",
+  };
 }
 
 interface ModelOutputItem {
@@ -609,9 +854,9 @@ async function plan(state: PlanState, input: AgentInput, deadline: number): Prom
         store: false,
         ...(model.startsWith("gpt-5") ? { reasoning: { effort: model.startsWith("gpt-5.4") ? "none" : "minimal" } } : {}),
         max_output_tokens: AGENT_ACT_BUDGET.maxOutputTokens,
-        instructions: actingInstructions(input.language),
+        instructions: actingInstructions(input.language, state.scope),
         input: [...input.history, { role: "user", content: input.text }, ...items],
-        tools: AGENT_FUNCTION_TOOLS,
+        tools: toolsFor(state.scope),
         tool_choice: "auto",
         parallel_tool_calls: true,
       }),
@@ -709,13 +954,15 @@ async function recordRun(
         inputFingerprint: requestFingerprint(input.text),
         catalogueVersion: TOOL_CATALOGUE_VERSION,
         catalogueFingerprint: TOOL_CATALOGUE_FINGERPRINT,
-        toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT,
+        // What this run was actually shown: a specialist plan sees a subset.
+        toolsetFingerprint: state.scope ? toolsetFingerprintOf(toolsFor(state.scope)) : AGENT_TOOLSET_FINGERPRINT,
         build: buildId(),
         model: modelFor("agent_plan"),
         status: outcome.status,
         errorCode: outcome.errorCode ?? null,
         steps: state.calls.length,
-        proposedTools: state.calls as unknown as Prisma.InputJsonValue,
+        // The routing decision first, then every call (the route is not a call and not counted in steps).
+        proposedTools: [...(state.route ? [state.route] : []), ...state.calls] as unknown as Prisma.InputJsonValue,
         parserIntent: "assistant_plan",
         parserAction: null,
         // Not compared with anything: a plan has no parser reference. Errors
@@ -747,6 +994,7 @@ export async function proposeWithAgent(input: AgentInput): Promise<AgentOutcome>
 
   let answer: string | undefined;
   try {
+    await route(state, input, deadline);
     ({ answer } = await plan(state, input, deadline));
   } catch (error) {
     const code = error instanceof AgentPlanError
@@ -786,7 +1034,7 @@ export async function proposeWithAgent(input: AgentInput): Promise<AgentOutcome>
     userId: input.user.id,
     actionName: EXECUTE_AGENT_PROPOSAL_ACTION.actionName,
     interpretedIntent: "agent_proposal",
-    inputPayload: { fingerprint, steps: steps.map(stepSummary), leftOut: [...new Set(state.leftOut)] },
+    inputPayload: { fingerprint, specialists: state.scope?.specialists ?? "general", steps: steps.map(stepSummary), leftOut: [...new Set(state.leftOut)] },
     riskLevel: EXECUTE_AGENT_PROPOSAL_ACTION.riskLevel,
     confirmationRequired: true,
     confirmed: false,
