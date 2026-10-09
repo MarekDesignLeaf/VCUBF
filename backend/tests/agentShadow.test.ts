@@ -5,6 +5,7 @@ import { createServer } from "../src/server.js";
 import { prisma } from "../src/db.js";
 import {
   AGENT_RUN_BUDGET,
+  AGENT_TOOLSET_FINGERPRINT,
   compareWithParser,
   observeShadow,
   settleShadowRuns,
@@ -286,6 +287,7 @@ describe("agent in shadow (F1)", () => {
     assert.deepEqual(summary.body.byLanguage["cs-CZ"].byAgreement, { mismatch: 1 });
     assert.equal(summary.body.byLanguage["cs-CZ"].agreementRate, 0);
     assert.deepEqual(summary.body.acceptance.acceptedLanguages, []);
+    assert.ok(summary.body.byLanguage["en-GB"].unmet.length > 0);
     assert.equal(summary.body.cohort.model, "gpt-5.4-mini");
     assert.equal(summary.body.cohort.build, buildId());
     assert.equal(counted.build, buildId());
@@ -294,6 +296,48 @@ describe("agent in shadow (F1)", () => {
     const worker = await loginAs("worker@test.local");
     const denied = await request(app).get("/audit/agent-shadow").set("Authorization", `Bearer ${worker}`);
     assert.equal(denied.status, 403);
+  });
+
+  it("a language is accepted only with enough agreement on real actions and few planner errors", async () => {
+    const template = {
+      companyId: (await prisma.company.findFirstOrThrow()).id,
+      userId: (await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } })).id,
+      mode: "shadow",
+      channel: "text",
+      inputFingerprint: "f",
+      catalogueVersion: "1.0.0",
+      catalogueFingerprint: "c",
+      toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT,
+      build: buildId(),
+      model: "gpt-5.4-mini",
+      status: "completed",
+      steps: 0,
+      proposedTools: [],
+      durationMs: 1,
+    };
+    const runs = (language: string, count: number, agreement: string, parserAction: string | null) =>
+      Array.from({ length: count }, () => ({ ...template, language, agreement, parserIntent: parserAction ?? "assistant_reply", parserAction }));
+    await prisma.agentRun.createMany({
+      data: [
+        // English: a planner that never acts — 95 conversations agree, 5 real commands are missed.
+        ...runs("en-GB", 95, "both_none", null),
+        ...runs("en-GB", 5, "parser_only", "create_job"),
+        // Polish: excellent agreement, but the planner fails on a third of all requests.
+        ...runs("pl-PL", 60, "match", "create_job"),
+        ...runs("pl-PL", 50, "both_none", null),
+        ...runs("pl-PL", 55, "error", "create_job"),
+        // Czech: enough real actions agreed, few errors.
+        ...runs("cs-CZ", 60, "match", "create_job"),
+        ...runs("cs-CZ", 2, "mismatch", "create_job"),
+        ...runs("cs-CZ", 40, "both_none", null),
+        ...runs("cs-CZ", 1, "error", "create_job"),
+      ],
+    });
+    const summary = await request(app).get("/audit/agent-shadow").set("Authorization", `Bearer ${token}`);
+    assert.equal(summary.status, 200);
+    assert.deepEqual(summary.body.acceptance.acceptedLanguages, ["cs-CZ"]);
+    assert.ok(summary.body.byLanguage["en-GB"].unmet.includes("agreement on actions below 95 %"), JSON.stringify(summary.body.byLanguage["en-GB"]));
+    assert.ok(summary.body.byLanguage["pl-PL"].unmet.includes("planner errors above 5 %"), JSON.stringify(summary.body.byLanguage["pl-PL"]));
   });
 
   it("compares proposals with the parser outcome", () => {

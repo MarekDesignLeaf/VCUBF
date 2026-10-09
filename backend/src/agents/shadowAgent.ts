@@ -415,12 +415,59 @@ const AGREEING: ShadowAgreement[] = ["match", "both_none"];
  * build therefore starts from zero, and acceptance needs its 100 compared
  * requests on one build. Earlier observations never vouch for unmeasured code.
  */
+/**
+ * The acceptance bar for one language. The masterplan's ≥ 95 % on ≥ 100
+ * compared requests, made strict enough to decide a switch-on:
+ *  - agreement where the parser actually acted is judged on its own, so a
+ *    planner that never proposes anything cannot pass on conversation alone;
+ *  - planner errors are bounded, so a planner unavailable for hard requests
+ *    cannot pass on the easy ones that happened to complete.
+ */
+export const AGENT_ACCEPTANCE = {
+  requiredRate: 0.95,
+  requiredSample: 100,
+  requiredActionableRate: 0.95,
+  requiredActionableSample: 50,
+  maxErrorRate: 0.05,
+} as const;
+
+type Tally = {
+  total: number;
+  errors: number;
+  parserRejected: number;
+  agreeing: number;
+  actionableCompared: number;
+  actionableMatches: number;
+  byAgreement: Record<string, number>;
+};
+
+function emptyTally(): Tally {
+  return { total: 0, errors: 0, parserRejected: 0, agreeing: 0, actionableCompared: 0, actionableMatches: 0, byAgreement: {} };
+}
+
+function verdict(bucket: Tally) {
+  const compared = bucket.total - bucket.errors - bucket.parserRejected;
+  const rate = compared > 0 ? bucket.agreeing / compared : null;
+  const actionableRate = bucket.actionableCompared > 0 ? bucket.actionableMatches / bucket.actionableCompared : null;
+  const attempted = bucket.total - bucket.parserRejected;
+  const errorRate = attempted > 0 ? bucket.errors / attempted : null;
+  const unmet: string[] = [];
+  if (compared < AGENT_ACCEPTANCE.requiredSample) unmet.push(`fewer than ${AGENT_ACCEPTANCE.requiredSample} compared requests`);
+  if (rate === null || rate < AGENT_ACCEPTANCE.requiredRate) unmet.push("overall agreement below 95 %");
+  if (bucket.actionableCompared < AGENT_ACCEPTANCE.requiredActionableSample) {
+    unmet.push(`fewer than ${AGENT_ACCEPTANCE.requiredActionableSample} compared requests the parser acted on`);
+  }
+  if (actionableRate === null || actionableRate < AGENT_ACCEPTANCE.requiredActionableRate) unmet.push("agreement on actions below 95 %");
+  if (errorRate === null || errorRate > AGENT_ACCEPTANCE.maxErrorRate) unmet.push("planner errors above 5 %");
+  return { compared, rate, actionableCompared: bucket.actionableCompared, actionableRate, errorRate, met: unmet.length === 0, unmet };
+}
+
 export async function shadowSummary(companyId: string, since?: Date) {
   const cohort = { model: modelFor("agent_plan"), toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT, build: buildId() };
   const scope = { companyId, mode: "shadow", ...(since ? { createdAt: { gte: since } } : {}) };
   const [groups, allRuns] = await Promise.all([
     prisma.agentRun.groupBy({
-      by: ["language", "agreement"],
+      by: ["language", "agreement", "parserAction"],
       where: { ...scope, ...cohort },
       _count: { _all: true },
       _sum: { tokensIn: true, tokensOut: true },
@@ -428,39 +475,39 @@ export async function shadowSummary(companyId: string, since?: Date) {
     prisma.agentRun.count({ where: scope }),
   ]);
 
-  const tally = () => ({ total: 0, errors: 0, parserRejected: 0, agreeing: 0, byAgreement: {} as Record<string, number> });
-  const overall = tally();
-  const perLanguage = new Map<string, ReturnType<typeof tally>>();
+  const overall = emptyTally();
+  const perLanguage = new Map<string, Tally>();
   let tokensIn = 0;
   let tokensOut = 0;
   for (const group of groups) {
     const count = group._count._all;
+    const agreement = group.agreement as ShadowAgreement;
     tokensIn += group._sum.tokensIn ?? 0;
     tokensOut += group._sum.tokensOut ?? 0;
-    const language = perLanguage.get(group.language) ?? tally();
+    const language = perLanguage.get(group.language) ?? emptyTally();
     perLanguage.set(group.language, language);
     for (const bucket of [overall, language]) {
       bucket.total += count;
-      bucket.byAgreement[group.agreement] = (bucket.byAgreement[group.agreement] ?? 0) + count;
-      if (group.agreement === "error") bucket.errors += count;
-      if (group.agreement === "parser_rejected") bucket.parserRejected += count;
-      if (AGREEING.includes(group.agreement as ShadowAgreement)) bucket.agreeing += count;
+      bucket.byAgreement[agreement] = (bucket.byAgreement[agreement] ?? 0) + count;
+      if (agreement === "error") bucket.errors += count;
+      if (agreement === "parser_rejected") bucket.parserRejected += count;
+      if (AGREEING.includes(agreement)) bucket.agreeing += count;
+      // Requests the parser acted on, judged on their own.
+      if (group.parserAction !== null && agreement !== "error" && agreement !== "parser_rejected") {
+        bucket.actionableCompared += count;
+        if (agreement === "match") bucket.actionableMatches += count;
+      }
     }
   }
-  const REQUIRED_RATE = 0.95;
-  const REQUIRED_SAMPLE = 100;
-  const verdict = (bucket: ReturnType<typeof tally>) => {
-    const compared = bucket.total - bucket.errors - bucket.parserRejected;
-    const rate = compared > 0 ? bucket.agreeing / compared : null;
-    return { compared, rate, met: compared >= REQUIRED_SAMPLE && rate !== null && rate >= REQUIRED_RATE };
-  };
   // The planner is prompted in the user's language, so each language earns
   // acceptance on its own: English agreement never vouches for Czech.
   const byLanguage = Object.fromEntries(
-    [...perLanguage.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([language, bucket]) => {
-      const { compared, rate, met } = verdict(bucket);
-      return [language, { total: bucket.total, compared, errors: bucket.errors, parserRejected: bucket.parserRejected, byAgreement: bucket.byAgreement, agreementRate: rate, met }];
-    }),
+    [...perLanguage.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([language, bucket]) => [
+        language,
+        { total: bucket.total, errors: bucket.errors, parserRejected: bucket.parserRejected, byAgreement: bucket.byAgreement, ...verdict(bucket) },
+      ]),
   );
   const all = verdict(overall);
   return {
@@ -471,14 +518,15 @@ export async function shadowSummary(companyId: string, since?: Date) {
     parserRejected: overall.parserRejected,
     byAgreement: overall.byAgreement,
     agreementRate: all.rate,
+    actionableAgreementRate: all.actionableRate,
+    errorRate: all.errorRate,
     byLanguage,
     tokensIn,
     tokensOut,
     /** Runs of earlier models, tool sets or builds: shown, never counted. */
     otherCohortRuns: allRuns - overall.total,
     acceptance: {
-      requiredRate: REQUIRED_RATE,
-      requiredSample: REQUIRED_SAMPLE,
+      ...AGENT_ACCEPTANCE,
       /** Each language is accepted on its own; only these may be switched on. */
       acceptedLanguages: Object.entries(byLanguage).filter(([, result]) => result.met).map(([language]) => language),
     },
