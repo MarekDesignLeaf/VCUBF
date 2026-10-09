@@ -82,7 +82,7 @@ describe("agent proposal steps (F2b)", () => {
     const english = proposalMessage([jobStep, statusStep], [], "en-GB");
     assert.equal(
       english,
-      "I propose 2 steps: 1. command “create job Hedge trim for Petra Novak”. 2. set task status: task title “Call Petra”, task status “completed”. Shall I carry out all of them?",
+      "I propose 2 steps: 1. New job “Hedge trim” for client Petra Novak. 2. Task “Call Petra” set to completed. Shall I carry out all of them?",
     );
     const czech = proposalMessage([jobStep], ["disconnect gmail"], "cs-CZ");
     assert.match(czech, /^Navrhuji tento krok: 1\. /);

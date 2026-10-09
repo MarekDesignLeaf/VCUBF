@@ -3,13 +3,15 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import request from "supertest";
 import { createServer } from "../src/server.js";
 import { prisma } from "../src/db.js";
-import { AGENT_TOOLSET_FINGERPRINT } from "../src/agents/shadowAgent.js";
+import { AGENT_FUNCTION_TOOLS, AGENT_TOOLSET_FINGERPRINT } from "../src/agents/shadowAgent.js";
+import { SPECIALISTS } from "../src/agents/specialists.js";
 import { buildId } from "../src/lib/buildInfo.js";
 import { modelFor } from "../src/lib/modelGateway.js";
 import { resetDb, seedCompanyAndAdmin, TEST_COMPANY_ID } from "./setup.js";
 
-// The agent acting — masterplan F2b. A multi-step request becomes one
+// The agent acting — masterplan F2b and F3. A multi-step request becomes one
 // proposal, read out in full, carried out by one yes; nothing changes before it.
+// The orchestrator first chooses the specialists, and plans with their tools only.
 
 const app = createServer();
 
@@ -21,6 +23,9 @@ let interpretationCalls = 0;
 let agentRounds: Round[] = [];
 let agentStatus = 200;
 let agentRequests: Array<Record<string, any>> = [];
+/** What the orchestrator's routing call answers; "other" plans with the whole catalogue. */
+let routing: unknown = { specialists: ["other"] };
+let routingRequests = 0;
 
 const originalFetch = globalThis.fetch;
 const originalKey = process.env.OPENAI_API_KEY;
@@ -47,6 +52,11 @@ function installModel() {
         output: round.map((call, index) => ({ type: "function_call", id: `fc_${agentRequests.length}_${index}`, call_id: `call_${agentRequests.length}_${index}`, ...call })),
         usage,
       });
+    }
+    // The orchestrator's routing call asks for the "specialists" format.
+    if (body.text?.format?.name === "specialists") {
+      routingRequests += 1;
+      return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(routing) }] }], usage: { input_tokens: 400, output_tokens: 10 } });
     }
     interpretationCalls += 1;
     return Response.json({ output: [{ content: [{ text: JSON.stringify(interpretation) }] }] });
@@ -90,6 +100,8 @@ describe("agent proposals (F2b)", () => {
     agentRounds = [];
     agentStatus = 200;
     agentRequests = [];
+    routing = { specialists: ["other"] };
+    routingRequests = 0;
   });
 
   after(async () => {
@@ -112,7 +124,7 @@ describe("agent proposals (F2b)", () => {
     assert.equal(proposed.body.intent, "agent_proposal");
     assert.equal(
       proposed.body.message,
-      "I propose 2 steps: 1. command “create job Hedge trim for Petra Novak”. 2. command “create task Call Petra Novak about the hedge”. Shall I carry out all of them?",
+      "I propose 2 steps: 1. New job “Hedge trim” for client Petra Novak. 2. New task “Call Petra Novak about the hedge”. Shall I carry out all of them?",
     );
     assert.equal(proposed.body.assistantMessage, proposed.body.message);
     assert.equal(proposed.body.data.steps.length, 2);
@@ -132,7 +144,8 @@ describe("agent proposals (F2b)", () => {
     const run = await prisma.agentRun.findFirstOrThrow({ where: { mode: "proposal" }, orderBy: { createdAt: "desc" } });
     assert.equal(run.status, "completed");
     assert.equal(run.agreement, "not_compared");
-    assert.deepEqual((run.proposedTools as Array<{ use: string }>).map((call) => call.use), ["read", "step", "step"]);
+    assert.deepEqual((run.proposedTools as Array<{ use: string }>).map((call) => call.use), ["route", "read", "step", "step"]);
+    assert.equal((run.proposedTools as Array<{ key: string }>)[0].key, "general", "\"other\" plans with the whole catalogue");
     assert.doesNotMatch(JSON.stringify(run), /Petra|hedge/i);
     const prepared = await prisma.auditLog.findFirstOrThrow({ where: { actionName: "execute_agent_proposal", interpretedIntent: "agent_proposal" } });
     assert.equal(prepared.errorMessage, "CONFIRMATION_REQUIRED");
@@ -145,7 +158,7 @@ describe("agent proposals (F2b)", () => {
     assert.equal(done.body.ok, true);
     assert.equal(
       done.body.message,
-      "Done. 1. command “create job Hedge trim for Petra Novak” – done. 2. command “create task Call Petra Novak about the hedge” – done.",
+      "Done. 1. New job “Hedge trim” for client Petra Novak – done. 2. New task “Call Petra Novak about the hedge” – done.",
     );
     assert.equal(interpretationCalls, interpretationsBefore, "a yes is not interpreted by the model");
     assert.equal(agentRequests.length, 2, "a yes is not planned again");
@@ -183,10 +196,10 @@ describe("agent proposals (F2b)", () => {
     assert.equal(proposed.status, 409, JSON.stringify(proposed.body));
     assert.equal(
       proposed.body.message,
-      "I propose one step: 1. command “create task Check the invoices”. I left out of the proposal: disconnect gmail, disable connector source, run playbook. You would do that yourself. Shall I carry it out?",
+      "I propose one step: 1. New task “Check the invoices”. I left out of the proposal: disconnect gmail, disable connector source, run playbook. You would do that yourself. Shall I carry it out?",
     );
     const run = await prisma.agentRun.findFirstOrThrow({ where: { mode: "proposal" }, orderBy: { createdAt: "desc" } });
-    assert.deepEqual((run.proposedTools as Array<{ use: string }>).map((call) => call.use), ["refused", "refused", "refused", "step"]);
+    assert.deepEqual((run.proposedTools as Array<{ use: string }>).map((call) => call.use), ["route", "refused", "refused", "refused", "step"]);
     const cancelled = await say("no", proposed.body.pendingReview.id);
     assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
     assert.equal(cancelled.body.intent, "cancel_agent_proposal");
@@ -202,7 +215,7 @@ describe("agent proposals (F2b)", () => {
     const done = await say("yes", proposed.body.pendingReview.id);
     assert.equal(done.body.ok, false, JSON.stringify(done.body));
     assert.equal(done.status, 404);
-    assert.match(done.body.message, /^I carried out 1 of 3 steps\. 1\. command “create task Buy fuel” – done\. 2\. Failed: No job matching "Missing job"\. I did not carry out the remaining step\.$/);
+    assert.match(done.body.message, /^I carried out 1 of 3 steps\. 1\. New task “Buy fuel” – done\. 2\. Failed: No job matching "Missing job"\. I did not carry out the remaining step\.$/);
     assert.equal(await prisma.task.count({ where: { title: "Buy fuel" } }), 1);
     assert.equal(await prisma.task.count({ where: { title: "Wash the van" } }), 0);
     assert.equal((await latestProposal())?.status, "failed");
@@ -281,6 +294,53 @@ describe("agent proposals (F2b)", () => {
     assert.equal((await prisma.voicePendingAction.count({ where: { status: "pending" } })), 0);
     const run = await prisma.agentRun.findFirstOrThrow({ where: { mode: "proposal" }, orderBy: { createdAt: "desc" } });
     assert.equal(run.errorCode, "PROPOSAL_TOO_LONG");
+  });
+
+  it("the orchestrator plans with only the chosen specialists' tools, and refuses the rest (F3)", async () => {
+    routing = { specialists: ["scheduling"] };
+    agentRounds = [[
+      // Not a scheduling tool, nor a scheduling command: refused, whatever the model asks for.
+      { name: "send_email", arguments: JSON.stringify({ to: ["petra@example.com"], subject: "Fence", body: "We are coming on Friday." }) },
+      command("convert lead Petra Novak"),
+      // Customers can be read by every role.
+      command("list clients"),
+      command("create job Fence repair for Petra Novak"),
+    ]];
+    const proposed = await say("Book the fence repair for Petra");
+    assert.equal(proposed.status, 409, JSON.stringify(proposed.body));
+    assert.equal(proposed.body.message, "I propose one step: 1. New job “Fence repair” for client Petra Novak. Shall I carry it out?");
+    assert.equal(routingRequests, 1);
+
+    const shown = (agentRequests[0].tools as Array<{ name: string; description: string }>);
+    assert.deepEqual(shown.map((tool) => tool.name).sort(), ["run_command", ...SPECIALISTS.scheduling.tools].sort());
+    assert.match(shown[0].description, /show calendar today/);
+    assert.doesNotMatch(shown[0].description, /send email to|convert lead|create client/);
+    assert.match(agentRequests[0].instructions, /Scheduling: read the calendar/);
+
+    const run = await prisma.agentRun.findFirstOrThrow({ where: { mode: "proposal" }, orderBy: { createdAt: "desc" } });
+    const calls = run.proposedTools as Array<{ use: string; key: string; tool: string }>;
+    assert.deepEqual(calls.map((call) => call.use), ["route", "refused", "refused", "read", "step"]);
+    assert.equal(calls[0].key, "scheduling");
+    const prepared = await prisma.auditLog.findFirstOrThrow({ where: { actionName: "execute_agent_proposal", interpretedIntent: "agent_proposal" }, orderBy: { createdAt: "desc" } });
+    assert.deepEqual((prepared.inputPayload as { specialists: string[] }).specialists, ["scheduling"]);
+
+    assert.equal((await say("no", proposed.body.pendingReview.id)).status, 200);
+    assert.equal(await prisma.job.count({ where: { jobTitle: "Fence repair" } }), 0);
+  });
+
+  it("a request that is partly outside the roles, or a routing failure, plans with the whole catalogue", async () => {
+    for (const answer of [{ specialists: ["crm", "other"] }, { specialists: [] }, "not json"]) {
+      routing = answer;
+      agentRequests = [];
+      agentRounds = [{ text: "Nothing to change." }];
+      const reply = await say("Who is Petra and what did we quote her?");
+      assert.equal(reply.status, 200, JSON.stringify(reply.body));
+      assert.equal(agentRequests[0].tools.length, AGENT_FUNCTION_TOOLS.length, JSON.stringify(answer));
+      const run = await prisma.agentRun.findFirstOrThrow({ where: { mode: "proposal" }, orderBy: { createdAt: "desc" } });
+      const route = (run.proposedTools as Array<{ key: string; valid: boolean }>)[0];
+      assert.equal(route.key, "general");
+      assert.equal(route.valid, answer !== "not json");
+    }
   });
 
   it("a planner failure reads the plan out as before and changes nothing", async () => {

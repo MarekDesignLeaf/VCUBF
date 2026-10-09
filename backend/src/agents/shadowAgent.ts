@@ -52,7 +52,11 @@ export const bridgeArgumentsSchema = z.object({ canonical_command: z.string().tr
 
 export type FunctionTool = { type: "function"; name: string; description: string; parameters: Record<string, unknown> };
 
-/** The tools the agent is shown — the same set in shadow and when acting, so acceptance measures what acts. */
+/**
+ * The tools the agent is shown: the whole set in shadow, and when acting on a
+ * request outside the specialists' roles. A specialist plan (F3) sees a subset
+ * of exactly these tools (specialists.ts), never another tool.
+ */
 export const AGENT_FUNCTION_TOOLS: readonly FunctionTool[] = [
   {
     type: "function",
