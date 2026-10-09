@@ -28,6 +28,7 @@
  *    decision it was shown for.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Prisma } from "@prisma/client";
 import type { z } from "zod";
 import { prisma } from "../db.js";
@@ -64,6 +65,39 @@ export interface ReviewedActionDefinition<Payload> {
    * "completed"). The message queues record "sent".
    */
   completedStatus?: string;
+}
+
+/**
+ * Approval binding (masterplan layer E). A yes should approve the review the
+ * user actually heard, not merely the newest one: with two overlapping
+ * preparations the older preview can be the last one shown. The command layer
+ * runs each request inside this context — carrying the id of the review the
+ * client last displayed, if it sent one — and learns back which review the
+ * request prepared or resolved, to hand the client for its next yes.
+ */
+interface ApprovalBinding {
+  /** The review the client displayed last; a claim of its queue must claim exactly it. */
+  expectedReviewId?: string;
+  /** The review this request put up for a yes. */
+  prepared?: { id: string; actionType: string; expiresAt: Date };
+  /** Whether this request claimed or cancelled a review. */
+  resolved?: boolean;
+}
+
+const approvalBinding = new AsyncLocalStorage<ApprovalBinding>();
+
+/**
+ * Run one request with approval binding. Without an expected review id the
+ * engine behaves exactly as before (the newest review of the queue), so
+ * clients that send none are unaffected.
+ */
+export async function runWithApprovalBinding<T>(
+  expectedReviewId: string | undefined,
+  work: () => Promise<T>,
+): Promise<{ result: T; prepared?: ApprovalBinding["prepared"]; resolved: boolean }> {
+  const binding: ApprovalBinding = { expectedReviewId };
+  const result = await approvalBinding.run(binding, work);
+  return { result, prepared: binding.prepared, resolved: binding.resolved === true };
 }
 
 function scope(user: ActingUser, actionType: string) {
@@ -119,10 +153,10 @@ export async function prepareReviewedAction<Payload>(
   definition: ReviewedActionDefinition<Payload>,
   payload: Payload,
   options: { sourceId?: string; now?: Date } = {}
-): Promise<{ expiresAt: Date }> {
+): Promise<{ expiresAt: Date; id: string }> {
   const now = options.now ?? new Date();
   const expiresAt = new Date(now.getTime() + definition.lifetimeMs);
-  await prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     // Two overlapping preparations must not both leave a pending review: under
     // READ COMMITTED both cancel-sweeps can run before either insert is
     // visible. A transaction-scoped advisory lock on (user, action type)
@@ -134,16 +168,19 @@ export async function prepareReviewedAction<Payload>(
       where: { ...scope(user, definition.actionType), status: "pending" },
       data: { status: definition.replacedStatus ?? "cancelled", payload: Prisma.DbNull, resolvedAt: now },
     });
-    await tx.voicePendingAction.create({
+    return tx.voicePendingAction.create({
       data: {
         ...scope(user, definition.actionType),
         payload: payload as Prisma.InputJsonValue,
         expiresAt,
         ...(options.sourceId ? { sourceId: options.sourceId } : {}),
       },
+      select: { id: true },
     });
   });
-  return { expiresAt };
+  const binding = approvalBinding.getStore();
+  if (binding) binding.prepared = { id: created.id, actionType: definition.actionType, expiresAt };
+  return { expiresAt, id: created.id };
 }
 
 export type ClaimedReviewedAction<Payload> =
@@ -167,6 +204,11 @@ export type ClaimedReviewedAction<Payload> =
        * be prepared again.
        */
       reason: "none" | "raced" | "invalid";
+      /**
+       * For "raced": the review the user was shown has been replaced by a
+       * newer one of the same queue, which this yes does not approve.
+       */
+      superseded?: true;
       /**
        * For "invalid" because the stored payload no longer parses: what the
        * schema rejected, so the owning service can keep its own wording.
@@ -221,6 +263,21 @@ export async function claimReviewedAction<Payload>(
       return { ok: false, reason: seen && seen.status !== "expired" ? "raced" : "none" } as const;
     }
 
+    // Approval binding: when the client says which review it showed, a yes
+    // approves that review and nothing else. A newer review of the same queue
+    // has not been heard, so it is not executed; the user is told the one they
+    // heard is no longer waiting. An id from another queue or user binds nothing here.
+    const expectedId = approvalBinding.getStore()?.expectedReviewId;
+    if (expectedId && expectedId !== pending.id) {
+      const expected = await tx.voicePendingAction.findUnique({
+        where: { id: expectedId },
+        select: { companyId: true, userId: true, actionType: true },
+      });
+      if (expected && expected.companyId === user.companyId && expected.userId === user.id && expected.actionType === definition.actionType) {
+        return { ok: false, reason: "raced", superseded: true } as const;
+      }
+    }
+
     // Pre-lock duplicates can share a millisecond createdAt, and a random id
     // is no evidence of which preview the user actually saw last. An
     // ambiguous approval executes nothing (approval binding): the tied
@@ -259,6 +316,12 @@ export async function claimReviewedAction<Payload>(
     });
     return { ok: true, pending } as const;
   });
+  // A claimed review, or one failed as invalid, is no longer waiting: the
+  // client's remembered review is spent.
+  if (outcome.ok || outcome.reason === "invalid") {
+    const binding = approvalBinding.getStore();
+    if (binding) binding.resolved = true;
+  }
   if (!outcome.ok) return outcome;
   const pending = outcome.pending;
 
@@ -291,5 +354,9 @@ export async function cancelReviewedAction(user: ActingUser, actionType: string,
     where: { ...scope(user, actionType), status: "pending" },
     data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
   });
+  if (cancelled.count > 0) {
+    const binding = approvalBinding.getStore();
+    if (binding) binding.resolved = true;
+  }
   return cancelled.count > 0;
 }

@@ -45,6 +45,21 @@ function refreshSessionOnce(): Promise<string | null> {
   return pendingRefresh;
 }
 
+/**
+ * Approval binding: the review this client showed last. Every command carries
+ * it, so a "yes" approves exactly the review the user heard — never a newer
+ * one prepared meanwhile (by an overlapping request or another device). The
+ * backend says what to remember: pendingReview with an id when a review was
+ * put up, null when the review was claimed or cancelled, absent otherwise.
+ */
+let shownReviewId: string | undefined;
+
+function rememberReview(answer: unknown) {
+  if (!answer || typeof answer !== "object" || !("pendingReview" in answer)) return;
+  const pending = (answer as { pendingReview?: { id?: unknown } | null }).pendingReview;
+  shownReviewId = pending && typeof pending.id === "string" ? pending.id : undefined;
+}
+
 async function request<T>(path: string, options: RequestInit = {}, mayRetry = true): Promise<T> {
   const token = getToken();
   const res = await fetch(`${API_URL}${path}`, {
@@ -1673,6 +1688,12 @@ export interface VoiceConversation {
   messages: VoiceConversationMessage[];
 }
 
+/** A review waiting for a yes, as the backend hands it to the client to remember. */
+export interface PendingReview {
+  id: string;
+  expiresAt: string;
+}
+
 export interface MobileAssistantResponse {
   ok: boolean;
   kind: "action" | "reply" | "clarification" | "plan" | "error";
@@ -1682,6 +1703,7 @@ export interface MobileAssistantResponse {
   message?: string;
   assistantMessage?: string;
   uiAction?: VoiceUiAction;
+  pendingReview?: PendingReview | null;
 }
 
 export interface SecretaryNavigationChild {
@@ -2362,27 +2384,39 @@ export const api = {
       remove: (id: string) =>
         request<{ ok: boolean }>(`/command/aliases/${id}`, { method: "DELETE" }),
     },
-    text: (text: string, inputMethod: "text" | "voice_transcript" = "text") =>
-      request<{
-        intent: string;
-        interpreted: unknown;
-        ok: boolean;
-        data?: unknown;
-        error?: string;
-        message?: string;
-        uiAction?: VoiceUiAction;
-      }>("/command/text", {
-        method: "POST",
-        body: JSON.stringify({ text, input_method: inputMethod }),
-      }),
+    text: async (text: string, inputMethod: "text" | "voice_transcript" = "text") => {
+      try {
+        const answer = await request<{
+          intent: string;
+          interpreted: unknown;
+          ok: boolean;
+          data?: unknown;
+          error?: string;
+          message?: string;
+          uiAction?: VoiceUiAction;
+          pendingReview?: PendingReview | null;
+        }>("/command/text", {
+          method: "POST",
+          body: JSON.stringify({ text, input_method: inputMethod, ...(shownReviewId ? { review_id: shownReviewId } : {}) }),
+        });
+        rememberReview(answer);
+        return answer;
+      } catch (error) {
+        if (error instanceof ApiError) rememberReview(error.details);
+        throw error;
+      }
+    },
     assistant: async (text: string, language: AppLanguage, history: Array<{ role: "user" | "assistant"; content: string }>, signal?: AbortSignal) => {
       try {
-        return await request<MobileAssistantResponse>("/command/assistant", {
+        const answer = await request<MobileAssistantResponse>("/command/assistant", {
           method: "POST",
-          body: JSON.stringify({ text, input_method: "voice_transcript", language, history }),
+          body: JSON.stringify({ text, input_method: "voice_transcript", language, history, ...(shownReviewId ? { review_id: shownReviewId } : {}) }),
           signal,
         });
+        rememberReview(answer);
+        return answer;
       } catch (error) {
+        if (error instanceof ApiError) rememberReview(error.details);
         // A review waiting for "yes" (409), a refusal (403) or a missing Gmail
         // authorisation comes back with a non-2xx status and the sentence to say.
         // That is Secretary's answer, not a lost connection: it used to be thrown

@@ -80,6 +80,32 @@ describe("command/text", () => {
     assert.equal(waitingRow.payload, null);
   });
 
+  it("a yes approves the review the client showed, not a newer one it never heard", async () => {
+    const send = (text: string, review_id?: string) =>
+      request(app).post("/command/text").set("Authorization", `Bearer ${adminToken}`).send({ text, ...(review_id ? { review_id } : {}) });
+    const heard = await send("create client Bound Heard, email bound.heard@example.com, phone 07700 900611");
+    assert.equal(heard.status, 202, JSON.stringify(heard.body));
+    const heardId = heard.body.pendingReview?.id;
+    assert.match(heardId, /^[0-9a-f-]{36}$/);
+    const unheard = await send("create client Bound Unheard, email bound.unheard@example.com, phone 07700 900622");
+    const unheardId = unheard.body.pendingReview?.id;
+    assert.ok(unheardId && unheardId !== heardId);
+
+    // The client still shows the first preview: its yes executes nothing.
+    const refused = await send("yes", heardId);
+    assert.equal(refused.status, 409, JSON.stringify(refused.body));
+    assert.equal(refused.body.error, "NO_PENDING_CLIENT_CREATE");
+    assert.equal(refused.body.pendingReview, undefined, "the unheard review is not handed over by a refused yes");
+    assert.equal(await prisma.client.count({ where: { displayName: { in: ["Bound Heard", "Bound Unheard"] } } }), 0);
+
+    // A yes for the review that was shown last creates exactly that client.
+    const approved = await send("yes", unheardId);
+    assert.equal(approved.status, 201, JSON.stringify(approved.body));
+    assert.equal(approved.body.pendingReview, null, "the client's remembered review is spent");
+    assert.equal(await prisma.client.count({ where: { displayName: "Bound Unheard" } }), 1);
+    assert.equal(await prisma.client.count({ where: { displayName: "Bound Heard" } }), 0);
+  });
+
   it("previews and confirms a client via a text command and audits it", async () => {
     const preview = await request(app)
       .post("/command/text")
