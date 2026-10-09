@@ -15,7 +15,7 @@ const ALLOWED_IN_SAFE_MODE = new Set<ParsedCommand["intent"]>([
   "unrecognized",
   // Withdrawing a waiting review only ever removes an action.
   "cancel_execute_action", "cancel_create_client", "cancel_archive_client", "cancel_archive_contact",
-  "cancel_delete_notifications", "cancel_gmail_message", "cancel_whatsapp_message",
+  "cancel_delete_notifications", "cancel_gmail_message", "cancel_whatsapp_message", "cancel_agent_proposal",
   // The speaker's own language and speaking rate; no business data.
   "set_voice_language", "set_speech_rate",
 ]);

@@ -752,6 +752,50 @@ export async function executeEmmaAction(user: AuthedUser, request: EmmaExecutabl
   return result;
 }
 
+/**
+ * One step of an agent proposal (masterplan F2), previewed: what the owning
+ * service would do, exactly as a spoken command would show it — but no review
+ * is put up for it, because the proposal as a whole is the review. Returns the
+ * operation as reviewed (the service's confirmInput when it reshaped it), which
+ * is what the proposal stores and what its yes executes.
+ */
+export async function previewEmmaActionForProposal(
+  user: AuthedUser,
+  request: EmmaExecutableActionRequest,
+): Promise<{ result: ServiceResult<unknown>; reviewed: EmmaExecutableActionRequest }> {
+  const validated = validateVoiceActionParameters(request.action, request.parameters);
+  if (!validated.success) {
+    return { result: fail(400, "VALIDATION_FAILED", validated.message, { issues: validated.issues }), reviewed: request };
+  }
+  const sanitized = { ...request, parameters: without(validated.data, "confirmed") };
+  const result = await executeEmmaActionDirect(user, sanitized, false);
+  const reviewed = !result.ok && result.error === "CONFIRMATION_REQUIRED" ? result.extra?.confirmInput : undefined;
+  return {
+    result,
+    reviewed: reviewed && typeof reviewed === "object" && !Array.isArray(reviewed)
+      ? { ...sanitized, parameters: reviewed as Record<string, unknown> }
+      : sanitized,
+  };
+}
+
+/**
+ * Execute one approved step of an agent proposal. A reviewed step (its action
+ * answers with a preview) runs with the yes it was reviewed for, exactly as
+ * confirming a single reviewed action does; any other step runs as the plain
+ * command would. Parameters are validated again: what no longer validates is
+ * not executed.
+ */
+export async function executeApprovedEmmaAction(
+  user: AuthedUser,
+  request: EmmaExecutableActionRequest,
+  reviewed: boolean,
+): Promise<ServiceResult<unknown>> {
+  const validated = validateVoiceActionParameters(request.action, request.parameters);
+  if (!validated.success) return fail(400, "VALIDATION_FAILED", validated.message, { issues: validated.issues });
+  const parameters = reviewed ? validated.data : without(validated.data, "confirmed");
+  return executeEmmaActionDirect(user, { ...request, parameters }, reviewed);
+}
+
 export async function confirmPendingEmmaAction(user: AuthedUser): Promise<ServiceResult<unknown>> {
   const claimed = await claimReviewedAction(user, EXECUTABLE_ACTION_REVIEW);
   if (!claimed.ok) {

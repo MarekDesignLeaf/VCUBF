@@ -25,7 +25,7 @@ const LEGACY_CAPABILITY_IDS = new Set([
 ]);
 const SAFE_CANCELLATION_INTENTS = new Set<ParsedCommand["intent"]>([
   "cancel_gmail_message", "cancel_whatsapp_message", "cancel_delete_notifications", "cancel_archive_client", "cancel_archive_contact",
-  "cancel_execute_action", "cancel_create_client",
+  "cancel_execute_action", "cancel_create_client", "cancel_agent_proposal",
 ]);
 
 function legacyMatches(legacyId: string, capability: EmmaCapability) {

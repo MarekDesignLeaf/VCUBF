@@ -27,6 +27,7 @@ import * as googleCalendarConnectorService from "../services/googleCalendarConne
 import { buildCommandUiAction, completedVoiceCommandMessage, openingVoiceLabelMessage, openingVoicePageMessage, type CommandUiAction } from "./voiceNavigation.js";
 import { getNavigationCatalogue } from "./navigationCatalogue.js";
 import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction, getPendingEmmaActionName } from "../services/emmaExecutableActionService.js";
+import { cancelAgentProposal, confirmAgentProposal } from "../agents/agentProposal.js";
 import { SAFE_MODE_ACTIVE, SafeModeActiveError, safeModeMessage, safeModeSince } from "./safeMode.js";
 import { commandAllowedInSafeMode } from "./safeModeCommands.js";
 import { spokenCancelled, spokenChannelMessages, spokenCompleted, spokenError, spokenOutcome, spokenReview } from "./spokenActionMessages.js";
@@ -289,6 +290,22 @@ async function dispatchAllowedCommand(
               : spokenCancelled(user.voiceLanguage) }
         : { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: result.httpStatus, error: result.error,
             message: spokenError(result.error, result.extra, user.voiceLanguage) ?? result.message, data: result.extra };
+      break;
+    }
+    // The one yes or no to the agent's proposal (masterplan F2b): the steps run
+    // in agentProposal.ts, each through the same paths as here.
+    case "confirm_agent_proposal":
+    case "cancel_agent_proposal": {
+      const result = command.intent === "confirm_agent_proposal" ? await confirmAgentProposal(user) : await cancelAgentProposal(user);
+      response = {
+        intent: command.intent,
+        interpreted: {},
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.data,
+        error: result.error,
+        message: result.message,
+      };
       break;
     }
     case "create_client": {

@@ -205,6 +205,17 @@ export const SET_COMPANY_AGENT_MODE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
 };
 
+export const EXECUTE_AGENT_PROPOSAL_ACTION: ActionContract = {
+  actionName: "execute_agent_proposal",
+  purpose:
+    "Carry out a proposal the agent put together for a multi-step request: every step read out in full and approved with one yes bound to exactly that proposal. Each step runs in order through its own owning service under the user's permissions and the administrator's capability switches, stopping at the first failure. Only where an administrator switched the agent on and the request's language passed the shadow acceptance; never during an emergency stop, and never for administration or connector settings.",
+  requiredPermission: "voice.execute",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "agent_runs", "agent_proposals"],
+  possibleErrors: ["MISSING_PERMISSION", "NO_PENDING_ACTION", "PENDING_ACTION_ALREADY_RESOLVED", "PENDING_ACTION_INVALID", "AGENT_OFF", "SAFE_MODE_ACTIVE", "EMMA_CAPABILITY_DISABLED", "STEP_FAILED"],
+};
+
 export const SET_COMPANY_SAFE_MODE_ACTION: ActionContract = {
   actionName: "set_company_safe_mode",
   purpose:

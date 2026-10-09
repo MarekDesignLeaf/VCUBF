@@ -184,6 +184,15 @@ export async function peekReviewedAction(
 }
 
 /**
+ * Review types that stand alone: an agent proposal (F2b) carries several
+ * steps and waits up to ten minutes, so a bare yes beside another waiting
+ * review would be ambiguous and refused. Preparing one withdraws every other
+ * review the user has waiting, and preparing any other review withdraws it:
+ * the yes always means the last thing read out.
+ */
+export const STANDALONE_REVIEW_TYPES: ReadonlySet<string> = new Set(["agent_proposal"]);
+
+/**
  * Put a review up for its yes. The previous review of the same type is
  * cancelled in the same transaction: there is only ever one thing a yes can
  * mean per user and action type (approval binding, masterplan layer E).
@@ -207,6 +216,20 @@ export async function prepareReviewedAction<Payload>(
     await tx.voicePendingAction.updateMany({
       where: { ...scope(user, definition.actionType), status: "pending" },
       data: { status: definition.replacedStatus ?? "cancelled", payload: Prisma.DbNull, resolvedAt: now },
+    });
+    // A stand-alone review and any other one never wait side by side. Only
+    // still-pending rows are touched, so a claim already under way elsewhere
+    // either finished first or finds its review withdrawn ("raced").
+    await tx.voicePendingAction.updateMany({
+      where: {
+        companyId: user.companyId,
+        userId: user.id,
+        status: "pending",
+        actionType: STANDALONE_REVIEW_TYPES.has(definition.actionType)
+          ? { not: definition.actionType }
+          : { in: [...STANDALONE_REVIEW_TYPES] },
+      },
+      data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
     });
     return tx.voicePendingAction.create({
       data: {

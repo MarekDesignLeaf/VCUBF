@@ -24,6 +24,7 @@ import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
 import { assistantNameFor } from "../../lib/assistantName.js";
 import { acceptedByService, observeShadow, parserOutcomeOf } from "../../agents/shadowAgent.js";
 import { isReviewPending, runWithApprovalBinding } from "../../lib/executionEngine.js";
+import { agentMayHandle, hasAgentProposalPending, proposeWithAgent } from "../../agents/agentProposal.js";
 
 /**
  * The user's voice language as it is right now.
@@ -134,12 +135,13 @@ type ParsedTextCommand = ReturnType<typeof parseTextCommand>;
 async function resolveUserCommand(user: AuthedUser, text: string, reader: string): Promise<ParsedTextCommand> {
   const parsed = parseTextCommand(text, reader);
   if (parsed.intent !== "unrecognized") return parsed;
-  const [clientCreatePending, gmailPending, whatsappPending, notificationDeletionPending, pendingEmmaAction] = await Promise.all([
+  const [clientCreatePending, gmailPending, whatsappPending, notificationDeletionPending, pendingEmmaAction, agentProposalPending] = await Promise.all([
     hasPendingVoiceClientCreation(user),
     hasPendingVoiceGmailMessage(user),
     hasPendingVoiceWhatsAppMessage(user),
     hasPendingVoiceNotificationDeletion(user),
     getPendingEmmaActionName(user),
+    hasAgentProposalPending(user),
   ]);
   const pendingActions: Array<{ pending: boolean; confirm: ParsedTextCommand; cancel: ParsedTextCommand }> = [
     {
@@ -166,6 +168,11 @@ async function resolveUserCommand(user: AuthedUser, text: string, reader: string
       pending: Boolean(pendingEmmaAction),
       confirm: { intent: "confirm_execute_action", entities: { action: pendingEmmaAction! } },
       cancel: { intent: "cancel_execute_action", entities: { action: pendingEmmaAction! } },
+    },
+    {
+      pending: agentProposalPending,
+      confirm: { intent: "confirm_agent_proposal", entities: {} },
+      cancel: { intent: "cancel_agent_proposal", entities: {} },
     },
   ];
   const active = pendingActions.filter((candidate) => candidate.pending);
@@ -475,7 +482,15 @@ commandRouter.post("/realtime/session", requirePermission(EXECUTE_TEXT_COMMAND_A
   }
 });
 
+/**
+ * When an answer to the voice assistant must be ready. The Windows companion
+ * gives up after eighteen seconds; an agent run that would end later is
+ * pointless, so it gets what is left of these sixteen.
+ */
+const ASSISTANT_ANSWER_DEADLINE_MS = 16_000;
+
 commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission), async (req, res) => {
+  const receivedAt = Date.now();
   const parsedBody = assistantSchema.safeParse(req.body);
   if (!parsedBody.success) return res.status(400).json(invalidCommandRequest(parsedBody.error, req.user!.voiceLanguage));
   const { text, input_method, history } = parsedBody.data;
@@ -517,6 +532,48 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
       });
     }
     if (assistant.kind !== "command" || !assistant.canonical_command) {
+      // A multi-step objective goes to the agent where it may act (masterplan
+      // F2b): it reads what it needs and answers, or puts up one proposal for
+      // one yes. Anywhere else — or if its run fails — the plan is read out
+      // as before.
+      if (assistant.kind === "plan" && await agentMayHandle(user, language)) {
+        const bound = await runWithApprovalBinding(parsedBody.data.review_id, () => proposeWithAgent({
+          user,
+          language,
+          text: alias.resolvedText,
+          history,
+          deadline: receivedAt + ASSISTANT_ANSWER_DEADLINE_MS,
+        }));
+        const outcome = bound.result;
+        if (outcome.kind !== "fallback") {
+          await recordAudit({
+            companyId: user.companyId,
+            userId: user.id,
+            actionName: "interpret_voice_request",
+            interpretedIntent: assistant.kind,
+            inputPayload: { text: auditAssistantInput(text), inputMethod: input_method },
+            dataAfter: { kind: assistant.kind, agent: outcome.kind, ...(outcome.kind === "proposal" ? { fingerprint: outcome.fingerprint } : {}) },
+            riskLevel: 0,
+            confirmationRequired: false,
+            result: "success",
+          });
+          if (outcome.kind === "answer") {
+            return res.json({ ok: true, kind: "reply", actionExecuted: false, message: safeNonActionAssistantMessage(outcome.message, language) });
+          }
+          return res.status(409).json({
+            intent: "agent_proposal",
+            interpreted: {},
+            ok: false,
+            httpStatus: 409,
+            error: "CONFIRMATION_REQUIRED",
+            message: outcome.message,
+            data: { steps: outcome.steps },
+            kind: "action",
+            assistantMessage: outcome.message,
+            ...(await pendingReviewField(user, parsedBody.data.review_id, bound)),
+          });
+        }
+      }
       await recordAudit({
         companyId: user.companyId,
         userId: user.id,
@@ -529,7 +586,13 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
         result: "success",
       });
       // The agent in shadow sees the same request; nothing it proposes runs.
-      observeShadow({ user, channel: "assistant", language, text: alias.resolvedText, history, actual: { intent: `assistant_${assistant.kind}`, key: null } });
+      // Not a plan: a multi-step objective has no parser reference to agree
+      // with, so a shadow run would be paid for and could only count against
+      // the agent for proposing the steps it should. Plans are accepted live
+      // (F2), through proposals the user approves.
+      if (assistant.kind !== "plan") {
+        observeShadow({ user, channel: "assistant", language, text: alias.resolvedText, history, actual: { intent: `assistant_${assistant.kind}`, key: null } });
+      }
       return res.json({
         ok: true,
         kind: assistant.kind,
