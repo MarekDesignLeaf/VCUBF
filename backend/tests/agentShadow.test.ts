@@ -298,12 +298,12 @@ describe("agent in shadow (F1)", () => {
     assert.equal(summary.body.total, 3);
     assert.equal(summary.body.otherCohortRuns, 2);
     assert.deepEqual(Object.keys(summary.body.byLanguage), ["cs-CZ", "en-GB"]);
-    assert.deepEqual(summary.body.byLanguage["en-GB"].byAgreement, { match: 1, parser_only: 1 });
-    assert.equal(summary.body.byLanguage["en-GB"].agreementRate, 0.5);
-    assert.deepEqual(summary.body.byLanguage["cs-CZ"].byAgreement, { mismatch: 1 });
-    assert.equal(summary.body.byLanguage["cs-CZ"].agreementRate, 0);
-    assert.deepEqual(summary.body.acceptance.acceptedLanguages, []);
-    assert.ok(summary.body.byLanguage["en-GB"].unmet.length > 0);
+    assert.deepEqual(summary.body.byLanguage["en-GB"].text.byAgreement, { match: 1, parser_only: 1 });
+    assert.equal(summary.body.byLanguage["en-GB"].text.agreementRate, 0.5);
+    assert.deepEqual(summary.body.byLanguage["cs-CZ"].text.byAgreement, { mismatch: 1 });
+    assert.equal(summary.body.byLanguage["cs-CZ"].text.agreementRate, 0);
+    assert.deepEqual(summary.body.acceptance.accepted, []);
+    assert.ok(summary.body.byLanguage["en-GB"].text.unmet.length > 0);
     assert.equal(summary.body.cohort.model, "gpt-5.4-mini");
     assert.equal(summary.body.cohort.build, buildId());
     assert.equal(counted.build, buildId());
@@ -314,7 +314,7 @@ describe("agent in shadow (F1)", () => {
     assert.equal(denied.status, 403);
   });
 
-  it("a language is accepted only with enough agreement on real actions and few planner errors", async () => {
+  it("a language and request path are accepted only with enough agreement on real actions and few planner errors", async () => {
     const template = {
       companyId: (await prisma.company.findFirstOrThrow()).id,
       userId: (await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } })).id,
@@ -331,8 +331,8 @@ describe("agent in shadow (F1)", () => {
       proposedTools: [],
       durationMs: 1,
     };
-    const runs = (language: string, count: number, agreement: string, parserAction: string | null) =>
-      Array.from({ length: count }, () => ({ ...template, language, agreement, parserIntent: parserAction ?? "assistant_reply", parserAction }));
+    const runs = (language: string, count: number, agreement: string, parserAction: string | null, channel = "text") =>
+      Array.from({ length: count }, () => ({ ...template, language, channel, agreement, parserIntent: parserAction ?? "assistant_reply", parserAction }));
     await prisma.agentRun.createMany({
       data: [
         // English: a planner that never acts — 95 conversations agree, 5 real commands are missed.
@@ -347,13 +347,16 @@ describe("agent in shadow (F1)", () => {
         ...runs("cs-CZ", 2, "mismatch", "create_job"),
         ...runs("cs-CZ", 40, "both_none", null),
         ...runs("cs-CZ", 1, "error", "create_job"),
+        // Czech through the voice assistant: every action missed — typed commands do not vouch for it.
+        ...runs("cs-CZ", 5, "parser_only", "create_job", "assistant"),
       ],
     });
     const summary = await request(app).get("/audit/agent-shadow").set("Authorization", `Bearer ${token}`);
     assert.equal(summary.status, 200);
-    assert.deepEqual(summary.body.acceptance.acceptedLanguages, ["cs-CZ"]);
-    assert.ok(summary.body.byLanguage["en-GB"].unmet.includes("agreement on actions below 95 %"), JSON.stringify(summary.body.byLanguage["en-GB"]));
-    assert.ok(summary.body.byLanguage["pl-PL"].unmet.includes("planner errors above 5 %"), JSON.stringify(summary.body.byLanguage["pl-PL"]));
+    assert.deepEqual(summary.body.acceptance.accepted, [{ language: "cs-CZ", channel: "text" }]);
+    assert.ok(summary.body.byLanguage["en-GB"].text.unmet.includes("agreement on actions below 95 %"), JSON.stringify(summary.body.byLanguage["en-GB"]));
+    assert.ok(summary.body.byLanguage["pl-PL"].text.unmet.includes("planner errors above 5 %"), JSON.stringify(summary.body.byLanguage["pl-PL"]));
+    assert.equal(summary.body.byLanguage["cs-CZ"].assistant.met, false);
   });
 
   it("compares proposals with the parser outcome", () => {

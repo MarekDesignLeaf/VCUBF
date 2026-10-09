@@ -484,7 +484,7 @@ export async function shadowSummary(companyId: string, since?: Date) {
   const scope = { companyId, mode: "shadow", ...(since ? { createdAt: { gte: since } } : {}) };
   const [groups, allRuns] = await Promise.all([
     prisma.agentRun.groupBy({
-      by: ["language", "agreement", "parserAction"],
+      by: ["language", "channel", "agreement", "parserAction"],
       where: { ...scope, ...cohort },
       _count: { _all: true },
       _sum: { tokensIn: true, tokensOut: true },
@@ -493,7 +493,10 @@ export async function shadowSummary(companyId: string, since?: Date) {
   ]);
 
   const overall = emptyTally();
-  const perLanguage = new Map<string, Tally>();
+  // One bucket per language and request path: the voice assistant (with
+  // conversation history) and typed commands are different flows, and each
+  // earns acceptance on its own.
+  const perSegment = new Map<string, { language: string; channel: string; tally: Tally }>();
   let tokensIn = 0;
   let tokensOut = 0;
   for (const group of groups) {
@@ -501,9 +504,10 @@ export async function shadowSummary(companyId: string, since?: Date) {
     const agreement = group.agreement as ShadowAgreement;
     tokensIn += group._sum.tokensIn ?? 0;
     tokensOut += group._sum.tokensOut ?? 0;
-    const language = perLanguage.get(group.language) ?? emptyTally();
-    perLanguage.set(group.language, language);
-    for (const bucket of [overall, language]) {
+    const segmentKey = `${group.language}|${group.channel}`;
+    const segment = perSegment.get(segmentKey) ?? { language: group.language, channel: group.channel, tally: emptyTally() };
+    perSegment.set(segmentKey, segment);
+    for (const bucket of [overall, segment.tally]) {
       bucket.total += count;
       bucket.byAgreement[agreement] = (bucket.byAgreement[agreement] ?? 0) + count;
       if (agreement === "error") bucket.errors += count;
@@ -517,15 +521,19 @@ export async function shadowSummary(companyId: string, since?: Date) {
     }
   }
   // The planner is prompted in the user's language, so each language earns
-  // acceptance on its own: English agreement never vouches for Czech.
-  const byLanguage = Object.fromEntries(
-    [...perLanguage.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([language, bucket]) => [
-        language,
-        { total: bucket.total, errors: bucket.errors, parserRejected: bucket.parserRejected, byAgreement: bucket.byAgreement, ...verdict(bucket) },
-      ]),
+  // acceptance on its own (English agreement never vouches for Czech), and
+  // within it each request path does too (typed commands never vouch for the
+  // voice assistant). Shape: byLanguage[language][channel].
+  const segments = [...perSegment.values()].sort((left, right) =>
+    left.language === right.language ? left.channel.localeCompare(right.channel) : left.language.localeCompare(right.language),
   );
+  const byLanguage: Record<string, Record<string, ReturnType<typeof verdict> & { total: number; errors: number; parserRejected: number; byAgreement: Record<string, number> }>> = {};
+  const accepted: Array<{ language: string; channel: string }> = [];
+  for (const { language, channel, tally } of segments) {
+    const result = { total: tally.total, errors: tally.errors, parserRejected: tally.parserRejected, byAgreement: tally.byAgreement, ...verdict(tally) };
+    (byLanguage[language] ??= {})[channel] = result;
+    if (result.met) accepted.push({ language, channel });
+  }
   const all = verdict(overall);
   return {
     cohort,
@@ -544,8 +552,8 @@ export async function shadowSummary(companyId: string, since?: Date) {
     otherCohortRuns: allRuns - overall.total,
     acceptance: {
       ...AGENT_ACCEPTANCE,
-      /** Each language is accepted on its own; only these may be switched on. */
-      acceptedLanguages: Object.entries(byLanguage).filter(([, result]) => result.met).map(([language]) => language),
+      /** Each language and request path is accepted on its own; only these may be switched on. */
+      accepted,
     },
   };
 }
