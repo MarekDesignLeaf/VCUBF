@@ -1070,6 +1070,21 @@ table,
    cannot read is a worse trade than a slightly taller panel. */
 .voice-col-right > .voice-heard-panel { min-height: 82px; }
 
+/* What was heard is what you check while you speak (9. 10.: one line of 9px text showed,
+   and a long sentence was cut off). The panel is taller, the history takes the height the
+   right column has left, and its text is readable and wraps instead of being clipped. */
+.voice-control-centre { max-height: clamp(320px, 48vh, 560px); }
+.voice-col-right > .voice-heard-panel { min-height: 150px; }
+.voice-control-centre .voice-col-right .voice-heard-list { max-height: none; min-height: 0; font-size: 12px; line-height: 1.4; }
+.voice-control-centre .voice-heard-list > li { font-size: 12px; }
+.voice-control-centre .voice-heard-text { white-space: normal; overflow-wrap: anywhere; }
+.voice-heard-list > li.is-pending .voice-heard-text { color: var(--muted); font-style: italic; }
+.voice-heard-list > li.is-pending .voice-heard-mark { color: var(--accent); }
+.voice-heard-list > li.is-unrecognised .voice-heard-text,
+.voice-heard-list > li.is-failed .voice-heard-text,
+.voice-heard-list > li.is-unrecognised .voice-heard-mark,
+.voice-heard-list > li.is-failed .voice-heard-mark { color: var(--warning-text); }
+
 /* On a phone the panel is stacked and tall; let the whole column scroll instead, or the
    content below it would be unreachable. */
 @media (max-width: 760px) {

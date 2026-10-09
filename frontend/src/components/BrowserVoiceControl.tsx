@@ -136,6 +136,12 @@ type Copy = {
   typeHere: string;
   monitor: string;
   monitorEmpty: string;
+  /** A stretch of speech on its way to the recogniser. */
+  transcribing: string;
+  /** Speech was heard, but nothing could be read from it. */
+  notRecognised: string;
+  /** The recogniser could not be reached for this stretch. */
+  transcriptionFailed: string;
   meter: string;
   meterLive: string;
   meterSilent: string;
@@ -177,7 +183,7 @@ function copyFor(language: string): Copy {
       connectionError: "Could not reach Secretary.", completed: "Done.",
       unknownOutcome: "Secretary did not answer in time. If you were confirming something, it may still have been done, so check before you say it again.",
       failed: "That request could not be completed.", send: "Send", typeHere: "…or type a command",
-      monitor: "What was heard (this computer only)", monitorEmpty: "Nothing yet.",
+      monitor: "What was heard (this computer only)", monitorEmpty: "Nothing yet.", transcribing: "transcribing…", notRecognised: "Speech heard, but not recognised — please say it again.", transcriptionFailed: "Could not be transcribed (connection).",
       meter: "Microphone", meterLive: "The microphone is picking up sound.",
       meterSilent: "Silence — nothing is reaching the microphone.",
       meterDenied: "No access to the microphone.", meterOff: "Voice control is off.",
@@ -207,7 +213,7 @@ function copyFor(language: string): Copy {
       connectionError: "Nepodařilo se spojit se Secretary.", completed: "Hotovo.",
       unknownOutcome: "Odpověď ze Secretary nepřišla včas. Pokud jste něco potvrzovali, mohlo se to přesto provést, tak to před zopakováním zkontrolujte.",
       failed: "Tento požadavek se nepodařilo dokončit.", send: "Odeslat", typeHere: "…nebo napište příkaz",
-      monitor: "Co bylo slyšet (jen tento počítač)", monitorEmpty: "Zatím nic.",
+      monitor: "Co bylo slyšet (jen tento počítač)", monitorEmpty: "Zatím nic.", transcribing: "přepisuji…", notRecognised: "Slyšel jsem řeč, ale nerozpoznal ji — řekněte to prosím znovu.", transcriptionFailed: "Přepis se nepovedl (spojení).",
       meter: "Mikrofon", meterLive: "Mikrofon snímá zvuk.",
       meterSilent: "Ticho — do mikrofonu nic nepřichází.",
       meterDenied: "Bez přístupu k mikrofonu.", meterOff: "Hlasové ovládání je vypnuté.",
@@ -237,7 +243,7 @@ function copyFor(language: string): Copy {
       connectionError: "Nie udało się połączyć z Secretary.", completed: "Gotowe.",
       unknownOutcome: "Odpowiedź z Secretary nie przyszła na czas. Jeśli coś potwierdzałeś, mogło to zostać wykonane, więc sprawdź przed powtórzeniem.",
       failed: "Nie udało się wykonać tego żądania.", send: "Wyślij", typeHere: "…albo wpisz polecenie",
-      monitor: "Co było słychać (tylko ten komputer)", monitorEmpty: "Jeszcze nic.",
+      monitor: "Co było słychać (tylko ten komputer)", monitorEmpty: "Jeszcze nic.", transcribing: "przepisuję…", notRecognised: "Słyszałem mowę, ale jej nie rozpoznałem — powtórz proszę.", transcriptionFailed: "Nie udało się przepisać (połączenie).",
       meter: "Mikrofon", meterLive: "Mikrofon odbiera dźwięk.",
       meterSilent: "Cisza — do mikrofonu nic nie dochodzi.",
       meterDenied: "Brak dostępu do mikrofonu.", meterOff: "Sterowanie głosem jest wyłączone.",
@@ -267,7 +273,7 @@ function copyFor(language: string): Copy {
       connectionError: "Secretary war nicht erreichbar.", completed: "Fertig.",
       unknownOutcome: "Secretary hat nicht rechtzeitig geantwortet. Falls Sie etwas bestätigt haben, wurde es vielleicht trotzdem ausgeführt; prüfen Sie das, bevor Sie es wiederholen.",
       failed: "Diese Anfrage konnte nicht abgeschlossen werden.", send: "Senden", typeHere: "…oder Befehl eingeben",
-      monitor: "Was zu hören war (nur dieser Computer)", monitorEmpty: "Noch nichts.",
+      monitor: "Was zu hören war (nur dieser Computer)", monitorEmpty: "Noch nichts.", transcribing: "wird erkannt…", notRecognised: "Sprache gehört, aber nicht erkannt — bitte wiederholen.", transcriptionFailed: "Nicht erkannt (Verbindung).",
       meter: "Mikrofon", meterLive: "Das Mikrofon nimmt Ton auf.",
       meterSilent: "Stille — am Mikrofon kommt nichts an.",
       meterDenied: "Kein Zugriff auf das Mikrofon.", meterOff: "Die Sprachsteuerung ist aus.",
@@ -297,7 +303,7 @@ function copyFor(language: string): Copy {
       connectionError: "Secretary est injoignable.", completed: "Terminé.",
       unknownOutcome: "Secretary n\u2019a pas répondu à temps. Si vous confirmiez quelque chose, cela a peut-être été fait ; vérifiez avant de le redire.",
       failed: "Cette demande n’a pas pu être traitée.", send: "Envoyer", typeHere: "…ou tapez une commande",
-      monitor: "Ce qui a été entendu (cet ordinateur uniquement)", monitorEmpty: "Rien pour l’instant.",
+      monitor: "Ce qui a été entendu (cet ordinateur uniquement)", monitorEmpty: "Rien pour l’instant.", transcribing: "transcription…", notRecognised: "Parole entendue mais non reconnue — répétez, s’il vous plaît.", transcriptionFailed: "Transcription impossible (connexion).",
       meter: "Microphone", meterLive: "Le microphone capte du son.",
       meterSilent: "Silence — rien n’arrive au microphone.",
       meterDenied: "Pas d’accès au microphone.", meterOff: "La commande vocale est désactivée.",
@@ -327,7 +333,7 @@ function copyFor(language: string): Copy {
       connectionError: "No se ha podido contactar con Secretary.", completed: "Hecho.",
       unknownOutcome: "Secretary no respondió a tiempo. Si estaba confirmando algo, puede que se haya hecho igualmente; compruébelo antes de repetirlo.",
       failed: "No se ha podido completar la solicitud.", send: "Enviar", typeHere: "…o escriba una orden",
-      monitor: "Lo que se ha oído (solo este ordenador)", monitorEmpty: "Todavía nada.",
+      monitor: "Lo que se ha oído (solo este ordenador)", monitorEmpty: "Todavía nada.", transcribing: "transcribiendo…", notRecognised: "Se oyó voz, pero no se reconoció — repítalo, por favor.", transcriptionFailed: "No se pudo transcribir (conexión).",
       meter: "Micrófono", meterLive: "El micrófono capta sonido.",
       meterSilent: "Silencio — no llega nada al micrófono.",
       meterDenied: "Sin acceso al micrófono.", meterOff: "El control por voz está desactivado.",
@@ -357,7 +363,7 @@ function copyFor(language: string): Copy {
       connectionError: "Secretary non è raggiungibile.", completed: "Fatto.",
       unknownOutcome: "Secretary non ha risposto in tempo. Se stavate confermando qualcosa, potrebbe essere stato eseguito comunque: controllate prima di ripeterlo.",
       failed: "Non è stato possibile completare la richiesta.", send: "Invia", typeHere: "…oppure scrivete un comando",
-      monitor: "Ciò che è stato sentito (solo questo computer)", monitorEmpty: "Ancora nulla.",
+      monitor: "Ciò che è stato sentito (solo questo computer)", monitorEmpty: "Ancora nulla.", transcribing: "trascrizione…", notRecognised: "Voce sentita ma non riconosciuta — ripeta, per favore.", transcriptionFailed: "Trascrizione non riuscita (connessione).",
       meter: "Microfono", meterLive: "Il microfono sta captando suono.",
       meterSilent: "Silenzio — al microfono non arriva nulla.",
       meterDenied: "Nessun accesso al microfono.", meterOff: "Il controllo vocale è disattivato.",
@@ -945,7 +951,21 @@ function releaseMicrophone() {
   }
 }
 
-interface HeardEntry { at: number; text: string; woke: boolean }
+/**
+ * One line of "what was heard". A stretch of speech appears as soon as it is
+ * sent to the recogniser ("pending"), and becomes either the words or a plain
+ * "heard, but not recognised" — never nothing, which looked like a dead
+ * microphone while the user was speaking.
+ */
+interface HeardEntry { id: number; at: number; text: string; woke: boolean; state?: "pending" | "unrecognised" | "failed" }
+let heardEntryId = 0;
+
+/** … on its way, ? heard but not read, ✓ addressed to the assistant, ✕ not addressed. */
+function heardMark(entry: HeardEntry): string {
+  if (entry.state === "pending") return "…";
+  if (entry.state) return "?";
+  return entry.woke ? "✓" : "✕";
+}
 interface TranscriptTurn { role: "user" | "assistant"; content: string }
 
 type Recogniser = {
@@ -1495,7 +1515,7 @@ export function BrowserVoiceControl() {
     setHearLog((current) =>
       // Sixty rather than twelve: this is the record you look back through when
       // something was misheard, and twelve lines is a few sentences.
-      [{ at: Date.now(), text, woke: alreadyActive || hit !== null }, ...current].slice(0, 60));
+      [{ id: ++heardEntryId, at: Date.now(), text, woke: alreadyActive || hit !== null }, ...current].slice(0, 60));
 
     // A dialogue in progress owns the sentence, and a taught command beats a
     // guess at what the words might have meant.
@@ -1552,15 +1572,34 @@ export function BrowserVoiceControl() {
     // a time in the order they were spoken. Out of order, an unaddressed
     // remark could be judged after a later "Alfonzo" had opened the window.
     let inOrder: Promise<void> = Promise.resolve();
+    const heardCopy = copyFor(language);
+    /** The stretch's line in "what was heard": pending until its words arrive. */
+    const settleEntry = (id: number, outcome: "words" | "unrecognised" | "failed") =>
+      setHearLog((current) => outcome === "words"
+        // The words get their own line (with the wake mark) from handleFinal.
+        ? current.filter((entry) => entry.id !== id)
+        : current.map((entry) => entry.id === id
+          ? { ...entry, state: outcome, text: outcome === "unrecognised" ? heardCopy.notRecognised : heardCopy.transcriptionFailed }
+          : entry));
+
     const transcribe = (audio: Float32Array, spokenAt: number) => {
+      const id = ++heardEntryId;
+      setHearLog((current) => [{ id, at: spokenAt, text: heardCopy.transcribing, woke: false, state: "pending" as const }, ...current].slice(0, 60));
       const heard = transcribeOne(audio);
       inOrder = inOrder.then(async () => {
-        const text = await heard;
-        if (text && !cancelled) await handleFinal.current(text, spokenAt);
+        const result = await heard;
+        if (cancelled) return;
+        // Words get their own line; silence leaves none; speech that could not be read says so.
+        settleEntry(id, result.failed ? "failed" : result.text || !result.dropped ? "words" : "unrecognised");
+        if (result.text) await handleFinal.current(result.text, spokenAt);
       }).catch(() => { /* one failed sentence must not block the ones after it */ });
     };
 
-    const transcribeOne = async (audio: Float32Array): Promise<string> => {
+    /**
+     * The words of one stretch of speech. Empty text with "dropped" means the
+     * recogniser heard speech but could not read it; empty without it, silence.
+     */
+    const transcribeOne = async (audio: Float32Array): Promise<{ text: string; dropped?: string; failed?: true }> => {
       // The library resamples to 16 kHz and writes the RIFF header; nothing here does
       // arithmetic on the samples.
       const wav = window.vad!.utils.encodeWAV(audio);
@@ -1581,9 +1620,9 @@ export function BrowserVoiceControl() {
               : response.status === 503 ? "transcription-unavailable" : `http-${response.status}`,
             errorCount: current.errorCount + 1,
           }));
-          return "";
+          return { text: "", failed: true };
         }
-        const payload = (await response.json()) as { text?: string };
+        const payload = (await response.json()) as { text?: string; dropped?: string };
         const heard = (payload.text ?? "").trim();
         setRecogniserState((current) => ({
           ...current,
@@ -1594,12 +1633,12 @@ export function BrowserVoiceControl() {
           lastPhraseAt: Date.now(),
         }));
         // Silence and hallucinations come back empty; nothing was said, so nothing runs.
-        return heard;
+        return { text: heard, dropped: payload.dropped };
       } catch {
         setRecogniserState((current) => ({
           ...current, status: "error", error: "transcription-unreachable", errorCount: current.errorCount + 1,
         }));
-        return "";
+        return { text: "", failed: true };
       }
     };
 
@@ -1980,13 +2019,13 @@ export function BrowserVoiceControl() {
         ) : (
           <ul className="voice-heard-list">
             {hearLog.map((entry) => (
-              <li key={entry.at} className={entry.woke ? "is-woke" : "is-ignored"}>
+              <li key={entry.id} className={entry.state ? `is-${entry.state}` : entry.woke ? "is-woke" : "is-ignored"}>
                 {/* The time, because a line you just said and one from ten minutes ago
                     look identical without it. */}
                 <time className="voice-heard-time" dateTime={new Date(entry.at).toISOString()}>
                   {new Date(entry.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                 </time>
-                <span className="voice-heard-mark">{entry.woke ? "✓" : "✕"}</span>
+                <span className="voice-heard-mark">{heardMark(entry)}</span>
                 <span className="voice-heard-text">{entry.text}</span>
               </li>
             ))}

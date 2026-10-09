@@ -442,13 +442,15 @@ commandRouter.post(
         userId: req.user!.id,
         actionName: "transcribe_voice_command",
         inputPayload: { audioBytes: audio.length, language, model: transcription.model },
-        dataAfter: { transcriptCharacters: transcription.text.length },
+        dataAfter: { transcriptCharacters: transcription.text.length, ...(transcription.dropped ? { dropped: transcription.dropped } : {}) },
         riskLevel: 0,
         confirmationRequired: false,
         result: "success",
       });
       res.set("Cache-Control", "no-store");
-      return res.json({ text: transcription.text });
+      // "dropped" tells the client that speech was heard but not recognised, so
+      // it can say so instead of showing nothing.
+      return res.json({ text: transcription.text, ...(transcription.dropped ? { dropped: transcription.dropped } : {}) });
     } catch (error) {
       console.error("Voice command transcription failed", error instanceof Error ? error.message : error);
       return res.status(503).json({ error: "TRANSCRIPTION_UNAVAILABLE", message: "Voice transcription is temporarily unavailable." });
