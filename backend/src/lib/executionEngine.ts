@@ -87,6 +87,8 @@ interface ApprovalBinding {
   prepared?: { id: string; actionType: string; expiresAt: Date };
   /** Reviews this request claimed, failed as invalid or cancelled. */
   resolvedIds: Set<string>;
+  /** A yes was refused because the waiting review is not the one heard here. */
+  refusedUnheard?: boolean;
 }
 
 const approvalBinding = new AsyncLocalStorage<ApprovalBinding>();
@@ -99,10 +101,10 @@ const approvalBinding = new AsyncLocalStorage<ApprovalBinding>();
 export async function runWithApprovalBinding<T>(
   expectedReviewId: string | null | undefined,
   work: () => Promise<T>,
-): Promise<{ result: T; prepared?: ApprovalBinding["prepared"]; resolvedIds: ReadonlySet<string> }> {
+): Promise<{ result: T; prepared?: ApprovalBinding["prepared"]; resolvedIds: ReadonlySet<string>; refusedUnheard: boolean }> {
   const binding: ApprovalBinding = { expectedReviewId, resolvedIds: new Set() };
   const result = await approvalBinding.run(binding, work);
-  return { result, prepared: binding.prepared, resolvedIds: binding.resolvedIds };
+  return { result, prepared: binding.prepared, resolvedIds: binding.resolvedIds, refusedUnheard: binding.refusedUnheard === true };
 }
 
 /** Whether a review is still waiting for this user's yes. */
@@ -286,6 +288,7 @@ export async function claimReviewedAction<Payload>(
     // told it is no longer waiting and can ask for it again.
     const binding = approvalBinding.getStore();
     if (binding && binding.expectedReviewId !== undefined && binding.expectedReviewId !== pending.id) {
+      binding.refusedUnheard = true;
       return { ok: false, reason: "raced", superseded: true } as const;
     }
 

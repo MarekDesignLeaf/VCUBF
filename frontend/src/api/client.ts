@@ -53,12 +53,32 @@ function refreshSessionOnce(): Promise<string | null> {
  * what to remember: pendingReview with an id when a review was put up, null
  * when the remembered one no longer waits, absent when it still does.
  */
-let shownReviewId: string | undefined;
+// Kept across a page reload: a phone may drop and reload the WebView between
+// the read-out and the yes, and the yes must still approve what was heard.
+// Storage can be missing or throw (private mode); then it lives in memory only.
+const SHOWN_REVIEW_KEY = "vcuf_shown_review";
+let shownReviewId: string | undefined = (() => {
+  try {
+    return localStorage.getItem(SHOWN_REVIEW_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+})();
+
+function setShownReview(id: string | undefined) {
+  shownReviewId = id;
+  try {
+    if (id) localStorage.setItem(SHOWN_REVIEW_KEY, id);
+    else localStorage.removeItem(SHOWN_REVIEW_KEY);
+  } catch {
+    // Memory still holds it for this page.
+  }
+}
 
 function rememberReview(answer: unknown) {
   if (!answer || typeof answer !== "object" || !("pendingReview" in answer)) return;
   const pending = (answer as { pendingReview?: { id?: unknown } | null }).pendingReview;
-  shownReviewId = pending && typeof pending.id === "string" ? pending.id : undefined;
+  setShownReview(pending && typeof pending.id === "string" ? pending.id : undefined);
 }
 
 async function request<T>(path: string, options: RequestInit = {}, mayRetry = true): Promise<T> {
@@ -2445,7 +2465,11 @@ export const api = {
 export { getToken };
 export function setToken(token: string | null) {
   if (token) localStorage.setItem("vcuf_token", token);
-  else localStorage.removeItem("vcuf_token");
+  else {
+    localStorage.removeItem("vcuf_token");
+    // Signing out forgets what was read out: the next person approves nothing.
+    setShownReview(undefined);
+  }
 }
 
 /**
