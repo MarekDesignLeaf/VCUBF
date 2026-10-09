@@ -64,13 +64,59 @@ const commandSchema = z.object({
   review_id: z.string().uuid().nullable().optional(),
 });
 
+/** How much conversation goes to the model with each request. */
+const HISTORY_TURNS = 6;
+const HISTORY_TURN_CHARS = 800;
+
+type HistoryTurn = { role: "user" | "assistant"; content: string };
+
+/**
+ * The recent conversation the client sends along, made to fit. It is context,
+ * never a command, so it must never be the reason a command is refused: a long
+ * answer (a menu read-out, an explanation) used to exceed the 800-character
+ * limit, and every following request was then rejected — the user heard the
+ * validation error ("too big") instead of an answer. A long turn now keeps its
+ * beginning and its end (where the question to the user usually is), only the
+ * last six turns are kept, and malformed entries are dropped.
+ */
+export function normalizeAssistantHistory(value: unknown): HistoryTurn[] {
+  if (!Array.isArray(value)) return [];
+  const turns = value.flatMap((entry): HistoryTurn[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const { role, content } = entry as { role?: unknown; content?: unknown };
+    if ((role !== "user" && role !== "assistant") || typeof content !== "string") return [];
+    const text = content.trim();
+    if (!text) return [];
+    if (text.length <= HISTORY_TURN_CHARS) return [{ role, content: text }];
+    const half = Math.floor((HISTORY_TURN_CHARS - 3) / 2);
+    return [{ role, content: `${text.slice(0, half)} … ${text.slice(-half)}` }];
+  });
+  return turns.slice(-HISTORY_TURNS);
+}
+
 const assistantSchema = commandSchema.extend({
   language: z.string().min(2).max(20).default("en-GB"),
-  history: z
-    .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().min(1).max(800) }))
-    .max(6)
-    .default([]),
+  history: z.unknown().transform(normalizeAssistantHistory),
 });
+
+/**
+ * A request the endpoint could not read. The raw validation report is for
+ * developers; read aloud it was gibberish ("code too big"), so the answer is a
+ * sentence and the details stay in `issues`.
+ */
+function invalidCommandRequest(error: z.ZodError, language: string) {
+  const locale = language.slice(0, 2).toLowerCase();
+  const message = locale === "cs"
+    ? "Tenhle požadavek jsem nedokázal zpracovat. Řekněte to prosím znovu."
+    : locale === "pl"
+      ? "Nie udało mi się przetworzyć tej prośby. Powiedz to proszę jeszcze raz."
+      : "I could not process that request. Please say it again.";
+  return {
+    error: "VALIDATION_FAILED",
+    message,
+    issues: error.issues.map((issue) => ({ path: issue.path.join("."), code: issue.code })),
+  };
+}
 
 const transcriptionQuerySchema = z.object({
   language: z.string().trim().min(2).max(20).default("en-GB"),
@@ -431,7 +477,7 @@ commandRouter.post("/realtime/session", requirePermission(EXECUTE_TEXT_COMMAND_A
 
 commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission), async (req, res) => {
   const parsedBody = assistantSchema.safeParse(req.body);
-  if (!parsedBody.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsedBody.error.message });
+  if (!parsedBody.success) return res.status(400).json(invalidCommandRequest(parsedBody.error, req.user!.voiceLanguage));
   const { text, input_method, history } = parsedBody.data;
   const user = req.user!;
   // The authenticated user preference is the single language authority.
@@ -592,7 +638,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
 commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission), async (req, res) => {
   const parsedBody = commandSchema.safeParse(req.body);
   if (!parsedBody.success) {
-    return res.status(400).json({ error: "VALIDATION_FAILED", message: parsedBody.error.message });
+    return res.status(400).json(invalidCommandRequest(parsedBody.error, req.user!.voiceLanguage));
   }
   const { text, input_method } = parsedBody.data;
   const user = req.user!;

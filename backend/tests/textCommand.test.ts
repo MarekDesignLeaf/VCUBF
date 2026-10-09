@@ -4,6 +4,7 @@ import request from "supertest";
 import { createServer } from "../src/server.js";
 import { prisma } from "../src/db.js";
 import { resetDb, seedCompanyAndAdmin } from "./setup.js";
+import { normalizeAssistantHistory } from "../src/modules/command/textCommand.js";
 
 const app = createServer();
 
@@ -78,6 +79,41 @@ describe("command/text", () => {
     const waitingRow = await prisma.voicePendingAction.findUniqueOrThrow({ where: { id: waiting.id } });
     assert.equal(waitingRow.status, "cancelled");
     assert.equal(waitingRow.payload, null);
+  });
+
+  it("a long earlier answer in the history never blocks the next command", async () => {
+    // Regression (9 Oct 2026): an explanation longer than 800 characters made
+    // every following request fail validation, and the user heard "too big".
+    const long = "Alfonzo explains the menu. ".repeat(120) + "Shall I open it?";
+    const history = [
+      ...Array.from({ length: 7 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", content: `turn ${index}` })),
+      { role: "assistant", content: long },
+      { role: "system", content: "dropped" },
+      { role: "user", content: "   " },
+    ];
+    const res = await request(app).post("/command/assistant").set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "list clients", input_method: "voice_transcript", history });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.intent, "list_clients");
+
+    const kept = normalizeAssistantHistory(history);
+    assert.equal(kept.length, 6);
+    const last = kept[kept.length - 1];
+    assert.equal(last.role, "assistant");
+    assert.ok(last.content.length <= 800);
+    assert.ok(last.content.startsWith("Alfonzo explains the menu."));
+    assert.ok(last.content.endsWith("Shall I open it?"), "the question at the end of a long answer is kept");
+    assert.deepEqual(normalizeAssistantHistory("not a list"), []);
+  });
+
+  it("a request it cannot read is answered in a sentence, not a validation report", async () => {
+    const res = await request(app).post("/command/assistant").set("Authorization", `Bearer ${adminToken}`)
+      .send({ text: "", input_method: "voice_transcript", history: [] });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, "VALIDATION_FAILED");
+    assert.equal(res.body.message, "I could not process that request. Please say it again.");
+    assert.ok(Array.isArray(res.body.issues));
+    assert.doesNotMatch(res.body.message, /too_big|too_small|\[/);
   });
 
   it("a yes approves the review the client showed, not a newer one it never heard", async () => {
