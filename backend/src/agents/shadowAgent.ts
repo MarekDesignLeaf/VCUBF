@@ -344,18 +344,19 @@ function runRecord(input: ShadowInput) {
 }
 
 /**
- * A request the sample selected but the shadow could not take, because two
- * runs were already in flight. It is recorded as an error with no model call:
- * a request skipped under load would otherwise vanish from the error rate, and
- * acceptance could be earned on quiet moments only.
+ * A request the sample selected but the shadow could not plan — two runs were
+ * already in flight, or no model key is configured. It is recorded as an error
+ * with no model call: a selected request that vanished would escape the error
+ * rate, and acceptance could be earned on quiet moments, or kept while the
+ * planner cannot run at all.
  */
-async function recordCapacitySkip(input: ShadowInput): Promise<void> {
+async function recordSkip(input: ShadowInput, code: "SHADOW_CAPACITY" | "OPENAI_NOT_CONFIGURED"): Promise<void> {
   try {
     await prisma.agentRun.create({
       data: {
         ...runRecord(input),
         status: "error",
-        errorCode: "SHADOW_CAPACITY",
+        errorCode: code,
         steps: 0,
         proposedTools: [] as unknown as Prisma.InputJsonValue,
         agreement: "error",
@@ -363,7 +364,7 @@ async function recordCapacitySkip(input: ShadowInput): Promise<void> {
       },
     });
   } catch (error) {
-    console.error("[agent-shadow] could not record a capacity skip", error instanceof Error ? error.message : error);
+    console.error("[agent-shadow] could not record a skipped run", error instanceof Error ? error.message : error);
   }
 }
 
@@ -421,23 +422,22 @@ function sampleRate(): number {
 /**
  * Give a handled request a shadow run, in the background. Returns at once;
  * the returned promise exists for tests. Nothing happens when the shadow is
- * off, the request is a confirmation turn, or no model key is configured.
- * With two runs already in flight, a selected request is recorded as a
- * capacity skip without a model call.
+ * off or the request is a confirmation turn. A selected request that cannot be
+ * planned — no model key, or two runs already in flight — is recorded as a
+ * skip without a model call.
  */
 export function observeShadow(input: ShadowInput): Promise<void> | undefined {
   const rate = sampleRate();
   if (rate <= 0 || Math.random() >= rate) return undefined;
   if (isApprovalTurn(input.actual.intent)) return undefined;
-  if (!process.env.OPENAI_API_KEY?.trim()) return undefined;
-  // Over capacity, the selected request is still recorded — as a skip that
-  // counts against availability — but no model is called.
-  const overCapacity = planning.size >= MAX_IN_FLIGHT;
-  const run: Promise<void> = (overCapacity ? recordCapacitySkip(input) : runShadow(input)).finally(() => {
+  // Without a model key or over capacity, the selected request is still
+  // recorded — as a skip that counts against availability — but no model is called.
+  const skip = !process.env.OPENAI_API_KEY?.trim() ? "OPENAI_NOT_CONFIGURED" : planning.size >= MAX_IN_FLIGHT ? "SHADOW_CAPACITY" : undefined;
+  const run: Promise<void> = (skip ? recordSkip(input, skip) : runShadow(input)).finally(() => {
     planning.delete(run);
     pending.delete(run);
   });
-  if (!overCapacity) planning.add(run);
+  if (!skip) planning.add(run);
   pending.add(run);
   return run;
 }

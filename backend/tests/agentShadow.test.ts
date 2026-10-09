@@ -288,6 +288,20 @@ describe("agent in shadow (F1)", () => {
     assert.equal(skipped[0].agreement, "error");
   });
 
+  it("a selected request without a model key is recorded against availability", async () => {
+    delete process.env.OPENAI_API_KEY;
+    try {
+      await say("list clients");
+      await settleShadowRuns();
+    } finally {
+      process.env.OPENAI_API_KEY = "test-openai-key";
+    }
+    assert.equal(modelRequests.length, 0);
+    const run = await prisma.agentRun.findFirstOrThrow();
+    assert.equal(run.errorCode, "OPENAI_NOT_CONFIGURED");
+    assert.equal(run.agreement, "error");
+  });
+
   it("confirmation turns get no shadow run", async () => {
     const skipped = observeShadow({
       user: { id: "user", companyId: "company" },
