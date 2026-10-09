@@ -80,6 +80,59 @@ describe("command/text", () => {
     assert.equal(waitingRow.payload, null);
   });
 
+  it("a yes approves the review the client showed, not a newer one it never heard", async () => {
+    const send = (text: string, review_id?: string | null) =>
+      request(app).post("/command/text").set("Authorization", `Bearer ${adminToken}`).send({ text, ...(review_id !== undefined ? { review_id } : {}) });
+    const heard = await send("create client Bound Heard, email bound.heard@example.com, phone 07700 900611");
+    assert.equal(heard.status, 202, JSON.stringify(heard.body));
+    const heardId = heard.body.pendingReview?.id;
+    assert.match(heardId, /^[0-9a-f-]{36}$/);
+    const unheard = await send("create client Bound Unheard, email bound.unheard@example.com, phone 07700 900622");
+    const unheardId = unheard.body.pendingReview?.id;
+    assert.ok(unheardId && unheardId !== heardId);
+
+    // The client still shows the first preview: its yes executes nothing.
+    const refused = await send("yes", heardId);
+    assert.equal(refused.status, 409, JSON.stringify(refused.body));
+    // Something is waiting, so the answer must not claim nothing is: it says
+    // the waiting review was not read out here.
+    assert.equal(refused.body.error, "REVIEW_NOT_HEARD");
+    assert.match(refused.body.message, /not read out to you here/);
+    // The heard review no longer waits, so the client forgets it — and the
+    // unheard one is not handed over: the user has not heard it.
+    assert.equal(refused.body.pendingReview, null);
+    // A client that displays nothing approves nothing.
+    const nothingShown = await send("yes", null);
+    assert.equal(nothingShown.status, 409, JSON.stringify(nothingShown.body));
+    assert.equal(nothingShown.body.error, "REVIEW_NOT_HEARD");
+    assert.equal(await prisma.client.count({ where: { displayName: { in: ["Bound Heard", "Bound Unheard"] } } }), 0);
+
+    // A yes for the review that was shown last creates exactly that client.
+    const approved = await send("yes", unheardId);
+    assert.equal(approved.status, 201, JSON.stringify(approved.body));
+    assert.equal(approved.body.pendingReview, null, "the client's remembered review is spent");
+    assert.equal(await prisma.client.count({ where: { displayName: "Bound Unheard" } }), 1);
+    assert.equal(await prisma.client.count({ where: { displayName: "Bound Heard" } }), 0);
+  });
+
+  it("a reviewed action's 409 preview hands over its review, and the assistant path honours it", async () => {
+    const companyId = (await prisma.company.findFirstOrThrow()).id;
+    await prisma.client.createMany({ data: [{ companyId, displayName: "Bind Keep" }, { companyId, displayName: "Bind Drop" }] });
+    const assistant = (text: string, review_id?: string | null) =>
+      request(app).post("/command/assistant").set("Authorization", `Bearer ${adminToken}`)
+        .send({ text, input_method: "voice_transcript", history: [], ...(review_id !== undefined ? { review_id } : {}) });
+    const previewed = await assistant('voice action merge_clients {"primary_client_name":"Bind Keep","duplicate_client_name":"Bind Drop"}', null);
+    assert.equal(previewed.body.error, "CONFIRMATION_REQUIRED", JSON.stringify(previewed.body));
+    const reviewId = previewed.body.pendingReview?.id;
+    assert.match(reviewId, /^[0-9a-f-]{36}$/);
+    // A yes carrying a review from elsewhere is refused; the merge has not happened.
+    const wrong = await assistant("yes", "00000000-0000-4000-8000-000000000000");
+    assert.equal(wrong.body.ok, false, JSON.stringify(wrong.body));
+    assert.equal(wrong.body.error, "REVIEW_NOT_HEARD");
+    assert.equal(await prisma.client.count({ where: { displayName: "Bind Drop", isActive: true } }), 1);
+    await prisma.voicePendingAction.deleteMany({});
+  });
+
   it("previews and confirms a client via a text command and audits it", async () => {
     const preview = await request(app)
       .post("/command/text")

@@ -45,6 +45,42 @@ function refreshSessionOnce(): Promise<string | null> {
   return pendingRefresh;
 }
 
+/**
+ * Approval binding: the review this client showed last. Every command carries
+ * it — null when nothing is shown — so a "yes" approves exactly the review the
+ * user heard here, never a newer one prepared meanwhile (an overlapping
+ * request, another device) and nothing when none was heard. The backend says
+ * what to remember: pendingReview with an id when a review was put up, null
+ * when the remembered one no longer waits, absent when it still does.
+ */
+// Kept across a page reload: a phone may drop and reload the WebView between
+// the read-out and the yes, and the yes must still approve what was heard.
+// Storage can be missing or throw (private mode); then it lives in memory only.
+const SHOWN_REVIEW_KEY = "vcuf_shown_review";
+let shownReviewId: string | undefined = (() => {
+  try {
+    return localStorage.getItem(SHOWN_REVIEW_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+})();
+
+function setShownReview(id: string | undefined) {
+  shownReviewId = id;
+  try {
+    if (id) localStorage.setItem(SHOWN_REVIEW_KEY, id);
+    else localStorage.removeItem(SHOWN_REVIEW_KEY);
+  } catch {
+    // Memory still holds it for this page.
+  }
+}
+
+function rememberReview(answer: unknown) {
+  if (!answer || typeof answer !== "object" || !("pendingReview" in answer)) return;
+  const pending = (answer as { pendingReview?: { id?: unknown } | null }).pendingReview;
+  setShownReview(pending && typeof pending.id === "string" ? pending.id : undefined);
+}
+
 async function request<T>(path: string, options: RequestInit = {}, mayRetry = true): Promise<T> {
   const token = getToken();
   const res = await fetch(`${API_URL}${path}`, {
@@ -1673,6 +1709,12 @@ export interface VoiceConversation {
   messages: VoiceConversationMessage[];
 }
 
+/** A review waiting for a yes, as the backend hands it to the client to remember. */
+export interface PendingReview {
+  id: string;
+  expiresAt: string;
+}
+
 export interface MobileAssistantResponse {
   ok: boolean;
   kind: "action" | "reply" | "clarification" | "plan" | "error";
@@ -1682,6 +1724,7 @@ export interface MobileAssistantResponse {
   message?: string;
   assistantMessage?: string;
   uiAction?: VoiceUiAction;
+  pendingReview?: PendingReview | null;
 }
 
 export interface SecretaryNavigationChild {
@@ -2362,27 +2405,39 @@ export const api = {
       remove: (id: string) =>
         request<{ ok: boolean }>(`/command/aliases/${id}`, { method: "DELETE" }),
     },
-    text: (text: string, inputMethod: "text" | "voice_transcript" = "text") =>
-      request<{
-        intent: string;
-        interpreted: unknown;
-        ok: boolean;
-        data?: unknown;
-        error?: string;
-        message?: string;
-        uiAction?: VoiceUiAction;
-      }>("/command/text", {
-        method: "POST",
-        body: JSON.stringify({ text, input_method: inputMethod }),
-      }),
+    text: async (text: string, inputMethod: "text" | "voice_transcript" = "text") => {
+      try {
+        const answer = await request<{
+          intent: string;
+          interpreted: unknown;
+          ok: boolean;
+          data?: unknown;
+          error?: string;
+          message?: string;
+          uiAction?: VoiceUiAction;
+          pendingReview?: PendingReview | null;
+        }>("/command/text", {
+          method: "POST",
+          body: JSON.stringify({ text, input_method: inputMethod, review_id: shownReviewId ?? null }),
+        });
+        rememberReview(answer);
+        return answer;
+      } catch (error) {
+        if (error instanceof ApiError) rememberReview(error.details);
+        throw error;
+      }
+    },
     assistant: async (text: string, language: AppLanguage, history: Array<{ role: "user" | "assistant"; content: string }>, signal?: AbortSignal) => {
       try {
-        return await request<MobileAssistantResponse>("/command/assistant", {
+        const answer = await request<MobileAssistantResponse>("/command/assistant", {
           method: "POST",
-          body: JSON.stringify({ text, input_method: "voice_transcript", language, history }),
+          body: JSON.stringify({ text, input_method: "voice_transcript", language, history, review_id: shownReviewId ?? null }),
           signal,
         });
+        rememberReview(answer);
+        return answer;
       } catch (error) {
+        if (error instanceof ApiError) rememberReview(error.details);
         // A review waiting for "yes" (409), a refusal (403) or a missing Gmail
         // authorisation comes back with a non-2xx status and the sentence to say.
         // That is Secretary's answer, not a lost connection: it used to be thrown
@@ -2410,7 +2465,11 @@ export const api = {
 export { getToken };
 export function setToken(token: string | null) {
   if (token) localStorage.setItem("vcuf_token", token);
-  else localStorage.removeItem("vcuf_token");
+  else {
+    localStorage.removeItem("vcuf_token");
+    // Signing out forgets what was read out: the next person approves nothing.
+    setShownReview(undefined);
+  }
 }
 
 /**

@@ -23,6 +23,7 @@ import { getPendingEmmaActionName } from "../../services/emmaExecutableActionSer
 import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
 import { assistantNameFor } from "../../lib/assistantName.js";
 import { acceptedByService, observeShadow, parserOutcomeOf } from "../../agents/shadowAgent.js";
+import { isReviewPending, runWithApprovalBinding } from "../../lib/executionEngine.js";
 
 /**
  * The user's voice language as it is right now.
@@ -53,6 +54,14 @@ commandRouter.get("/navigation", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
 const commandSchema = z.object({
   text: z.string().min(1, "text is required"),
   input_method: z.enum(["text", "voice_transcript"]).default("text"),
+  /**
+   * Approval binding. The review the client displayed last (pendingReview.id
+   * of an earlier answer), or null when it displays none. When present, a yes
+   * approves exactly that review — never a newer one, never one in another
+   * queue — and null approves nothing. Absent (older clients): the newest
+   * review is meant, as before.
+   */
+  review_id: z.string().uuid().nullable().optional(),
 });
 
 const assistantSchema = commandSchema.extend({
@@ -127,6 +136,42 @@ const OUTBOUND_VOICE_ACTIONS = new Set(["send_email", "send_whatsapp", "reply_em
 function outboundMessage(command: ParsedTextCommand) {
   return command.intent === "prepare_gmail_message" || command.intent === "prepare_whatsapp_message"
     || (command.intent === "execute_action" && OUTBOUND_VOICE_ACTIONS.has(command.entities.action));
+}
+
+/**
+ * A yes refused by approval binding: something is waiting, but not the review
+ * this device heard (or it heard none). Each service would answer "no longer
+ * waiting", which is not true here, so the answer says what actually happened
+ * and what to do: ask for it again, and it will be read out first.
+ */
+function withUnheardReviewMessage(bound: { result: CommandResponse; refusedUnheard: boolean }, language: string): CommandResponse {
+  // Only a refusal is reworded: if another queue's yes went through in the
+  // same request, its own answer stands.
+  if (!bound.refusedUnheard || bound.result.ok) return bound.result;
+  const message = language.startsWith("cs")
+    ? "Čeká něco, co jsem vám tady nepřečetl, a tak to neprovedu. Řekněte znovu, co mám připravit, přečtu vám to a pak potvrďte."
+    : language.startsWith("pl")
+      ? "Czeka coś, czego tu nie przeczytałem, więc tego nie wykonam. Powiedz jeszcze raz, co mam przygotować — przeczytam to, a potem potwierdź."
+      : "Something is waiting that I have not read out to you here, so I will not carry it out. Tell me again what to prepare, I will read it out, and then confirm.";
+  return { ...bound.result, ok: false, error: "REVIEW_NOT_HEARD", message };
+}
+
+/**
+ * What the client should remember for its next yes: the review this request
+ * put up (its id and expiry); null when the review it remembered is no longer
+ * waiting (claimed, cancelled, expired or resolved elsewhere), so a stale id
+ * does not refuse every later yes; nothing when its review still waits.
+ */
+async function pendingReviewField(
+  user: AuthedUser,
+  expected: string | null | undefined,
+  bound: { prepared?: { id: string; expiresAt: Date }; resolvedIds: ReadonlySet<string> },
+) {
+  if (bound.prepared) return { pendingReview: { id: bound.prepared.id, expiresAt: bound.prepared.expiresAt.toISOString() } };
+  if (typeof expected === "string" && (bound.resolvedIds.has(expected) || !(await isReviewPending(user, expected)))) {
+    return { pendingReview: null };
+  }
+  return {};
 }
 
 function auditText(command: ParsedTextCommand, value: string | null | undefined) {
@@ -497,7 +542,8 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     capabilityId: policyBlock.capabilityId,
   });
 
-  const response = localizeVoiceClientResponse(await dispatchParsedCommand(user, command), language);
+  const bound = await runWithApprovalBinding(parsedBody.data.review_id, () => dispatchParsedCommand(user, command));
+  const response = localizeVoiceClientResponse(withUnheardReviewMessage(bound, language), language);
   const uiAction = response.uiAction
     ? await publishVoiceUiAction(user, response.intent, response.uiAction)
     : undefined;
@@ -530,6 +576,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     kind: "action",
     assistantMessage: response.message,
     appliedAliases: alias.appliedRules,
+    ...(await pendingReviewField(user, parsedBody.data.review_id, bound)),
   });
 });
 
@@ -563,7 +610,8 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
     capabilityId: policyBlock.capabilityId,
   });
 
-  const response = await dispatchParsedCommand(user, command);
+  const bound = await runWithApprovalBinding(parsedBody.data.review_id, () => dispatchParsedCommand(user, command));
+  const response = withUnheardReviewMessage(bound, user.voiceLanguage);
   const uiAction = response.uiAction
     ? await publishVoiceUiAction(user, response.intent, response.uiAction)
     : undefined;
@@ -587,5 +635,5 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
   });
 
   observeShadow({ user, channel: "text", language: user.voiceLanguage, text: alias.resolvedText, actual: parserOutcomeOf(command, acceptedByService(response)) });
-  res.status(response.httpStatus).json({ ...response, uiAction, appliedAliases: alias.appliedRules });
+  res.status(response.httpStatus).json({ ...response, uiAction, appliedAliases: alias.appliedRules, ...(await pendingReviewField(user, parsedBody.data.review_id, bound)) });
 });
