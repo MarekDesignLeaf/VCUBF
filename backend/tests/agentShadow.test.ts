@@ -316,6 +316,18 @@ describe("agent in shadow (F1)", () => {
     await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceSpeechRate: 1.15 } });
   });
 
+  it("an assistant request whose interpretation failed still records the planner's availability", async () => {
+    // The provider is down for both the interpretation and the planner.
+    modelStatus = 503;
+    const unavailable = await request(app).post("/command/assistant").set("Authorization", `Bearer ${token}`)
+      .send({ text: "could you sort out the thing from yesterday", input_method: "voice_transcript", history: [] });
+    assert.equal(unavailable.status, 503, JSON.stringify(unavailable.body));
+    await settleShadowRuns();
+    const run = await prisma.agentRun.findFirstOrThrow({ where: { channel: "assistant" } });
+    assert.equal(run.parserIntent, "assistant_unavailable");
+    assert.equal(run.agreement, "error", "a planner outage counts against availability");
+  });
+
   it("confirmation turns get no shadow run", async () => {
     const skipped = observeShadow({
       user: { id: "user", companyId: "company" },

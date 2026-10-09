@@ -414,6 +414,10 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
       });
     } catch (error) {
       console.error("Voice assistant interpretation failed", error instanceof Error ? error.message : error);
+      // The planner uses the same provider: if it is down too, the shadow
+      // records a planner error that counts against availability. If the
+      // planner works, the run has no reference and is not compared.
+      observeShadow({ user, channel: "assistant", language, text: alias.resolvedText, history, actual: { intent: "assistant_unavailable", key: null, accepted: false } });
       return res.status(503).json({
         ok: false,
         kind: "error",
