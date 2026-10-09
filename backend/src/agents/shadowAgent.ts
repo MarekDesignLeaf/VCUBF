@@ -87,6 +87,7 @@ export type ShadowAgreement =
   | "agent_only"
   | "parser_only"
   | "invalid_proposal"
+  | "parser_rejected"
   | "error";
 
 /** What the parser did: the intent, a key to compare on, and — in memory only — its entities. */
@@ -96,6 +97,12 @@ export interface ParserOutcome {
   key: string | null;
   /** What the command was given. Compared in memory, never stored (D4). */
   entities?: unknown;
+  /**
+   * Whether the owning service accepted the command. A request the service
+   * refused (missing fields, a duplicate, no permission) is no reference to
+   * judge a proposal against: agreeing with it proves nothing.
+   */
+  accepted?: boolean;
 }
 
 export interface ProposedTool {
@@ -128,16 +135,17 @@ function actionEntities(action: string, parameters: unknown) {
   return { action, parameters: validated.success ? validated.data : parameters };
 }
 
-export function parserOutcomeOf(command: ParsedCommand): ParserOutcome {
-  if (command.intent === "unrecognized") return { intent: command.intent, key: null };
+export function parserOutcomeOf(command: ParsedCommand, accepted = true): ParserOutcome {
+  if (command.intent === "unrecognized") return { intent: command.intent, key: null, accepted };
   if (command.intent === "execute_action") {
     return {
       intent: command.intent,
       key: `execute_action:${command.entities.action}`,
       entities: actionEntities(command.entities.action, command.entities.parameters),
+      accepted,
     };
   }
-  return { intent: command.intent, key: command.intent, entities: command.entities };
+  return { intent: command.intent, key: command.intent, entities: command.entities, accepted };
 }
 
 /**
@@ -217,10 +225,13 @@ function proposalFrom(name: string, rawArguments: string): Proposal {
  * the same values — schemas alone cannot tell, because many actions are
  * validated only by their owning service, so the proposal's arguments are
  * compared, exactly, with what the parser actually received
- * ("arguments_differ" otherwise). The right action with further calls beside it is "extra_calls".
- * All of these count against the rate.
+ * ("arguments_differ" otherwise). The right action with further calls beside
+ * it is "extra_calls". All of these count against the rate. A request the
+ * service itself refused is "parser_rejected": with no valid reference there
+ * is nothing to agree with, so it is excluded from the rate like an error.
  */
 export function compareWithParser(proposals: Proposal[], actual: ParserOutcome): ShadowAgreement {
+  if (actual.accepted === false) return "parser_rejected";
   if (proposals.some((proposal) => !proposal.valid || proposal.key === null)) return "invalid_proposal";
   const proposedKeys = proposals.map((proposal) => proposal.key);
   if (actual.key === null) return proposedKeys.length === 0 ? "both_none" : "agent_only";
@@ -392,8 +403,9 @@ const AGREEING: ShadowAgreement[] = ["match", "both_none"];
 
 /**
  * The acceptance view of the shadow (F1): how often the agent's proposal
- * agrees with what the parser did. Errors are counted but excluded from the
- * rate; everything else — including an invalid proposal — counts against it.
+ * agrees with what the parser did. Errors and requests the service refused are
+ * counted but excluded from the rate; everything else — including an invalid
+ * proposal — counts against it.
  *
  * Only the current cohort counts: runs of the model, the exact tool set and
  * the deployed build in use now. The build covers everything a fingerprint of
@@ -426,13 +438,15 @@ export async function shadowSummary(companyId: string, since?: Date) {
     tokensOut += group._sum.tokensOut ?? 0;
   }
   const errors = byAgreement.error ?? 0;
-  const compared = total - errors;
+  const parserRejected = byAgreement.parser_rejected ?? 0;
+  const compared = total - errors - parserRejected;
   const agreeing = AGREEING.reduce((sum, agreement) => sum + (byAgreement[agreement] ?? 0), 0);
   return {
     cohort,
     total,
     compared,
     errors,
+    parserRejected,
     byAgreement,
     agreementRate: compared > 0 ? agreeing / compared : null,
     tokensIn,

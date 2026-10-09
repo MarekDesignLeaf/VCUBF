@@ -218,6 +218,23 @@ describe("agent in shadow (F1)", () => {
     assert.equal(run.agreement, "invalid_proposal");
   });
 
+  it("agreeing with a request the service refused proves nothing and is not counted", async () => {
+    // Parser and agent ask for exactly the same thing; the service refuses it (no such job).
+    const parameters = { job_title: "No Such Job", resource_type: "material", name: "Topsoil" };
+    modelOutput = [{ name: "add_job_resource", arguments: JSON.stringify(parameters) }];
+    const refused = await say(`voice action add_job_resource ${JSON.stringify(parameters)}`);
+    assert.equal(refused.body.intent, "execute_action", JSON.stringify(refused.body));
+    assert.equal(refused.body.ok, false, JSON.stringify(refused.body));
+    await settleShadowRuns();
+    const run = await prisma.agentRun.findFirstOrThrow();
+    assert.equal(run.parserAction, "execute_action:add_job_resource");
+    assert.equal(run.agreement, "parser_rejected");
+    const summary = await request(app).get("/audit/agent-shadow").set("Authorization", `Bearer ${token}`);
+    assert.equal(summary.body.parserRejected, 1);
+    assert.equal(summary.body.compared, 0);
+    assert.equal(summary.body.agreementRate, null);
+  });
+
   it("a bridge call with anything beside the canonical command is invalid", async () => {
     modelOutput = [{ name: "run_command", arguments: JSON.stringify({ canonical_command: "list clients", unexpected: true }) }];
     await say("list clients");
@@ -302,5 +319,7 @@ describe("agent in shadow (F1)", () => {
     assert.equal(compareWithParser([proposal("create_job", false)], { intent: "create_job", key: "create_job" }), "invalid_proposal");
     assert.equal(compareWithParser([proposal("create_job"), proposal(null)], { intent: "create_job", key: "create_job" }), "invalid_proposal");
     assert.equal(compareWithParser([proposal(null)], { intent: "assistant_reply", key: null }), "invalid_proposal");
+    // A request the service refused is no reference, whatever the proposal.
+    assert.equal(compareWithParser([proposal("create_job")], { ...job, accepted: false }), "parser_rejected");
   });
 });

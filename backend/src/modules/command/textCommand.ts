@@ -515,7 +515,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     result: response.ok ? "success" : "error",
     errorMessage: response.ok ? undefined : response.error,
   });
-  observeShadow({ user, channel: "assistant", language, text: alias.resolvedText, history, actual: parserOutcomeOf(command) });
+  observeShadow({ user, channel: "assistant", language, text: alias.resolvedText, history, actual: parserOutcomeOf(command, response.ok) });
   // Once a command has reached the deterministic action engine, its verified
   // result is the only text {assistant} may show or speak. The language model's
   // interpretation message can be incomplete, malformed, or claim success
@@ -582,6 +582,6 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
     errorMessage: response.ok ? undefined : response.error,
   });
 
-  observeShadow({ user, channel: "text", language: user.voiceLanguage, text: alias.resolvedText, actual: parserOutcomeOf(command) });
+  observeShadow({ user, channel: "text", language: user.voiceLanguage, text: alias.resolvedText, actual: parserOutcomeOf(command, response.ok) });
   res.status(response.httpStatus).json({ ...response, uiAction, appliedAliases: alias.appliedRules });
 });
