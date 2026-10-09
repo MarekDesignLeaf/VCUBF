@@ -99,9 +99,16 @@ export async function modelRequest(task: ModelTask, path: string, init: RequestI
  */
 export function recordUsage(task: ModelTask, usage: unknown): void {
   if (!usage || typeof usage !== "object") return;
-  const { input_tokens, output_tokens } = usage as { input_tokens?: unknown; output_tokens?: unknown };
+  const { input_tokens, output_tokens, input_tokens_details } = usage as {
+    input_tokens?: unknown;
+    output_tokens?: unknown;
+    input_tokens_details?: { cached_tokens?: unknown } | null;
+  };
   if (typeof input_tokens !== "number" && typeof output_tokens !== "number") return;
-  console.log(`[model-gateway] task=${task} model=${modelFor(task)} tokens_in=${input_tokens ?? "?"} tokens_out=${output_tokens ?? "?"}`);
+  // How much of the prompt the provider served from its cache: the evidence for
+  // whether a prompt's order lets it be reused (interpretation, 9. 10.).
+  const cached = input_tokens_details?.cached_tokens;
+  console.log(`[model-gateway] task=${task} model=${modelFor(task)} tokens_in=${input_tokens ?? "?"}${typeof cached === "number" ? ` tokens_cached=${cached}` : ""} tokens_out=${output_tokens ?? "?"}`);
 }
 
 function log(task: ModelTask, outcome: string, durationMs: number): void {

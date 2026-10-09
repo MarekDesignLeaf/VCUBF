@@ -6,6 +6,7 @@ import { appLanguage } from "../i18n";
 import { useAuth } from "../context/useAuth";
 import { isDesktopCompanionWindow } from "../lib/platform";
 import { MacroRecorder, replayMacro, type MacroStep } from "../lib/macroRecorder";
+import { speechPieces } from "../lib/speechPieces";
 import {
   learningPhrases,
   learningSpeech,
@@ -524,11 +525,19 @@ function pickVoice(language: string, voices: SpeechSynthesisVoice[]): SpeechSynt
  * `canplaythrough` only says the browser expects to manage, which it did not.
  */
 interface Playback {
-  /** Total length including the lead-in, in seconds. Known before a sample is played. */
-  duration: number;
   stop(): void;
+  /** Called once, when the last piece has finished or playback was stopped. */
   onEnded(listener: () => void): void;
 }
+
+/**
+ * Told every time a piece of a reply is scheduled: the wall-clock time the audio
+ * scheduled so far ends, and whether that is the whole reply. When a later piece
+ * could not be synthesised, the reply ends early and `unplayed` is what was not
+ * said, for the system voice to finish — a review must be heard in full before
+ * its yes.
+ */
+type ScheduleListener = (endsAt: number, complete: boolean, unplayed?: string) => void;
 
 let currentPlayback: Playback | null = null;
 
@@ -621,6 +630,7 @@ function ensureAudioContext(): AudioContext | null {
 function releaseOutput() {
   const context = outputContext;
   outputContext = null;
+  spokenPieces.clear();
   void context?.close().catch(() => undefined);
 }
 
@@ -661,14 +671,6 @@ async function authorizedVoiceFetch(url: string, init: RequestInit & { headers: 
   return refreshed ? send(refreshed) : response;
 }
 
-/**
- * Speak through the backend's neural voice.
- *
- * Returns the playback that started, or null when nothing could be played — the signal
- * to fall back to the browser's own synthesis. The whole clip is fetched and decoded
- * before a sample is played, so its real length is known up front and there is no
- * decoding left to fall behind during playback.
- */
 // Bumped by every new reply and by every interruption, so audio that arrives
 // for a reply that has since been silenced or replaced is never played.
 let speechGeneration = 0;
@@ -680,11 +682,33 @@ let speechGeneration = 0;
  */
 const PENDING_SPEECH_HOLD_MS = 120_000;
 
-async function playNeuralVoice(text: string, language: string, generation = speechGeneration): Promise<Playback | null> {
-  try {
-    const context = ensureAudioContext();
-    if (!context) return null;
+/**
+ * Short pieces already heard once, decoded and ready ("Ano?", "Hotovo.").
+ *
+ * The server keeps the same words in memory, but the round trip to it was still
+ * the wait between saying "Alfonzo" and hearing "Ano?" — 2 s on 9. 10., right
+ * after a deployment had emptied the server's copy. The acknowledgement is
+ * fetched here as soon as voice control is on, so it plays the moment the name
+ * is recognised.
+ */
+const spokenPieces = new Map<string, AudioBuffer>();
+const KEPT_PIECE_LENGTH = 80;
+const KEPT_PIECES = 40;
 
+function pieceKey(text: string, language: string, rate: number) {
+  return `${language}\u0000${rate}\u0000${text}`;
+}
+
+/** One piece of a reply as audio, or null when it cannot be had. */
+async function neuralPiece(context: AudioContext, text: string, language: string, rate: number): Promise<AudioBuffer | null> {
+  const key = pieceKey(text, language, rate);
+  const kept = spokenPieces.get(key);
+  if (kept) {
+    spokenPieces.delete(key);
+    spokenPieces.set(key, kept);
+    return kept;
+  }
+  try {
     const response = await authorizedVoiceFetch(`${API_URL}/command/speak`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -693,27 +717,124 @@ async function playNeuralVoice(text: string, language: string, generation = spee
     if (!response.ok) return null;
     const encoded = await response.arrayBuffer();
     if (encoded.byteLength === 0) return null;
-
     const decoded = await context.decodeAudioData(encoded);
-    const buffer = withLeadIn(context, decoded);
+    if (text.length <= KEPT_PIECE_LENGTH) {
+      spokenPieces.set(key, decoded);
+      if (spokenPieces.size > KEPT_PIECES) spokenPieces.delete(spokenPieces.keys().next().value!);
+    }
+    return decoded;
+  } catch {
+    return null;
+  }
+}
 
-    if (generation !== speechGeneration) return null;
-    const source = context.createBufferSource();
-    source.buffer = buffer;
-    source.connect(context.destination);
+/**
+ * Two short, quiet notes the moment a command addressed to him is taken up.
+ *
+ * Understanding a command takes seconds — transcription, then the model — and
+ * until the answer came nothing said it had been heard at all (9. 10.: "musí
+ * reagovat okamžitě"). The notes are made here, so they cost no request. They
+ * start a little late on purpose: an idle Windows output drops its first
+ * samples (see LEAD_IN_MS).
+ */
+function playCue() {
+  const context = outputContext;
+  if (!context || context.state !== "running") return;
+  try {
+    const start = context.currentTime + 0.12;
+    [660, 880].forEach((frequency, index) => {
+      const at = start + index * 0.09;
+      const tone = context.createOscillator();
+      const level = context.createGain();
+      tone.type = "sine";
+      tone.frequency.value = frequency;
+      level.gain.setValueAtTime(0.0001, at);
+      level.gain.exponentialRampToValueAtTime(0.05, at + 0.012);
+      level.gain.exponentialRampToValueAtTime(0.0001, at + 0.085);
+      tone.connect(level);
+      level.connect(context.destination);
+      tone.start(at);
+      tone.stop(at + 0.1);
+    });
+  } catch { /* A missing cue is not worth an error. */ }
+}
+
+/** Fetch and decode a phrase ahead of time, so its first use plays at once. */
+async function prepareSpeech(text: string, language: string, rate: number): Promise<void> {
+  const context = ensureAudioContext();
+  if (context && !spokenPieces.has(pieceKey(text, language, rate))) await neuralPiece(context, text, language, rate);
+}
+
+/**
+ * Speak through the backend's neural voice.
+ *
+ * Returns the playback that started, or null when nothing could be played — the signal
+ * to fall back to the browser's own synthesis.
+ *
+ * The reply is cut into sentences (speechPieces) and every piece is requested at once;
+ * the first plays as soon as it arrives and each later one is scheduled to follow the
+ * one before it without a gap. Each piece is still fetched and decoded whole before a
+ * sample of it is played, so there is no decoding left to fall behind during playback.
+ */
+async function playNeuralVoice(
+  text: string,
+  language: string,
+  rate: number,
+  onScheduled: ScheduleListener,
+  generation = speechGeneration,
+): Promise<Playback | null> {
+  try {
+    const context = ensureAudioContext();
+    if (!context) return null;
+
+    const pieces = speechPieces(text);
+    if (pieces.length === 0) return null;
+    // All at once: the later pieces are synthesised while the first one plays.
+    const arriving = pieces.map((piece) => neuralPiece(context, piece, language, rate));
+
+    const first = await arriving[0];
+    if (!first || generation !== speechGeneration) return null;
 
     const listeners: Array<() => void> = [];
+    const sources: AudioBufferSourceNode[] = [];
     let finished = false;
-    source.onended = () => {
+    let stopped = false;
+    // Where the audio scheduled so far ends, in the context's clock.
+    let cursor = 0;
+    const finish = () => {
       if (finished) return;
       finished = true;
       for (const listener of listeners) listener();
     };
+    /** Plays one decoded piece after everything already scheduled; returns when it ends, in wall-clock time. */
+    const schedule = (buffer: AudioBuffer, last: boolean) => {
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      // A context resumed a moment ago may still be settling; scheduling a hair ahead
+      // keeps the very first reply as clean as the rest. A piece that arrives after
+      // the one before it has finished starts as soon as it can.
+      const startAt = Math.max(cursor, context.currentTime + 0.02);
+      cursor = startAt + buffer.duration;
+      if (last) source.onended = finish;
+      sources.push(source);
+      source.start(startAt);
+      return Date.now() + (cursor - context.currentTime) * 1000;
+    };
+    /** The reply ends with what is already scheduled. */
+    const endWithScheduled = () => {
+      const last = sources[sources.length - 1];
+      if (!last || context.currentTime >= cursor) finish();
+      else last.onended = finish;
+    };
 
     const playback: Playback = {
-      duration: buffer.duration,
       stop() {
-        try { source.stop(); } catch { /* already stopped */ }
+        stopped = true;
+        for (const source of sources) {
+          try { source.stop(); } catch { /* already stopped */ }
+        }
+        finish();
       },
       onEnded(listener) {
         if (finished) listener();
@@ -722,9 +843,22 @@ async function playNeuralVoice(text: string, language: string, generation = spee
     };
     currentPlayback = playback;
 
-    // A context resumed a moment ago may still be settling; scheduling a hair ahead
-    // keeps the very first reply as clean as the rest.
-    source.start(context.currentTime + 0.02);
+    onScheduled(schedule(withLeadIn(context, first), pieces.length === 1), pieces.length === 1);
+    if (pieces.length > 1) {
+      void (async () => {
+        for (let index = 1; index < pieces.length; index += 1) {
+          const buffer = await arriving[index];
+          if (stopped || generation !== speechGeneration) return;
+          if (!buffer) {
+            endWithScheduled();
+            onScheduled(Date.now() + Math.max(0, cursor - context.currentTime) * 1000, true, pieces.slice(index).join(" "));
+            return;
+          }
+          const last = index === pieces.length - 1;
+          onScheduled(schedule(buffer, last), last);
+        }
+      })();
+    }
     return playback;
   } catch {
     return null;
@@ -1263,25 +1397,8 @@ export function BrowserVoiceControl() {
     echoFloor.current = 0;
     spokenText.current = [text, ...spokenText.current].slice(0, 3);
 
-    void (async () => {
-      const audio = await playNeuralVoice(text, language, generation);
-      // Silenced or replaced while the audio was on its way: the newer state
-      // already owns the guards.
-      if (generation !== speechGeneration) return;
-      if (audio) {
-        // The real length, known before playback starts rather than guessed from
-        // metadata that may not have arrived yet.
-        const playing = audio.duration * 1000;
-        speakingUntil.current = Date.now() + playing + SPEAKING_GRACE_MS;
-        echoGuardUntil.current = Date.now() + playing + ECHO_TAIL_MS;
-        startHearing();
-        audio.onEnded(() => {
-          if (generation === speechGeneration) audible.current = false;
-          speakingUntil.current = Date.now() + SPEAKING_GRACE_MS;
-          echoGuardUntil.current = Date.now() + ECHO_TAIL_MS;
-        });
-        return;
-      }
+    /** The browser's own voice: when the neural voice is unavailable, or to finish a reply it could not. */
+    const sayWithSystemVoice = async (words: string) => {
       if (!("speechSynthesis" in window)) {
         speakingUntil.current = 0;
         echoGuardUntil.current = Date.now() + ECHO_TAIL_MS;
@@ -1291,16 +1408,14 @@ export function BrowserVoiceControl() {
         const voices = await systemVoices();
         // Silenced or replaced while the voices were loading.
         if (generation !== speechGeneration) return;
-        const utterance = new SpeechSynthesisUtterance(text);
+        const utterance = new SpeechSynthesisUtterance(words);
         utterance.lang = language;
         const voice = pickVoice(language, voices);
         if (voice) utterance.voice = voice;
         utterance.rate = speechRate;
-        // Roughly three words a second, so the hold lasts about as long as this
-        // will take to say.
         // Three words a second at normal pace, scaled by how fast she is set to
         // talk, so the hold matches how long this actually takes.
-        const estimated = (text.split(/\s+/).length / (3 * speechRate)) * 1000;
+        const estimated = (words.split(/\s+/).length / (3 * speechRate)) * 1000;
         speakingUntil.current = Date.now() + estimated + SPEAKING_GRACE_MS;
         echoGuardUntil.current = Date.now() + estimated + ECHO_TAIL_MS;
         utterance.onstart = () => { if (generation === speechGeneration) startHearing(); };
@@ -1311,8 +1426,45 @@ export function BrowserVoiceControl() {
         };
         window.speechSynthesis.speak(utterance);
       } catch { /* Speech output is optional. */ }
+    };
+
+    void (async () => {
+      let unplayed = "";
+      const audio = await playNeuralVoice(text, language, speechRate, (endsAt, complete, rest) => {
+        if (generation !== speechGeneration) return;
+        // While later pieces are still on their way the pending hold stays: a
+        // "yes" must not be taken before the whole reply has been heard. Once the
+        // last piece is scheduled, the real end replaces it.
+        if (!complete) return;
+        speakingUntil.current = endsAt + SPEAKING_GRACE_MS;
+        echoGuardUntil.current = endsAt + ECHO_TAIL_MS;
+        if (rest) unplayed = rest;
+      }, generation);
+      // Silenced or replaced while the audio was on its way: the newer state
+      // already owns the guards.
+      if (generation !== speechGeneration) return;
+      if (audio) {
+        startHearing();
+        audio.onEnded(() => {
+          if (generation === speechGeneration) audible.current = false;
+          speakingUntil.current = Date.now() + SPEAKING_GRACE_MS;
+          echoGuardUntil.current = Date.now() + ECHO_TAIL_MS;
+          // A piece could not be synthesised: the rest is said in the system
+          // voice rather than left out.
+          if (unplayed && generation === speechGeneration) void sayWithSystemVoice(unplayed);
+        });
+        return;
+      }
+      await sayWithSystemVoice(text);
     })();
   }, [language, speechRate, companionOwnsVoice, startHearing]);
+
+  // "Ano?" is ready before the name is first said, so answering to it costs no
+  // round trip (measured 2 s on 9. 10.).
+  useEffect(() => {
+    if (!enabled || companionOwnsVoice) return;
+    void prepareSpeech(acknowledgement(language), language, speechRate);
+  }, [enabled, companionOwnsVoice, language, speechRate]);
 
 
   const phrases = learningPhrases(language);
@@ -1522,6 +1674,7 @@ export function BrowserVoiceControl() {
     if (await handleLearningTurn(text)) return;
 
     if (alreadyActive) {
+      if (!companionOwnsVoice) playCue();
       // "No taught command" and "could not check" are different answers. Only
       // the first lets the sentence go on to be interpreted: otherwise a taught
       // command could be acted on as some other command.
@@ -1545,6 +1698,7 @@ export function BrowserVoiceControl() {
     conversationStartedAt.current = Date.now();
     extendConversation();
     if (!remainder) { speak(acknowledgement(language)); return; }
+    if (!companionOwnsVoice) playCue();
     await execute(remainder);
   };
 
