@@ -170,10 +170,10 @@ describe("agent in shadow (F1)", () => {
     await prisma.voicePendingAction.deleteMany({});
   });
 
-  it("the same command and values, said differently in case and spacing, is a match", async () => {
+  it("the same command with exactly the same values is a match", async () => {
     modelOutput = [{
       name: "run_command",
-      arguments: JSON.stringify({ canonical_command: "create client values  same, email Values.Same@example.com, phone 07700 900555" }),
+      arguments: JSON.stringify({ canonical_command: "create client Values Same, email values.same@example.com, phone 07700 900555" }),
     }];
     await say("create client Values Same, email values.same@example.com, phone 07700 900555");
     await settleShadowRuns();
@@ -237,9 +237,17 @@ describe("agent in shadow (F1)", () => {
     await say("list clients");
     await settleShadowRuns();
 
+    // A run of another model is shown but never counted toward acceptance.
+    const counted = await prisma.agentRun.findFirstOrThrow();
+    await prisma.agentRun.create({
+      data: { ...counted, id: undefined, model: "some-earlier-model", agreement: "match", proposedTools: [] },
+    });
+
     const summary = await request(app).get("/audit/agent-shadow").set("Authorization", `Bearer ${token}`);
     assert.equal(summary.status, 200);
     assert.equal(summary.body.total, 2);
+    assert.equal(summary.body.otherCohortRuns, 1);
+    assert.equal(summary.body.cohort.model, "gpt-5.4-mini");
     assert.deepEqual(summary.body.byAgreement, { match: 1, parser_only: 1 });
     assert.equal(summary.body.agreementRate, 0.5);
     assert.equal(summary.body.acceptance.met, false);
@@ -252,7 +260,14 @@ describe("agent in shadow (F1)", () => {
   it("compares proposals with the parser outcome", () => {
     const proposal = (key: string | null, valid = key !== null, entities?: unknown): Proposal => ({ tool: "t", kind: "write", key, valid, argumentsFingerprint: "f", entities });
     const job = { intent: "create_job", key: "create_job", entities: { title: "Garden", client_name: "Jane Smith" } };
-    assert.equal(compareWithParser([proposal("create_job", true, { client_name: "jane  smith", title: "Garden " })], job), "match");
+    assert.equal(compareWithParser([proposal("create_job", true, { title: "Garden", client_name: "Jane Smith" })], job), "match");
+    // Values are compared exactly: text that differs only in case or spacing is different text.
+    assert.equal(compareWithParser([proposal("create_job", true, { client_name: "jane  smith", title: "Garden" })], job), "arguments_differ");
+    const message = { intent: "execute_action", key: "execute_action:send_whatsapp", entities: { action: "send_whatsapp", parameters: { to: "+447700900123", body: "Please STOP" } } };
+    assert.equal(
+      compareWithParser([proposal("execute_action:send_whatsapp", true, { action: "send_whatsapp", parameters: { to: "+447700900123", body: "please  STOP" } })], message),
+      "arguments_differ",
+    );
     assert.equal(compareWithParser([proposal("create_job", true, { client_name: "John Smith", title: "Garden" })], job), "arguments_differ");
     // A service-validated action given nothing differs from what the parser received.
     assert.equal(

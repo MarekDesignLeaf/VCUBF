@@ -136,9 +136,12 @@ export function parserOutcomeOf(command: ParsedCommand): ParserOutcome {
   return { intent: command.intent, key: command.intent, entities: command.entities };
 }
 
-/** Text compared as said: case, surrounding and repeated whitespace aside. Keys sorted, absent values dropped. */
+/**
+ * Values compared exactly as given — a message body that differs only in case
+ * or spacing is a different message. Only key order and absent values are set
+ * aside, because they change nothing that would be sent or written.
+ */
 function canonical(value: unknown): unknown {
-  if (typeof value === "string") return value.trim().replace(/\s+/g, " ").toLowerCase();
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === "object") {
     return Object.fromEntries(
@@ -208,8 +211,8 @@ function proposalFrom(name: string, rawArguments: string): Proposal {
  * proposal invalid. A match means exactly the one thing the parser did, given
  * the same values — schemas alone cannot tell, because many actions are
  * validated only by their owning service, so the proposal's arguments are
- * compared with what the parser actually received ("arguments_differ"
- * otherwise). The right action with further calls beside it is "extra_calls".
+ * compared, exactly, with what the parser actually received
+ * ("arguments_differ" otherwise). The right action with further calls beside it is "extra_calls".
  * All of these count against the rate.
  */
 export function compareWithParser(proposals: Proposal[], actual: ParserOutcome): ShadowAgreement {
@@ -384,14 +387,23 @@ const AGREEING: ShadowAgreement[] = ["match", "both_none"];
  * The acceptance view of the shadow (F1): how often the agent's proposal
  * agrees with what the parser did. Errors are counted but excluded from the
  * rate; everything else — including an invalid proposal — counts against it.
+ *
+ * Only the current cohort counts: runs of the model and the exact tool set in
+ * use now. A new model or a changed catalogue starts from zero, so earlier
+ * observations can never vouch for a configuration nobody has measured.
  */
 export async function shadowSummary(companyId: string, since?: Date) {
-  const groups = await prisma.agentRun.groupBy({
-    by: ["agreement"],
-    where: { companyId, mode: "shadow", ...(since ? { createdAt: { gte: since } } : {}) },
-    _count: { _all: true },
-    _sum: { tokensIn: true, tokensOut: true },
-  });
+  const cohort = { model: modelFor("agent_plan"), toolsetFingerprint: AGENT_TOOLSET_FINGERPRINT };
+  const scope = { companyId, mode: "shadow", ...(since ? { createdAt: { gte: since } } : {}) };
+  const [groups, allRuns] = await Promise.all([
+    prisma.agentRun.groupBy({
+      by: ["agreement"],
+      where: { ...scope, ...cohort },
+      _count: { _all: true },
+      _sum: { tokensIn: true, tokensOut: true },
+    }),
+    prisma.agentRun.count({ where: scope }),
+  ]);
   const byAgreement: Record<string, number> = {};
   let total = 0;
   let tokensIn = 0;
@@ -406,6 +418,7 @@ export async function shadowSummary(companyId: string, since?: Date) {
   const compared = total - errors;
   const agreeing = AGREEING.reduce((sum, agreement) => sum + (byAgreement[agreement] ?? 0), 0);
   return {
+    cohort,
     total,
     compared,
     errors,
@@ -413,6 +426,8 @@ export async function shadowSummary(companyId: string, since?: Date) {
     agreementRate: compared > 0 ? agreeing / compared : null,
     tokensIn,
     tokensOut,
+    /** Runs of earlier models or tool sets: shown, never counted. */
+    otherCohortRuns: allRuns - total,
     acceptance: { requiredRate: 0.95, requiredSample: 100, met: compared >= 100 && agreeing / compared >= 0.95 },
   };
 }
