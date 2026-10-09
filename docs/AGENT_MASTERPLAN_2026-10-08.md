@@ -162,6 +162,8 @@ Vypínač per firma; úkoly, kterým parser nerozumí a mají > 1 krok, jdou age
 
 **Control Tower v1 (vrstva I, §57) — PR #44:** stránka `/agents` („Dohled nad agenty“, jen pro `users.manage`, pouze ke čtení) nad `GET /audit/control-tower` a `GET /audit/agent-shadow`: nasazený build a model každé úlohy brány, zda běží agent ve stínu (podíl, klíč k modelu, běhy v letu), stav nouzového zastavení, co čeká na „ano“ po druzích akcí (`pendingReviewsOverview` v enginu — jen počty a časy, nikdy obsah), posledních 24 h běhů (chyby, tokeny), akceptace stínu po jazycích × cestách a posledních 50 běhů (názvy navržených nástrojů a shoda; otisky argumentů se nezobrazují). Nic nemění; vypínač agenta per firma přibude s F2 a bude tu vidět.
 
+**F2a — vypínač agenta per firma (§39) — PR #46:** `Company.agentEnabledAt`; přepíná jen administrátor na stránce „Dohled nad agenty“ (`PUT /company/agent-mode`, audit s rizikem 3, jen skutečná změna; řádek zamčený). Secretary na vypínač nemá nástroj — nemůže si zvýšit autonomii. Agent smí jednat (`agentMayActFor`) jen když platí všechny tři podmínky: vypínač zapnutý, jazyk × cesta prošly akceptací stínu v aktuální kohortě, žádné nouzové zastavení. Během zastavení jde agent vypnout, ne zapnout. Sám o sobě vypínač zatím nic nespouští — první konzument je F2b (vícekrokový návrh s jedním „ano“).
+
 ### F3 — Specialisté pro tři hlavní funkce
 Komunikační (e-mail + WhatsApp, angličtina), Plánovací (kalendář), CRM. Orchestrátor skládá jeden návrh napříč specialisty. **Akceptace:** scénáře nad třemi funkcemi, které Marek chce od začátku — jedna věta → jeden návrh → jedno ano.
 

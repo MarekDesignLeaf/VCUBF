@@ -26,6 +26,11 @@ model Company {
   // nothing new is changed or sent for the company: reads, audit, sign-in and
   // the switch itself keep working. null = normal operation.
   safeModeSince      DateTime? @map("safe_mode_since")
+  // The agent may act for the company (masterplan F2, §39). Null = off. Even
+  // when on, it acts only for a language and request path that passed the
+  // shadow acceptance, never during an emergency stop, and only through
+  // reviewed proposals. Only an administrator switches it; Secretary cannot.
+  agentEnabledAt     DateTime? @map("agent_enabled_at")
   createdAt          DateTime  @default(now()) @map("created_at")
 
   primaryAdministrator User? @relation("CompanyPrimaryAdministrator", fields: [primaryAdminUserId], references: [id], onDelete: SetNull)

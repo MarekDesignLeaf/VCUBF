@@ -2,7 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import { recordAudit } from "../../lib/audit.js";
-import { SET_COMPANY_SAFE_MODE_ACTION } from "../../lib/actionContracts.js";
+import { SET_COMPANY_AGENT_MODE_ACTION, SET_COMPANY_SAFE_MODE_ACTION } from "../../lib/actionContracts.js";
+import { agentModeState } from "../../agents/agentMode.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { getEmmaPolicy, isAdministrator, updateEmmaPolicy, updateEmmaPolicySchema } from "../../services/emmaPolicyService.js";
@@ -104,6 +105,56 @@ companyRouter.put("/safe-mode", requirePermission(SET_COMPANY_SAFE_MODE_ACTION.r
   }
   res.set("Cache-Control", "no-store");
   return res.json(after);
+});
+
+// The agent switch (masterplan F2, §39). Read by administrators of users and
+// the company; switched only by an administrator, audited at risk 3. The
+// state says where the agent may act right now — nowhere until a language
+// and request path passed the shadow acceptance.
+const agentModeSchema = z.object({ enabled: z.boolean(), reason: z.string().trim().max(500).optional() });
+
+companyRouter.get("/agent-mode", requirePermission("users.manage"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  return res.json(await agentModeState(req.user!.companyId));
+});
+
+companyRouter.put("/agent-mode", requirePermission(SET_COMPANY_AGENT_MODE_ACTION.requiredPermission), async (req, res) => {
+  const user = req.user!;
+  if (!isAdministrator(user)) {
+    return res.status(403).json({ error: "ADMINISTRATOR_REQUIRED", message: "Only a company administrator can switch the agent." });
+  }
+  const parsed = agentModeSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED", message: parsed.error.message });
+  const enabled = parsed.data.enabled;
+  const outcome = await prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ agent_enabled_at: Date | null }>>`
+      SELECT "agent_enabled_at" FROM "companies" WHERE "id" = ${user.companyId} FOR UPDATE`;
+    if (rows.length === 0) return null;
+    const previous = rows[0].agent_enabled_at;
+    const before = { enabled: previous !== null, since: previous };
+    if (before.enabled === enabled) return { before, after: before, changed: false };
+    const updated = await tx.company.update({
+      where: { id: user.companyId },
+      data: { agentEnabledAt: enabled ? new Date() : null },
+      select: { agentEnabledAt: true },
+    });
+    return { before, after: { enabled: updated.agentEnabledAt !== null, since: updated.agentEnabledAt }, changed: true };
+  });
+  if (!outcome) return res.status(404).json({ error: "COMPANY_NOT_FOUND" });
+  if (outcome.changed) {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: SET_COMPANY_AGENT_MODE_ACTION.actionName,
+      inputPayload: { enabled, reason: parsed.data.reason ?? null },
+      dataBefore: outcome.before,
+      dataAfter: outcome.after,
+      riskLevel: SET_COMPANY_AGENT_MODE_ACTION.riskLevel,
+      result: "success",
+    });
+  }
+  res.set("Cache-Control", "no-store");
+  return res.json(await agentModeState(user.companyId));
 });
 
 companyRouter.get("/emma-policy", requirePermission("company.manage"), async (req, res) => {

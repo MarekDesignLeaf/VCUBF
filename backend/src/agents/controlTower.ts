@@ -38,8 +38,9 @@ function proposedToolNames(value: unknown): Array<{ tool: string; kind: string; 
 
 export async function controlTowerOverview(companyId: string, now = new Date()) {
   const since = new Date(now.getTime() - DAY_MS);
-  const [stop, pendingReviews, runs, lastDay] = await Promise.all([
+  const [stop, agent, pendingReviews, runs, lastDay] = await Promise.all([
     safeModeSince(companyId),
+    prisma.company.findUnique({ where: { id: companyId }, select: { agentEnabledAt: true } }),
     pendingReviewsOverview(companyId, now),
     prisma.agentRun.findMany({
       where: { companyId },
@@ -74,6 +75,7 @@ export async function controlTowerOverview(companyId: string, now = new Date()) 
     generatedAt: now,
     build: buildId(),
     safeMode: { enabled: stop !== null, since: stop },
+    agent: { enabled: Boolean(agent?.agentEnabledAt), since: agent?.agentEnabledAt ?? null },
     shadow: shadowSettings(),
     models: MODEL_TASKS.map((task) => ({ task, model: modelFor(task) })),
     pendingReviews,
