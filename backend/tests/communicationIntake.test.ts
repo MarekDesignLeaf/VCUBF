@@ -313,7 +313,8 @@ describe("Communication Extraction and Reply Drafting", () => {
     assert.equal((audit?.inputPayload as { intakeIds?: string[] })?.intakeIds?.length, 3);
 
     // Nothing left on a channel: said plainly, nothing to confirm.
-    const none = await say('voice action resolve_communication_intakes {"channel":"sms"}');
+    await prisma.communicationIntake.updateMany({ where: { companyId: TEST_COMPANY_ID, channel: "portal_chat" }, data: { resolutionNeeded: false } });
+    const none = await say('voice action resolve_communication_intakes {"channel":"portal_chat"}');
     assert.equal(none.status, 200, JSON.stringify(none.body));
     assert.match(none.body.message, /no unresolved messages/);
   });
