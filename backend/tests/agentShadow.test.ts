@@ -271,17 +271,25 @@ describe("agent in shadow (F1)", () => {
     await prisma.agentRun.create({
       data: { ...counted, id: undefined, build: "an-earlier-b", agreement: "match", proposedTools: [] },
     });
+    // A Czech run of the current cohort is counted — under Czech, not English.
+    await prisma.agentRun.create({
+      data: { ...counted, id: undefined, language: "cs-CZ", agreement: "mismatch", proposedTools: [] },
+    });
 
     const summary = await request(app).get("/audit/agent-shadow").set("Authorization", `Bearer ${token}`);
     assert.equal(summary.status, 200);
-    assert.equal(summary.body.total, 2);
+    assert.equal(summary.body.total, 3);
     assert.equal(summary.body.otherCohortRuns, 2);
+    assert.deepEqual(Object.keys(summary.body.byLanguage), ["cs-CZ", "en-GB"]);
+    assert.deepEqual(summary.body.byLanguage["en-GB"].byAgreement, { match: 1, parser_only: 1 });
+    assert.equal(summary.body.byLanguage["en-GB"].agreementRate, 0.5);
+    assert.deepEqual(summary.body.byLanguage["cs-CZ"].byAgreement, { mismatch: 1 });
+    assert.equal(summary.body.byLanguage["cs-CZ"].agreementRate, 0);
+    assert.deepEqual(summary.body.acceptance.acceptedLanguages, []);
     assert.equal(summary.body.cohort.model, "gpt-5.4-mini");
     assert.equal(summary.body.cohort.build, buildId());
     assert.equal(counted.build, buildId());
-    assert.deepEqual(summary.body.byAgreement, { match: 1, parser_only: 1 });
-    assert.equal(summary.body.agreementRate, 0.5);
-    assert.equal(summary.body.acceptance.met, false);
+    assert.deepEqual(summary.body.byAgreement, { match: 1, parser_only: 1, mismatch: 1 });
 
     const worker = await loginAs("worker@test.local");
     const denied = await request(app).get("/audit/agent-shadow").set("Authorization", `Bearer ${worker}`);

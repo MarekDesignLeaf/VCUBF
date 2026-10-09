@@ -405,7 +405,7 @@ const AGREEING: ShadowAgreement[] = ["match", "both_none"];
  * The acceptance view of the shadow (F1): how often the agent's proposal
  * agrees with what the parser did. Errors and requests the service refused are
  * counted but excluded from the rate; everything else — including an invalid
- * proposal — counts against it.
+ * proposal — counts against it. Acceptance is per language.
  *
  * Only the current cohort counts: runs of the model, the exact tool set and
  * the deployed build in use now. The build covers everything a fingerprint of
@@ -420,39 +420,67 @@ export async function shadowSummary(companyId: string, since?: Date) {
   const scope = { companyId, mode: "shadow", ...(since ? { createdAt: { gte: since } } : {}) };
   const [groups, allRuns] = await Promise.all([
     prisma.agentRun.groupBy({
-      by: ["agreement"],
+      by: ["language", "agreement"],
       where: { ...scope, ...cohort },
       _count: { _all: true },
       _sum: { tokensIn: true, tokensOut: true },
     }),
     prisma.agentRun.count({ where: scope }),
   ]);
-  const byAgreement: Record<string, number> = {};
-  let total = 0;
+
+  const tally = () => ({ total: 0, errors: 0, parserRejected: 0, agreeing: 0, byAgreement: {} as Record<string, number> });
+  const overall = tally();
+  const perLanguage = new Map<string, ReturnType<typeof tally>>();
   let tokensIn = 0;
   let tokensOut = 0;
   for (const group of groups) {
-    byAgreement[group.agreement] = group._count._all;
-    total += group._count._all;
+    const count = group._count._all;
     tokensIn += group._sum.tokensIn ?? 0;
     tokensOut += group._sum.tokensOut ?? 0;
+    const language = perLanguage.get(group.language) ?? tally();
+    perLanguage.set(group.language, language);
+    for (const bucket of [overall, language]) {
+      bucket.total += count;
+      bucket.byAgreement[group.agreement] = (bucket.byAgreement[group.agreement] ?? 0) + count;
+      if (group.agreement === "error") bucket.errors += count;
+      if (group.agreement === "parser_rejected") bucket.parserRejected += count;
+      if (AGREEING.includes(group.agreement as ShadowAgreement)) bucket.agreeing += count;
+    }
   }
-  const errors = byAgreement.error ?? 0;
-  const parserRejected = byAgreement.parser_rejected ?? 0;
-  const compared = total - errors - parserRejected;
-  const agreeing = AGREEING.reduce((sum, agreement) => sum + (byAgreement[agreement] ?? 0), 0);
+  const REQUIRED_RATE = 0.95;
+  const REQUIRED_SAMPLE = 100;
+  const verdict = (bucket: ReturnType<typeof tally>) => {
+    const compared = bucket.total - bucket.errors - bucket.parserRejected;
+    const rate = compared > 0 ? bucket.agreeing / compared : null;
+    return { compared, rate, met: compared >= REQUIRED_SAMPLE && rate !== null && rate >= REQUIRED_RATE };
+  };
+  // The planner is prompted in the user's language, so each language earns
+  // acceptance on its own: English agreement never vouches for Czech.
+  const byLanguage = Object.fromEntries(
+    [...perLanguage.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([language, bucket]) => {
+      const { compared, rate, met } = verdict(bucket);
+      return [language, { total: bucket.total, compared, errors: bucket.errors, parserRejected: bucket.parserRejected, byAgreement: bucket.byAgreement, agreementRate: rate, met }];
+    }),
+  );
+  const all = verdict(overall);
   return {
     cohort,
-    total,
-    compared,
-    errors,
-    parserRejected,
-    byAgreement,
-    agreementRate: compared > 0 ? agreeing / compared : null,
+    total: overall.total,
+    compared: all.compared,
+    errors: overall.errors,
+    parserRejected: overall.parserRejected,
+    byAgreement: overall.byAgreement,
+    agreementRate: all.rate,
+    byLanguage,
     tokensIn,
     tokensOut,
-    /** Runs of earlier models or tool sets: shown, never counted. */
-    otherCohortRuns: allRuns - total,
-    acceptance: { requiredRate: 0.95, requiredSample: 100, met: compared >= 100 && agreeing / compared >= 0.95 },
+    /** Runs of earlier models, tool sets or builds: shown, never counted. */
+    otherCohortRuns: allRuns - overall.total,
+    acceptance: {
+      requiredRate: REQUIRED_RATE,
+      requiredSample: REQUIRED_SAMPLE,
+      /** Each language is accepted on its own; only these may be switched on. */
+      acceptedLanguages: Object.entries(byLanguage).filter(([, result]) => result.met).map(([language]) => language),
+    },
   };
 }
