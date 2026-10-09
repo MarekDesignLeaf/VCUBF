@@ -120,7 +120,8 @@ describe("agent in shadow (F1)", () => {
     assert.equal(run.mode, "shadow");
     assert.equal(run.status, "completed");
     assert.equal(run.parserIntent, "create_client");
-    assert.equal(run.agreement, "match");
+    // The right command, but with a send beside it: not a match.
+    assert.equal(run.agreement, "extra_calls");
     assert.equal(run.steps, 2);
     assert.equal(run.tokensIn, 9_800);
     assert.match(run.inputFingerprint, /^[0-9a-f]{64}$/);
@@ -159,7 +160,7 @@ describe("agent in shadow (F1)", () => {
     assert.equal(run.steps, AGENT_RUN_BUDGET.maxSteps);
     assert.equal(run.status, "budget_exceeded");
     assert.equal(run.errorCode, "STEP_BUDGET");
-    assert.equal(run.agreement, "match");
+    assert.equal(run.agreement, "extra_calls");
   });
 
   it("a command the parser does not know is an invalid proposal, not a match", async () => {
@@ -208,7 +209,12 @@ describe("agent in shadow (F1)", () => {
     assert.equal(compareWithParser([proposal("create_job")], { intent: "assistant_plan", key: null }), "agent_only");
     assert.equal(compareWithParser([], { intent: "create_job", key: "create_job" }), "parser_only");
     assert.equal(compareWithParser([proposal("create_task")], { intent: "create_job", key: "create_job" }), "mismatch");
-    assert.equal(compareWithParser([proposal("create_task"), proposal("create_job")], { intent: "create_job", key: "create_job" }), "match");
-    assert.equal(compareWithParser([proposal(null)], { intent: "create_job", key: "create_job" }), "invalid_proposal");
+    assert.equal(compareWithParser([proposal("create_job")], { intent: "create_job", key: "create_job" }), "match");
+    // The right action with something else beside it is not agreement.
+    assert.equal(compareWithParser([proposal("create_task"), proposal("create_job")], { intent: "create_job", key: "create_job" }), "extra_calls");
+    // Neither is the right action with arguments its schema refuses, nor any refused call beside it.
+    assert.equal(compareWithParser([proposal("create_job", false)], { intent: "create_job", key: "create_job" }), "invalid_proposal");
+    assert.equal(compareWithParser([proposal("create_job"), proposal(null)], { intent: "create_job", key: "create_job" }), "invalid_proposal");
+    assert.equal(compareWithParser([proposal(null)], { intent: "assistant_reply", key: null }), "invalid_proposal");
   });
 });

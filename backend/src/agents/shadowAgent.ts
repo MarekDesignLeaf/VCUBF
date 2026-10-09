@@ -74,7 +74,15 @@ export const AGENT_TOOLSET_FINGERPRINT = createHash("sha256").update(JSON.string
 
 const catalogueKinds = new Map(AGENT_TOOL_CATALOGUE.map((tool) => [tool.name as string, tool.kind as string]));
 
-export type ShadowAgreement = "match" | "mismatch" | "both_none" | "agent_only" | "parser_only" | "invalid_proposal" | "error";
+export type ShadowAgreement =
+  | "match"
+  | "extra_calls"
+  | "mismatch"
+  | "both_none"
+  | "agent_only"
+  | "parser_only"
+  | "invalid_proposal"
+  | "error";
 
 /** What the parser did, reduced to names: the intent, and a key to compare on. */
 export interface ParserOutcome {
@@ -148,12 +156,20 @@ function proposalFrom(name: string, rawArguments: string): ProposedTool {
   return { tool: name, kind, key: `execute_action:${name}`, valid: validated.success, argumentsFingerprint: fingerprint };
 }
 
+/**
+ * Strict on purpose: the rate this feeds decides whether the agent may act.
+ * Any call the parser or the action's schema would refuse makes the whole
+ * proposal invalid, and a match means exactly the one thing the parser did —
+ * the right action with further calls beside it is "extra_calls", which counts
+ * against the rate like a mismatch.
+ */
 export function compareWithParser(proposals: ProposedTool[], actual: ParserOutcome): ShadowAgreement {
-  const proposedKeys = proposals.filter((proposal) => proposal.key !== null).map((proposal) => proposal.key);
-  if (proposals.length > 0 && proposedKeys.length === 0) return "invalid_proposal";
+  if (proposals.some((proposal) => !proposal.valid || proposal.key === null)) return "invalid_proposal";
+  const proposedKeys = proposals.map((proposal) => proposal.key);
   if (actual.key === null) return proposedKeys.length === 0 ? "both_none" : "agent_only";
   if (proposedKeys.length === 0) return "parser_only";
-  return proposedKeys.includes(actual.key) ? "match" : "mismatch";
+  if (!proposedKeys.includes(actual.key)) return "mismatch";
+  return proposedKeys.length === 1 ? "match" : "extra_calls";
 }
 
 function instructions(language: string) {
