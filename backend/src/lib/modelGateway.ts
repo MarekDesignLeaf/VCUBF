@@ -37,6 +37,9 @@ const TASKS: Record<ModelTask, TaskDefinition> = {
   agent_plan: { envVar: "OPENAI_AGENT_MODEL", defaultModel: "gpt-5.4-mini", defaultTimeoutMs: 15_000 },
 };
 
+/** Every task the gateway routes, in a stable order (Control Tower). */
+export const MODEL_TASKS = Object.keys(TASKS) as ModelTask[];
+
 /** The model a task runs on: the task's environment override, or its default. */
 export function modelFor(task: ModelTask): string {
   const definition = TASKS[task];

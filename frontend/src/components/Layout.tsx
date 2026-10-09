@@ -26,6 +26,7 @@ export function Layout() {
   const canUseEmmaMemory = user?.permissions?.includes("voice.execute") ?? false;
   const canReadConnectors = user?.permissions?.includes("connectors.read") ?? false;
   const canManageCompany = user?.permissions?.includes("company.manage") ?? false;
+  const canManageUsers = user?.permissions?.includes("users.manage") ?? false;
   const isAdministrator = user?.role === "administrator" || user?.role === "admin";
   const language = appLanguage(user?.voiceLanguage);
   const assistantName = useAssistantName();
@@ -92,6 +93,7 @@ export function Layout() {
         { key: "learning", to: "/learning" },
         { key: "voiceAliases", to: "/voice-aliases" },
         { key: "emmaMemory", to: "/memory-model", visible: canUseEmmaMemory || canReadAudit },
+        { key: "agents", to: "/agents", visible: canManageUsers },
       ],
     },
   ];

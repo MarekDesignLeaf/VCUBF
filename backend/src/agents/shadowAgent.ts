@@ -441,6 +441,19 @@ function sampleRate(): number {
   return Number.isFinite(rate) ? Math.max(0, Math.min(1, rate)) : 0;
 }
 
+/** How the shadow is set up right now (Control Tower). */
+export function shadowSettings() {
+  const rate = sampleRate();
+  return {
+    enabled: rate > 0,
+    sampleRate: rate,
+    model: modelFor("agent_plan"),
+    modelKeyConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
+    runsInFlight: planning.size,
+    maxInFlight: MAX_IN_FLIGHT,
+  };
+}
+
 /**
  * Give a handled request a shadow run, in the background. Returns at once;
  * the returned promise exists for tests. Nothing happens when the shadow is

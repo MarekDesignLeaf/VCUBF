@@ -111,6 +111,7 @@ export const SECRETARY_NAVIGATION_CATALOGUE: readonly NavigationSection[] = [
         ] }
       ),
       item("emma_permissions", "Company-wide administrator controls for every read, write, external and connector capability {assistant} may execute.", ["Enable", "Disable", "Save {assistant} permissions"], { access: { all: ["company.manage"] } }),
+      item("agents", "Agent Control Tower: read-only view of the build and models in use, whether the agent in shadow and the emergency stop are on, what waits for a yes (counts only) and the latest agent runs (fingerprints, never message text).", ["Refresh"], { access: { all: ["users.manage"] } }),
     ],
   },
   {

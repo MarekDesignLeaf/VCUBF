@@ -1076,3 +1076,8 @@ table,
   .content { height: auto; overflow: visible; display: block; }
   .content > .page-content { overflow: visible; }
 }
+
+/* Agent control tower */
+.table-scroll { overflow-x: auto; }
+.proposed-tool { margin-right: 6px; }
+.proposed-tool-invalid { text-decoration: line-through; }

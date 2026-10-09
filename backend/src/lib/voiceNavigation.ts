@@ -41,6 +41,7 @@ export const VOICE_PAGE_ROUTES = {
   new_employee: { path: "/employees/new", label: "New Employee" },
   new_quote: { path: "/quotes/new", label: "New Quote" },
   memory_model: { path: "/memory-model", label: "Memory Model" },
+  agents: { path: "/agents", label: "Agent Control Tower" },
 } as const;
 
 export type VoicePage = keyof typeof VOICE_PAGE_ROUTES;
@@ -53,7 +54,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     enquiries: "Zapytania", communication_intake: "Przychodząca komunikacja", communications: "Komunikacja", photos: "Zdjęcia",
     photo_selection: "Wybór zdjęć", business_context: "Kontekst firmy", industries: "Branże", connectors: "Integracje", company: "Firma",
     website_audit: "Audyt strony", website_content: "Treść strony", employees: "Pracownicy", calendar: "Kalendarz", services: "Usługi",
-    quotes: "Oferty", invoices: "Faktury", recruitment: "Rekrutacja", playbooks: "Procedury", learning: "Uczenie", memory_model: "Pamięć {assistant}", voice_aliases: "Aliasy głosowe", new_employee: "Nowy pracownik", new_quote: "Nowa oferta",
+    quotes: "Oferty", invoices: "Faktury", recruitment: "Rekrutacja", playbooks: "Procedury", learning: "Uczenie", memory_model: "Pamięć {assistant}", agents: "Wieża kontrolna agentów", voice_aliases: "Aliasy głosowe", new_employee: "Nowy pracownik", new_quote: "Nowa oferta",
   },
   "cs-CZ": {
     dashboard: "Přehled", setup: "První nastavení", forgot_password: "Obnovení hesla", reset_password: "Nastavit nové heslo",
@@ -62,7 +63,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     communication_intake: "Příjem komunikace", communications: "Komunikace", photos: "Fotografie", photo_selection: "Výběr fotografií",
     business_context: "Kontext firmy", industries: "Obory", connectors: "Konektory", company: "Firma", website_audit: "Audit webu",
     website_content: "Obsah webu", employees: "Uživatelé a přístupy", calendar: "Kalendář", services: "Služby", quotes: "Nabídky",
-    invoices: "Faktury", recruitment: "Nábor", playbooks: "Postupy", learning: "Učení", memory_model: "Paměť {assistant}", voice_aliases: "Hlasové aliasy", new_employee: "Nový uživatel", new_quote: "Nová nabídka",
+    invoices: "Faktury", recruitment: "Nábor", playbooks: "Postupy", learning: "Učení", memory_model: "Paměť {assistant}", agents: "Dohled nad agenty", voice_aliases: "Hlasové aliasy", new_employee: "Nový uživatel", new_quote: "Nová nabídka",
   },
   "fr-FR": {
     dashboard: "Tableau de bord", setup: "Configuration initiale", forgot_password: "Récupération du mot de passe", reset_password: "Définir un nouveau mot de passe",
@@ -71,7 +72,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     enquiries: "Demandes", communication_intake: "Réception des communications", communications: "Communications", photos: "Photos",
     photo_selection: "Sélection de photos", business_context: "Contexte de l’entreprise", industries: "Secteurs", connectors: "Connecteurs", company: "Entreprise",
     website_audit: "Audit du site", website_content: "Contenu du site", employees: "Employés", calendar: "Calendrier", services: "Services",
-    quotes: "Devis", invoices: "Factures", recruitment: "Recrutement", playbooks: "Procédures", learning: "Apprentissage", memory_model: "Mémoire d’{assistant}", voice_aliases: "Alias vocaux", new_employee: "Nouvel employé", new_quote: "Nouveau devis",
+    quotes: "Devis", invoices: "Factures", recruitment: "Recrutement", playbooks: "Procédures", learning: "Apprentissage", memory_model: "Mémoire d’{assistant}", agents: "Tour de contrôle des agents", voice_aliases: "Alias vocaux", new_employee: "Nouvel employé", new_quote: "Nouveau devis",
   },
   "de-DE": {
     dashboard: "Übersicht", setup: "Ersteinrichtung", forgot_password: "Passwortwiederherstellung", reset_password: "Neues Passwort festlegen",
@@ -80,7 +81,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     enquiries: "Anfragen", communication_intake: "Kommunikationseingang", communications: "Kommunikation", photos: "Fotos",
     photo_selection: "Fotoauswahl", business_context: "Unternehmenskontext", industries: "Branchen", connectors: "Konnektoren", company: "Unternehmen",
     website_audit: "Website-Audit", website_content: "Website-Inhalte", employees: "Mitarbeiter", calendar: "Kalender", services: "Leistungen",
-    quotes: "Angebote", invoices: "Rechnungen", recruitment: "Personalbeschaffung", playbooks: "Abläufe", learning: "Lernen", memory_model: "{assistant}-Speicher", voice_aliases: "Sprachaliase", new_employee: "Neuer Mitarbeiter", new_quote: "Neues Angebot",
+    quotes: "Angebote", invoices: "Rechnungen", recruitment: "Personalbeschaffung", playbooks: "Abläufe", learning: "Lernen", memory_model: "{assistant}-Speicher", agents: "Agenten-Kontrollzentrum", voice_aliases: "Sprachaliase", new_employee: "Neuer Mitarbeiter", new_quote: "Neues Angebot",
   },
   "es-ES": {
     dashboard: "Panel", setup: "Configuración inicial", forgot_password: "Recuperación de contraseña", reset_password: "Establecer nueva contraseña",
@@ -89,7 +90,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     enquiries: "Consultas", communication_intake: "Entrada de comunicaciones", communications: "Comunicaciones", photos: "Fotos",
     photo_selection: "Selección de fotos", business_context: "Contexto empresarial", industries: "Sectores", connectors: "Conectores", company: "Empresa",
     website_audit: "Auditoría web", website_content: "Contenido web", employees: "Empleados", calendar: "Calendario", services: "Servicios",
-    quotes: "Presupuestos", invoices: "Facturas", recruitment: "Selección de personal", playbooks: "Procedimientos", learning: "Aprendizaje", memory_model: "Memoria de {assistant}", voice_aliases: "Alias de voz", new_employee: "Nuevo empleado", new_quote: "Nuevo presupuesto",
+    quotes: "Presupuestos", invoices: "Facturas", recruitment: "Selección de personal", playbooks: "Procedimientos", learning: "Aprendizaje", memory_model: "Memoria de {assistant}", agents: "Torre de control de agentes", voice_aliases: "Alias de voz", new_employee: "Nuevo empleado", new_quote: "Nuevo presupuesto",
   },
   "it-IT": {
     dashboard: "Panoramica", setup: "Configurazione iniziale", forgot_password: "Recupero password", reset_password: "Imposta nuova password",
@@ -98,7 +99,7 @@ const LOCALIZED_PAGE_LABELS: Partial<Record<VoiceLanguage, Partial<Record<VoiceP
     enquiries: "Richieste", communication_intake: "Ricezione comunicazioni", communications: "Comunicazioni", photos: "Foto",
     photo_selection: "Selezione foto", business_context: "Contesto aziendale", industries: "Settori", connectors: "Connettori", company: "Azienda",
     website_audit: "Audit del sito", website_content: "Contenuto del sito", employees: "Dipendenti", calendar: "Calendario", services: "Servizi",
-    quotes: "Preventivi", invoices: "Fatture", recruitment: "Selezione del personale", playbooks: "Procedure", learning: "Apprendimento", memory_model: "Memoria di {assistant}", voice_aliases: "Alias vocali", new_employee: "Nuovo dipendente", new_quote: "Nuovo preventivo",
+    quotes: "Preventivi", invoices: "Fatture", recruitment: "Selezione del personale", playbooks: "Procedure", learning: "Apprendimento", memory_model: "Memoria di {assistant}", agents: "Torre di controllo degli agenti", voice_aliases: "Alias vocali", new_employee: "Nuovo dipendente", new_quote: "Nuovo preventivo",
   },
 };
 
@@ -205,6 +206,9 @@ const PAGE_ALIASES: Record<string, VoicePage> = {
   "learning rules": "learning",
   "memory model": "memory_model",
   patterns: "memory_model",
+  agents: "agents",
+  "agent control tower": "agents",
+  "control tower": "agents",
   // Czech menu labels and common spoken variants.
   prehled: "dashboard", ucet: "account", oznameni: "notifications", "kvalita dat": "data_quality", "firemni metriky": "metrics",
   poptavky: "leads", klienti: "clients", kontakty: "contacts", dokumenty: "documents", zakazky: "jobs", ukoly: "tasks",
@@ -213,6 +217,7 @@ const PAGE_ALIASES: Record<string, VoicePage> = {
   firma: "company", "audit webu": "website_audit", "obsah webu": "website_content", uzivatele: "employees", kalendar: "calendar",
   sluzby: "services", "katalog sluzeb": "services", nabidky: "quotes", faktury: "invoices", nabor: "recruitment", postupy: "playbooks",
   uceni: "learning", "pamet asistenta": "memory_model", pamet: "memory_model",
+  agenti: "agents", agenty: "agents", "dohled nad agenty": "agents",
   // Czech declines, and a spoken command uses the accusative: "ukaž klienty",
   // not "ukaž klienti". Only the first case was listed, so the commands people
   // actually say missed the map and fell through to the language model.
@@ -233,6 +238,7 @@ const PAGE_ALIASES: Record<string, VoicePage> = {
   "kontekst firmy": "business_context", branze: "industries", integracje: "connectors", "audyt strony": "website_audit",
   "tresc strony": "website_content", pracownicy: "employees", kalendarz: "calendar", uslugi: "services", "katalog uslug": "services",
   oferty: "quotes", wyceny: "quotes", rekrutacja: "recruitment", procedury: "playbooks", "pamiec emmy": "memory_model",
+  agenci: "agents", "wieza kontrolna agentow": "agents",
 };
 
 function normalizePageName(rawPage: string) {

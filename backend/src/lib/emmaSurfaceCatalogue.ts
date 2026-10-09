@@ -113,7 +113,7 @@ const PAGE_CATEGORIES: Record<VoicePage, string> = {
   communications: "communication", photos: "evidence", photo_selection: "evidence", business_context: "evidence",
   industries: "evidence", connectors: "connectors", company: "administration", website_audit: "evidence",
   website_content: "evidence", employees: "people", calendar: "work", services: "sales", quotes: "sales",
-  invoices: "sales", recruitment: "people", playbooks: "learning", learning: "learning", memory_model: "learning", voice_aliases: "learning", new_employee: "people", new_quote: "sales",
+  invoices: "sales", recruitment: "people", playbooks: "learning", learning: "learning", memory_model: "learning", agents: "administration", voice_aliases: "learning", new_employee: "people", new_quote: "sales",
 };
 
 function isActionContract(value: unknown): value is ActionContract {

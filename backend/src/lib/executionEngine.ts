@@ -142,6 +142,28 @@ export async function hasReviewedActionPending(user: ActingUser, actionType: str
 }
 
 /**
+ * What is waiting for a yes across the company, for the Control Tower: per
+ * kind of action, how many reviews wait and since when. Read only, and never
+ * the payload — the text of a waiting message stays with its review.
+ */
+export async function pendingReviewsOverview(companyId: string, now = new Date()) {
+  const groups = await prisma.voicePendingAction.groupBy({
+    by: ["actionType"],
+    where: { companyId, status: "pending", expiresAt: { gt: now } },
+    _count: { _all: true },
+    _min: { createdAt: true, expiresAt: true },
+  });
+  return groups
+    .map((group) => ({
+      actionType: group.actionType,
+      waiting: group._count._all,
+      oldestCreatedAt: group._min.createdAt,
+      nextExpiresAt: group._min.expiresAt,
+    }))
+    .sort((left, right) => left.actionType.localeCompare(right.actionType));
+}
+
+/**
  * The newest review of this type still waiting for its yes, read without
  * claiming it — for callers that need to know what a yes would mean (which
  * action, to word the outcome) before they ask the engine to claim it. The
