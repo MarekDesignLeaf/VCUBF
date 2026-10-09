@@ -194,6 +194,17 @@ export const UPDATE_EMMA_COMPANY_POLICY_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
 };
 
+export const SET_COMPANY_AGENT_MODE_ACTION: ActionContract = {
+  actionName: "set_company_agent_mode",
+  purpose:
+    "Switch the agent on or off for the company. When on, the agent may act only for a language and request path that passed the shadow acceptance, never during an emergency stop, and only through reviewed proposals that the user confirms. Only an administrator sets it; Secretary has no tool for it and cannot raise its own autonomy.",
+  requiredPermission: "company.manage",
+  riskLevel: 3,
+  confirmationRequired: false,
+  dataSources: ["user_input", "companies.agent_enabled_at"],
+  possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
+};
+
 export const SET_COMPANY_SAFE_MODE_ACTION: ActionContract = {
   actionName: "set_company_safe_mode",
   purpose:

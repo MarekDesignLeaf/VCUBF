@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, type AgentShadowSummary, type ControlTowerOverview } from "../api/client";
+import { AgentSwitchCard } from "../components/AgentSwitchCard";
+import { useAuth } from "../context/useAuth";
 
 function percent(value: number | null): string {
   return value === null ? "—" : `${Math.round(value * 1000) / 10} %`;
@@ -15,6 +17,9 @@ function when(value: string | null): string {
  * decided and computed by the backend; this page changes nothing.
  */
 export function AgentControlTower() {
+  const { user } = useAuth();
+  const isAdministrator = user?.role === "administrator" || user?.role === "admin";
+  const canSwitchAgent = isAdministrator && (user?.permissions?.includes("company.manage") ?? false);
   const [overview, setOverview] = useState<ControlTowerOverview | null>(null);
   const [shadow, setShadow] = useState<AgentShadowSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,9 +59,12 @@ export function AgentControlTower() {
         ? `On for ${Math.round(overview.shadow.sampleRate * 100)} % of commands`
         : "Off — set AGENT_SHADOW_SAMPLE_RATE on Railway to switch it on"}
         {overview.shadow.enabled && !overview.shadow.modelKeyConfigured && " (no model key: every selected command is recorded as an error)"}</p>
+      <p><strong>Agent:</strong> {overview.agent.enabled ? `On since ${when(overview.agent.since)}` : "Off"}</p>
       <p><strong>Build:</strong> <code>{overview.build}</code></p>
       <p><strong>Last 24 hours:</strong> {`${overview.lastDay.runs} agent runs, ${overview.lastDay.errors} errors, ${overview.lastDay.tokensIn} tokens in, ${overview.lastDay.tokensOut} tokens out`}</p>
     </section>
+
+    <AgentSwitchCard canSwitch={canSwitchAgent} onChanged={() => void load()} />
 
     <section className="settings-card" style={{ marginTop: 24 }}>
       <h2>Models</h2>

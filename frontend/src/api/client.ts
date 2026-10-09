@@ -150,6 +150,7 @@ export interface ControlTowerOverview {
   generatedAt: string;
   build: string;
   safeMode: SafeModeState;
+  agent: { enabled: boolean; since: string | null };
   shadow: { enabled: boolean; sampleRate: number; model: string; modelKeyConfigured: boolean; runsInFlight: number; maxInFlight: number };
   models: Array<{ task: string; model: string }>;
   pendingReviews: Array<{ actionType: string; waiting: number; oldestCreatedAt: string | null; nextExpiresAt: string | null }>;
@@ -168,6 +169,15 @@ export interface ShadowSegmentVerdict {
   errorRate: number | null;
   met: boolean;
   unmet: string[];
+}
+
+/** The per-company agent switch (backend: /company/agent-mode). */
+export interface AgentModeState {
+  enabled: boolean;
+  since: string | null;
+  safeMode: boolean;
+  accepted: Array<{ language: string; channel: string }>;
+  effective: Array<{ language: string; channel: string }>;
 }
 
 /** Shadow acceptance (backend: GET /audit/agent-shadow). */
@@ -1908,6 +1918,11 @@ export const api = {
   company: {
     get: () => request<CompanyProfile>("/company"),
     update: (name: string) => request<CompanyProfile>("/company", { method: "PUT", body: JSON.stringify({ name }) }),
+    agentMode: () => request<AgentModeState>("/company/agent-mode"),
+    setAgentMode: (enabled: boolean, reason?: string) => request<AgentModeState>("/company/agent-mode", {
+      method: "PUT",
+      body: JSON.stringify({ enabled, ...(reason ? { reason } : {}) }),
+    }),
     safeMode: () => request<SafeModeState>("/company/safe-mode"),
     setSafeMode: (enabled: boolean, reason?: string) => request<SafeModeState>("/company/safe-mode", {
       method: "PUT",

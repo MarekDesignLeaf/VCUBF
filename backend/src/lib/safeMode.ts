@@ -118,6 +118,13 @@ const ALLOWED_IN_SAFE_MODE: AllowedMutation[] = [
     reason: "deactivating an account, and nothing else in the same request",
   },
   {
+    pattern: /^\/company\/agent-mode$/i,
+    methods: ["PUT"],
+    administratorOnly: true,
+    body: (body) => Boolean(body) && typeof body === "object" && (body as { enabled?: unknown }).enabled === false,
+    reason: "switching the agent off; switching it on stays refused",
+  },
+  {
     pattern: /^\/connectors\/sources\/[^/]+\/disable$/i,
     methods: ["POST"],
     administratorOnly: true,
