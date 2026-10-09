@@ -236,6 +236,22 @@ describe("agent in shadow (F1)", () => {
     assert.equal(summary.body.agreementRate, null);
   });
 
+  it("a reviewed action whose preview was prepared is a valid reference", async () => {
+    const companyId = (await prisma.company.findFirstOrThrow()).id;
+    await prisma.client.createMany({ data: [{ companyId, displayName: "Merge Keep" }, { companyId, displayName: "Merge Drop" }] });
+    const parameters = { primary_client_name: "Merge Keep", duplicate_client_name: "Merge Drop" };
+    modelOutput = [{ name: "merge_clients", arguments: JSON.stringify(parameters) }];
+    const previewed = await say(`voice action merge_clients ${JSON.stringify(parameters)}`);
+    assert.equal(previewed.body.error, "CONFIRMATION_REQUIRED", JSON.stringify(previewed.body));
+    await settleShadowRuns();
+    const run = await prisma.agentRun.findFirstOrThrow();
+    assert.equal(run.parserAction, "execute_action:merge_clients");
+    assert.equal(run.agreement, "match");
+    // Nothing was merged by the preview or by the shadow.
+    assert.equal(await prisma.client.count({ where: { displayName: { in: ["Merge Keep", "Merge Drop"] }, isActive: true } }), 2);
+    await prisma.voicePendingAction.deleteMany({});
+  });
+
   it("a bridge call with anything beside the canonical command is invalid", async () => {
     modelOutput = [{ name: "run_command", arguments: JSON.stringify({ canonical_command: "list clients", unexpected: true }) }];
     await say("list clients");

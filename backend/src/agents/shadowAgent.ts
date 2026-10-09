@@ -129,6 +129,15 @@ export interface ShadowInput {
   actual: ParserOutcome;
 }
 
+/**
+ * Whether the owning service took the command. A reviewed action answers its
+ * first step with CONFIRMATION_REQUIRED and ok: false — that is a prepared
+ * review waiting for a yes, not a refusal, so it is a valid reference.
+ */
+export function acceptedByService(response: { ok: boolean; error?: string }): boolean {
+  return response.ok || response.error === "CONFIRMATION_REQUIRED";
+}
+
 /** An executable action's parameters as its schema reads them, so both sides compare alike. */
 function actionEntities(action: string, parameters: unknown) {
   const validated = validateVoiceActionParameters(action, parameters);
@@ -459,7 +468,15 @@ function verdict(bucket: Tally) {
   }
   if (actionableRate === null || actionableRate < AGENT_ACCEPTANCE.requiredActionableRate) unmet.push("agreement on actions below 95 %");
   if (errorRate === null || errorRate > AGENT_ACCEPTANCE.maxErrorRate) unmet.push("planner errors above 5 %");
-  return { compared, rate, actionableCompared: bucket.actionableCompared, actionableRate, errorRate, met: unmet.length === 0, unmet };
+  return {
+    compared,
+    agreementRate: rate,
+    actionableCompared: bucket.actionableCompared,
+    actionableAgreementRate: actionableRate,
+    errorRate,
+    met: unmet.length === 0,
+    unmet,
+  };
 }
 
 export async function shadowSummary(companyId: string, since?: Date) {
@@ -517,8 +534,8 @@ export async function shadowSummary(companyId: string, since?: Date) {
     errors: overall.errors,
     parserRejected: overall.parserRejected,
     byAgreement: overall.byAgreement,
-    agreementRate: all.rate,
-    actionableAgreementRate: all.actionableRate,
+    agreementRate: all.agreementRate,
+    actionableAgreementRate: all.actionableAgreementRate,
     errorRate: all.errorRate,
     byLanguage,
     tokensIn,

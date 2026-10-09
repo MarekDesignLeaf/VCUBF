@@ -22,7 +22,7 @@ import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorServic
 import { getPendingEmmaActionName } from "../../services/emmaExecutableActionService.js";
 import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
 import { assistantNameFor } from "../../lib/assistantName.js";
-import { observeShadow, parserOutcomeOf } from "../../agents/shadowAgent.js";
+import { acceptedByService, observeShadow, parserOutcomeOf } from "../../agents/shadowAgent.js";
 
 /**
  * The user's voice language as it is right now.
@@ -515,7 +515,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     result: response.ok ? "success" : "error",
     errorMessage: response.ok ? undefined : response.error,
   });
-  observeShadow({ user, channel: "assistant", language, text: alias.resolvedText, history, actual: parserOutcomeOf(command, response.ok) });
+  observeShadow({ user, channel: "assistant", language, text: alias.resolvedText, history, actual: parserOutcomeOf(command, acceptedByService(response)) });
   // Once a command has reached the deterministic action engine, its verified
   // result is the only text {assistant} may show or speak. The language model's
   // interpretation message can be incomplete, malformed, or claim success
@@ -582,6 +582,6 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
     errorMessage: response.ok ? undefined : response.error,
   });
 
-  observeShadow({ user, channel: "text", language: user.voiceLanguage, text: alias.resolvedText, actual: parserOutcomeOf(command, response.ok) });
+  observeShadow({ user, channel: "text", language: user.voiceLanguage, text: alias.resolvedText, actual: parserOutcomeOf(command, acceptedByService(response)) });
   res.status(response.httpStatus).json({ ...response, uiAction, appliedAliases: alias.appliedRules });
 });
