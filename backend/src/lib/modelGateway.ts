@@ -13,7 +13,7 @@
  * behind the same task table — never a second call path in a service.
  */
 
-export type ModelTask = "interpretation" | "translation" | "transcription" | "speech" | "realtime_session";
+export type ModelTask = "interpretation" | "translation" | "transcription" | "speech" | "realtime_session" | "agent_plan";
 
 interface TaskDefinition {
   /** The environment variable that overrides the model, kept from before the gateway. */
@@ -33,6 +33,8 @@ const TASKS: Record<ModelTask, TaskDefinition> = {
   speech: { envVar: "OPENAI_TTS_MODEL", defaultModel: "tts-1", defaultTimeoutMs: 30_000 },
   /** Short-lived credentials for the legacy realtime audio channel. */
   realtime_session: { envVar: "OPENAI_REALTIME_MODEL", defaultModel: "gpt-realtime-1.5", defaultTimeoutMs: 15_000 },
+  /** The agent's planning step: which tools a request needs (masterplan F1; 15 s budget, D5). */
+  agent_plan: { envVar: "OPENAI_AGENT_MODEL", defaultModel: "gpt-5.4-mini", defaultTimeoutMs: 15_000 },
 };
 
 /** The model a task runs on: the task's environment override, or its default. */

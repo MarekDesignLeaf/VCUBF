@@ -68,6 +68,7 @@ model Company {
   voiceConversations           VoiceConversation[]
   voiceConversationMessages    VoiceConversationMessage[]
   voicePendingActions          VoicePendingAction[]
+  agentRuns                    AgentRun[]
   assistantMemories            AssistantMemory[]
   passwordResetTokens          PasswordResetToken[]
   voiceMacros                  VoiceMacro[]
@@ -208,6 +209,7 @@ model User {
   voiceDeviceState VoiceDeviceState?
   voiceConversations VoiceConversation[]
   voicePendingActions VoicePendingAction[]
+  agentRuns           AgentRun[]
   assistantMemories AssistantMemory[] @relation("AssistantMemoryOwner")
   assignedTasks Task[]     @relation("AssignedTasks")
   devicePairings DevicePairing[]
@@ -335,6 +337,53 @@ model VoicePendingAction {
 
   @@index([companyId, userId, actionType, status, expiresAt])
   @@map("voice_pending_actions")
+}
+
+// One run of the agent layer (masterplan F1, layer G). In shadow mode the agent
+// is shown the same request the deterministic parser handled, proposes the
+// tools it would use, and executes nothing; the run records how its proposal
+// compares with what the parser actually did. Decision D4: no message text is
+// ever stored — the request is kept only as a keyed fingerprint, proposed tool
+// arguments only as fingerprints, the parser outcome only as intent and action
+// names. Tokens are recorded per run; a price per token is configuration that
+// does not exist yet, so cost is derived later rather than guessed here. The
+// catalogue version names the governed tool set; the toolset fingerprint is the
+// exact tool list the model was shown (catalogue plus the parser bridge); the
+// build is the deployed commit, covering the prompt and how proposals are read
+// and judged. Model, tool set and build form the cohort an acceptance rate is
+// about.
+model AgentRun {
+  id                   String   @id @default(uuid())
+  companyId            String   @map("company_id")
+  userId               String   @map("user_id")
+  mode                 String   @default("shadow")
+  channel              String
+  language             String
+  inputFingerprint     String   @map("input_fingerprint")
+  catalogueVersion     String   @map("catalogue_version")
+  catalogueFingerprint String   @map("catalogue_fingerprint")
+  toolsetFingerprint   String   @map("toolset_fingerprint")
+  build                String
+  model                String
+  status               String
+  errorCode            String?  @map("error_code")
+  steps                Int      @default(0)
+  proposedTools        Json     @map("proposed_tools")
+  parserIntent         String   @map("parser_intent")
+  parserAction         String?  @map("parser_action")
+  agreement            String
+  tokensIn             Int?     @map("tokens_in")
+  tokensOut            Int?     @map("tokens_out")
+  durationMs           Int      @map("duration_ms")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([companyId, mode, agreement])
+  @@index([companyId, mode, model, toolsetFingerprint, build], map: "agent_runs_cohort_idx")
+  @@map("agent_runs")
 }
 
 // Explicit, durable the assistant memory. Conversation transcripts remain a separate,

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../../db.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
+import { shadowSummary } from "../../agents/shadowAgent.js";
 
 export const auditRouter = Router();
 
@@ -15,4 +16,13 @@ auditRouter.get("/log", async (req, res) => {
     take: 100,
   });
   res.json(entries);
+});
+
+// GET /audit/agent-shadow — how often the agent in shadow agrees with what the
+// parser actually did (masterplan F1 acceptance: ≥ 95 % on ≥ 100 requests).
+// Counts and token totals only; agent runs hold no message text.
+// Always over the whole current cohort (model, tool set, build): no time
+// window, so failures cannot be filtered out of the verdict.
+auditRouter.get("/agent-shadow", async (req, res) => {
+  res.json(await shadowSummary(req.user!.companyId));
 });
