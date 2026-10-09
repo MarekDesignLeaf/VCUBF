@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 34 mounted route groups, 53 Prisma models, 144 Action Contracts,
+- **Backend**: 34 mounted route groups, 53 Prisma models, 145 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,

@@ -278,4 +278,44 @@ describe("Communication Extraction and Reply Drafting", () => {
       .set("Authorization", `Bearer ${adminToken}`);
     assert.ok(!list.body.some((item: any) => item.id === otherIntake.id));
   });
+  it("marks every unresolved WhatsApp message as resolved after one preview, bound to the previewed messages", async () => {
+    const say = (text: string) => request(app).post("/command/text").set("Authorization", `Bearer ${adminToken}`).send({ text });
+    const whatsapp = (sender: string) => prisma.communicationIntake.create({
+      data: { companyId: TEST_COMPANY_ID, channel: "whatsapp", senderName: sender, messageText: `Hello from ${sender}`, receivedAt: new Date() },
+    });
+    await prisma.communicationIntake.updateMany({ where: { companyId: TEST_COMPANY_ID, channel: "whatsapp" }, data: { resolutionNeeded: false } });
+    const previewed = await Promise.all(["Anna", "Bert", "Cyril"].map(whatsapp));
+    const email = await prisma.communicationIntake.create({
+      data: { companyId: TEST_COMPANY_ID, channel: "email", senderName: "Dora", messageText: "An email", receivedAt: new Date() },
+    });
+    const otherCompany = await prisma.company.create({ data: { name: "Bulk Other Co" } });
+    const foreign = await prisma.communicationIntake.create({
+      data: { companyId: otherCompany.id, channel: "whatsapp", messageText: "Another company's message", receivedAt: new Date() },
+    });
+
+    const preview = await say('voice action resolve_communication_intakes {"channel":"whatsapp"}');
+    assert.equal(preview.status, 409, JSON.stringify(preview.body));
+    assert.equal(preview.body.error, "CONFIRMATION_REQUIRED");
+    assert.match(preview.body.message, /mark 3 messages on WhatsApp as resolved/);
+    assert.match(preview.body.message, /Anna/);
+    assert.equal(await prisma.communicationIntake.count({ where: { id: { in: previewed.map((intake) => intake.id) }, resolutionNeeded: false } }), 0, "a preview changes nothing");
+
+    // A message that arrives after the preview is not part of what was approved.
+    const late = await whatsapp("Late Larry");
+    const yes = await say("yes");
+    assert.equal(yes.status, 200, JSON.stringify(yes.body));
+    assert.match(yes.body.message, /3 messages on WhatsApp/);
+    assert.equal(await prisma.communicationIntake.count({ where: { id: { in: previewed.map((intake) => intake.id) }, resolutionNeeded: false, resolvedAt: { not: null } } }), 3);
+    assert.equal((await prisma.communicationIntake.findUniqueOrThrow({ where: { id: late.id } })).resolutionNeeded, true);
+    assert.equal((await prisma.communicationIntake.findUniqueOrThrow({ where: { id: email.id } })).resolutionNeeded, true, "other channels stay");
+    assert.equal((await prisma.communicationIntake.findUniqueOrThrow({ where: { id: foreign.id } })).resolutionNeeded, true, "other companies stay");
+    const audit = await prisma.auditLog.findFirst({ where: { actionName: "resolve_communication_intakes", result: "success" }, orderBy: { createdAt: "desc" } });
+    assert.equal((audit?.inputPayload as { intakeIds?: string[] })?.intakeIds?.length, 3);
+
+    // Nothing left on a channel: said plainly, nothing to confirm.
+    await prisma.communicationIntake.updateMany({ where: { companyId: TEST_COMPANY_ID, channel: "portal_chat" }, data: { resolutionNeeded: false } });
+    const none = await say('voice action resolve_communication_intakes {"channel":"portal_chat"}');
+    assert.equal(none.status, 200, JSON.stringify(none.body));
+    assert.match(none.body.message, /no unresolved messages/);
+  });
 });

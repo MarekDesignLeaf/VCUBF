@@ -131,10 +131,50 @@ function repeatSentence(alreadySent: unknown, lang: Locale) {
 }
 
 /** The spoken review for an action waiting for a yes, or undefined if this module does not word it. */
+/** "7 messages on WhatsApp" in each language, with the right plural. */
+function messagesOn(count: number, channel: unknown, lang: Locale): string {
+  const where = channel === "whatsapp"
+    ? { cs: "na WhatsAppu", pl: "na WhatsAppie", en: "on WhatsApp" }
+    : channel === "email"
+      ? { cs: "v e-mailu", pl: "w e-mailu", en: "in email" }
+      : channel && channel !== "all"
+        ? { cs: `v kanálu ${String(channel)}`, pl: `w kanale ${String(channel)}`, en: `on ${String(channel)}` }
+        : { cs: "ve všech kanálech", pl: "we wszystkich kanałach", en: "across all channels" };
+  if (lang === "cs") {
+    const word = count === 1 ? "zprávu" : count >= 2 && count <= 4 ? "zprávy" : "zpráv";
+    return `${count} ${word} ${where.cs}`;
+  }
+  if (lang === "pl") {
+    const word = count === 1 ? "wiadomość" : "wiadomości";
+    return `${count} ${word} ${where.pl}`;
+  }
+  return `${count} ${count === 1 ? "message" : "messages"} ${where.en}`;
+}
+
+function sendersList(preview: Row, lang: Locale): string {
+  const senders = Array.isArray(preview.senders) ? preview.senders.map(String) : [];
+  if (senders.length === 0) return "";
+  const others = Number(preview.otherSenders) || 0;
+  const list = senders.join(", ");
+  if (lang === "cs") return ` Od: ${list}${others ? ` a dalších ${others}` : ""}.`;
+  if (lang === "pl") return ` Od: ${list}${others ? ` i jeszcze ${others}` : ""}.`;
+  return ` From: ${list}${others ? ` and ${others} more` : ""}.`;
+}
+
 export function spokenReview(action: string, preview: Row | undefined, language: string): string | undefined {
   if (!preview) return undefined;
   const lang = locale(language);
   switch (action) {
+    case "resolve_communication_intakes": {
+      const what = messagesOn(Number(preview.count) || 0, preview.channel, lang);
+      const senders = sendersList(preview, lang);
+      const more = preview.moreRemain
+        ? (lang === "cs" ? " Další zbudou na příště." : lang === "pl" ? " Pozostałe zostaną na następny raz." : " The rest will remain for next time.")
+        : "";
+      if (lang === "cs") return `Označím jako vyřízené ${what}.${senders}${more} Nic se neodešle ani nesmaže. Mám to udělat?`;
+      if (lang === "pl") return `Oznaczę jako załatwione ${what}.${senders}${more} Nic nie zostanie wysłane ani usunięte. Czy mam to zrobić?`;
+      return `I will mark ${what} as resolved.${senders}${more} Nothing is sent or deleted. Shall I do it?`;
+    }
     case "reply_whatsapp": {
       const who = preview.recipientName || preview.to;
       const how = spokenLanguage(preview.sentIn, lang);
@@ -213,6 +253,15 @@ export function spokenReview(action: string, preview: Row | undefined, language:
 export function spokenOutcome(action: string | undefined, data: Row | undefined, language: string): string | undefined {
   const lang = locale(language);
   switch (action) {
+    case "resolve_communication_intakes": {
+      const count = Number(data?.resolved) || 0;
+      if (count === 0) {
+        const where = messagesOn(0, data?.channel, lang).replace(/^0 \S+ /, "");
+        return lang === "cs" ? `Žádná nevyřízená zpráva ${where} není.` : lang === "pl" ? `Brak niezałatwionych wiadomości ${where}.` : `There are no unresolved messages ${where}.`;
+      }
+      const what = messagesOn(count, data?.channel, lang);
+      return lang === "cs" ? `Hotovo, jako vyřízené jsem označil ${what}.` : lang === "pl" ? `Gotowe, jako załatwione oznaczyłem ${what}.` : `Done: I marked ${what} as resolved.`;
+    }
     case "reply_whatsapp":
     case "send_whatsapp":
       return lang === "cs" ? "Zpráva je odeslaná." : lang === "pl" ? "Wiadomość została wysłana." : "The message has been sent.";

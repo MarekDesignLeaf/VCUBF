@@ -340,6 +340,12 @@ async function executeEmmaActionDirect(
       const intake = await intakeByReference(user, stringValue(p, "sender_or_message"));
       return intake.ok ? communicationService.updateCommunicationIntakeResolution(user, intake.data.id, { resolution_needed: p.resolution_needed }) : intake;
     }
+    case "resolve_communication_intakes":
+      return communicationService.resolveCommunicationIntakes(user, {
+        channel: p.channel,
+        intake_ids: p.intake_ids,
+        confirmed,
+      });
     case "convert_communication_intake": {
       const intake = await intakeByReference(user, stringValue(p, "sender_or_message"));
       if (!intake.ok) return intake;

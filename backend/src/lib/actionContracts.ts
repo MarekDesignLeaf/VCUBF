@@ -1553,6 +1553,17 @@ export const FIND_UNRESOLVED_ENQUIRIES_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED"],
 };
 
+export const RESOLVE_COMMUNICATION_INTAKES_ACTION: ActionContract = {
+  actionName: "resolve_communication_intakes",
+  purpose:
+    "Mark every still-unresolved preserved inbound communication of one channel (for example all WhatsApp messages, or all email) or of all channels as resolved — after one preview of exactly which messages and a separate confirmation. The confirmation applies to the previewed messages only; anything received after the preview stays unresolved. Nothing is sent, replied to or deleted.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.communication_intakes", "crm.communication_records"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONFIRMATION_REQUIRED"],
+};
+
 export const SET_COMMUNICATION_INTAKE_RESOLUTION_ACTION: ActionContract = {
   actionName: "set_communication_intake_resolution",
   purpose:

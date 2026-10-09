@@ -215,6 +215,14 @@ export const voiceActionSchemas = {
   set_communication_intake_resolution: z
     .object({ sender_or_message: nonEmpty, resolution_needed: z.boolean() })
     .strict(),
+  // Bulk: every unresolved message of one channel, or of all. The preview
+  // returns the exact message ids, and the confirmation is bound to them.
+  resolve_communication_intakes: z
+    .object({
+      channel: z.enum([...COMMUNICATION_CHANNELS, "all"]).optional(),
+      intake_ids: z.array(z.string().uuid()).min(1).max(500).optional(),
+    })
+    .strict(),
   convert_communication_intake: z
     .object({ sender_or_message: nonEmpty, client_name: optionalText })
     .strict(),
@@ -318,6 +326,7 @@ The JSON must be valid, contain only the documented fields and preserve every us
 - draft_job_advert {"title"}; create_candidate {"job_opening_title","name","email?","phone?","notes?"}; set_candidate_stage {"candidate_name","stage"}
 - create_communication_intake {"channel","message_text","sender_name?","sender_email?","sender_phone?","received_at?","source_reference?"}
 - extract_communication_intake {"sender_or_message"}; draft_communication_reply {"sender_or_message"}; set_communication_intake_resolution {"sender_or_message","resolution_needed"}
+- resolve_communication_intakes {"channel?"}; marks ALL unresolved received messages as resolved — channel is whatsapp, email (or another channel name) or all; omit it for all. Use it for "mark all WhatsApp messages as resolved/handled" ("označ všechny zprávy na WhatsAppu za vyřízené"). It is always previewed and needs a separate confirmation; never pass intake_ids yourself.
 - convert_communication_intake {"sender_or_message","client_name?"}. Conversion is previewed and needs a separate confirmation.
 - acknowledge_notification {"notification_key"}; unacknowledge_notification {"notification_key"}
 - archive_learning_rule {"term"}; reactivate_learning_rule {"term"}; archive_memory {"content"}

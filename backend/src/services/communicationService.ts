@@ -7,6 +7,7 @@ import {
   EXTRACT_COMMUNICATION_INTAKE_ACTION,
   LOG_COMMUNICATION_INTAKE_ACTION,
   PREPARE_COMMUNICATION_REPLY_ACTION,
+  RESOLVE_COMMUNICATION_INTAKES_ACTION,
   SET_COMMUNICATION_INTAKE_RESOLUTION_ACTION,
   UPDATE_COMMUNICATION_RECORD_ACTION,
   COMMUNICATION_CHANNELS,
@@ -1025,4 +1026,110 @@ export async function prepareCommunicationReply(
     result: "success",
   });
   return ok(200, updated);
+}
+
+const resolveIntakesSchema = z
+  .object({
+    channel: z.enum([...COMMUNICATION_CHANNELS, "all"]).optional(),
+    intake_ids: z.array(z.string().uuid()).min(1).max(500).optional(),
+    confirmed: z.boolean().optional(),
+  })
+  .strict();
+
+/** The most messages one confirmation may resolve; more are left for the next. */
+const RESOLVE_BATCH_LIMIT = 500;
+
+/**
+ * resolve_communication_intakes — "mark all WhatsApp messages as resolved".
+ *
+ * The first call only previews: how many unresolved messages of the channel
+ * there are and from whom. The confirmation is bound to exactly the previewed
+ * messages (their ids travel with the review as confirmInput), so a message
+ * that arrives between the preview and the yes stays unresolved. Messages are
+ * only marked; nothing is sent, replied to or deleted, and each one can be
+ * reopened individually. Linked Communication Log follow-ups are closed with
+ * them, as for a single message.
+ */
+export async function resolveCommunicationIntakes(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
+  const parsed = resolveIntakesSchema.safeParse(rawInput ?? {});
+  if (!parsed.success) {
+    await auditIntakeFailure(user, RESOLVE_COMMUNICATION_INTAKES_ACTION, rawInput, "VALIDATION_FAILED");
+    return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  }
+  const channel = parsed.data.channel && parsed.data.channel !== "all" ? parsed.data.channel : undefined;
+  const scope = {
+    companyId: user.companyId,
+    resolutionNeeded: true,
+    ...(channel ? { channel } : {}),
+    ...(parsed.data.intake_ids ? { id: { in: parsed.data.intake_ids } } : {}),
+  };
+  const candidates = await prisma.communicationIntake.findMany({
+    where: scope,
+    orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
+    take: RESOLVE_BATCH_LIMIT + 1,
+    select: { id: true, channel: true, senderName: true, senderEmail: true, senderPhone: true, receivedAt: true, communicationRecordId: true },
+  });
+  const batch = candidates.slice(0, RESOLVE_BATCH_LIMIT);
+  const channelLabel = channel ?? "all";
+  if (batch.length === 0) return ok(200, { resolved: 0, channel: channelLabel });
+
+  if (!parsed.data.confirmed) {
+    const senders = [...new Set(batch.map((intake) => intake.senderName || intake.senderEmail || intake.senderPhone).filter(Boolean))] as string[];
+    const preview = {
+      channel: channelLabel,
+      count: batch.length,
+      moreRemain: candidates.length > RESOLVE_BATCH_LIMIT,
+      oldestReceivedAt: batch[0].receivedAt,
+      newestReceivedAt: batch[batch.length - 1].receivedAt,
+      senders: senders.slice(0, 5),
+      otherSenders: Math.max(0, senders.length - 5),
+    };
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: RESOLVE_COMMUNICATION_INTAKES_ACTION.actionName,
+      inputPayload: { channel: channelLabel, count: batch.length },
+      riskLevel: RESOLVE_COMMUNICATION_INTAKES_ACTION.riskLevel,
+      confirmationRequired: true,
+      confirmed: false,
+      result: "rejected",
+      errorMessage: "CONFIRMATION_REQUIRED",
+    });
+    return fail(409, "CONFIRMATION_REQUIRED", "Review the messages and confirm to mark them as resolved.", {
+      preview,
+      confirmInput: { channel: channelLabel, intake_ids: batch.map((intake) => intake.id) },
+    });
+  }
+
+  const ids = batch.map((intake) => intake.id);
+  const recordIds = batch.map((intake) => intake.communicationRecordId).filter((id): id is string => Boolean(id));
+  const now = new Date();
+  const resolved = await prisma.$transaction(async (tx) => {
+    // Still unresolved at the moment of the yes: one resolved meanwhile is not counted twice.
+    const updated = await tx.communicationIntake.updateMany({
+      where: { companyId: user.companyId, id: { in: ids }, resolutionNeeded: true },
+      data: { resolutionNeeded: false, resolvedAt: now, resolvedBy: user.id },
+    });
+    if (recordIds.length > 0) {
+      await tx.communicationRecord.updateMany({
+        where: { companyId: user.companyId, id: { in: recordIds } },
+        data: { followUpNeeded: false },
+      });
+    }
+    return updated.count;
+  });
+
+  await recordAudit({
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: RESOLVE_COMMUNICATION_INTAKES_ACTION.actionName,
+    inputPayload: { channel: channelLabel, intakeIds: ids },
+    dataBefore: { resolutionNeeded: true, count: ids.length },
+    dataAfter: { resolutionNeeded: false, resolved, resolvedAt: now },
+    riskLevel: RESOLVE_COMMUNICATION_INTAKES_ACTION.riskLevel,
+    confirmationRequired: true,
+    confirmed: true,
+    result: "success",
+  });
+  return ok(200, { resolved, channel: channelLabel, moreRemain: candidates.length > RESOLVE_BATCH_LIMIT });
 }
