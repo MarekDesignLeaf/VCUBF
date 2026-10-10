@@ -280,7 +280,7 @@ async function requestTranscription(form: FormData): Promise<string> {
  * the stems that are meant as stems (navigac-, naved-, pomoz-) keep their endings.
  */
 export function needsApplicationMap(text: string): boolean {
-  return /(?<![\p{L}])(?:menus?|navigation|where|how\s+(?:do|can)|help|guides?|features?|pages?|screens?|workflows?|kde|jak|gdzie)(?![\p{L}])|(?<![\p{L}])(?:pomoz|pomóż|naveď|naved|navigac|poprowadź)/iu.test(text);
+  return /(?<![\p{L}])(?:(?:sub)?menus?|navigation|where|how\s+(?:do(?:es)?|can|to|should)|help(?:ing)?|guides?|features?|(?:home)?pages?|screens?|workflows?|kde|jak|jakým\s+způsobem|gdzie)(?![\p{L}])|(?<![\p{L}])(?:pomoz|pomóż|pomoż|naveď|naved|navigac|poprowadź)/iu.test(text);
 }
 
 export async function interpretVoiceRequest(input: {

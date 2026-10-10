@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, it } from "node:test";
-import { assistantRealtimeVoice, assistantVoice, DEFAULT_VOICE, isSpeechConfigured, PCM_CONTENT_TYPE, speakReply, streamReply } from "../src/services/voiceSpeechService.js";
+import { assistantRealtimeVoice, assistantVoice, DEFAULT_VOICE, isSpeechConfigured, PCM_CONTENT_TYPE, PCM_END_MARKER, speakReply, streamReply } from "../src/services/voiceSpeechService.js";
 
 const realFetch = globalThis.fetch;
 const realKey = process.env.OPENAI_API_KEY;
@@ -162,8 +162,9 @@ describe("Streamed replies (raw PCM, played as they arrive)", () => {
     const out = sink();
     assert.equal(await streamReply("Máte tři zakázky na zítra a jednu na pátek, všechny v Oxfordu.", 1, out), true);
     assert.equal(body.response_format, "pcm");
-    assert.deepEqual(out.events, [`start ${PCM_CONTENT_TYPE}`, "write 2", "write 3", "write 1"]);
-    assert.deepEqual(out.bytes, [1, 2, 3, 4, 5, 6]);
+    // A complete stream ends with the marker, so a cut one can be told apart.
+    assert.deepEqual(out.events, [`start ${PCM_CONTENT_TYPE}`, "write 2", "write 3", "write 1", "write 8"]);
+    assert.deepEqual(out.bytes, [1, 2, 3, 4, 5, 6, ...PCM_END_MARKER]);
   });
 
   it("starts nothing when the voice cannot be had, so the route can answer 503", async () => {
@@ -182,6 +183,8 @@ describe("Streamed replies (raw PCM, played as they arrive)", () => {
     const out = sink();
     await assert.rejects(streamReply("Připravil jsem objednávku pro dodavatele Alfa na čtyřicet kusů.", 1, out));
     assert.deepEqual(out.events, [`start ${PCM_CONTENT_TYPE}`, "write 4"]);
+    // Broken off: no end marker after the audio that did come.
+    assert.ok(!out.events.includes("write 8"));
     // The same failure before any audio is simply "no voice".
     globalThis.fetch = (async () => streamed([], true)) as typeof fetch;
     const none = sink();
@@ -198,10 +201,26 @@ describe("Streamed replies (raw PCM, played as they arrive)", () => {
     const second = sink();
     assert.equal(await streamReply("Ano, rozumím.", 1, second), true);
     assert.equal(calls, 1);
-    assert.deepEqual(second.bytes, [9, 8, 7]);
+    assert.deepEqual(second.bytes, [9, 8, 7, ...PCM_END_MARKER]);
     // A different speed is different audio.
     assert.equal(await streamReply("Ano, rozumím.", 1.3, sink()), true);
     assert.equal(calls, 2);
   });
+  it("a page that leaves stops the synthesis; before any audio it is simply no voice", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    const left = new AbortController();
+    left.abort();
+    let calls = 0;
+    globalThis.fetch = (async () => { calls += 1; return streamed([[1, 2]]); }) as typeof fetch;
+    assert.equal(await streamReply("Připravil jsem odpověď pro klienta Nováka.", 1, sink(), left.signal), false);
+    assert.equal(calls, 0);
+    // Leaving mid-stream: thrown after the audio that came, no end marker.
+    const leaving = new AbortController();
+    globalThis.fetch = (async () => streamed([[5, 6], [7, 8], [9, 10]])) as typeof fetch;
+    const out = sink();
+    const write = out.write;
+    out.write = (chunk: Uint8Array) => { write(chunk); leaving.abort(); };
+    await assert.rejects(streamReply("Připravil jsem odpověď pro klientku Novákovou.", 1, out, leaving.signal));
+    assert.deepEqual(out.events, [`start ${PCM_CONTENT_TYPE}`, "write 2"]);
+  });
 });
-

@@ -32,6 +32,10 @@ const speakSchema = z.object({
 voiceSpeechRouter.post("/speak", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission), asyncRoute(async (req, res) => {
   const parsed = speakSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "VALIDATION_FAILED" });
+  // A page that stops listening (the reply was cut off) stops the synthesis too,
+  // even while the account is still being read.
+  const gone = new AbortController();
+  res.on("close", () => { if (!res.writableFinished) gone.abort(); });
 
   // From the database, not the token: a language change has to apply to the
   // very next reply, not after the next sign-in.
@@ -46,9 +50,7 @@ voiceSpeechRouter.post("/speak", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
   const rate = row?.voiceSpeechRate ?? req.user!.voiceSpeechRate ?? 1;
 
   if (parsed.data.format === "pcm") {
-    // A page that stops listening (the reply was cut off) stops the synthesis too.
-    const gone = new AbortController();
-    res.on("close", () => { if (!res.writableFinished) gone.abort(); });
+    if (gone.signal.aborted) return;
     try {
       const streamed = await streamReply(parsed.data.text, rate, {
         start(contentType) {

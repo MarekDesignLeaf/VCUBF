@@ -11,6 +11,19 @@
  * could click.
  */
 
+/**
+ * What closes a complete stream ("VCUBFEND", see the backend's PCM_END_MARKER).
+ * A stream that ends without it was cut short somewhere on the way, and is
+ * treated as broken off — never as a reply heard in full.
+ */
+export const END_MARKER = new Uint8Array([0x56, 0x43, 0x55, 0x42, 0x46, 0x45, 0x4e, 0x44]);
+
+/** A sample rate from a header, or the backend's own when it is missing or absurd. */
+export function sampleRateFrom(contentType: string): number {
+  const rate = Number(/rate=(\d+)/.exec(contentType)?.[1]);
+  return Number.isFinite(rate) && rate >= 8000 && rate <= 96000 ? rate : 24000;
+}
+
 /** The first block is short so the voice starts at once; later ones are a little longer. */
 export const FIRST_BLOCK_SECONDS = 0.2;
 export const LATER_BLOCK_SECONDS = 0.25;
@@ -43,11 +56,16 @@ export function streamResampler(fromRate: number, toRate: number) {
   };
 }
 
-/** Blocks of float samples at `toRate`, read from a stream of 16-bit samples at `fromRate`. */
+/**
+ * Blocks of float samples at `toRate`, read from a stream of 16-bit samples at
+ * `fromRate` that ends with END_MARKER. The last bytes are held back until the
+ * stream ends, so the marker is never played; a stream without it throws.
+ */
 export function pcmBlocks(body: ReadableStream<Uint8Array>, fromRate: number, toRate: number) {
   const reader = body.getReader();
   const resample = streamResampler(fromRate, toRate);
   let carry: number | null = null;
+  let tail = new Uint8Array(0);
   let pending: Float32Array[] = [];
   let pendingLength = 0;
   let done = false;
@@ -57,9 +75,22 @@ export function pcmBlocks(body: ReadableStream<Uint8Array>, fromRate: number, to
     const wanted = Math.round(fromRate * (first ? FIRST_BLOCK_SECONDS : LATER_BLOCK_SECONDS));
     while (!done && pendingLength < wanted) {
       const { value, done: ended } = await reader.read();
-      if (ended) { done = true; break; }
+      if (ended) {
+        done = true;
+        if (tail.byteLength !== END_MARKER.byteLength || tail.some((byte, index) => byte !== END_MARKER[index])) {
+          throw new Error("SPEECH_STREAM_CUT_SHORT");
+        }
+        break;
+      }
       if (!value || value.byteLength === 0) continue;
-      let bytes = value;
+      // Everything but the last few bytes, which may be the end marker.
+      const joinedTail = new Uint8Array(tail.byteLength + value.byteLength);
+      joinedTail.set(tail, 0);
+      joinedTail.set(value, tail.byteLength);
+      const keep = Math.min(END_MARKER.byteLength, joinedTail.byteLength);
+      tail = joinedTail.slice(joinedTail.byteLength - keep);
+      if (joinedTail.byteLength === keep) continue;
+      let bytes = joinedTail.subarray(0, joinedTail.byteLength - keep);
       // A sample can be split between two chunks of the stream.
       if (carry !== null) {
         const joined = new Uint8Array(bytes.byteLength + 1);
@@ -89,9 +120,5 @@ export function pcmBlocks(body: ReadableStream<Uint8Array>, fromRate: number, to
     return output;
   };
 
-  return {
-    next: read,
-    /** Stop reading; what has not arrived is not wanted. */
-    cancel() { void reader.cancel().catch(() => undefined); },
-  };
+  return { next: read };
 }

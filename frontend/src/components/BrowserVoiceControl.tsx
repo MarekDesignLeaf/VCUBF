@@ -6,7 +6,7 @@ import { appLanguage } from "../i18n";
 import { useAuth } from "../context/useAuth";
 import { isDesktopCompanionWindow } from "../lib/platform";
 import { MacroRecorder, replayMacro, type MacroStep } from "../lib/macroRecorder";
-import { pcmBlocks } from "../lib/pcmStream";
+import { pcmBlocks, sampleRateFrom } from "../lib/pcmStream";
 import { speechPieces } from "../lib/speechPieces";
 import {
   learningPhrases,
@@ -669,6 +669,9 @@ function ensureAudioContext(): AudioContext | null {
 
 /** Release the output once voice control is switched off. */
 function releaseOutput() {
+  // Nothing more of the current reply is wanted, nor still downloaded.
+  currentPlayback?.stop();
+  currentPlayback = null;
   const context = outputContext;
   outputContext = null;
   spokenPieces.clear();
@@ -826,16 +829,23 @@ function onceStream(buffer: AudioBuffer): PieceStream {
 async function firstPieceStream(context: AudioContext, text: string, language: string, rate: number, signal: AbortSignal): Promise<PieceStream | null> {
   const key = pieceKey(text, language, rate);
   const kept = spokenPieces.get(key);
-  if (kept) return onceStream(kept);
+  if (kept) {
+    // Most recently used goes last, so "Ano?" is not the one dropped.
+    spokenPieces.delete(key);
+    spokenPieces.set(key, kept);
+    return onceStream(kept);
+  }
   const response = await authorizedVoiceFetch(`${API_URL}/command/speak`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, language, format: "pcm" }),
+    // Below 24 kHz (a headset in call mode) the simple resampling here would
+    // alias; the browser's own decoder does better with the MP3 there.
+    body: JSON.stringify(context.sampleRate >= 24_000 ? { text, language, format: "pcm" } : { text, language }),
     signal,
   });
   if (!response.ok) return null;
   const type = response.headers.get("content-type") ?? "";
-  const sampleRate = Number(/rate=(\d+)/.exec(type)?.[1] ?? 24_000);
+  const sampleRate = sampleRateFrom(type);
   if (!type.startsWith("audio/pcm") || !response.body) {
     const encoded = await response.arrayBuffer();
     if (encoded.byteLength === 0) return null;
@@ -975,6 +985,8 @@ async function playNeuralVoice(
      * know there is a rest.
      */
     const endWithScheduled = (rest?: string) => {
+      // Ending early: the pieces still on their way are no longer wanted.
+      if (rest) wanted.abort();
       events.scheduled(Date.now() + Math.max(0, cursor - context.currentTime) * 1000, true, rest);
       const last = sources[sources.length - 1];
       if (!last || played.has(last)) finish();
@@ -1611,6 +1623,8 @@ export function BrowserVoiceControl() {
     // The spoken exchange this reply answers, if any: its times go under the answer.
     const answering = exchange.current;
     exchange.current = null;
+    // A new reply: the times of an earlier one no longer describe what is on screen.
+    setTiming(null);
 
     void (async () => {
       let unplayed = "";
@@ -1806,6 +1820,18 @@ export function BrowserVoiceControl() {
   }, [learningVoice, phrases, speak]);
 
   const execute = useCallback(async (text: string) => {
+    // The spoken exchange this command belongs to, taken now: another one may
+    // start before this answer comes back.
+    const mine = exchange.current;
+    exchange.current = null;
+    /** Speak the answer, handing this exchange's times to the reply. */
+    const answer = (words: string) => {
+      if (mine) {
+        mine.answeredAt ??= Date.now();
+        exchange.current = mine;
+      }
+      speak(words);
+    };
     setStatus("thinking");
     setHeard(text);
     appendTurn({ role: "user", content: text });
@@ -1814,7 +1840,7 @@ export function BrowserVoiceControl() {
       // Cancelled at the limit, so the next sentence never starts while this
       // one could still answer; a cancelled request is reported as failed.
       const result: MobileAssistantResponse = await api.command.assistant(text, language, history, AbortSignal.timeout(ASSISTANT_LIMIT_MS));
-      if (exchange.current) exchange.current.answeredAt = Date.now();
+      if (mine) mine.answeredAt = Date.now();
       // Not understood: say so and offer to be taught, rather than repeating a
       // generic failure the user can do nothing with.
       const notUnderstood = result.intent === "unrecognized"
@@ -1824,7 +1850,7 @@ export function BrowserVoiceControl() {
         setAnswer(offer);
         appendTurn({ role: "assistant", content: offer });
         setLearningStage("offered");
-        speak(offer);
+        answer(offer);
         extendConversation();
         setStatus("idle");
         return;
@@ -1835,7 +1861,7 @@ export function BrowserVoiceControl() {
       appendTurn({ role: "assistant", content: responseText });
       if (result.uiAction?.kind === "navigate") navigate(result.uiAction.path);
       if (result.uiAction?.kind === "set_language") updateUser({ voiceLanguage: result.uiAction.language });
-      speak(responseText);
+      answer(responseText);
       extendConversation();
     } catch (error) {
       // Cancelling at the limit only stops this window waiting; Secretary may
@@ -1844,7 +1870,7 @@ export function BrowserVoiceControl() {
       const message = isTimeout(error) ? copy.unknownOutcome : copy.connectionError;
       setAnswer(message);
       appendTurn({ role: "assistant", content: message });
-      speak(message);
+      answer(message);
     } finally {
       setStatus("idle");
     }
@@ -1945,13 +1971,14 @@ export function BrowserVoiceControl() {
     const transcribe = (audio: Float32Array, spokenAt: number, endedAt: number, cued: boolean) => {
       const id = ++heardEntryId;
       setHearLog((current) => [{ id, at: spokenAt, text: heardCopy.transcribing, woke: false, state: "pending" as const }, ...current].slice(0, 60));
-      const heard = transcribeOne(audio);
+      // Stamped when the words come back, not when their turn in the queue comes.
+      const heard = transcribeOne(audio).then((result) => ({ ...result, heardAt: Date.now() }));
       inOrder = inOrder.then(async () => {
         const result = await heard;
         if (cancelled) return;
         // Words get their own line; silence leaves none; speech that could not be read says so.
         settleEntry(id, result.failed ? "failed" : result.text || !result.dropped ? "words" : "unrecognised");
-        if (result.text) await handleFinal.current(result.text, spokenAt, { endedAt, heardAt: Date.now(), cued });
+        if (result.text) await handleFinal.current(result.text, spokenAt, { endedAt, heardAt: result.heardAt, cued });
       }).catch(() => { /* one failed sentence must not block the ones after it */ });
     };
 

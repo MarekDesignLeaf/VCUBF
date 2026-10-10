@@ -141,7 +141,7 @@ describe("voice assistant interpretation", () => {
   });
 
   it("sends the application map for how-to questions only, not for every \"jaké\"", () => {
-    for (const text of ["jak otevřu faktury", "Kde najdu kalendář?", "pomozte mi s menu", "How do I open communication intake?", "Where is the invoice page", "which pages are there", "navigace", "pomóż mi", "gdzie jest kalendarz"]) {
+    for (const text of ["jak otevřu faktury", "Kde najdu kalendář?", "pomozte mi s menu", "How do I open communication intake?", "Where is the invoice page", "which pages are there", "navigace", "pomóż mi", "gdzie jest kalendarz", "How does the calendar work?", "how to add a client", "Pomożesz mi znaleźć faktury?", "Jakým způsobem přidám klienta?", "open the submenu", "go to the homepage"]) {
       assert.equal(needsApplicationMap(text), true, text);
     }
     for (const text of ["jaké mám zakázky tento týden", "Jaký je stav faktury", "jakou cenu má plot", "jakmile přijde platba", "kolik nám dluží zákazníci", "show my jobs"]) {
