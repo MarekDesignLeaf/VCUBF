@@ -525,19 +525,33 @@ function pickVoice(language: string, voices: SpeechSynthesisVoice[]): SpeechSynt
  * `canplaythrough` only says the browser expects to manage, which it did not.
  */
 interface Playback {
+  /**
+   * Silence it now. The end listeners run before this returns, so whoever stops
+   * a reply sets the guards after them and has the last word. (They used to run
+   * later, from the audio's own "ended" event, and could overwrite the hold a
+   * newer reply had just set.)
+   */
   stop(): void;
-  /** Called once, when the last piece has finished or playback was stopped. */
-  onEnded(listener: () => void): void;
+  /** Called once: when the last piece has finished (stopped false) or playback was stopped (true). */
+  onEnded(listener: (stopped: boolean) => void): void;
 }
 
-/**
- * Told every time a piece of a reply is scheduled: the wall-clock time the audio
- * scheduled so far ends, and whether that is the whole reply. When a later piece
- * could not be synthesised, the reply ends early and `unplayed` is what was not
- * said, for the system voice to finish — a review must be heard in full before
- * its yes.
- */
-type ScheduleListener = (endsAt: number, complete: boolean, unplayed?: string) => void;
+/** What a reply in pieces reports while it plays. */
+interface PlaybackEvents {
+  /**
+   * A piece was scheduled: the wall-clock time the audio scheduled so far ends,
+   * and whether that is the whole reply. When a later piece could not be
+   * synthesised the reply ends early, and `unplayed` is what was not said, for
+   * the system voice to finish — a review must be heard in full before its yes.
+   */
+  scheduled(endsAt: number, complete: boolean, unplayed?: string): void;
+  /**
+   * The audio ran out before the next piece arrived (false), or sounds again
+   * (true). Nothing is playing in such a gap, so nothing in it may count as
+   * talking over the reply — the reply is not over, and the microphone stays held.
+   */
+  sounding(on: boolean): void;
+}
 
 let currentPlayback: Playback | null = null;
 
@@ -588,7 +602,10 @@ const BARGE_IN_OVER_FLOOR = 2.5;
 const BARGE_IN_FLOOR_MIN = 0.12;
 const BARGE_IN_SUSTAIN_MS = 250;
 const BARGE_IN_TICK_MS = 50;
-/** Long enough to drop what was already captured, short enough to answer at once. */
+/**
+ * After stopping a reply that was not sounding yet (still on its way): long enough to
+ * drop what was already captured, short enough to answer at once.
+ */
 const BARGE_IN_GUARD_MS = 400;
 
 /**
@@ -691,16 +708,20 @@ const PENDING_SPEECH_HOLD_MS = 120_000;
  * fetched here as soon as voice control is on, so it plays the moment the name
  * is recognised.
  */
+// Short phrases only, and few of them: a decoded second of audio is ~200 kB, so
+// this stays within a few megabytes. The key cannot name the server's voice; a
+// change of voice on the server is heard here after a reload or once voice
+// control is switched off and on (which clears it).
 const spokenPieces = new Map<string, AudioBuffer>();
-const KEPT_PIECE_LENGTH = 80;
-const KEPT_PIECES = 40;
+const KEPT_PIECE_LENGTH = 40;
+const KEPT_PIECES = 20;
 
 function pieceKey(text: string, language: string, rate: number) {
   return `${language}\u0000${rate}\u0000${text}`;
 }
 
-/** One piece of a reply as audio, or null when it cannot be had. */
-async function neuralPiece(context: AudioContext, text: string, language: string, rate: number): Promise<AudioBuffer | null> {
+/** One piece of a reply as audio, or null when it cannot be had (or was no longer wanted). */
+async function neuralPiece(context: AudioContext, text: string, language: string, rate: number, signal?: AbortSignal): Promise<AudioBuffer | null> {
   const key = pieceKey(text, language, rate);
   const kept = spokenPieces.get(key);
   if (kept) {
@@ -713,6 +734,7 @@ async function neuralPiece(context: AudioContext, text: string, language: string
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, language }),
+      signal,
     });
     if (!response.ok) return null;
     const encoded = await response.arrayBuffer();
@@ -780,9 +802,11 @@ async function playNeuralVoice(
   text: string,
   language: string,
   rate: number,
-  onScheduled: ScheduleListener,
+  events: PlaybackEvents,
   generation = speechGeneration,
 ): Promise<Playback | null> {
+  // Pieces not yet arrived are cancelled when the reply is stopped or replaced.
+  const wanted = new AbortController();
   try {
     const context = ensureAudioContext();
     if (!context) return null;
@@ -790,24 +814,32 @@ async function playNeuralVoice(
     const pieces = speechPieces(text);
     if (pieces.length === 0) return null;
     // All at once: the later pieces are synthesised while the first one plays.
-    const arriving = pieces.map((piece) => neuralPiece(context, piece, language, rate));
+    const arriving = pieces.map((piece) => neuralPiece(context, piece, language, rate, wanted.signal));
 
     const first = await arriving[0];
-    if (!first || generation !== speechGeneration) return null;
+    if (!first || generation !== speechGeneration) {
+      wanted.abort();
+      return null;
+    }
 
-    const listeners: Array<() => void> = [];
+    const listeners: Array<(stopped: boolean) => void> = [];
     const sources: AudioBufferSourceNode[] = [];
     let finished = false;
     let stopped = false;
     // Where the audio scheduled so far ends, in the context's clock.
     let cursor = 0;
+    // The piece after which the reply is over: the last one, or the last one
+    // scheduled when a later piece could not be had.
+    let endsWith: AudioBufferSourceNode | null = null;
     const finish = () => {
       if (finished) return;
       finished = true;
-      for (const listener of listeners) listener();
+      for (const listener of listeners) listener(stopped);
     };
     /** Plays one decoded piece after everything already scheduled; returns when it ends, in wall-clock time. */
     const schedule = (buffer: AudioBuffer, last: boolean) => {
+      // The one before it has already finished: the reply was in a gap and sounds again.
+      const resumed = sources.length > 0 && context.currentTime >= cursor;
       const source = context.createBufferSource();
       source.buffer = buffer;
       source.connect(context.destination);
@@ -816,51 +848,71 @@ async function playNeuralVoice(
       // the one before it has finished starts as soon as it can.
       const startAt = Math.max(cursor, context.currentTime + 0.02);
       cursor = startAt + buffer.duration;
-      if (last) source.onended = finish;
+      if (last) endsWith = source;
+      source.onended = () => {
+        if (finished || stopped) return;
+        if (source === endsWith) finish();
+        // Nothing after it yet: a gap until the next piece arrives.
+        else if (context.currentTime >= cursor - 0.01) events.sounding(false);
+      };
       sources.push(source);
       source.start(startAt);
+      if (resumed) events.sounding(true);
       return Date.now() + (cursor - context.currentTime) * 1000;
-    };
-    /** The reply ends with what is already scheduled. */
-    const endWithScheduled = () => {
-      const last = sources[sources.length - 1];
-      if (!last || context.currentTime >= cursor) finish();
-      else last.onended = finish;
     };
 
     const playback: Playback = {
       stop() {
         stopped = true;
+        wanted.abort();
         for (const source of sources) {
           try { source.stop(); } catch { /* already stopped */ }
         }
         finish();
       },
       onEnded(listener) {
-        if (finished) listener();
+        if (finished) listener(stopped);
         else listeners.push(listener);
       },
     };
     currentPlayback = playback;
 
-    onScheduled(schedule(withLeadIn(context, first), pieces.length === 1), pieces.length === 1);
+    /**
+     * The reply ends early, with what is already scheduled; `rest` was not said.
+     * Reported before the end itself, so the end's listeners know there is a rest.
+     */
+    const endEarly = (rest: string) => {
+      events.scheduled(Date.now() + Math.max(0, cursor - context.currentTime) * 1000, true, rest);
+      const last = sources[sources.length - 1];
+      if (!last || context.currentTime >= cursor) finish();
+      else endsWith = last;
+    };
+
+    events.scheduled(schedule(withLeadIn(context, first), pieces.length === 1), pieces.length === 1);
     if (pieces.length > 1) {
       void (async () => {
         for (let index = 1; index < pieces.length; index += 1) {
-          const buffer = await arriving[index];
-          if (stopped || generation !== speechGeneration) return;
+          if (stopped || finished || generation !== speechGeneration) return;
+          let buffer: AudioBuffer | null = null;
+          try { buffer = await arriving[index]; } catch { buffer = null; }
+          if (stopped || finished || generation !== speechGeneration) return;
           if (!buffer) {
-            endWithScheduled();
-            onScheduled(Date.now() + Math.max(0, cursor - context.currentTime) * 1000, true, pieces.slice(index).join(" "));
+            endEarly(pieces.slice(index).join(" "));
             return;
           }
           const last = index === pieces.length - 1;
-          onScheduled(schedule(buffer, last), last);
+          try {
+            events.scheduled(schedule(buffer, last), last);
+          } catch {
+            endEarly(pieces.slice(index).join(" "));
+            return;
+          }
         }
       })();
     }
     return playback;
   } catch {
+    wanted.abort();
     return null;
   }
 }
@@ -1325,13 +1377,20 @@ export function BrowserVoiceControl() {
    * captured a moment ago can still carry her voice.
    */
   const silence = useCallback(() => {
+    // A reply that was actually sounding keeps its full echo tail (ECHO_TAIL_MS is
+    // never shortened): what the microphone caught while it played still carries
+    // her voice, and a short word said over a review must not slip through as a
+    // "yes" to what was not heard. This is what happened before, too, though by
+    // accident — the audio's late "ended" event re-extended the guard. Cutting off
+    // nothing (a reply still on its way) keeps the short guard.
+    const wasSounding = audible.current;
     speechGeneration += 1;
     audible.current = false;
     currentPlayback?.stop();
     currentPlayback = null;
     try { window.speechSynthesis?.cancel(); } catch { /* not everywhere */ }
     speakingUntil.current = 0;
-    echoGuardUntil.current = Date.now() + BARGE_IN_GUARD_MS;
+    echoGuardUntil.current = Date.now() + (wasSounding ? ECHO_TAIL_MS : BARGE_IN_GUARD_MS);
   }, []);
 
   // Escape stops her at once. A measured threshold is the hands-free way; a key that
@@ -1430,28 +1489,39 @@ export function BrowserVoiceControl() {
 
     void (async () => {
       let unplayed = "";
-      const audio = await playNeuralVoice(text, language, speechRate, (endsAt, complete, rest) => {
-        if (generation !== speechGeneration) return;
-        // While later pieces are still on their way the pending hold stays: a
-        // "yes" must not be taken before the whole reply has been heard. Once the
-        // last piece is scheduled, the real end replaces it.
-        if (!complete) return;
-        speakingUntil.current = endsAt + SPEAKING_GRACE_MS;
-        echoGuardUntil.current = endsAt + ECHO_TAIL_MS;
-        if (rest) unplayed = rest;
+      const audio = await playNeuralVoice(text, language, speechRate, {
+        scheduled: (endsAt, complete, rest) => {
+          if (generation !== speechGeneration) return;
+          // While later pieces are still on their way the pending hold stays: a
+          // "yes" must not be taken before the whole reply has been heard. Once
+          // the last piece is scheduled, the real end replaces it.
+          if (!complete) return;
+          speakingUntil.current = endsAt + SPEAKING_GRACE_MS;
+          echoGuardUntil.current = endsAt + ECHO_TAIL_MS;
+          if (rest) unplayed = rest;
+        },
+        // Between two pieces nothing is playing, so a voice in the room is not
+        // talking over the reply: cutting it off there would drop the rest of a
+        // review unheard and let the next "yes" through. The hold stays, so what
+        // is said in the gap is not acted on either.
+        sounding: (on) => {
+          if (generation !== speechGeneration) return;
+          if (on) startHearing();
+          else audible.current = false;
+        },
       }, generation);
       // Silenced or replaced while the audio was on its way: the newer state
       // already owns the guards.
       if (generation !== speechGeneration) return;
       if (audio) {
         startHearing();
-        audio.onEnded(() => {
+        audio.onEnded((stopped) => {
           if (generation === speechGeneration) audible.current = false;
           speakingUntil.current = Date.now() + SPEAKING_GRACE_MS;
           echoGuardUntil.current = Date.now() + ECHO_TAIL_MS;
           // A piece could not be synthesised: the rest is said in the system
-          // voice rather than left out.
-          if (unplayed && generation === speechGeneration) void sayWithSystemVoice(unplayed);
+          // voice rather than left out — unless the reply was cut off.
+          if (unplayed && !stopped && generation === speechGeneration) void sayWithSystemVoice(unplayed);
         });
         return;
       }
