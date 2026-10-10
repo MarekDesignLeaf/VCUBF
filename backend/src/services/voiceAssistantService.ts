@@ -270,6 +270,19 @@ async function requestTranscription(form: FormData): Promise<string> {
   return z.object({ text: z.string() }).parse(parsed).text.trim();
 }
 
+/**
+ * Whether the sentence asks how to use the application, so the application map
+ * goes with it.
+ *
+ * The map is about five thousand tokens. "jak" used to match inside "jaké",
+ * "jaký" and "jakou", so every "jaké mám zakázky" carried the map and was
+ * twice as long to read (9. 10.: 10k tokens instead of 5k). Whole words only;
+ * the stems that are meant as stems (navigac-, naved-, pomoz-) keep their endings.
+ */
+export function needsApplicationMap(text: string): boolean {
+  return /(?<![\p{L}])(?:(?:sub)?menus?|navigation|where|how\s+(?:do(?:es)?|can|to|should)|help(?:ing)?|guides?|features?|(?:home)?pages?|screens?|workflows?|kde|jak|jakým\s+způsobem|gdzie)(?![\p{L}])|(?<![\p{L}])(?:pomoz|pomóż|pomoż|naveď|naved|navigac|poprowadź)/iu.test(text);
+}
+
 export async function interpretVoiceRequest(input: {
   text: string;
   userName: string;
@@ -289,7 +302,7 @@ export async function interpretVoiceRequest(input: {
   const history = (input.history ?? []).slice(-6);
   const contextJson = JSON.stringify(input.memoryContext ?? { persistentMemories: [], recentConversations: [] });
   const behaviorInstructions = buildEmmaBehaviorInstructions(input.behaviorScenario);
-  const needsProgramKnowledge = /(?:menu|navigation|where|how\s+(?:do|can)|help|guide|feature|page|screen|workflow|kde|jak|pomoz|naveď|naved|menu|navigac|gdzie|jak|pom[oó]ż|poprowadź)/iu.test(input.text);
+  const needsProgramKnowledge = needsApplicationMap(input.text);
   const programGuidance = needsProgramKnowledge
     ? `\nUse this implemented application map when the user asks how to do something, where a feature is, what a page means, or how to reach an outcome. Guide step by step and never invent UI:\nTreat its UI details as exact source-of-truth, not as examples. Quote control labels verbatim. Do not infer a conventional New button, editable line-item grid, confirmation, field or workflow that the map does not state. If a requested UI detail is absent, say it is not described instead of guessing.\n${PROGRAM_KNOWLEDGE}`
     : "";
