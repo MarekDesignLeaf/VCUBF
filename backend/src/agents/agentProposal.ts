@@ -137,8 +137,12 @@ export const AGENT_PROPOSABLE_COMMANDS: ReadonlySet<ParsedCommand["intent"]> = n
   "log_communication", "log_portfolio_photo",
 ]);
 
-/** Reading commands that only make sense on a screen; the planner gets no use from them. */
-const READS_NOT_RUN = new Set<string>(["navigate", "describe_menu", "unrecognized"]);
+/**
+ * Reading commands the planner gets no use from: pages and menus make sense
+ * only on a screen, and moving through messages being read out is the user's
+ * own place in a reading.
+ */
+const READS_NOT_RUN = new Set<string>(["navigate", "describe_menu", "unrecognized", "next_message_sender", "older_sender_messages"]);
 
 function isApprovalTurn(intent: string) {
   return intent.startsWith("confirm_") || intent.startsWith("cancel_");
@@ -644,13 +648,13 @@ async function handleCommand(state: PlanState, canonical: string, command: Parse
       record(state, { ...call, valid: true, use: "refused" }, fingerprint);
       return `Not allowed: ${decision.message}`;
     }
-    const response = await (await dispatcher())(state.user, command);
+    const response = await (await dispatcher())(state.user, command, { planning: true });
     record(state, { ...call, valid: response.ok, use: "read" }, fingerprint);
     return resultText({ ok: response.ok, error: response.error, message: response.message, data: response.data });
   }
   if (READS_NOT_RUN.has(command.intent)) {
     record(state, { ...call, valid: true, use: "refused" }, fingerprint);
-    return "Opening pages and reading menus is not part of planning.";
+    return "Opening pages, reading menus and moving through a reading aloud are not part of planning.";
   }
   if (!AGENT_PROPOSABLE_COMMANDS.has(command.intent)) {
     record(state, { ...call, valid: true, use: "refused" }, fingerprint);

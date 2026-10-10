@@ -21,6 +21,15 @@ export interface CommandGrammar {
   yes: RegExp;
   /** A bare no to the one review that is waiting. */
   no: RegExp;
+  /**
+   * While received messages are being read out: on to the next sender
+   * ("přeskoč ho", "další"). Matched against the folded sentence — lowercase,
+   * no accents, no punctuation — and only while a reading is in progress, so a
+   * bare "další" means nothing at any other time.
+   */
+  readingSkip: RegExp;
+  /** While messages are being read out: more, older ones from the same sender ("starší"). Folded, as readingSkip. */
+  readingOlder: RegExp;
   /** The phrases that switch the language, each capturing the language named. */
   languageSwitch: LanguageSwitchPhrases;
 }

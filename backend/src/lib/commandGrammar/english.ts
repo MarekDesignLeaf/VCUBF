@@ -330,6 +330,8 @@ function knowledge(text: string): ParsedCommand | undefined {
   if (/^(?:list|show(?:\s+me)?|open)\s+contacts?$/i.test(text)) return { intent: "list_contacts", entities: {} };
   if (/^(?:list|show(?:\s+me)?|read|open)\s+(?:my\s+)?(?:email|mail)(?:\s+messages?)?s?$/i.test(text)) return { intent: "list_channel_messages", entities: { channel: "email" } };
   if (/^(?:list|show(?:\s+me)?|read|open)\s+(?:my\s+)?whatsapp(?:\s+messages?)?$/i.test(text)) return { intent: "list_channel_messages", entities: { channel: "whatsapp" } };
+  if (/^skip\s+to\s+the\s+next\s+sender$/i.test(text)) return { intent: "next_message_sender", entities: {} };
+  if (/^read\s+older\s+messages\s+from\s+this\s+sender$/i.test(text)) return { intent: "older_sender_messages", entities: {} };
   if (/^(?:list|show(?:\s+me)?|open)\s+jobs?$/i.test(text)) return { intent: "list_jobs", entities: {} };
   if (/^(?:list|show(?:\s+me)?|open)\s+leads?$/i.test(text)) return { intent: "list_leads", entities: {} };
   return undefined;
@@ -339,6 +341,12 @@ export const english: CommandGrammar = {
   language: "en",
   yes: /^(?:yes|yeah|yep|confirm(?:\s+action)?|go ahead|do it|send it)$/iu,
   no: /^(?:no|cancel(?:\s+action)?|cancel it|cancel that|don't send|do not send|stop email)$/iu,
+  // "skip him", "skip Petra", "next", "move on", "continue". The canonical
+  // "skip to the next sender" is read by parse(), whether or not anything is
+  // being read, so the model's command always means the same thing.
+  readingSkip: /^(?:(?:ok|okay|right|fine)\s+)?(?:skip(?:\s+\S+){0,3}|next(?:\s+(?:one|sender|person|contact))?|move\s+on|go\s+on|carry\s+on|keep\s+going|continue(?:\s+reading)?|read\s+(?:the\s+)?next(?:\s+(?:one|sender|person))?)(?:\s+please)?$/u,
+  // "older", "read the older ones", "more from him".
+  readingOlder: /^(?:(?:ok|okay|right|fine)\s+)?(?:(?:(?:read|show)\s+(?:me\s+)?)?(?:the\s+)?(?:older|earlier|previous)(?:\s+(?:ones|messages))?(?:\s+from\s+(?:him|her|them|this\s+sender))?|more\s+from\s+(?:him|her|them|this\s+sender))(?:\s+please)?$/u,
   languageSwitch: {
     patterns: [
       /^(?:set|change|switch)\s+(?:the\s+)?(?:(?:emma(?:'s)?|voice|menu|secretary)\s+)?language\s+(?:to\s+)?(.+)$/iu,

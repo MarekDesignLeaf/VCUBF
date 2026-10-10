@@ -87,6 +87,8 @@ export const COMMAND_POLICY = {
   list_clients: { category: "customers", mode: "read" },
   list_contacts: { category: "customers", mode: "read" },
   list_channel_messages: { category: "communication", mode: "read" },
+  next_message_sender: { category: "communication", mode: "read" },
+  older_sender_messages: { category: "communication", mode: "read" },
   prepare_gmail_message: { category: "communication", mode: "external", actionName: "prepare_voice_gmail_message" },
   confirm_gmail_message: { category: "communication", mode: "external", actionName: "confirm_voice_gmail_message" },
   cancel_gmail_message: { category: "communication", mode: "external", actionName: "cancel_voice_gmail_message" },

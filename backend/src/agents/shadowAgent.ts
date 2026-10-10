@@ -196,9 +196,13 @@ function sameEntities(left: unknown, right: unknown) {
   return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
 }
 
-/** Confirmation turns ("yes", "cancel email") mean nothing without the review they answer. */
+/**
+ * Confirmation turns ("yes", "cancel email") mean nothing without the review
+ * they answer, and "přeskoč" / "starší" nothing without the reading they move
+ * through; the agent sees neither, so these are not compared.
+ */
 function isApprovalTurn(intent: string) {
-  return intent.startsWith("confirm_") || intent.startsWith("cancel_");
+  return intent.startsWith("confirm_") || intent.startsWith("cancel_") || intent === "next_message_sender" || intent === "older_sender_messages";
 }
 
 function fingerprintKey() {

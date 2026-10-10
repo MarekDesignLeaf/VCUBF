@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { spokenChannelMessages, spokenError, spokenOutcome, spokenReview } from "../src/lib/spokenActionMessages.js";
+import { spokenError, spokenOutcome, spokenReview } from "../src/lib/spokenActionMessages.js";
 import { addDays, localDateTime } from "../src/lib/spokenDate.js";
 import { speechChunks } from "../src/services/voiceSpeechService.js";
 
@@ -118,34 +118,6 @@ describe("Spoken reviews", () => {
 });
 
 function spokenEscape(value: string) { return value.replace(/ /g, " "); }
-
-describe("Reading received messages aloud", () => {
-  it("reads the newest messages with sender, age, text and whether they were answered", () => {
-    const now = new Date("2026-10-05T20:00:00Z");
-    const spoken = spokenChannelMessages("whatsapp", {
-      items: [
-        { sender: "Honza Novák", text: "What time will you arrive?", receivedAt: new Date("2026-10-05T18:00:00Z"), replied: true },
-        { sender: "+447700900222", text: "Thanks for the quote.", receivedAt: new Date("2026-10-04T19:00:00Z"), replied: false },
-      ],
-      unansweredToday: 1,
-    }, "cs-CZ", now);
-    assert.equal(spoken, "Poslední zprávy na WhatsAppu: 1. Honza Novák, před 2 hodinami: „What time will you arrive?“. Odpovězeno. 2. +447700900222, včera: „Thanks for the quote.“. Bez odpovědi. Za posledních 24 hodin zůstává bez odpovědi 1. Odpovědět můžete třeba: odpověz Honzovi, že…");
-    assert.equal(spokenChannelMessages("whatsapp", { items: [], unansweredToday: 0 }, "en-GB"), "There are no received WhatsApp messages.");
-  });
-
-  it("says an email was answered only when the reply left from Secretary, and how to reply", () => {
-    const now = new Date("2026-10-05T20:00:00Z");
-    const spoken = spokenChannelMessages("email", {
-      items: [
-        { sender: "Jan Novák", text: "Subject: Plot", receivedAt: new Date("2026-10-05T18:00:00Z"), replied: true },
-        { sender: "petra@example.com", text: "Subject: Faktura", receivedAt: new Date("2026-10-04T19:00:00Z") },
-      ],
-      unansweredToday: 0,
-    }, "cs-CZ", now);
-    // The second may have been answered straight from Gmail, so nothing is claimed about it.
-    assert.equal(spoken, "Poslední zprávy v e-mailu: 1. Jan Novák, před 2 hodinami: „Subject: Plot“. Odpovězeno. 2. petra@example.com, včera: „Subject: Faktura“. Odpovědět můžete třeba: odpověz Honzovi na e-mail, že…");
-  });
-});
 
 describe("Long reviews are heard in full", () => {
   it("splits a long reply at sentence ends into pieces the voice service accepts, losing nothing", () => {

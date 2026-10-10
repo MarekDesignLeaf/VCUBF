@@ -9,6 +9,7 @@
 // Czech and Polish forms are masculine or neutral.
 
 import { addDays, localDateTime } from "./spokenDate.js";
+import type { ReadingTurn } from "../services/messageReadingService.js";
 
 type Locale = "cs" | "pl" | "en";
 type Row = Record<string, any>;
@@ -417,36 +418,117 @@ function ago(at: Date, now: Date, lang: Locale) {
   return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
-/** Reads the newest received messages aloud: who, when, what, and whether it was answered. */
-export function spokenChannelMessages(
-  channel: "email" | "whatsapp",
-  result: { items: Array<{ sender: string; text: string; receivedAt: Date; replied?: boolean }>; unansweredToday: number },
-  language: string,
-  now = new Date(),
-): string {
+function capitalised(text: string) {
+  return text.charAt(0).toLocaleUpperCase() + text.slice(1);
+}
+
+/** Czech has three plural forms (1, 2–4, 5+); Polish keys on the last digit and 12–14. */
+function counted(count: number, lang: Locale, forms: { cs: [string, string, string]; pl: [string, string, string]; en: [string, string] }) {
+  if (lang === "en") return `${count} ${count === 1 ? forms.en[0] : forms.en[1]}`;
+  if (count === 1) return `${count} ${forms[lang][0]}`;
+  const few = lang === "cs" ? count >= 2 && count <= 4 : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14);
+  return `${count} ${few ? forms[lang][1] : forms[lang][2]}`;
+}
+
+const MESSAGES = { cs: ["zpráva", "zprávy", "zpráv"], pl: ["wiadomość", "wiadomości", "wiadomości"], en: ["message", "messages"] } as { cs: [string, string, string]; pl: [string, string, string]; en: [string, string] };
+const OLDER = { cs: ["starší zpráva", "starší zprávy", "starších zpráv"], pl: ["starsza wiadomość", "starsze wiadomości", "starszych wiadomości"], en: ["older message", "older messages"] } as { cs: [string, string, string]; pl: [string, string, string]; en: [string, string] };
+const SENDERS = { cs: ["odesílatele", "odesílatelů", "odesílatelů"], pl: ["nadawcy", "nadawców", "nadawców"], en: ["sender", "senders"] } as { cs: [string, string, string]; pl: [string, string, string]; en: [string, string] };
+
+/** "a, b a c" / "a, b i c" / "a, b and c". */
+function spokenList(items: string[], lang: Locale) {
+  if (items.length <= 1) return items.join("");
+  const and = lang === "cs" ? " a " : lang === "pl" ? " i " : " and ";
+  return `${items.slice(0, -1).join(", ")}${and}${items[items.length - 1]}`;
+}
+
+/** How many senders the first answer names before it only counts the rest. */
+const SENDERS_NAMED = 5;
+
+/**
+ * One answer of a reading of received messages: on the first, who has written
+ * and how much; then one sender's newest few messages — when, what, and
+ * whether they were answered — how many older ones remain, and who is next.
+ * Only what the reading returned is said.
+ */
+export function spokenReadingTurn(turn: ReadingTurn, language: string, now = new Date()): string {
   const lang = locale(language);
-  const name = channel === "whatsapp" ? "WhatsApp" : (lang === "en" ? "email" : "e-mail");
-  if (!result.items.length) {
-    return lang === "cs" ? `Na ${name === "WhatsApp" ? "WhatsAppu" : "e-mailu"} nejsou žádné přijaté zprávy.`
-      : lang === "pl" ? `Brak odebranych wiadomości ${name === "WhatsApp" ? "na WhatsAppie" : "e-mail"}.`
-        : `There are no received ${name} messages.`;
+  const whatsapp = turn.channel === "whatsapp";
+  const parts: string[] = [];
+  const overview = turn.overview;
+
+  if (overview && !overview.senders.length) {
+    return lang === "cs" ? `Na ${whatsapp ? "WhatsAppu" : "e-mailu"} nejsou žádné přijaté zprávy.`
+      : lang === "pl" ? `Brak odebranych wiadomości ${whatsapp ? "na WhatsAppie" : "e-mail"}.`
+        : `There are no received ${whatsapp ? "WhatsApp" : "email"} messages.`;
   }
-  const lines = result.items.map((item, index) => {
-    const answered = item.replied === undefined ? ""
-      : item.replied ? (lang === "cs" ? " Odpovězeno." : lang === "pl" ? " Odpowiedziano." : " Answered.")
-        : (lang === "cs" ? " Bez odpovědi." : lang === "pl" ? " Bez odpowiedzi." : " Not answered.");
-    return `${index + 1}. ${item.sender}, ${ago(item.receivedAt, now, lang)}: „${quote(item.text, 160)}“.${answered}`;
-  });
-  const head = lang === "cs" ? `Poslední zprávy ${channel === "whatsapp" ? "na WhatsAppu" : "v e-mailu"}:`
-    : lang === "pl" ? `Ostatnie wiadomości ${channel === "whatsapp" ? "na WhatsAppie" : "e-mail"}:`
-      : `Latest ${name} messages:`;
-  const unanswered = channel === "whatsapp" && result.unansweredToday
-    ? (lang === "cs" ? ` Za posledních 24 hodin zůstává bez odpovědi ${result.unansweredToday}.`
-      : lang === "pl" ? ` W ciągu ostatnich 24 godzin bez odpowiedzi: ${result.unansweredToday}.`
-        : ` ${result.unansweredToday} from the last 24 hours are not answered.`)
-    : "";
-  const hint = channel === "whatsapp"
-    ? (lang === "cs" ? " Odpovědět můžete třeba: odpověz Honzovi, že…" : lang === "pl" ? " Możesz odpowiedzieć na przykład: odpowiedz Janowi, że…" : " You can reply, for example: reply to John that…")
-    : (lang === "cs" ? " Odpovědět můžete třeba: odpověz Honzovi na e-mail, že…" : lang === "pl" ? " Możesz odpowiedzieć na przykład: odpowiedz Janowi na e-mail, że…" : " You can reply, for example: reply to John's email that…");
-  return `${head} ${lines.join(" ")}${unanswered}${hint}`;
+  if (overview && overview.senders.length > 1) {
+    const named = overview.senders.slice(0, SENDERS_NAMED).map((entry) => `${entry.sender} ${counted(entry.count, lang, MESSAGES)}`);
+    const rest = overview.senders.length - named.length;
+    if (rest > 0) {
+      named.push(lang === "cs" ? (rest === 1 ? "jeden další" : rest <= 4 ? `${rest} další` : `${rest} dalších`)
+        : lang === "pl" ? (rest === 1 ? "jeszcze jeden" : `jeszcze ${rest} innych`)
+          : `${rest} more`);
+    }
+    const from = counted(overview.senders.length, lang, SENDERS);
+    parts.push(lang === "cs" ? `Na ${whatsapp ? "WhatsAppu" : "e-mailu"} máte zprávy od ${from}: ${spokenList(named, lang)}.`
+      : lang === "pl" ? `${whatsapp ? "Na WhatsAppie" : "W poczcie e-mail"} masz wiadomości od ${from}: ${spokenList(named, lang)}.`
+        : `${whatsapp ? "WhatsApp" : "Email"} messages from ${from}: ${spokenList(named, lang)}.`);
+  }
+  if (overview && whatsapp && overview.unansweredToday) {
+    parts.push(lang === "cs" ? `Za posledních 24 hodin zůstává bez odpovědi ${overview.unansweredToday}.`
+      : lang === "pl" ? `W ciągu ostatnich 24 godzin bez odpowiedzi: ${overview.unansweredToday}.`
+        : `${overview.unansweredToday} from the last 24 hours are not answered.`);
+  }
+
+  const sender = turn.sender;
+  if (sender) {
+    if (sender.alreadyRead > 0 && !sender.messages.length) {
+      parts.push(lang === "cs" ? "Starší zprávy od tohoto odesílatele už nejsou."
+        : lang === "pl" ? "Starszych wiadomości od tego nadawcy już nie ma."
+          : "There are no older messages from this sender.");
+    } else {
+      // The count is already in the overview when it named several senders.
+      const counts = sender.alreadyRead === 0 && sender.total > 1 && !(overview && overview.senders.length > 1);
+      parts.push(sender.alreadyRead > 0
+        ? (lang === "cs" ? `${sender.name}, starší zprávy.` : lang === "pl" ? `${sender.name}, starsze wiadomości.` : `${sender.name}, older messages.`)
+        : counts ? `${sender.name}, ${counted(sender.total, lang, MESSAGES)}.` : `${sender.name}.`);
+      for (const message of sender.messages) {
+        const answered = message.replied === undefined ? ""
+          : message.replied ? (lang === "cs" ? " Odpovězeno." : lang === "pl" ? " Odpowiedziano." : " Answered.")
+            : (lang === "cs" ? " Bez odpovědi." : lang === "pl" ? " Bez odpowiedzi." : " Not answered.");
+        parts.push(`${capitalised(ago(message.receivedAt, now, lang))}: „${quote(message.text, 200)}“.${answered}`);
+      }
+      if (sender.olderLeft > 0) {
+        const older = counted(sender.olderLeft, lang, OLDER);
+        parts.push(lang === "cs" ? `Ještě ${older}.` : lang === "pl" ? `Jeszcze ${older}.` : `${older} left.`);
+      }
+    }
+  } else if (!overview) {
+    parts.push(lang === "cs" ? "Další odesílatel už není." : lang === "pl" ? "Następnego nadawcy już nie ma." : "There is no next sender.");
+  }
+
+  if (turn.next) {
+    parts.push(lang === "cs" ? `Další je ${turn.next.sender}.` : lang === "pl" ? `Następny nadawca: ${turn.next.sender}.` : `Next is ${turn.next.sender}.`);
+  }
+  if (overview && (turn.next || sender?.olderLeft)) {
+    const skip = turn.next ? (lang === "cs" ? "„přeskoč“ pro dalšího odesílatele" : lang === "pl" ? "„pomiń” dla następnego nadawcy" : "“skip” for the next sender") : "";
+    const older = sender?.olderLeft ? (lang === "cs" ? "„starší“ pro starší zprávy" : lang === "pl" ? "„starsze” dla starszych wiadomości" : "“older” for older messages") : "";
+    const or = lang === "cs" ? ", nebo " : lang === "pl" ? " albo " : ", or ";
+    parts.push(`${lang === "cs" ? "Řekněte" : lang === "pl" ? "Powiedz" : "Say"} ${[skip, older].filter(Boolean).join(or)}.`);
+  }
+  if (turn.done) parts.push(lang === "cs" ? "To jsou všechny zprávy." : lang === "pl" ? "To wszystkie wiadomości." : "Those are all the messages.");
+  if (overview) {
+    parts.push(whatsapp
+      ? (lang === "cs" ? "Odpovědět můžete třeba: odpověz Honzovi, že…" : lang === "pl" ? "Możesz odpowiedzieć na przykład: odpowiedz Janowi, że…" : "You can reply, for example: reply to John that…")
+      : (lang === "cs" ? "Odpovědět můžete třeba: odpověz Honzovi na e-mail, že…" : lang === "pl" ? "Możesz odpowiedzieć na przykład: odpowiedz Janowi na e-mail, że…" : "You can reply, for example: reply to John's email that…"));
+  }
+  return parts.join(" ");
+}
+
+/** "Přeskoč" with nothing being read: say so, and how to start. */
+export function spokenNothingBeingRead(language: string) {
+  const lang = locale(language);
+  return lang === "cs" ? "Teď vám žádné zprávy nečtu. Řekněte třeba: přečti zprávy na WhatsAppu."
+    : lang === "pl" ? "Teraz nie czytam żadnych wiadomości. Powiedz na przykład: przeczytaj wiadomości z WhatsAppa."
+      : "I am not reading any messages right now. Say, for example: read my WhatsApp messages.";
 }

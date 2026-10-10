@@ -262,6 +262,8 @@ describe("commandParser", () => {
       ["list contacts", "list_contacts"],
       ["show emails", "list_channel_messages"],
       ["show whatsapp messages", "list_channel_messages"],
+      ["skip to the next sender", "next_message_sender"],
+      ["read older messages from this sender", "older_sender_messages"],
       ["set language cs-CZ", "set_voice_language"],
       ["read full menu", "describe_menu"],
       ["read full menu section customers and work", "describe_menu"],
