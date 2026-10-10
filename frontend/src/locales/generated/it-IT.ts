@@ -1438,6 +1438,7 @@ const catalogue: Record<string, string> = {
   "What this line covers": "Cosa copre questa riga",
   "What was discussed/promised": "Cosa è stato discusso/promesso",
   "WhatsApp": "WhatsApp",
+  "WhatsApp reply window closing": "Sta per chiudersi la finestra di risposta WhatsApp",
   "whatsapp_business": "whatsapp_business",
   "When": "Quando",
   "When I say": "Quando dico",
