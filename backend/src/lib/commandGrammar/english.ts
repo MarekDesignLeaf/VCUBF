@@ -341,12 +341,15 @@ export const english: CommandGrammar = {
   language: "en",
   yes: /^(?:yes|yeah|yep|confirm(?:\s+action)?|go ahead|do it|send it)$/iu,
   no: /^(?:no|cancel(?:\s+action)?|cancel it|cancel that|don't send|do not send|stop email)$/iu,
-  // "skip him", "skip Petra", "next", "move on", "continue". The canonical
-  // "skip to the next sender" is read by parse(), whether or not anything is
-  // being read, so the model's command always means the same thing.
-  readingSkip: /^(?:(?:ok|okay|right|fine)\s+)?(?:skip(?:\s+\S+){0,3}|next(?:\s+(?:one|sender|person|contact))?|move\s+on|go\s+on|carry\s+on|keep\s+going|continue(?:\s+reading)?|read\s+(?:the\s+)?next(?:\s+(?:one|sender|person))?)(?:\s+please)?$/u,
-  // "older", "read the older ones", "more from him".
-  readingOlder: /^(?:(?:ok|okay|right|fine)\s+)?(?:(?:(?:read|show)\s+(?:me\s+)?)?(?:the\s+)?(?:older|earlier|previous)(?:\s+(?:ones|messages))?(?:\s+from\s+(?:him|her|them|this\s+sender))?|more\s+from\s+(?:him|her|them|this\s+sender))(?:\s+please)?$/u,
+  // "skip him", "next", "move on". Not "continue": the Windows companion asks
+  // for it to read on after a long answer. The canonical "skip to the next
+  // sender" is read by parse(), whether or not anything is being read, so the
+  // model's command always means the same thing.
+  readingSkip: /^(?:(?:ok|okay|right|fine)\s+)?(?:skip(?:\s+(?:him|her|them|it|this|that|this\s+one|that\s+one|this\s+sender))?|next(?:\s+(?:one|sender|person|contact))?|move\s+on|read\s+(?:the\s+)?next(?:\s+(?:one|sender|person))?)(?:\s+please)?$/u,
+  // "skip Petra", "skip Mr Smith".
+  readingSkipNamed: /^(?:(?:ok|okay|right|fine)\s+)?skip\s+(.+?)(?:\s+please)?$/u,
+  // "older", "read the older ones", "more from him", "more".
+  readingOlder: /^(?:(?:ok|okay|right|fine)\s+)?(?:(?:(?:read|show)\s+(?:me\s+)?)?(?:the\s+)?(?:older|earlier|previous)(?:\s+(?:ones|messages))?(?:\s+from\s+(?:him|her|them|this\s+sender))?|more\s+from\s+(?:him|her|them|this\s+sender)|(?:read\s+)?more(?:\s+messages)?)(?:\s+please)?$/u,
   languageSwitch: {
     patterns: [
       /^(?:set|change|switch)\s+(?:the\s+)?(?:(?:emma(?:'s)?|voice|menu|secretary)\s+)?language\s+(?:to\s+)?(.+)$/iu,

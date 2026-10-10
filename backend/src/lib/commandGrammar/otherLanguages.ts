@@ -11,6 +11,7 @@ function switchAndNavigate(language: string, patterns: RegExp[], fillers: string
     yes: NEVER,
     no: NEVER,
     readingSkip: NEVER,
+    readingSkipNamed: NEVER,
     readingOlder: NEVER,
     languageSwitch: { patterns, fillers },
     parse: (text) => parseLanguageSwitch(text, grammar.languageSwitch) ?? parseNavigation(text, navigation),

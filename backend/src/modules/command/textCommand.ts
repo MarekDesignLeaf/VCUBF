@@ -21,7 +21,7 @@ import { evaluateEmmaCommand } from "../../services/emmaPolicyService.js";
 import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorService.js";
 import { getPendingEmmaActionName } from "../../services/emmaExecutableActionService.js";
 import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
-import { hasActiveReading } from "../../services/messageReadingService.js";
+import { activeReading } from "../../services/messageReadingService.js";
 import { assistantNameFor } from "../../lib/assistantName.js";
 import { acceptedByService, observeShadow, parserOutcomeOf } from "../../agents/shadowAgent.js";
 import { isReviewPending, runWithApprovalBinding } from "../../lib/executionEngine.js";
@@ -137,8 +137,9 @@ async function resolveUserCommand(user: AuthedUser, text: string, reader: string
   // While messages are read out one sender at a time, "přeskoč ho", "další"
   // and "starší" move through them — before anything else, and only then: at
   // any other time a bare "další" means nothing.
-  if (reader !== CANONICAL_COMMAND && hasActiveReading(user)) {
-    const control = readingControl(text, reader, [...addressedAs(user), assistantNameFor(user)]);
+  const reading = reader === CANONICAL_COMMAND ? undefined : activeReading(user);
+  if (reading) {
+    const control = readingControl(text, reader, { addressedAs: [...addressedAs(user), assistantNameFor(user)], senders: [reading.current, reading.next] });
     if (control) return control;
   }
   const parsed = parseTextCommand(text, reader);

@@ -28,6 +28,12 @@ export interface CommandGrammar {
    * bare "další" means nothing at any other time.
    */
   readingSkip: RegExp;
+  /**
+   * "přeskoč Petru": a skip with words after it, captured. Taken as a skip
+   * only when the words name the sender just read or the one named as next
+   * (namedIn), so "skip tomorrow's job" is not swallowed. Folded.
+   */
+  readingSkipNamed: RegExp;
   /** While messages are being read out: more, older ones from the same sender ("starší"). Folded, as readingSkip. */
   readingOlder: RegExp;
   /** The phrases that switch the language, each capturing the language named. */
@@ -49,6 +55,27 @@ export function withoutFinalPunctuation(text: string) {
 /** Lowercase, no accents, single spaces: how dictated words are compared. */
 export function fold(value: string) {
   return value.trim().normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Titles said before a name ("pana Nováka", "panią Ewę", "Mr Smith") that name nobody. */
+const NAME_TITLES = new Set(["pan", "pana", "panu", "panem", "pani", "slecna", "slecnu", "pania", "mr", "mrs", "ms", "miss"]);
+
+/**
+ * Whether the words said name this person: every word but a title starts like
+ * a word of the name ("Petru" for Petra, "Nováka" for Novák — Czech and Polish
+ * decline names), and there are at most three of them. "Přeskoč zítřejší
+ * zakázku" names nobody being read, so it is not taken as a skip.
+ */
+export function namedIn(said: string, name: string): boolean {
+  const parts = fold(name).split(/[^\p{L}\p{N}]+/u).filter((part) => part.length >= 3);
+  const words = fold(said).split(/[^\p{L}\p{N}]+/u).filter((word) => word && !NAME_TITLES.has(word));
+  // Three letters in common, or all but the last of a short name ("Ewa" → "Ewę").
+  const alike = (word: string, part: string) => {
+    const length = Math.max(2, Math.min(3, Math.min(word.length, part.length) - 1));
+    return word.slice(0, length) === part.slice(0, length);
+  };
+  return words.length > 0 && words.length <= 3
+    && words.every((word) => word.length >= 3 && parts.some((part) => alike(word, part)));
 }
 
 /**

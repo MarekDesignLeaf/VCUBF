@@ -36,7 +36,9 @@ const ROWS = [
   row("j1", "Jana", "+447700900333", "Jana 1", 50),
 ];
 
-const start = (groups: SenderGroup[]): ReadingPlace => ({ channel: "whatsapp", order: groups.map((group) => group.key), index: 0, shown: 0 });
+const start = (groups: SenderGroup[]): ReadingPlace => ({ channel: "whatsapp", order: groups.map((group) => group.key), index: 0 });
+// "přeskoč": the sender after this place, from their newest message.
+const nextSender = (place: ReadingPlace): ReadingPlace => ({ channel: place.channel, order: place.order, index: place.index + 1 });
 
 describe("grouping messages by sender", () => {
   it("puts the sender who wrote last first, each sender's messages newest first", () => {
@@ -78,7 +80,7 @@ describe("moving through a reading", () => {
     assert.equal(first.turn.done, false);
 
     // "přeskoč": the next sender, from their newest message.
-    const second = turnAt(groups, { ...first.place, index: first.place.index + 1, shown: 0 });
+    const second = turnAt(groups, nextSender(first.place));
     assert.equal(second.turn.sender?.name, "Petra Dvořáková");
     assert.equal(second.turn.sender?.messages.length, MESSAGES_PER_TURN);
     assert.equal(second.turn.sender?.olderLeft, 5 - MESSAGES_PER_TURN);
@@ -95,12 +97,12 @@ describe("moving through a reading", () => {
     assert.equal(none.turn.sender?.messages.length, 0);
     assert.equal(none.turn.next?.sender, "Jana");
 
-    const last = turnAt(groups, { ...older.place, index: older.place.index + 1, shown: 0 });
+    const last = turnAt(groups, nextSender(older.place));
     assert.equal(last.turn.sender?.name, "Jana");
     assert.equal(last.turn.next, undefined);
     assert.equal(last.turn.done, true);
 
-    const beyond = turnAt(groups, { ...last.place, index: last.place.index + 1, shown: 0 });
+    const beyond = turnAt(groups, nextSender(last.place));
     assert.equal(beyond.turn.sender, undefined);
     assert.equal(beyond.turn.done, true);
   });
@@ -116,6 +118,17 @@ describe("moving through a reading", () => {
     assert.equal(next.order[next.order.length - 1], "+447700900444", "the new sender goes last");
   });
 
+  it("continues \"starší\" from the last message read, even when the sender writes again meanwhile", () => {
+    const before = groupBySender(ROWS, "whatsapp");
+    const petra = turnAt(before, { ...start(before), index: 1 });
+    assert.deepEqual(petra.turn.sender?.messages.map((message) => message.text), ["Petra 1", "Petra 2", "Petra 3"]);
+    // Petra writes again before "starší": nothing is read twice and nothing older is stepped over.
+    const after = groupBySender([...ROWS, row("p0", "Petra Dvořáková", "+447700900222", "Petra 0", 0)], "whatsapp");
+    const older = turnAt(after, petra.place);
+    assert.deepEqual(older.turn.sender?.messages.map((message) => message.text), ["Petra 4", "Petra 5"]);
+    assert.equal(older.turn.sender?.olderLeft, 0);
+  });
+
   it("passes over a sender whose messages are gone", () => {
     const before = groupBySender(ROWS, "whatsapp");
     const after = groupBySender(ROWS.filter((message) => !message.id.startsWith("p")), "whatsapp");
@@ -125,15 +138,16 @@ describe("moving through a reading", () => {
 });
 
 describe("the words that move through a reading", () => {
-  const cs = (text: string) => readingControl(text, "cs-CZ", ["Alfonzo"])?.intent;
-  const pl = (text: string) => readingControl(text, "pl-PL")?.intent;
-  const en = (text: string) => readingControl(text, "en-GB")?.intent;
+  const senders = ["Petra Dvořáková", "Honza Novák"];
+  const cs = (text: string) => readingControl(text, "cs-CZ", { addressedAs: ["Alfonzo"], senders })?.intent;
+  const pl = (text: string) => readingControl(text, "pl-PL", { senders: ["Ewa Nowak", "Jan Kowalski"] })?.intent;
+  const en = (text: string) => readingControl(text, "en-GB", { senders: ["John Smith", "Petra"] })?.intent;
 
   it("hears skipping and older messages in Czech, as dictation writes them", () => {
-    for (const text of ["Přeskoč ho.", "přeskoč", "Přeskoč, ho!", "Přeskočte.", "přeskoč Petru", "přeskoč pana Nováka", "Další.", "dalšího", "dál", "Pokračuj.", "čti dál", "přejdi na dalšího", "Alfonzo, přeskoč ho", "tak další", "další odesílatel"]) {
+    for (const text of ["Přeskoč ho.", "přeskoč", "Přeskoč, ho!", "Přeskočte.", "Další.", "dalšího", "dál", "přejdi na dalšího", "přejdi na další", "přečti další", "Alfonzo, přeskoč ho", "tak další", "další odesílatel"]) {
       assert.equal(cs(text), "next_message_sender", text);
     }
-    for (const text of ["Starší.", "starší zprávy", "přečti starší zprávy", "ještě od něj", "další zprávy od ní", "přečti i starší"]) {
+    for (const text of ["Starší.", "starší zprávy", "přečti starší zprávy", "ještě od něj", "další zprávy od ní", "přečti i starší", "víc"]) {
       assert.equal(cs(text), "older_sender_messages", text);
     }
     for (const text of ["přečti zprávy na WhatsAppu", "ano", "další faktura je po splatnosti", "kdo je další na řadě dnes odpoledne", "přeskočil jsem to"]) {
@@ -141,13 +155,31 @@ describe("the words that move through a reading", () => {
     }
   });
 
+  it("leaves \"pokračuj\" and \"continue\" to the Windows companion, which asks for them to read on", () => {
+    for (const text of ["Pokračuj.", "pokračuj ve čtení", "čti dál"]) assert.equal(cs(text), undefined, text);
+    for (const text of ["continue", "go on", "keep going"]) assert.equal(en(text), undefined, text);
+    assert.equal(pl("kontynuuj"), undefined);
+  });
+
+  it("takes words after \"přeskoč\" only when they name the sender read or the one next", () => {
+    assert.deepEqual(readingControl("přeskoč Petru", "cs-CZ", { senders }), { intent: "next_message_sender", entities: { sender: "petru" } });
+    assert.equal(cs("přeskoč pana Nováka"), "next_message_sender");
+    assert.equal(cs("přeskoč zítřejší zakázku"), undefined, "names nobody being read: left for the model");
+    assert.equal(cs("přeskoč Karla"), undefined);
+    assert.equal(en("skip Mr Smith"), "next_message_sender");
+    assert.equal(en("skip tomorrow's job"), undefined);
+    assert.equal(pl("pomiń Ewę"), "next_message_sender");
+    assert.equal(pl("pomiń jutrzejsze zlecenie"), undefined);
+    assert.equal(readingControl("přeskoč Petru", "cs-CZ"), undefined, "without the senders nothing can be named");
+  });
+
   it("reads Czech words only with Czech on, and Polish and English in their own language", () => {
     assert.equal(readingControl("přeskoč ho", "en-GB"), undefined);
     assert.equal(readingControl("skip him", "cs-CZ"), undefined);
-    for (const text of ["pomiń go", "Dalej.", "następny", "czytaj dalej", "przejdź do następnego"]) assert.equal(pl(text), "next_message_sender", text);
-    for (const text of ["starsze", "przeczytaj starsze wiadomości", "więcej od niego"]) assert.equal(pl(text), "older_sender_messages", text);
-    for (const text of ["Skip him.", "skip", "next", "next one", "move on", "continue"]) assert.equal(en(text), "next_message_sender", text);
-    for (const text of ["older", "read the older ones", "more from her", "read older messages from this sender"]) assert.equal(en(text), "older_sender_messages", text);
+    for (const text of ["pomiń go", "Dalej.", "następny", "przejdź dalej", "przejdź do następnego"]) assert.equal(pl(text), "next_message_sender", text);
+    for (const text of ["starsze", "przeczytaj starsze wiadomości", "więcej od niego", "więcej"]) assert.equal(pl(text), "older_sender_messages", text);
+    for (const text of ["Skip him.", "skip", "next", "next one", "move on"]) assert.equal(en(text), "next_message_sender", text);
+    for (const text of ["older", "read the older ones", "more from her", "read older messages from this sender", "more", "read more"]) assert.equal(en(text), "older_sender_messages", text);
     assert.equal(readingControl("další", "de-DE"), undefined, "languages without a grammar recognise none of it");
   });
 
@@ -159,12 +191,13 @@ describe("the words that move through a reading", () => {
   });
 
   it("starts a reading of WhatsApp or e-mail without the model, full stop and all", () => {
-    for (const text of ["Přečti zprávy na WhatsAppu.", "ukaž mi WhatsApp", "přečti WhatsAppové zprávy", "Přečti e-maily.", "ukaž poštu"]) {
+    for (const text of ["Přečti zprávy na WhatsAppu.", "ukaž mi WhatsApp", "přečti WhatsAppové zprávy", "Přečti e-maily.", "ukaž poštu", "přečti zprávy z e-mailu"]) {
       const command = parseTextCommand(text, "cs-CZ");
       assert.equal(command.intent, "list_channel_messages", text);
     }
     assert.deepEqual(parseTextCommand("Přečti zprávy na WhatsAppu.", "cs-CZ").entities, { channel: "whatsapp" });
     assert.deepEqual(parseTextCommand("Přečti e-maily.", "cs-CZ").entities, { channel: "email" });
+    assert.deepEqual(parseTextCommand("přečti zprávy v e-mailu", "cs-CZ").entities, { channel: "email" });
     assert.deepEqual(parseTextCommand("Przeczytaj wiadomości z WhatsAppa.", "pl-PL").entities, { channel: "whatsapp" });
     assert.deepEqual(parseTextCommand("pokaż e-maile", "pl-PL").entities, { channel: "email" });
   });
@@ -199,7 +232,7 @@ describe("what Alfonzo says while reading", () => {
   });
 
   it("says when a sender has nothing older, when nobody is next, and when everything has been read", () => {
-    const petra = { ...start(groups), index: 1, shown: 5 };
+    const petra = { ...start(groups), index: 1, readTo: { at: hoursAgo(30).getTime(), id: "p5" } };
     assert.equal(spokenReadingTurn(turnAt(groups, petra).turn, "cs-CZ", NOW), "Starší zprávy od tohoto odesílatele už nejsou. Další je Jana.");
     const jana = turnAt(groups, { ...start(groups), index: 2 }).turn;
     assert.equal(spokenReadingTurn(jana, "cs-CZ", NOW), "Jana. Před 2 dny: „Jana 1“. Bez odpovědi. To jsou všechny zprávy.");
@@ -214,13 +247,13 @@ describe("what Alfonzo says while reading", () => {
     assert.equal(spokenReadingTurn({ ...turn, overview: { senders: [{ sender: "Honza Novák", count: 2 }], unansweredToday: 0 } }, "en-GB", NOW),
       "Honza Novák, 2 messages. An hour ago: „Honza 1“. Not answered. Yesterday: „Honza 2“. Not answered. Those are all the messages. You can reply, for example: reply to John that…");
     assert.equal(spokenReadingTurn({ channel: "whatsapp", overview: { senders: [], unansweredToday: 0 }, done: true }, "en-GB", NOW), "There are no received WhatsApp messages.");
-    assert.equal(spokenReadingTurn({ channel: "email", overview: { senders: [], unansweredToday: 0 }, done: true }, "cs-CZ", NOW), "Na e-mailu nejsou žádné přijaté zprávy.");
+    assert.equal(spokenReadingTurn({ channel: "email", overview: { senders: [], unansweredToday: 0 }, done: true }, "cs-CZ", NOW), "V e-mailu nejsou žádné přijaté zprávy.");
   });
 
   it("names five senders at most and counts the rest", () => {
     const many = Array.from({ length: 8 }, (_, index) => ({ sender: `S${index + 1}`, count: 1 }));
     const spoken = spokenReadingTurn({ channel: "email", overview: { senders: many, unansweredToday: 0 }, done: false }, "cs-CZ", NOW);
-    assert.match(spoken, /^Na e-mailu máte zprávy od 8 odesílatelů: S1 1 zpráva, S2 1 zpráva, S3 1 zpráva, S4 1 zpráva, S5 1 zpráva a 3 další\./);
+    assert.match(spoken, /^V e-mailu máte zprávy od 8 odesílatelů: S1 1 zpráva, S2 1 zpráva, S3 1 zpráva, S4 1 zpráva, S5 1 zpráva a 3 další\./);
   });
 
   it("says plainly when nothing is being read, and how to start", () => {

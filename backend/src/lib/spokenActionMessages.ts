@@ -457,7 +457,7 @@ export function spokenReadingTurn(turn: ReadingTurn, language: string, now = new
   const overview = turn.overview;
 
   if (overview && !overview.senders.length) {
-    return lang === "cs" ? `Na ${whatsapp ? "WhatsAppu" : "e-mailu"} nejsou žádné přijaté zprávy.`
+    return lang === "cs" ? `${whatsapp ? "Na WhatsAppu" : "V e-mailu"} nejsou žádné přijaté zprávy.`
       : lang === "pl" ? `Brak odebranych wiadomości ${whatsapp ? "na WhatsAppie" : "e-mail"}.`
         : `There are no received ${whatsapp ? "WhatsApp" : "email"} messages.`;
   }
@@ -466,11 +466,11 @@ export function spokenReadingTurn(turn: ReadingTurn, language: string, now = new
     const rest = overview.senders.length - named.length;
     if (rest > 0) {
       named.push(lang === "cs" ? (rest === 1 ? "jeden další" : rest <= 4 ? `${rest} další` : `${rest} dalších`)
-        : lang === "pl" ? (rest === 1 ? "jeszcze jeden" : `jeszcze ${rest} innych`)
+        : lang === "pl" ? (rest === 1 ? "jeszcze jeden nadawca" : `jeszcze ${rest} innych nadawców`)
           : `${rest} more`);
     }
     const from = counted(overview.senders.length, lang, SENDERS);
-    parts.push(lang === "cs" ? `Na ${whatsapp ? "WhatsAppu" : "e-mailu"} máte zprávy od ${from}: ${spokenList(named, lang)}.`
+    parts.push(lang === "cs" ? `${whatsapp ? "Na WhatsAppu" : "V e-mailu"} máte zprávy od ${from}: ${spokenList(named, lang)}.`
       : lang === "pl" ? `${whatsapp ? "Na WhatsAppie" : "W poczcie e-mail"} masz wiadomości od ${from}: ${spokenList(named, lang)}.`
         : `${whatsapp ? "WhatsApp" : "Email"} messages from ${from}: ${spokenList(named, lang)}.`);
   }

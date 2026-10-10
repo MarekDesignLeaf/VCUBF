@@ -1207,10 +1207,10 @@ async function dispatchAllowedCommand(
     case "next_message_sender":
     case "older_sender_messages": {
       const turn = command.intent === "next_message_sender"
-        ? await messageReadingService.readNextSender(user)
+        ? await messageReadingService.readNextSender(user, command.entities.sender)
         : await messageReadingService.readOlderFromSender(user);
       response = {
-        intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data: turn ?? null,
+        intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data: turn ?? null,
         message: turn ? spokenReadingTurn(turn, user.voiceLanguage) : spokenNothingBeingRead(user.voiceLanguage),
       };
       break;

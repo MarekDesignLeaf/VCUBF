@@ -148,10 +148,13 @@ export const polish: CommandGrammar = {
   language: "pl",
   yes: /^(?:potwierdzam|potwierdź|potwierdz|potwierdź\s+akcję|potwierdz\s+akcje|wyślij|wyslij)$/iu,
   no: /^(?:nie|anuluj|anuluj\s+akcję|anuluj\s+akcje|nie\s+wysyłaj|nie\s+wysylaj)$/iu,
-  // "pomiń go", "dalej", "następny", "czytaj dalej", "przejdź do następnego".
-  readingSkip: /^(?:(?:ok|dobrze|dobra)\s+)?(?:pomin(?:\s+\S+){0,3}|dalej|nastepn[ya](?:\s+(?:nadawca|osoba))?|kolejn[ya](?:\s+(?:nadawca|osoba))?|(?:czytaj|idz|przejdz)\s+dalej|przejdz\s+do\s+(?:nastepnego|nastepnej|kolejnego|kolejnej)|kontynuuj)(?:\s+prosze)?$/u,
-  // "starsze", "przeczytaj starsze wiadomości", "więcej od niego".
-  readingOlder: /^(?:(?:ok|dobrze|dobra)\s+)?(?:(?:(?:przeczytaj|czytaj|pokaz)\s+)?(?:starsze|wczesniejsze)(?:\s+wiadomosci)?(?:\s+od\s+(?:niego|niej|nich))?|wiecej\s+od\s+(?:niego|niej|nich))(?:\s+prosze)?$/u,
+  // "pomiń go", "dalej", "następny", "przejdź do następnego". Not "kontynuuj":
+  // the Windows companion asks for it to read on after a long answer.
+  readingSkip: /^(?:(?:ok|dobrze|dobra)\s+)?(?:pomin(?:\s+(?:go|ja|je|to|tego|te|nadawce|tego\s+nadawce))?|dalej|nastepn[ya](?:\s+(?:nadawca|osoba))?|kolejn[ya](?:\s+(?:nadawca|osoba))?|(?:idz|przejdz)\s+dalej|przejdz\s+do\s+(?:nastepnego|nastepnej|kolejnego|kolejnej))(?:\s+prosze)?$/u,
+  // "pomiń Ewę", "pomiń pana Nowaka".
+  readingSkipNamed: /^(?:(?:ok|dobrze|dobra)\s+)?pomin\s+(.+?)(?:\s+prosze)?$/u,
+  // "starsze", "przeczytaj starsze wiadomości", "więcej od niego", "więcej".
+  readingOlder: /^(?:(?:ok|dobrze|dobra)\s+)?(?:(?:(?:przeczytaj|czytaj|pokaz)\s+)?(?:starsze|wczesniejsze)(?:\s+wiadomosci)?(?:\s+od\s+(?:niego|niej|nich))?|wiecej(?:\s+od\s+(?:niego|niej|nich))?)(?:\s+prosze)?$/u,
   languageSwitch: {
     patterns: [
       /^(?:zmień|zmien|przełącz|przelacz|ustaw)\s+(?:język|jezyk)(?:\s+emmy|\s+menu)?\s*(?:(?:na|do)\s+)?(.+)$/iu,

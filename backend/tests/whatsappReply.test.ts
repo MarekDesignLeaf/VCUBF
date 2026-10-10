@@ -207,6 +207,18 @@ describe("Replying to a received WhatsApp message", () => {
     assert.match(again.body.message, /Petra Dvořáková\. An hour ago: „Petra 1“\./, "asking again reads from the first sender");
   });
 
+  it("\"skip\" with the name of the sender announced next skips that one too; other words after \"skip\" are not a skip", async () => {
+    await received({ phone: "+447700900222", name: "Petra Dvořáková", text: "Petra 1", hoursAgo: 1, wamid: "wamid.N1" });
+    await received({ phone: "+447700900111", name: "Honza Novák", text: "Honza 1", hoursAgo: 2, wamid: "wamid.N2" });
+    await received({ phone: "+447700900333", name: "Jana Malá", text: "Jana 1", hoursAgo: 3, wamid: "wamid.N3" });
+    const heard = await speak("show whatsapp messages");
+    assert.match(heard.body.message, /Petra Dvořáková\. An hour ago: „Petra 1“\. Not answered\. Next is Honza Novák\./);
+    // Honza was announced as next; "skip Honza" means not to hear him.
+    const skipped = await speak("skip Honza");
+    assert.equal(skipped.body.intent, "next_message_sender", JSON.stringify(skipped.body));
+    assert.match(skipped.body.message, /^Jana Malá\. 3 hours ago: „Jana 1“\./);
+  });
+
   it("'last' answers the most recent message from anyone", async () => {
     await received({ phone: "+447700900111", name: "Honza Novák", text: "Older message", hoursAgo: 5, wamid: "wamid.OLD" });
     await received({ phone: "+447700900222", name: "Petra Dvořáková", text: "Newest message", hoursAgo: 1, wamid: "wamid.NEW" });

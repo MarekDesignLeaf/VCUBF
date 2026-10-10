@@ -224,9 +224,10 @@ function records(text: string): ParsedCommand | undefined {
   return undefined;
 }
 
-// "přečti zprávy na WhatsAppu", "ukaž mi WhatsApp", "přečti e-maily." Folded and
-// without the full stop dictation adds, so reading them needs no language model.
-const READ_MESSAGES = /^(?:ukaz|precti|otevri|zobraz)(?:\s+mi)?\s+(?:(?:zpravy|posledni\s+zpravy)\s+(?:na|z|ze|v|ve)\s+)?(whatsappu?|whatsappove\s+zpravy|e-?maily|e-?mailove\s+zpravy|postu)$/u;
+// "přečti zprávy na WhatsAppu", "ukaž mi WhatsApp", "přečti e-maily.", "přečti
+// zprávy z e-mailu". Folded and without the full stop dictation adds, so reading
+// them needs no language model.
+const READ_MESSAGES = /^(?:ukaz|precti|otevri|zobraz)(?:\s+mi)?\s+(?:(?:zpravy|posledni\s+zpravy)\s+(?:na|z|ze|v|ve)\s+)?(whatsappu?|whatsappove\s+zpravy|e-?maily|e-?mailu|e-?mailove\s+zpravy|postu)$/u;
 
 function knowledge(text: string): ParsedCommand | undefined {
   // Only a direct "zapamatuj si" is ever kept. Dictation drops "že" far more
@@ -287,10 +288,13 @@ export const czech: CommandGrammar = {
   yes: /^(?:ano|potvrzuji|potvrďuji|potvrdit|potvrď\s+akci|potvrd\s+akci|odešli|odesli|tak\s+ano|tak\s+jo)$/iu,
   // "zruš to" answers the review; it is not a task called "to".
   no: /^(?:ne|zruš|zrus|zruš\s+akci|zrus\s+akci|zruš\s+to|zrus\s+to|nezasilat|neodesilat)$/iu,
-  // "přeskoč ho", "přeskočte", "přeskoč Petru", "další", "dál", "pokračuj", "čti dál".
-  readingSkip: /^(?:(?:tak|ok|okej|dobre|dobra|jo)\s+)?(?:preskoc(?:it|te)?(?:\s+\S+){0,3}|dalsi(?:ho)?(?:\s+(?:odesilatel|odesilatele|kontakt|clovek|cloveka|uzivatel|uzivatele))?|dal|na\s+dalsiho|(?:prejdi|jdi|jdeme|jed|pokracuj)\s+(?:na\s+dalsiho|dal)|pokracuj(?:\s+ve\s+cteni)?|cti\s+dal|(?:precti|cti)\s+(?:zpravy\s+od\s+)?dalsiho)(?:\s+prosim)?$/u,
-  // "starší", "přečti starší zprávy", "ještě od něj", "další zprávy od ní".
-  readingOlder: /^(?:(?:tak|ok|okej|dobre|jo)\s+)?(?:(?:(?:precti|cti|ukaz)\s+(?:mi\s+)?)?(?:i\s+)?(?:starsi|predchozi)(?:\s+(?:zpravy|zpravu))?(?:\s+od\s+(?:nej|neho|ni|nich|toho|ty|tohoto\s+odesilatele))?|(?:jeste|vic|vice|dalsi\s+zpravy)\s+od\s+(?:nej|neho|ni|nich|toho|ty))(?:\s+prosim)?$/u,
+  // "přeskoč ho", "přeskočte", "další", "dál", "přečti další". Not "pokračuj":
+  // the Windows companion asks for it to read on after a long answer.
+  readingSkip: /^(?:(?:tak|ok|okej|dobre|dobra|jo)\s+)?(?:preskoc(?:it|te)?(?:\s+(?:ho|ji|je|jeho|jeji|to|toho|tohle|tuhle|tenhle|tohohle|tohoto|tu|odesilatele|kontakt|uzivatele))?|dalsi(?:ho)?(?:\s+(?:odesilatel|odesilatele|kontakt|clovek|cloveka|uzivatel|uzivatele))?|dal|na\s+dalsiho|(?:prejdi|jdi|jdeme|jed)\s+(?:na\s+dalsi(?:ho)?|dal)|(?:precti|cti)\s+(?:zpravy\s+od\s+)?dalsi(?:ho)?)(?:\s+prosim)?$/u,
+  // "přeskoč Petru", "přeskoč pana Nováka".
+  readingSkipNamed: /^(?:(?:tak|ok|okej|dobre|dobra|jo)\s+)?preskoc(?:it|te)?\s+(.+?)(?:\s+prosim)?$/u,
+  // "starší", "přečti starší zprávy", "ještě od něj", "víc".
+  readingOlder: /^(?:(?:tak|ok|okej|dobre|jo)\s+)?(?:(?:(?:precti|cti|ukaz)\s+(?:mi\s+)?)?(?:i\s+)?(?:starsi|predchozi)(?:\s+(?:zpravy|zpravu))?(?:\s+od\s+(?:nej|neho|ni|nich|toho|ty|tohoto\s+odesilatele))?|(?:jeste|vic|vice|dalsi\s+zpravy)\s+od\s+(?:nej|neho|ni|nich|toho|ty)|vic|vice)(?:\s+prosim)?$/u,
   languageSwitch: {
     patterns: [
       /^(?:zm[eě]ň|zmen|přepni|prepn[ií]|nastav)\s+(?:(?:jazyk\s+)?(?:emmy|menu|sekretary|sekretáře)|jazyk)\s*(?:(?:na|do)\s+)?(.+)$/iu,
