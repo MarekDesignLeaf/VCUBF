@@ -6,6 +6,7 @@ import { appLanguage } from "../i18n";
 import { useAuth } from "../context/useAuth";
 import { isDesktopCompanionWindow } from "../lib/platform";
 import { MacroRecorder, replayMacro, type MacroStep } from "../lib/macroRecorder";
+import { pcmBlocks } from "../lib/pcmStream";
 import { speechPieces } from "../lib/speechPieces";
 import {
   learningPhrases,
@@ -112,6 +113,12 @@ function recogniserLabel(state: RecogniserState, copy: Copy): string {
   return copy.recogniserStopped;
 }
 
+/** When a sentence ended (the voice detector closed it) and when its words came back. */
+type HeardAt = { endedAt: number; heardAt: number; cued: boolean };
+
+/** Seconds, already formatted for the language. `understood` is missing when only "Ano?" was said. */
+type Timing = { total: string; silence: string; heard: string; understood?: string; voice: string };
+
 type Copy = {
   title: (name: string) => string;
   listening: string;
@@ -143,6 +150,8 @@ type Copy = {
   notRecognised: string;
   /** The recogniser could not be reached for this stretch. */
   transcriptionFailed: string;
+  /** How long the last answer took, step by step, in seconds. */
+  timing: (t: Timing) => string;
   meter: string;
   meterLive: string;
   meterSilent: string;
@@ -185,6 +194,7 @@ function copyFor(language: string): Copy {
       unknownOutcome: "Secretary did not answer in time. If you were confirming something, it may still have been done, so check before you say it again.",
       failed: "That request could not be completed.", send: "Send", typeHere: "…or type a command",
       monitor: "What was heard (this computer only)", monitorEmpty: "Nothing yet.", transcribing: "transcribing…", notRecognised: "Speech heard, but not recognised — please say it again.", transcriptionFailed: "Could not be transcribed (connection).",
+      timing: (t) => `Response ${t.total} s — end of speech ${t.silence} · transcription ${t.heard}${t.understood ? ` · understanding ${t.understood}` : ""} · voice ${t.voice}`,
       meter: "Microphone", meterLive: "The microphone is picking up sound.",
       meterSilent: "Silence — nothing is reaching the microphone.",
       meterDenied: "No access to the microphone.", meterOff: "Voice control is off.",
@@ -215,6 +225,7 @@ function copyFor(language: string): Copy {
       unknownOutcome: "Odpověď ze Secretary nepřišla včas. Pokud jste něco potvrzovali, mohlo se to přesto provést, tak to před zopakováním zkontrolujte.",
       failed: "Tento požadavek se nepodařilo dokončit.", send: "Odeslat", typeHere: "…nebo napište příkaz",
       monitor: "Co bylo slyšet (jen tento počítač)", monitorEmpty: "Zatím nic.", transcribing: "přepisuji…", notRecognised: "Slyšel jsem řeč, ale nerozpoznal ji — řekněte to prosím znovu.", transcriptionFailed: "Přepis se nepovedl (spojení).",
+      timing: (t) => `Odezva ${t.total} s — konec řeči ${t.silence} · přepis ${t.heard}${t.understood ? ` · porozumění ${t.understood}` : ""} · hlas ${t.voice}`,
       meter: "Mikrofon", meterLive: "Mikrofon snímá zvuk.",
       meterSilent: "Ticho — do mikrofonu nic nepřichází.",
       meterDenied: "Bez přístupu k mikrofonu.", meterOff: "Hlasové ovládání je vypnuté.",
@@ -245,6 +256,7 @@ function copyFor(language: string): Copy {
       unknownOutcome: "Odpowiedź z Secretary nie przyszła na czas. Jeśli coś potwierdzałeś, mogło to zostać wykonane, więc sprawdź przed powtórzeniem.",
       failed: "Nie udało się wykonać tego żądania.", send: "Wyślij", typeHere: "…albo wpisz polecenie",
       monitor: "Co było słychać (tylko ten komputer)", monitorEmpty: "Jeszcze nic.", transcribing: "przepisuję…", notRecognised: "Słyszałem mowę, ale jej nie rozpoznałem — powtórz proszę.", transcriptionFailed: "Nie udało się przepisać (połączenie).",
+      timing: (t) => `Czas reakcji ${t.total} s — koniec mowy ${t.silence} · transkrypcja ${t.heard}${t.understood ? ` · zrozumienie ${t.understood}` : ""} · głos ${t.voice}`,
       meter: "Mikrofon", meterLive: "Mikrofon odbiera dźwięk.",
       meterSilent: "Cisza — do mikrofonu nic nie dochodzi.",
       meterDenied: "Brak dostępu do mikrofonu.", meterOff: "Sterowanie głosem jest wyłączone.",
@@ -275,6 +287,7 @@ function copyFor(language: string): Copy {
       unknownOutcome: "Secretary hat nicht rechtzeitig geantwortet. Falls Sie etwas bestätigt haben, wurde es vielleicht trotzdem ausgeführt; prüfen Sie das, bevor Sie es wiederholen.",
       failed: "Diese Anfrage konnte nicht abgeschlossen werden.", send: "Senden", typeHere: "…oder Befehl eingeben",
       monitor: "Was zu hören war (nur dieser Computer)", monitorEmpty: "Noch nichts.", transcribing: "wird erkannt…", notRecognised: "Sprache gehört, aber nicht erkannt — bitte wiederholen.", transcriptionFailed: "Nicht erkannt (Verbindung).",
+      timing: (t) => `Reaktionszeit ${t.total} s — Sprechende ${t.silence} · Transkription ${t.heard}${t.understood ? ` · Verstehen ${t.understood}` : ""} · Stimme ${t.voice}`,
       meter: "Mikrofon", meterLive: "Das Mikrofon nimmt Ton auf.",
       meterSilent: "Stille — am Mikrofon kommt nichts an.",
       meterDenied: "Kein Zugriff auf das Mikrofon.", meterOff: "Die Sprachsteuerung ist aus.",
@@ -305,6 +318,7 @@ function copyFor(language: string): Copy {
       unknownOutcome: "Secretary n\u2019a pas répondu à temps. Si vous confirmiez quelque chose, cela a peut-être été fait ; vérifiez avant de le redire.",
       failed: "Cette demande n’a pas pu être traitée.", send: "Envoyer", typeHere: "…ou tapez une commande",
       monitor: "Ce qui a été entendu (cet ordinateur uniquement)", monitorEmpty: "Rien pour l’instant.", transcribing: "transcription…", notRecognised: "Parole entendue mais non reconnue — répétez, s’il vous plaît.", transcriptionFailed: "Transcription impossible (connexion).",
+      timing: (t) => `Temps de réponse ${t.total} s — fin de parole ${t.silence} · transcription ${t.heard}${t.understood ? ` · compréhension ${t.understood}` : ""} · voix ${t.voice}`,
       meter: "Microphone", meterLive: "Le microphone capte du son.",
       meterSilent: "Silence — rien n’arrive au microphone.",
       meterDenied: "Pas d’accès au microphone.", meterOff: "La commande vocale est désactivée.",
@@ -335,6 +349,7 @@ function copyFor(language: string): Copy {
       unknownOutcome: "Secretary no respondió a tiempo. Si estaba confirmando algo, puede que se haya hecho igualmente; compruébelo antes de repetirlo.",
       failed: "No se ha podido completar la solicitud.", send: "Enviar", typeHere: "…o escriba una orden",
       monitor: "Lo que se ha oído (solo este ordenador)", monitorEmpty: "Todavía nada.", transcribing: "transcribiendo…", notRecognised: "Se oyó voz, pero no se reconoció — repítalo, por favor.", transcriptionFailed: "No se pudo transcribir (conexión).",
+      timing: (t) => `Tiempo de respuesta ${t.total} s — fin del habla ${t.silence} · transcripción ${t.heard}${t.understood ? ` · comprensión ${t.understood}` : ""} · voz ${t.voice}`,
       meter: "Micrófono", meterLive: "El micrófono capta sonido.",
       meterSilent: "Silencio — no llega nada al micrófono.",
       meterDenied: "Sin acceso al micrófono.", meterOff: "El control por voz está desactivado.",
@@ -365,6 +380,7 @@ function copyFor(language: string): Copy {
       unknownOutcome: "Secretary non ha risposto in tempo. Se stavate confermando qualcosa, potrebbe essere stato eseguito comunque: controllate prima di ripeterlo.",
       failed: "Non è stato possibile completare la richiesta.", send: "Invia", typeHere: "…oppure scrivete un comando",
       monitor: "Ciò che è stato sentito (solo questo computer)", monitorEmpty: "Ancora nulla.", transcribing: "trascrizione…", notRecognised: "Voce sentita ma non riconosciuta — ripeta, per favore.", transcriptionFailed: "Trascrizione non riuscita (connessione).",
+      timing: (t) => `Tempo di risposta ${t.total} s — fine del parlato ${t.silence} · trascrizione ${t.heard}${t.understood ? ` · comprensione ${t.understood}` : ""} · voce ${t.voice}`,
       meter: "Microfono", meterLive: "Il microfono sta captando suono.",
       meterSilent: "Silenzio — al microfono non arriva nulla.",
       meterDenied: "Nessun accesso al microfono.", meterOff: "Il controllo vocale è disattivato.",
@@ -566,6 +582,14 @@ let currentPlayback: Playback | null = null;
  * Real silence costs a fifth of a second and cannot be heard.
  */
 const LEAD_IN_MS = 220;
+
+/** Silence that ends a sentence (the voice detector's redemption time). */
+const END_OF_SPEECH_MS = 900;
+
+/** Milliseconds as seconds with one decimal, in the language's own way of writing them. */
+function seconds(ms: number, language: string): string {
+  return (Math.max(0, ms) / 1000).toLocaleString(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
 
 /**
  * How long to wait before starting recognition again after a failure.
@@ -781,6 +805,65 @@ function playCue() {
   } catch { /* A missing cue is not worth an error. */ }
 }
 
+/** One piece of a reply as blocks of audio, handed over as they arrive. */
+interface PieceStream {
+  /** The next block, or null when the piece is over. Throws when it was broken off. */
+  next(): Promise<AudioBuffer | null>;
+}
+
+function onceStream(buffer: AudioBuffer): PieceStream {
+  let given = false;
+  return { next: async () => (given ? null : ((given = true), buffer)) };
+}
+
+/**
+ * The first piece of a reply, streamed: raw samples from the backend are played
+ * while the rest of the sentence is still being made (`format: "pcm"`, see
+ * /command/speak). The whole MP3 used to have to arrive first — 1.4–1.7 s for a
+ * sentence on 10. 10. An older backend that answers with MP3 is still played,
+ * whole. Null when there is no voice to be had.
+ */
+async function firstPieceStream(context: AudioContext, text: string, language: string, rate: number, signal: AbortSignal): Promise<PieceStream | null> {
+  const key = pieceKey(text, language, rate);
+  const kept = spokenPieces.get(key);
+  if (kept) return onceStream(kept);
+  const response = await authorizedVoiceFetch(`${API_URL}/command/speak`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, language, format: "pcm" }),
+    signal,
+  });
+  if (!response.ok) return null;
+  const type = response.headers.get("content-type") ?? "";
+  const sampleRate = Number(/rate=(\d+)/.exec(type)?.[1] ?? 24_000);
+  if (!type.startsWith("audio/pcm") || !response.body) {
+    const encoded = await response.arrayBuffer();
+    if (encoded.byteLength === 0) return null;
+    return onceStream(await context.decodeAudioData(encoded));
+  }
+  const keep = text.length <= KEPT_PIECE_LENGTH ? ([] as Float32Array[]) : null;
+  const blocks = pcmBlocks(response.body, sampleRate, context.sampleRate);
+  return {
+    async next() {
+      const samples = await blocks.next();
+      if (!samples) {
+        if (keep && keep.length) {
+          const whole = context.createBuffer(1, keep.reduce((sum, part) => sum + part.length, 0), context.sampleRate);
+          let at = 0;
+          for (const part of keep) { whole.copyToChannel(part as Float32Array<ArrayBuffer>, 0, at); at += part.length; }
+          spokenPieces.set(key, whole);
+          if (spokenPieces.size > KEPT_PIECES) spokenPieces.delete(spokenPieces.keys().next().value!);
+        }
+        return null;
+      }
+      keep?.push(samples);
+      const buffer = context.createBuffer(1, samples.length, context.sampleRate);
+      buffer.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
+      return buffer;
+    },
+  };
+}
+
 /** Fetch and decode a phrase ahead of time, so its first use plays at once. */
 async function prepareSpeech(text: string, language: string, rate: number): Promise<void> {
   const context = ensureAudioContext();
@@ -793,10 +876,10 @@ async function prepareSpeech(text: string, language: string, rate: number): Prom
  * Returns the playback that started, or null when nothing could be played — the signal
  * to fall back to the browser's own synthesis.
  *
- * The reply is cut into sentences (speechPieces) and every piece is requested at once;
- * the first plays as soon as it arrives and each later one is scheduled to follow the
- * one before it without a gap. Each piece is still fetched and decoded whole before a
- * sample of it is played, so there is no decoding left to fall behind during playback.
+ * The reply is cut into sentences (speechPieces) and every piece is requested at once.
+ * The first is streamed and starts to sound with its first fifth of a second; each later
+ * one is fetched and decoded whole while the first plays, and is scheduled to follow the
+ * one before it without a gap.
  */
 async function playNeuralVoice(
   text: string,
@@ -814,10 +897,12 @@ async function playNeuralVoice(
     const pieces = speechPieces(text);
     if (pieces.length === 0) return null;
     // All at once: the later pieces are synthesised while the first one plays.
-    const arriving = pieces.map((piece) => neuralPiece(context, piece, language, rate, wanted.signal));
+    const opening = firstPieceStream(context, pieces[0], language, rate, wanted.signal);
+    const arriving = pieces.map((piece, index) => (index === 0 ? null : neuralPiece(context, piece, language, rate, wanted.signal)));
 
-    const first = await arriving[0];
-    if (!first || generation !== speechGeneration) {
+    const stream = await opening;
+    const first = stream ? await stream.next() : null;
+    if (!stream || !first || generation !== speechGeneration) {
       wanted.abort();
       return null;
     }
@@ -885,38 +970,54 @@ async function playNeuralVoice(
     currentPlayback = playback;
 
     /**
-     * The reply ends early, with what is already scheduled; `rest` was not said.
-     * Reported before the end itself, so the end's listeners know there is a rest.
+     * The reply ends with what is already scheduled. With `rest`, it ends early and
+     * `rest` was not said; reported before the end itself, so the end's listeners
+     * know there is a rest.
      */
-    const endEarly = (rest: string) => {
+    const endWithScheduled = (rest?: string) => {
       events.scheduled(Date.now() + Math.max(0, cursor - context.currentTime) * 1000, true, rest);
       const last = sources[sources.length - 1];
       if (!last || played.has(last)) finish();
       else endsWith = last;
     };
+    const abandoned = () => stopped || finished || generation !== speechGeneration;
 
-    events.scheduled(schedule(withLeadIn(context, first), pieces.length === 1), pieces.length === 1);
-    if (pieces.length > 1) {
-      void (async () => {
-        for (let index = 1; index < pieces.length; index += 1) {
-          if (stopped || finished || generation !== speechGeneration) return;
-          let buffer: AudioBuffer | null = null;
-          try { buffer = await arriving[index]; } catch { buffer = null; }
-          if (stopped || finished || generation !== speechGeneration) return;
-          if (!buffer) {
-            endEarly(pieces.slice(index).join(" "));
-            return;
-          }
-          const last = index === pieces.length - 1;
-          try {
-            events.scheduled(schedule(buffer, last), last);
-          } catch {
-            endEarly(pieces.slice(index).join(" "));
-            return;
-          }
+    events.scheduled(schedule(withLeadIn(context, first), false), false);
+    void (async () => {
+      // The rest of the first piece, block by block as it arrives.
+      try {
+        for (let block = await stream.next(); block; block = await stream.next()) {
+          if (abandoned()) return;
+          events.scheduled(schedule(block, false), false);
         }
-      })();
-    }
+      } catch {
+        // Broken off part-way: the whole of it is said again rather than half of it.
+        if (!abandoned()) endWithScheduled(pieces.join(" "));
+        return;
+      }
+      if (abandoned()) return;
+      if (pieces.length === 1) {
+        endWithScheduled();
+        return;
+      }
+      for (let index = 1; index < pieces.length; index += 1) {
+        if (abandoned()) return;
+        let buffer: AudioBuffer | null = null;
+        try { buffer = await arriving[index]; } catch { buffer = null; }
+        if (abandoned()) return;
+        if (!buffer) {
+          endWithScheduled(pieces.slice(index).join(" "));
+          return;
+        }
+        const last = index === pieces.length - 1;
+        try {
+          events.scheduled(schedule(buffer, last), last);
+        } catch {
+          endWithScheduled(pieces.slice(index).join(" "));
+          return;
+        }
+      }
+    })();
     return playback;
   } catch {
     wanted.abort();
@@ -1274,7 +1375,14 @@ export function BrowserVoiceControl() {
   const [engine, setEngine] = useState<"starting" | "local" | "browser">("starting");
   const lastEventAt = useRef(0);
   const recogniser = useRef<Recogniser | null>(null);
-  const handleFinal = useRef<(text: string, spokenAt?: number) => Promise<void>>(async () => {});
+  const handleFinal = useRef<(text: string, spokenAt?: number, heard?: HeardAt) => Promise<void>>(async () => {});
+  /**
+   * The exchange being answered: when the sentence ended and when its words came
+   * back, then when the answer did. The reply's first sound completes it, and the
+   * time each step took is shown under the answer.
+   */
+  const exchange = useRef<{ endedAt: number; heardAt: number; answeredAt?: number } | null>(null);
+  const [timing, setTiming] = useState<{ endedAt: number; heardAt: number; answeredAt?: number; soundAt: number } | null>(null);
   const recorder = useRef(new MacroRecorder());
   const stageRef = useRef<typeof learningStage>("off");
   const stepsRef = useRef<MacroStep[]>([]);
@@ -1500,6 +1608,10 @@ export function BrowserVoiceControl() {
       } catch { /* Speech output is optional. */ }
     };
 
+    // The spoken exchange this reply answers, if any: its times go under the answer.
+    const answering = exchange.current;
+    exchange.current = null;
+
     void (async () => {
       let unplayed = "";
       const audio = await playNeuralVoice(text, language, speechRate, {
@@ -1531,6 +1643,8 @@ export function BrowserVoiceControl() {
       if (generation !== speechGeneration) return;
       if (audio) {
         startHearing();
+        // The first sound comes after the lead-in silence.
+        if (answering) setTiming({ ...answering, soundAt: Date.now() + LEAD_IN_MS });
         audio.onEnded((stopped) => {
           // Cut off, the one who cut it off sets the guards; played out, it stopped sounding now.
           if (!stopped) lastSoundedAt.current = Date.now();
@@ -1700,6 +1814,7 @@ export function BrowserVoiceControl() {
       // Cancelled at the limit, so the next sentence never starts while this
       // one could still answer; a cancelled request is reported as failed.
       const result: MobileAssistantResponse = await api.command.assistant(text, language, history, AbortSignal.timeout(ASSISTANT_LIMIT_MS));
+      if (exchange.current) exchange.current.answeredAt = Date.now();
       // Not understood: say so and offer to be taught, rather than repeating a
       // generic failure the user can do nothing with.
       const notUnderstood = result.intent === "unrecognized"
@@ -1736,7 +1851,7 @@ export function BrowserVoiceControl() {
   }, [appendTurn, copy.completed, copy.connectionError, copy.failed, copy.unknownOutcome, extendConversation, language, learningVoice, navigate, speak, updateUser]);
 
   // One finished sentence from the recogniser.
-  handleFinal.current = async (spoken: string, spokenAt = Date.now()) => {
+  handleFinal.current = async (spoken: string, spokenAt = Date.now(), heard?: HeardAt) => {
     const text = spoken.trim();
     if (!text) return;
 
@@ -1762,7 +1877,9 @@ export function BrowserVoiceControl() {
     if (await handleLearningTurn(text)) return;
 
     if (alreadyActive) {
-      if (!companionOwnsVoice) playCue();
+      // Already cued when the sentence ended, if the window was open then.
+      if (!companionOwnsVoice && !heard?.cued) playCue();
+      if (heard) exchange.current = { endedAt: heard.endedAt, heardAt: heard.heardAt };
       // "No taught command" and "could not check" are different answers. Only
       // the first lets the sentence go on to be interpreted: otherwise a taught
       // command could be acted on as some other command.
@@ -1785,6 +1902,7 @@ export function BrowserVoiceControl() {
     const remainder = text.slice(hit.at + hit.length).replace(/^[\s,.:;!?-]+/, "").trim();
     conversationStartedAt.current = Date.now();
     extendConversation();
+    if (heard) exchange.current = { endedAt: heard.endedAt, heardAt: heard.heardAt };
     if (!remainder) { speak(acknowledgement(language)); return; }
     if (!companionOwnsVoice) playCue();
     await execute(remainder);
@@ -1824,7 +1942,7 @@ export function BrowserVoiceControl() {
           ? { ...entry, state: outcome, text: outcome === "unrecognised" ? heardCopy.notRecognised : heardCopy.transcriptionFailed }
           : entry));
 
-    const transcribe = (audio: Float32Array, spokenAt: number) => {
+    const transcribe = (audio: Float32Array, spokenAt: number, endedAt: number, cued: boolean) => {
       const id = ++heardEntryId;
       setHearLog((current) => [{ id, at: spokenAt, text: heardCopy.transcribing, woke: false, state: "pending" as const }, ...current].slice(0, 60));
       const heard = transcribeOne(audio);
@@ -1833,7 +1951,7 @@ export function BrowserVoiceControl() {
         if (cancelled) return;
         // Words get their own line; silence leaves none; speech that could not be read says so.
         settleEntry(id, result.failed ? "failed" : result.text || !result.dropped ? "words" : "unrecognised");
-        if (result.text) await handleFinal.current(result.text, spokenAt);
+        if (result.text) await handleFinal.current(result.text, spokenAt, { endedAt, heardAt: Date.now(), cued });
       }).catch(() => { /* one failed sentence must not block the ones after it */ });
     };
 
@@ -1905,7 +2023,7 @@ export function BrowserVoiceControl() {
           // below 0.35 still keeps normal pauses inside one sentence.
           positiveSpeechThreshold: 0.45,
           negativeSpeechThreshold: 0.35,
-          redemptionMs: 900,
+          redemptionMs: END_OF_SPEECH_MS,
           preSpeechPadMs: 400,
           minSpeechMs: 300,
           // Closing an over-long recording (below) keeps what was heard.
@@ -1926,7 +2044,11 @@ export function BrowserVoiceControl() {
             // The echo guard, applied to the audio rather than to a transcript: what was
             // captured while she was speaking is thrown away before anything reads it.
             if (Date.now() < echoGuardUntil.current) return;
-            transcribe(audio, spokenAt);
+            // In an open conversation every sentence is for him, so the cue can sound
+            // the moment the sentence ends, before its words are back (~1 s sooner).
+            const cued = spokenAt <= activeUntil.current && !companionOwnsVoice;
+            if (cued) playCue();
+            transcribe(audio, spokenAt, Date.now(), cued);
           },
         });
       } catch {
@@ -1948,7 +2070,7 @@ export function BrowserVoiceControl() {
       window.clearInterval(lengthLimit);
       void vad?.destroy();
     };
-  }, [enabled, hotword, language]);
+  }, [enabled, hotword, language, companionOwnsVoice]);
 
   // --- Chrome's recogniser, only when the local pipeline could not start -----
   useEffect(() => {
@@ -2152,6 +2274,8 @@ export function BrowserVoiceControl() {
     const text = typed.trim();
     if (!text) return;
     setTyped("");
+    // Typed, not spoken: there is no spoken exchange to time.
+    exchange.current = null;
     conversationStartedAt.current = Date.now();
     extendConversation();
     await execute(text);
@@ -2222,6 +2346,17 @@ export function BrowserVoiceControl() {
       {/* Keyed by the text, so a new answer starts at its top rather than where the
           last one was scrolled to. */}
       {answer ? <p className="voice-answer" key={answer}><strong>{copy.answered}:</strong> {answer}</p> : null}
+      {timing ? (
+        <p className="voice-timing">
+          {copy.timing({
+            total: seconds(END_OF_SPEECH_MS + timing.soundAt - timing.endedAt, language),
+            silence: seconds(END_OF_SPEECH_MS, language),
+            heard: seconds(timing.heardAt - timing.endedAt, language),
+            understood: timing.answeredAt ? seconds(timing.answeredAt - timing.heardAt, language) : undefined,
+            voice: seconds(timing.soundAt - (timing.answeredAt ?? timing.heardAt), language),
+          })}
+        </p>
+      ) : null}
 
       <form
         className="voice-typed"

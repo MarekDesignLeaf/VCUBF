@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, it } from "node:test";
-import { assistantRealtimeVoice, assistantVoice, DEFAULT_VOICE, isSpeechConfigured, speakReply } from "../src/services/voiceSpeechService.js";
+import { assistantRealtimeVoice, assistantVoice, DEFAULT_VOICE, isSpeechConfigured, PCM_CONTENT_TYPE, speakReply, streamReply } from "../src/services/voiceSpeechService.js";
 
 const realFetch = globalThis.fetch;
 const realKey = process.env.OPENAI_API_KEY;
@@ -121,3 +121,87 @@ describe("Spoken replies use OpenAI text-to-speech only", () => {
     assert.equal(assistantRealtimeVoice(" Verse "), "verse");
   });
 });
+
+describe("Streamed replies (raw PCM, played as they arrive)", () => {
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    if (realKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = realKey;
+  });
+
+  /** A response whose body arrives in the given pieces, then fails if `fail` is set. */
+  function streamed(pieces: number[][], fail = false) {
+    let next = 0;
+    return new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (next < pieces.length) controller.enqueue(new Uint8Array(pieces[next++]));
+        else if (fail) controller.error(new Error("connection reset"));
+        else controller.close();
+      },
+    }), { status: 200, headers: { "content-type": "application/octet-stream" } });
+  }
+
+  function sink() {
+    const events: string[] = [];
+    const bytes: number[] = [];
+    return {
+      events,
+      bytes,
+      start(contentType: string) { events.push(`start ${contentType}`); },
+      write(chunk: Uint8Array) { events.push(`write ${chunk.byteLength}`); bytes.push(...chunk); },
+    };
+  }
+
+  it("asks for PCM and passes every piece on as it comes, in order", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return streamed([[1, 2], [3, 4, 5], [6]]);
+    }) as typeof fetch;
+    const out = sink();
+    assert.equal(await streamReply("Máte tři zakázky na zítra a jednu na pátek, všechny v Oxfordu.", 1, out), true);
+    assert.equal(body.response_format, "pcm");
+    assert.deepEqual(out.events, [`start ${PCM_CONTENT_TYPE}`, "write 2", "write 3", "write 1"]);
+    assert.deepEqual(out.bytes, [1, 2, 3, 4, 5, 6]);
+  });
+
+  it("starts nothing when the voice cannot be had, so the route can answer 503", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
+    const out = sink();
+    assert.equal(await streamReply("Dnes nemáte žádné zakázky naplánované.", 1, out), false);
+    assert.deepEqual(out.events, []);
+    delete process.env.OPENAI_API_KEY;
+    assert.equal(await streamReply("Dnes nic.", 1, sink()), false);
+  });
+
+  it("a failure after audio started is thrown, so the response is broken off rather than ended", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    globalThis.fetch = (async () => streamed([[1, 2, 3, 4]], true)) as typeof fetch;
+    const out = sink();
+    await assert.rejects(streamReply("Připravil jsem objednávku pro dodavatele Alfa na čtyřicet kusů.", 1, out));
+    assert.deepEqual(out.events, [`start ${PCM_CONTENT_TYPE}`, "write 4"]);
+    // The same failure before any audio is simply "no voice".
+    globalThis.fetch = (async () => streamed([], true)) as typeof fetch;
+    const none = sink();
+    assert.equal(await streamReply("Připravil jsem objednávku pro dodavatele Beta.", 1, none), false);
+    assert.deepEqual(none.events, []);
+  });
+
+  it("keeps a short phrase, so the next time it is answered without OpenAI", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    let calls = 0;
+    globalThis.fetch = (async () => { calls += 1; return streamed([[9, 8], [7]]); }) as typeof fetch;
+    const first = sink();
+    assert.equal(await streamReply("Ano, rozumím.", 1, first), true);
+    const second = sink();
+    assert.equal(await streamReply("Ano, rozumím.", 1, second), true);
+    assert.equal(calls, 1);
+    assert.deepEqual(second.bytes, [9, 8, 7]);
+    // A different speed is different audio.
+    assert.equal(await streamReply("Ano, rozumím.", 1.3, sink()), true);
+    assert.equal(calls, 2);
+  });
+});
+

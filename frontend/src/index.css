@@ -1109,3 +1109,9 @@ table,
 .table-scroll { overflow-x: auto; }
 .proposed-tool { margin-right: 6px; }
 .proposed-tool-invalid { text-decoration: line-through; }
+
+/* How long the last answer took, step by step (10. 10.): small, under the answer. */
+.voice-control-centre .voice-col-left > .voice-timing {
+  flex: 0 0 auto; margin: 0; font-size: 10px; line-height: 1.3; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}

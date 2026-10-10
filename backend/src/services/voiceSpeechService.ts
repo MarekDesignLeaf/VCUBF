@@ -127,6 +127,114 @@ async function speakChunk(trimmed: string, rate: number): Promise<SpokenReply | 
   return spoken;
 }
 
+/**
+ * Raw audio, streamed: 24 kHz, 16-bit signed little-endian, one channel.
+ *
+ * The whole MP3 of a sentence arrived 1.4–1.7 s after it was asked for, and
+ * not a sample could be played before all of it was there. OpenAI recommends
+ * raw PCM for the fastest start, and raw samples need no decoder, so the page
+ * can play them as they arrive. The MP3 path stays for every other caller.
+ */
+export const PCM_SAMPLE_RATE = 24_000;
+export const PCM_CONTENT_TYPE = `audio/pcm;rate=${PCM_SAMPLE_RATE}`;
+
+/** Where streamed audio goes: the HTTP response, or a test. */
+export interface AudioSink {
+  /** Called once, before the first bytes; nothing is sent before it. */
+  start(contentType: string): void;
+  write(chunk: Uint8Array): void;
+}
+
+// Raw audio is about five times the size of MP3, so fewer and shorter phrases
+// are kept: at most ~20 MB.
+const PCM_CACHEABLE_TEXT = 60;
+const PCM_CACHE_ENTRIES = 100;
+const pcmCache = new Map<string, Buffer>();
+
+/**
+ * Stream one reply as raw PCM.
+ *
+ * Returns false when nothing could be had before a single byte was sent — the
+ * caller then answers 503 and the browser uses its own voice. A failure after
+ * audio has started throws: the caller must break the response off rather than
+ * end it, so the page knows the reply was not heard in full.
+ */
+export async function streamReply(text: string, rate: number, sink: AudioSink, signal?: AbortSignal): Promise<boolean> {
+  const trimmed = text.trim().slice(0, MAX_SPOKEN_REPLY);
+  if (!process.env.OPENAI_API_KEY?.trim() || !trimmed) return false;
+  let started = false;
+  const begin = () => {
+    if (!started) sink.start(PCM_CONTENT_TYPE);
+    started = true;
+  };
+  for (const chunk of speechChunks(trimmed)) {
+    const cacheable = chunk.length <= PCM_CACHEABLE_TEXT;
+    const id = cacheable ? cacheKey(chunk, rate) : "";
+    const cached = cacheable ? pcmCache.get(id) : undefined;
+    if (cached) {
+      pcmCache.delete(id);
+      pcmCache.set(id, cached);
+      begin();
+      sink.write(cached);
+      continue;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SPEECH_TIMEOUT_MS);
+    const stop = () => controller.abort();
+    signal?.addEventListener("abort", stop);
+    try {
+      let response: Response;
+      try {
+        response = await modelRequest("speech", "/v1/audio/speech", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: modelFor("speech"),
+            voice: assistantVoice(),
+            input: chunk,
+            response_format: "pcm",
+            speed: openAiSpeed(rate),
+          }),
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (!started) return false;
+        throw error;
+      }
+      if (!response.ok || !response.body) {
+        if (!started) return false;
+        throw new Error(`SPEECH_FAILED_${response.status}`);
+      }
+      const kept: Uint8Array[] = [];
+      let bytes = 0;
+      try {
+        for await (const piece of response.body as unknown as AsyncIterable<Uint8Array>) {
+          if (piece.byteLength === 0) continue;
+          begin();
+          sink.write(piece);
+          if (cacheable) kept.push(piece);
+          bytes += piece.byteLength;
+        }
+      } catch (error) {
+        if (!started) return false;
+        throw error;
+      }
+      if (bytes === 0) {
+        if (!started) return false;
+        throw new Error("SPEECH_EMPTY");
+      }
+      if (cacheable) {
+        pcmCache.set(id, Buffer.concat(kept));
+        if (pcmCache.size > PCM_CACHE_ENTRIES) pcmCache.delete(pcmCache.keys().next().value!);
+      }
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", stop);
+    }
+  }
+  return started;
+}
+
 async function synthesise(trimmed: string, rate: number): Promise<SpokenReply | null> {
   // The pieces of one reply abort together, so the controller stays here and
   // the gateway's default timeout is not used.
