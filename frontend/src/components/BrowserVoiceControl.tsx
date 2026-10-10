@@ -831,6 +831,9 @@ async function playNeuralVoice(
     // The piece after which the reply is over: the last one, or the last one
     // scheduled when a later piece could not be had.
     let endsWith: AudioBufferSourceNode | null = null;
+    // Pieces that have played out, by their own "ended" event rather than by
+    // comparing clocks, which can disagree by a rounding error at the very end.
+    const played = new WeakSet<AudioBufferSourceNode>();
     const finish = () => {
       if (finished) return;
       finished = true;
@@ -838,8 +841,9 @@ async function playNeuralVoice(
     };
     /** Plays one decoded piece after everything already scheduled; returns when it ends, in wall-clock time. */
     const schedule = (buffer: AudioBuffer, last: boolean) => {
-      // The one before it has already finished: the reply was in a gap and sounds again.
-      const resumed = sources.length > 0 && context.currentTime >= cursor;
+      const previous = sources[sources.length - 1];
+      // The one before it has already played out: the reply was in a gap and sounds again.
+      const resumed = previous !== undefined && played.has(previous);
       const source = context.createBufferSource();
       source.buffer = buffer;
       source.connect(context.destination);
@@ -847,16 +851,19 @@ async function playNeuralVoice(
       // keeps the very first reply as clean as the rest. A piece that arrives after
       // the one before it has finished starts as soon as it can.
       const startAt = Math.max(cursor, context.currentTime + 0.02);
-      cursor = startAt + buffer.duration;
-      if (last) endsWith = source;
       source.onended = () => {
+        played.add(source);
         if (finished || stopped) return;
         if (source === endsWith) finish();
         // Nothing after it yet: a gap until the next piece arrives.
-        else if (context.currentTime >= cursor - 0.01) events.sounding(false);
+        else if (source === sources[sources.length - 1]) events.sounding(false);
       };
-      sources.push(source);
+      // Started before anything is recorded, so a piece that cannot start leaves
+      // the reply as it was.
       source.start(startAt);
+      cursor = startAt + buffer.duration;
+      sources.push(source);
+      if (last) endsWith = source;
       if (resumed) events.sounding(true);
       return Date.now() + (cursor - context.currentTime) * 1000;
     };
@@ -884,7 +891,7 @@ async function playNeuralVoice(
     const endEarly = (rest: string) => {
       events.scheduled(Date.now() + Math.max(0, cursor - context.currentTime) * 1000, true, rest);
       const last = sources[sources.length - 1];
-      if (!last || context.currentTime >= cursor) finish();
+      if (!last || played.has(last)) finish();
       else endsWith = last;
     };
 
@@ -1236,6 +1243,9 @@ export function BrowserVoiceControl() {
   // Deliberately separate from speakingUntil: that one ends the moment she is cut off,
   // this one has to outlive it.
   const echoGuardUntil = useRef(0);
+  // When her voice last stopped sounding: the end of a reply, or the start of a
+  // gap between its pieces. Cutting her off just after that still keeps the tail.
+  const lastSoundedAt = useRef(0);
   /**
    * True only while a reply is actually being heard. Talking over her is
    * judged only then: while a review is still being fetched there is nothing
@@ -1390,7 +1400,10 @@ export function BrowserVoiceControl() {
     currentPlayback = null;
     try { window.speechSynthesis?.cancel(); } catch { /* not everywhere */ }
     speakingUntil.current = 0;
-    echoGuardUntil.current = Date.now() + (wasSounding ? ECHO_TAIL_MS : BARGE_IN_GUARD_MS);
+    echoGuardUntil.current = Math.max(
+      Date.now() + (wasSounding ? ECHO_TAIL_MS : BARGE_IN_GUARD_MS),
+      lastSoundedAt.current + ECHO_TAIL_MS,
+    );
   }, []);
 
   // Escape stops her at once. A measured threshold is the hands-free way; a key that
@@ -1507,7 +1520,10 @@ export function BrowserVoiceControl() {
         sounding: (on) => {
           if (generation !== speechGeneration) return;
           if (on) startHearing();
-          else audible.current = false;
+          else {
+            audible.current = false;
+            lastSoundedAt.current = Date.now();
+          }
         },
       }, generation);
       // Silenced or replaced while the audio was on its way: the newer state
@@ -1516,6 +1532,8 @@ export function BrowserVoiceControl() {
       if (audio) {
         startHearing();
         audio.onEnded((stopped) => {
+          // Cut off, the one who cut it off sets the guards; played out, it stopped sounding now.
+          if (!stopped) lastSoundedAt.current = Date.now();
           if (generation === speechGeneration) audible.current = false;
           speakingUntil.current = Date.now() + SPEAKING_GRACE_MS;
           echoGuardUntil.current = Date.now() + ECHO_TAIL_MS;
