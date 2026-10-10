@@ -1085,6 +1085,19 @@ table,
 .voice-heard-list > li.is-unrecognised .voice-heard-mark,
 .voice-heard-list > li.is-failed .voice-heard-mark { color: var(--warning-text); }
 
+/* The answer can be long (a list of jobs, a review read out in full), and the left column
+   clipped it with no way to read the rest (9. 10.). It now takes what the column has left
+   and scrolls inside itself, so the typing field below it stays in view. What was heard
+   and the live line keep a few lines each and scroll too. */
+.voice-control-centre .voice-col-left > .voice-answer {
+  flex: 1 1 auto; min-height: 3.2em; margin: 0; padding-right: 4px;
+  overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; white-space: pre-line;
+}
+.voice-control-centre .voice-col-left > .voice-heard,
+.voice-control-centre .voice-col-left > .voice-interim {
+  max-height: 4.2em; margin: 0; overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere;
+}
+
 /* On a phone the panel is stacked and tall; let the whole column scroll instead, or the
    content below it would be unreachable. */
 @media (max-width: 760px) {
