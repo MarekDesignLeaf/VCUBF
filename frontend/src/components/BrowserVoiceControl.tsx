@@ -116,6 +116,13 @@ function recogniserLabel(state: RecogniserState, copy: Copy): string {
 /** When a sentence ended (the voice detector closed it) and when its words came back. */
 type HeardAt = { endedAt: number; heardAt: number; cued: boolean };
 
+/**
+ * A spoken exchange being answered: when the sentence ended, when its words came
+ * back and when the answer did. It travels with the reply it belongs to, so the
+ * times shown are always that reply's; the reply's first sound completes it.
+ */
+type Exchange = { endedAt: number; heardAt: number; answeredAt?: number };
+
 /** Seconds, already formatted for the language. `understood` is missing when only "Ano?" was said. */
 type Timing = { total: string; silence: string; heard: string; understood?: string; voice: string };
 
@@ -669,7 +676,9 @@ function ensureAudioContext(): AudioContext | null {
 
 /** Release the output once voice control is switched off. */
 function releaseOutput() {
-  // Nothing more of the current reply is wanted, nor still downloaded.
+  // Nothing more of the current reply is wanted, nor still downloaded, nor one
+  // whose first sound is still on its way.
+  speechGeneration += 1;
   currentPlayback?.stop();
   currentPlayback = null;
   const context = outputContext;
@@ -1388,13 +1397,8 @@ export function BrowserVoiceControl() {
   const lastEventAt = useRef(0);
   const recogniser = useRef<Recogniser | null>(null);
   const handleFinal = useRef<(text: string, spokenAt?: number, heard?: HeardAt) => Promise<void>>(async () => {});
-  /**
-   * The exchange being answered: when the sentence ended and when its words came
-   * back, then when the answer did. The reply's first sound completes it, and the
-   * time each step took is shown under the answer.
-   */
-  const exchange = useRef<{ endedAt: number; heardAt: number; answeredAt?: number } | null>(null);
-  const [timing, setTiming] = useState<{ endedAt: number; heardAt: number; answeredAt?: number; soundAt: number } | null>(null);
+  /** How long the last spoken answer took; shown under it. */
+  const [timing, setTiming] = useState<(Exchange & { soundAt: number }) | null>(null);
   const recorder = useRef(new MacroRecorder());
   const stageRef = useRef<typeof learningStage>("off");
   const stepsRef = useRef<MacroStep[]>([]);
@@ -1570,7 +1574,7 @@ export function BrowserVoiceControl() {
     audible.current = true;
   }, []);
 
-  const speak = useCallback((text: string) => {
+  const speak = useCallback((text: string, timed?: Exchange | null) => {
     if (!text || companionOwnsVoice) return;
     currentPlayback?.stop();
     currentPlayback = null;
@@ -1620,9 +1624,6 @@ export function BrowserVoiceControl() {
       } catch { /* Speech output is optional. */ }
     };
 
-    // The spoken exchange this reply answers, if any: its times go under the answer.
-    const answering = exchange.current;
-    exchange.current = null;
     // A new reply: the times of an earlier one no longer describe what is on screen.
     setTiming(null);
 
@@ -1658,7 +1659,7 @@ export function BrowserVoiceControl() {
       if (audio) {
         startHearing();
         // The first sound comes after the lead-in silence.
-        if (answering) setTiming({ ...answering, soundAt: Date.now() + LEAD_IN_MS });
+        if (timed) setTiming({ ...timed, soundAt: Date.now() + LEAD_IN_MS });
         audio.onEnded((stopped) => {
           // Cut off, the one who cut it off sets the guards; played out, it stopped sounding now.
           if (!stopped) lastSoundedAt.current = Date.now();
@@ -1819,18 +1820,11 @@ export function BrowserVoiceControl() {
     return false;
   }, [learningVoice, phrases, speak]);
 
-  const execute = useCallback(async (text: string) => {
-    // The spoken exchange this command belongs to, taken now: another one may
-    // start before this answer comes back.
-    const mine = exchange.current;
-    exchange.current = null;
-    /** Speak the answer, handing this exchange's times to the reply. */
+  const execute = useCallback(async (text: string, timed: Exchange | null = null) => {
+    /** Speak the answer with this exchange's times (a typed command has none). */
     const answer = (words: string) => {
-      if (mine) {
-        mine.answeredAt ??= Date.now();
-        exchange.current = mine;
-      }
-      speak(words);
+      if (timed) timed.answeredAt ??= Date.now();
+      speak(words, timed);
     };
     setStatus("thinking");
     setHeard(text);
@@ -1840,7 +1834,7 @@ export function BrowserVoiceControl() {
       // Cancelled at the limit, so the next sentence never starts while this
       // one could still answer; a cancelled request is reported as failed.
       const result: MobileAssistantResponse = await api.command.assistant(text, language, history, AbortSignal.timeout(ASSISTANT_LIMIT_MS));
-      if (mine) mine.answeredAt = Date.now();
+      if (timed) timed.answeredAt = Date.now();
       // Not understood: say so and offer to be taught, rather than repeating a
       // generic failure the user can do nothing with.
       const notUnderstood = result.intent === "unrecognized"
@@ -1902,10 +1896,10 @@ export function BrowserVoiceControl() {
     // guess at what the words might have meant.
     if (await handleLearningTurn(text)) return;
 
+    const timed: Exchange | null = heard ? { endedAt: heard.endedAt, heardAt: heard.heardAt } : null;
     if (alreadyActive) {
       // Already cued when the sentence ended, if the window was open then.
       if (!companionOwnsVoice && !heard?.cued) playCue();
-      if (heard) exchange.current = { endedAt: heard.endedAt, heardAt: heard.heardAt };
       // "No taught command" and "could not check" are different answers. Only
       // the first lets the sentence go on to be interpreted: otherwise a taught
       // command could be acted on as some other command.
@@ -1915,11 +1909,12 @@ export function BrowserVoiceControl() {
       } catch {
         setAnswer(learningVoice.lookupFailed);
         appendTurn({ role: "assistant", content: learningVoice.lookupFailed });
-        speak(learningVoice.lookupFailed);
+        speak(learningVoice.lookupFailed, timed && { ...timed, answeredAt: Date.now() });
         return;
       }
+      // A taught command waits for a confirmation dialog: not timed.
       if (learned) { await runLearned(learned); return; }
-      await execute(text);
+      await execute(text, timed);
       return;
     }
     if (!hit) return;
@@ -1928,10 +1923,14 @@ export function BrowserVoiceControl() {
     const remainder = text.slice(hit.at + hit.length).replace(/^[\s,.:;!?-]+/, "").trim();
     conversationStartedAt.current = Date.now();
     extendConversation();
-    if (heard) exchange.current = { endedAt: heard.endedAt, heardAt: heard.heardAt };
-    if (!remainder) { speak(acknowledgement(language)); return; }
+    if (!remainder) {
+      // Shown as the answer, so its time is not read as the previous answer's.
+      setAnswer(acknowledgement(language));
+      speak(acknowledgement(language), timed);
+      return;
+    }
     if (!companionOwnsVoice) playCue();
-    await execute(remainder);
+    await execute(remainder, timed);
   };
 
   // --- the local pipeline: our microphone, Silero, OpenAI transcription -------
@@ -2301,8 +2300,6 @@ export function BrowserVoiceControl() {
     const text = typed.trim();
     if (!text) return;
     setTyped("");
-    // Typed, not spoken: there is no spoken exchange to time.
-    exchange.current = null;
     conversationStartedAt.current = Date.now();
     extendConversation();
     await execute(text);
