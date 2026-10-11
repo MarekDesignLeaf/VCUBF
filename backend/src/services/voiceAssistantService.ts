@@ -4,7 +4,7 @@ import { VOICE_LANGUAGE_LABELS, isVoiceLanguage } from "../lib/voiceLanguages.js
 import { CANONICAL_COMMAND_FORMS } from "../lib/canonicalCommands.js";
 import type { AssistantContext } from "./assistantMemoryService.js";
 import { buildEmmaBehaviorInstructions } from "./emmaBehaviorService.js";
-import { modelFor, modelRequest, recordUsage } from "../lib/modelGateway.js";
+import { modelFor, modelRequest, recordUsage, taskTimeoutMs } from "../lib/modelGateway.js";
 import { EMMA_EXECUTABLE_ACTION_GUIDE } from "../lib/emmaExecutableActionCatalogue.js";
 import { DEFAULT_ASSISTANT_NAME, withAssistantName } from "../lib/assistantName.js";
 import { assistantRealtimeVoice } from "./voiceSpeechService.js";
@@ -116,21 +116,43 @@ function buildTranscriptionPrompt(isoLanguage: string, wakeWord: string, extraVo
  * transcript that mostly consists of prompt words is treated as silence.
  */
 export function isPromptEcho(text: string, prompt: string): boolean {
-  const fold = (value: string) =>
-    value.toLowerCase().normalize("NFKD").replace(/\p{M}+/gu, "").replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
-  const heard = fold(text);
+  const heard = promptFold(text);
   if (heard.length === 0) return false;
-  const promptWords = new Set(fold(prompt));
+  const promptWords = new Set(promptFold(prompt));
   if (promptWords.size === 0) return false;
   const joinedHeard = heard.join(" ");
   // An echo runs across the prompt's list: three or more of its phrases in a
   // row. One phrase, or the wake word and one phrase, is exactly what a person
   // says ("Alfonzo, vytvoř klienta", a learned alias), so it is kept.
-  if (heard.length >= 3 && longestPromptRun(heard, prompt.split(/[.,;]/).map(fold).filter((phrase) => phrase.length)) >= 3) return true;
-  if (/^(context|kontext|prompt|vocabulary|slovnik)\b/.test(joinedHeard)) return true;
+  if (heard.length >= 3 && longestPromptRun(heard, promptPhrases(prompt)) >= 3) return true;
+  if (ECHO_LABEL.test(joinedHeard)) return true;
   if (heard.length < 6) return false;
   const overlap = heard.filter((word) => promptWords.has(word)).length / heard.length;
   return overlap >= 0.85;
+}
+
+/** Lowercase words without accents or punctuation, as an echo is compared. */
+function promptFold(value: string) {
+  return value.toLowerCase().normalize("NFKD").replace(/\p{M}+/gu, "").replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
+}
+
+function promptPhrases(prompt: string) {
+  return prompt.split(/[.,;]/).map(promptFold).filter((phrase) => phrase.length);
+}
+
+/** How an echo of the prompt has been seen to begin ("context: ### Alfonzo ###"). */
+const ECHO_LABEL = /^(context|kontext|prompt|vocabulary|slovnik)\b/;
+
+/**
+ * Whether a transcript still being streamed has started reading the prompt
+ * back: four of its phrases in a row, one more than isPromptEcho asks of a
+ * finished sentence, because this one may still go on. Nobody dictates the
+ * vocabulary list, so there is no point waiting for the rest of it.
+ */
+export function isPromptEchoStarting(partial: string, prompt: string): boolean {
+  const heard = promptFold(partial);
+  if (heard.length >= 2 && ECHO_LABEL.test(heard.join(" "))) return true;
+  return heard.length >= 4 && longestPromptRun(heard, promptPhrases(prompt)) >= 4;
 }
 
 /**
@@ -236,15 +258,19 @@ export async function transcribeVoiceAudio(
   if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
 
   form.append("prompt", prompt);
-  let text = await requestTranscription(form);
-  if (isPromptEcho(text, prompt)) {
+  // Streamed, so an echo is seen in its first words and cut off there rather
+  // than read to the end (10.–11. 10.: most evening commands echoed, and each
+  // echo cost 1.1–1.7 s before the retry could even start).
+  const first = await requestTranscription(form, (partial) => isPromptEchoStarting(partial, prompt));
+  let text = first.text;
+  if (first.stopped || isPromptEcho(text, prompt)) {
     // The smaller 4o models answer unclear or short speech with the prompt
     // (seen 9. 10.: a spoken command came back as the vocabulary list and the
     // user saw nothing at all). Asking once more without the prompt costs a
     // second call only in this case, and gives back what was actually said.
     form.delete("prompt");
-    const retried = await requestTranscription(form);
-    console.log(`[transcription] prompt echo, retried without prompt: ${retried && !isPromptEcho(retried, prompt) ? "recognised" : "nothing"}`);
+    const retried = (await requestTranscription(form)).text;
+    console.log(`[transcription] prompt echo${first.stopped ? " (cut off early)" : ""}, retried without prompt: ${retried && !isPromptEcho(retried, prompt) ? "recognised" : "nothing"}`);
     if (!retried || isPromptEcho(retried, prompt)) return { text: "", model, dropped: "prompt_echo" };
     text = retried;
   }
@@ -256,18 +282,68 @@ export async function transcribeVoiceAudio(
   return { text, model };
 }
 
-/** One transcription request; the text, trimmed. */
-async function requestTranscription(form: FormData): Promise<string> {
+/** Transcription models that can stream their text (whisper-1 cannot). */
+const STREAMING_TRANSCRIPTION = /^gpt-/;
+
+/**
+ * One transcription request; the text, trimmed.
+ *
+ * With `stopWhen`, a model that can stream is asked to, and the request is
+ * cut off as soon as the text so far satisfies it — `stopped` then says the
+ * text is only the beginning. A stream that ends without its closing event is
+ * an error, never a shorter sentence.
+ */
+async function requestTranscription(form: FormData, stopWhen?: (text: string) => boolean): Promise<{ text: string; stopped: boolean }> {
+  const streamed = Boolean(stopWhen) && STREAMING_TRANSCRIPTION.test(modelFor("transcription"));
+  if (streamed) form.set("stream", "true");
+  else form.delete("stream");
+  const cutOff = new AbortController();
   const response = await modelRequest("transcription", "/v1/audio/transcriptions", {
     method: "POST",
     body: form,
+    signal: AbortSignal.any([cutOff.signal, AbortSignal.timeout(taskTimeoutMs("transcription"))]),
   });
   if (!response.ok) throw new Error(`OPENAI_TRANSCRIPTION_FAILED_${response.status}`);
-  const parsed = await response.json();
-  // The transcription is the highest-volume AI call (every heard stretch of
-  // speech), so its token usage is exactly what the cost decision needs.
-  recordUsage("transcription", (parsed as { usage?: unknown })?.usage);
-  return z.object({ text: z.string() }).parse(parsed).text.trim();
+  if (!streamed || !response.body || !response.headers.get("content-type")?.includes("text/event-stream")) {
+    const parsed = await response.json();
+    // The transcription is the highest-volume AI call (every heard stretch of
+    // speech), so its token usage is exactly what the cost decision needs.
+    recordUsage("transcription", (parsed as { usage?: unknown })?.usage);
+    return { text: z.object({ text: z.string() }).parse(parsed).text.trim(), stopped: false };
+  }
+  const startedAt = Date.now();
+  // The gateway logs when the headers came; a streamed sentence is over only
+  // at its last event, so its whole time is logged here.
+  const finished = (outcome: string) => console.log(`[transcription] streamed outcome=${outcome} ms=${Date.now() - startedAt}`);
+  let text = "";
+  let pending = "";
+  const decoder = new TextDecoder();
+  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    pending += decoder.decode(chunk, { stream: true }).replace(/\r\n/g, "\n");
+    let end: number;
+    while ((end = pending.indexOf("\n\n")) >= 0) {
+      const data = pending.slice(0, end).split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+      pending = pending.slice(end + 2);
+      if (!data || data === "[DONE]") continue;
+      let event: { type?: unknown; delta?: unknown; text?: unknown; usage?: unknown };
+      try { event = JSON.parse(data); } catch { continue; }
+      if (event.type === "transcript.text.delta" && typeof event.delta === "string") {
+        text += event.delta;
+        if (stopWhen!(text)) {
+          cutOff.abort();
+          finished("cut_off");
+          return { text: text.trim(), stopped: true };
+        }
+      } else if (event.type === "transcript.text.done") {
+        recordUsage("transcription", event.usage);
+        finished("done");
+        return { text: (typeof event.text === "string" ? event.text : text).trim(), stopped: false };
+      } else if (event.type === "error") {
+        throw new Error("OPENAI_TRANSCRIPTION_FAILED_STREAM");
+      }
+    }
+  }
+  throw new Error("OPENAI_TRANSCRIPTION_INCOMPLETE");
 }
 
 /**
