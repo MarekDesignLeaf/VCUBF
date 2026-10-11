@@ -43,6 +43,8 @@ cancel delete notifications
 list contacts
 show emails
 show whatsapp messages
+skip to the next sender
+read older messages from this sender
   set language LANGUAGE_CODE (${VOICE_LANGUAGES.join(", ")})
   read full menu [section NAME]
   show calendar today|tomorrow|next 7 days

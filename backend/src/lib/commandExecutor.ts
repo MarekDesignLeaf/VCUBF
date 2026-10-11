@@ -24,13 +24,14 @@ import * as voiceWhatsAppService from "../services/voiceWhatsAppService.js";
 import * as voiceNotificationService from "../services/voiceNotificationService.js";
 import * as voicePreferenceService from "../services/voicePreferenceService.js";
 import * as googleCalendarConnectorService from "../services/googleCalendarConnectorService.js";
+import * as messageReadingService from "../services/messageReadingService.js";
 import { buildCommandUiAction, completedVoiceCommandMessage, openingVoiceLabelMessage, openingVoicePageMessage, type CommandUiAction } from "./voiceNavigation.js";
 import { getNavigationCatalogue } from "./navigationCatalogue.js";
 import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction, getPendingEmmaActionName } from "../services/emmaExecutableActionService.js";
 import { cancelAgentProposal, confirmAgentProposal } from "../agents/agentProposal.js";
 import { SAFE_MODE_ACTIVE, SafeModeActiveError, safeModeMessage, safeModeSince } from "./safeMode.js";
 import { commandAllowedInSafeMode } from "./safeModeCommands.js";
-import { spokenCancelled, spokenChannelMessages, spokenCompleted, spokenError, spokenOutcome, spokenReview } from "./spokenActionMessages.js";
+import { spokenCancelled, spokenCompleted, spokenError, spokenNothingBeingRead, spokenOutcome, spokenReadingTurn, spokenReview } from "./spokenActionMessages.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -210,11 +211,14 @@ function safeModeRefusal(user: AuthedUser, command: ParsedCommand): CommandRespo
  * stop switched on while a command was already past this check is caught when
  * the engine refuses the claim, and answered the same way, so the caller
  * still audits the command and a playbook still records its run.
+ *
+ * `planning` marks a read the agent makes while it plans: it sees the same
+ * data, but nothing the user is in the middle of (a reading of messages) moves.
  */
 export async function dispatchParsedCommand(
   user: AuthedUser,
   command: ParsedCommand,
-  options: { confirmedWorkflow?: boolean } = {},
+  options: { confirmedWorkflow?: boolean; planning?: boolean } = {},
 ): Promise<CommandResponse> {
   if (!commandAllowedInSafeMode(command) && await safeModeSince(user.companyId)) return safeModeRefusal(user, command);
   try {
@@ -228,7 +232,7 @@ export async function dispatchParsedCommand(
 async function dispatchAllowedCommand(
   user: AuthedUser,
   command: ParsedCommand,
-  options: { confirmedWorkflow?: boolean },
+  options: { confirmedWorkflow?: boolean; planning?: boolean },
 ): Promise<CommandResponse> {
   let response: CommandResponse;
 
@@ -1189,12 +1193,25 @@ async function dispatchAllowedCommand(
     }
 
     case "list_channel_messages": {
-      // Read aloud: the newest few, who sent them, when, and whether they were
-      // answered — not the whole unresolved backlog, oldest first.
-      const recent = await communicationService.recentChannelMessages(user, command.entities.channel, 5);
+      // Read aloud one sender at a time: who has written, then the newest few
+      // from the sender who wrote last, and who is next. Someone who wrote ten
+      // times no longer fills the whole answer; "přeskoč" moves on.
+      const turn = await messageReadingService.startReading(user, command.entities.channel, { remember: !options.planning });
       response = {
-        intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data: recent,
-        message: spokenChannelMessages(command.entities.channel, recent, user.voiceLanguage),
+        intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data: turn,
+        message: spokenReadingTurn(turn, user.voiceLanguage),
+      };
+      break;
+    }
+
+    case "next_message_sender":
+    case "older_sender_messages": {
+      const turn = command.intent === "next_message_sender"
+        ? await messageReadingService.readNextSender(user, command.entities.sender)
+        : await messageReadingService.readOlderFromSender(user);
+      response = {
+        intent: command.intent, interpreted: command.entities, ok: true, httpStatus: 200, data: turn ?? null,
+        message: turn ? spokenReadingTurn(turn, user.voiceLanguage) : spokenNothingBeingRead(user.voiceLanguage),
       };
       break;
     }

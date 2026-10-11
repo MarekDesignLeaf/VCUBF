@@ -23,7 +23,7 @@ import { czech } from "./commandGrammar/czech.js";
 import { english } from "./commandGrammar/english.js";
 import { french, german, italian, spanish } from "./commandGrammar/otherLanguages.js";
 import { polish } from "./commandGrammar/polish.js";
-import { fold, parseLanguageName, parseLanguageSwitch, type CommandGrammar } from "./commandGrammar/shared.js";
+import { fold, namedIn, parseLanguageName, parseLanguageSwitch, type CommandGrammar } from "./commandGrammar/shared.js";
 
 // If nothing matches, the result is `unrecognized` — the system must not
 // guess (VCUBF error handling rule).
@@ -100,6 +100,11 @@ export type ParsedCommand =
   | { intent: "list_clients"; entities: Record<string, never> }
   | { intent: "list_contacts"; entities: Record<string, never> }
   | { intent: "list_channel_messages"; entities: { channel: "email" | "whatsapp" } }
+  // While received messages are read out one sender at a time: the next
+  // sender, or more of the same sender's older messages.
+  // sender: the name said with it ("přeskoč Petru"), when one was.
+  | { intent: "next_message_sender"; entities: { sender?: string } }
+  | { intent: "older_sender_messages"; entities: Record<string, never> }
   | {
       intent: "prepare_gmail_message";
       // from: the sending account as the user named it ("personal",
@@ -179,6 +184,29 @@ export function parseStoredCommand(rawText: string): ParsedCommand {
     if (command.intent !== "unrecognized") return command;
   }
   return { intent: "unrecognized", entities: {} };
+}
+
+/**
+ * "přeskoč ho", "další", "starší": moving through messages being read out, in
+ * the language switched on. These words mean something only while a reading is
+ * in progress, so the caller asks only then. `senders` are the sender just read
+ * and the one named as next: words after "přeskoč" count only when they name
+ * one of them.
+ */
+export function readingControl(rawText: string, reader: string, context: { addressedAs?: string[]; senders?: Array<string | undefined> } = {}): ParsedCommand | undefined {
+  let said = fold(bare(rawText).replace(/[,;:]+/g, " "));
+  // In an open conversation the name may still lead the sentence ("Alfonzo, přeskoč").
+  for (const name of (context.addressedAs ?? []).map(fold).filter(Boolean)) {
+    if (said.startsWith(`${name} `)) { said = said.slice(name.length + 1); break; }
+  }
+  const grammar = grammarFor(reader);
+  if (grammar.readingSkip.test(said)) return { intent: "next_message_sender", entities: {} };
+  if (grammar.readingOlder.test(said)) return { intent: "older_sender_messages", entities: {} };
+  const named = said.match(grammar.readingSkipNamed)?.[1];
+  if (named && (context.senders ?? []).some((sender) => sender && namedIn(named, sender))) {
+    return { intent: "next_message_sender", entities: { sender: named } };
+  }
+  return undefined;
 }
 
 /** A bare yes to the one review that is waiting, in the language switched on. */

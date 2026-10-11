@@ -127,6 +127,10 @@ function records(text: string): ParsedCommand | undefined {
   return { intent: "create_contact", entities: { display_name: displayName, email: contact.email, phone: contact.phone } };
 }
 
+// "przeczytaj wiadomości z WhatsAppa", "pokaż e-maile." Folded and without the
+// full stop dictation adds, so reading them needs no language model.
+const READ_MESSAGES = /^(?:pokaz|przeczytaj|otworz)(?:\s+mi)?\s+(?:(?:wiadomosci|ostatnie\s+wiadomosci)\s+(?:na|z|ze|w)\s+)?(whatsapp(?:a|ie|u)?|e-?maile|poczte)$/u;
+
 function knowledge(text: string): ParsedCommand | undefined {
   let m = text.match(/^zapamiętaj\s+(?:sobie\s+)?dla\s+(?:firmy|spółki|spolki)\s*,?\s*(?:(?:że|ze)\s+)?(.+)$/iu);
   if (m) return { intent: "create_assistant_memory", entities: { content: m[1].trim(), scope: "company" } };
@@ -135,7 +139,8 @@ function knowledge(text: string): ParsedCommand | undefined {
   m = text.match(/^co\s+(?:pamiętasz|pamietasz)(?:\s+o\s+(.+?))?\??$/iu);
   if (m) return { intent: "recall_assistant_memory", entities: { query: m[1]?.trim() } };
   if (/^(?:pokaż|pokaz|wyświetl|wyswietl)\s+powiadomienia$/iu.test(text) || /^powiadomienia$/iu.test(text)) return { intent: "list_notifications", entities: {} };
-  if (/^(?:pokaż|pokaz|przeczytaj|otwórz|otworz)\s+(?:mi\s+)?(?:e-?maile|pocztę|poczte)$/iu.test(text)) return { intent: "list_channel_messages", entities: { channel: "email" } };
+  const read = fold(withoutFinalPunctuation(text)).match(READ_MESSAGES);
+  if (read) return { intent: "list_channel_messages", entities: { channel: read[1].startsWith("w") ? "whatsapp" : "email" } };
   return undefined;
 }
 
@@ -143,6 +148,13 @@ export const polish: CommandGrammar = {
   language: "pl",
   yes: /^(?:potwierdzam|potwierdź|potwierdz|potwierdź\s+akcję|potwierdz\s+akcje|wyślij|wyslij)$/iu,
   no: /^(?:nie|anuluj|anuluj\s+akcję|anuluj\s+akcje|nie\s+wysyłaj|nie\s+wysylaj)$/iu,
+  // "pomiń go", "dalej", "następny", "przejdź do następnego". Not "kontynuuj":
+  // the Windows companion asks for it to read on after a long answer.
+  readingSkip: /^(?:(?:ok|dobrze|dobra)\s+)?(?:pomin(?:\s+(?:go|ja|je|to|tego|te|nadawce|tego\s+nadawce))?|dalej|nastepn[ya](?:\s+(?:nadawca|osoba))?|kolejn[ya](?:\s+(?:nadawca|osoba))?|(?:idz|przejdz)\s+dalej|przejdz\s+do\s+(?:nastepnego|nastepnej|kolejnego|kolejnej))(?:\s+prosze)?$/u,
+  // "pomiń Ewę", "pomiń pana Nowaka".
+  readingSkipNamed: /^(?:(?:ok|dobrze|dobra)\s+)?pomin\s+(.+?)(?:\s+prosze)?$/u,
+  // "starsze", "przeczytaj starsze wiadomości", "więcej od niego", "więcej".
+  readingOlder: /^(?:(?:ok|dobrze|dobra)\s+)?(?:(?:(?:przeczytaj|czytaj|pokaz)\s+)?(?:starsze|wczesniejsze)(?:\s+wiadomosci)?(?:\s+od\s+(?:niego|niej|nich))?|wiecej(?:\s+od\s+(?:niego|niej|nich))?)(?:\s+prosze)?$/u,
   languageSwitch: {
     patterns: [
       /^(?:zmień|zmien|przełącz|przelacz|ustaw)\s+(?:język|jezyk)(?:\s+emmy|\s+menu)?\s*(?:(?:na|do)\s+)?(.+)$/iu,

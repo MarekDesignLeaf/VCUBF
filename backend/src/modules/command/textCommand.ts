@@ -5,7 +5,7 @@ import { prisma } from "../../db.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { recordAudit } from "../../lib/audit.js";
 import { EXECUTE_TEXT_COMMAND_ACTION } from "../../lib/actionContracts.js";
-import { CANONICAL_COMMAND, isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand } from "../../lib/commandParser.js";
+import { CANONICAL_COMMAND, isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand, readingControl } from "../../lib/commandParser.js";
 import { dispatchParsedCommand, type CommandResponse } from "../../lib/commandExecutor.js";
 import { resolveLearningAliases } from "../../services/learningService.js";
 import { addressedAs, aliasVocabulary } from "../../services/voiceAliasService.js";
@@ -21,6 +21,7 @@ import { evaluateEmmaCommand } from "../../services/emmaPolicyService.js";
 import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorService.js";
 import { getPendingEmmaActionName } from "../../services/emmaExecutableActionService.js";
 import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
+import { activeReading } from "../../services/messageReadingService.js";
 import { assistantNameFor } from "../../lib/assistantName.js";
 import { acceptedByService, observeShadow, parserOutcomeOf } from "../../agents/shadowAgent.js";
 import { isReviewPending, runWithApprovalBinding } from "../../lib/executionEngine.js";
@@ -133,6 +134,14 @@ type ParsedTextCommand = ReturnType<typeof parseTextCommand>;
  * Polish sentence is not understood.
  */
 async function resolveUserCommand(user: AuthedUser, text: string, reader: string): Promise<ParsedTextCommand> {
+  // While messages are read out one sender at a time, "přeskoč ho", "další"
+  // and "starší" move through them — before anything else, and only then: at
+  // any other time a bare "další" means nothing.
+  const reading = reader === CANONICAL_COMMAND ? undefined : activeReading(user);
+  if (reading) {
+    const control = readingControl(text, reader, { addressedAs: [...addressedAs(user), assistantNameFor(user)], senders: [reading.current, reading.next] });
+    if (control) return control;
+  }
   const parsed = parseTextCommand(text, reader);
   if (parsed.intent !== "unrecognized") return parsed;
   const [clientCreatePending, gmailPending, whatsappPending, notificationDeletionPending, pendingEmmaAction, agentProposalPending] = await Promise.all([

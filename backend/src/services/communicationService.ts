@@ -355,49 +355,6 @@ export async function listEnquiries(user: AuthedUser, query: EnquiryQuery): Prom
   return items;
 }
 
-export interface RecentChannelMessage {
-  id: string;
-  sender: string;
-  text: string;
-  receivedAt: Date;
-  /**
-   * Whether a reply was sent from Secretary. WhatsApp replies only leave from
-   * here, so false means unanswered. An email may have been answered straight
-   * from Gmail, so for email only a reply sent from here is stated.
-   */
-  replied?: boolean;
-}
-
-/** The newest received messages on one channel, newest first, for reading aloud. */
-export async function recentChannelMessages(user: AuthedUser, channel: "email" | "whatsapp", limit = 5): Promise<{ items: RecentChannelMessage[]; unansweredToday: number }> {
-  const intakes = await prisma.communicationIntake.findMany({
-    where: { companyId: user.companyId, channel },
-    orderBy: { receivedAt: "desc" },
-    take: Math.max(1, Math.min(20, limit)),
-    select: { id: true, senderName: true, senderEmail: true, senderPhone: true, messageText: true, receivedAt: true, sourceMetadata: true },
-  });
-  const replied = (metadata: unknown) => {
-    const replies = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata as { replies?: unknown }).replies : undefined;
-    return Array.isArray(replies) && replies.length > 0;
-  };
-  const items = intakes.map((intake) => ({
-    id: intake.id,
-    sender: intake.senderName ?? intake.senderEmail ?? intake.senderPhone ?? "Unknown sender",
-    text: intake.messageText,
-    receivedAt: intake.receivedAt,
-    ...(channel === "whatsapp" ? { replied: replied(intake.sourceMetadata) } : replied(intake.sourceMetadata) ? { replied: true } : {}),
-  }));
-  let unansweredToday = 0;
-  if (channel === "whatsapp") {
-    const lastDay = await prisma.communicationIntake.findMany({
-      where: { companyId: user.companyId, channel, receivedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
-      select: { sourceMetadata: true },
-    });
-    unansweredToday = lastDay.filter((intake) => !replied(intake.sourceMetadata)).length;
-  }
-  return { items, unansweredToday };
-}
-
 export async function listUnresolvedIntakeEnquiries(user: AuthedUser): Promise<EnquiryListItem[]> {
   const items = await listEnquiries(user, { resolution: "unresolved" });
   return items.filter((item) => item.sourceType === "communication_intake");
