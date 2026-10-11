@@ -303,6 +303,13 @@ async function requestTranscription(form: FormData, stopWhen?: (text: string) =>
     body: form,
     signal: AbortSignal.any([cutOff.signal, AbortSignal.timeout(taskTimeoutMs("transcription"))]),
   });
+  if (!response.ok && streamed && response.status === 400) {
+    // A model or account that refuses to stream still hears the sentence: ask
+    // for the whole text instead, as before streaming.
+    await response.body?.cancel().catch(() => undefined);
+    console.log("[transcription] streaming refused (400), asked again without it");
+    return requestTranscription(form);
+  }
   if (!response.ok) throw new Error(`OPENAI_TRANSCRIPTION_FAILED_${response.status}`);
   if (!streamed || !response.body || !response.headers.get("content-type")?.includes("text/event-stream")) {
     const parsed = await response.json();

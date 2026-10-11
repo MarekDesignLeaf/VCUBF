@@ -316,6 +316,21 @@ describe("voice assistant interpretation", () => {
     await assert.rejects(transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo"), /OPENAI_TRANSCRIPTION_INCOMPLETE/);
   });
 
+  it("asks for the whole text when streaming is refused, rather than hearing nothing", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    const streams: unknown[] = [];
+    globalThis.fetch = async (_url, init) => {
+      const form = init?.body as FormData;
+      streams.push(form.get("stream"));
+      if (form.get("stream")) return Response.json({ error: { message: "stream is not supported" } }, { status: 400 });
+      return Response.json({ text: "Alfonzo, ukaž klienty." });
+    };
+    const result = await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo");
+    assert.equal(result.text, "Alfonzo, ukaž klienty.");
+    assert.deepEqual(streams, ["true", null]);
+  });
+
   it("asks whisper-1, which cannot stream, for the whole text", async () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
     process.env.OPENAI_TRANSCRIPTION_MODEL = "whisper-1";
