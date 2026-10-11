@@ -1,4 +1,5 @@
-import { Router, raw } from "express";
+import { createHash } from "node:crypto";
+import { Router, raw, type Response } from "express";
 import { z } from "zod";
 import { requireAuth, type AuthedUser } from "../../middleware/auth.js";
 import { prisma } from "../../db.js";
@@ -494,6 +495,28 @@ commandRouter.post("/realtime/session", requirePermission(EXECUTE_TEXT_COMMAND_A
 });
 
 /**
+ * One line per answer, so how Alfonzo answered can be read from the logs
+ * without asking (11. 10.: the model gave the same 49-token answer to almost
+ * every sentence for half a day, and nothing showed which answer it was).
+ * No words of the request or the reply are logged: only the language, which
+ * path answered (the grammar, or the model and its kind of answer), the
+ * intent, the error, the lengths and a short hash of the reply, which shows
+ * the same reply repeating.
+ */
+function logAssistantOutcome(res: Response, language: string, receivedAt: number, text: string, path: () => string) {
+  const send = res.json.bind(res);
+  res.json = (body: unknown) => {
+    try {
+      const answer = (body && typeof body === "object" ? body : {}) as { kind?: unknown; intent?: unknown; error?: unknown; assistantMessage?: unknown; message?: unknown };
+      const reply = typeof answer.assistantMessage === "string" ? answer.assistantMessage : typeof answer.message === "string" ? answer.message : "";
+      const replyId = reply ? createHash("sha256").update(reply).digest("hex").slice(0, 10) : "-";
+      console.log(`[assistant] lang=${language} path=${path()} status=${res.statusCode} kind=${String(answer.kind ?? "-")} intent=${String(answer.intent ?? "-")} error=${String(answer.error ?? "-")} heard_chars=${text.length} reply_chars=${reply.length} reply_id=${replyId} ms=${Date.now() - receivedAt}`);
+    } catch { /* a log line must never cost the answer */ }
+    return send(body);
+  };
+}
+
+/**
  * When an answer to the voice assistant must be ready. The Windows companion
  * gives up after eighteen seconds; an agent run that would end later is
  * pointless, so it gets what is left of these sixteen.
@@ -510,9 +533,10 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
   // A stale desktop/browser payload must never switch one response back to
   // English while the menu and the rest of {assistant} are using another language.
   const language = user.voiceLanguage;
+  let assistant: Awaited<ReturnType<typeof interpretVoiceRequest>> | undefined;
+  logAssistantOutcome(res, language, receivedAt, text, () => (assistant ? `model:${assistant.kind}` : "grammar"));
   const alias = await resolveLearningAliases(user, text);
   let command = await resolveUserCommand(user, alias.resolvedText, language);
-  let assistant: Awaited<ReturnType<typeof interpretVoiceRequest>> | undefined;
 
   if (command.intent === "unrecognized") {
     try {

@@ -278,7 +278,11 @@ export async function transcribeVoiceAudio(
   // invents plausible sentences from near-silent audio (observed: Czech website
   // names), so anything shaped like a hallucination becomes empty text and the
   // caller simply ignores it.
-  if (isLikelyHallucination(text)) return { text: "", model, ...(text ? { dropped: "hallucination" as const } : {}) };
+  const hallucination = isLikelyHallucination(text);
+  // The language asked for and what came back, without the words: a sentence
+  // heard in the wrong language is what a stray language switch looks like.
+  console.log(`[transcription] lang=${isoLanguage} chars=${text.length}${hallucination && text ? " dropped=hallucination" : ""}`);
+  if (hallucination) return { text: "", model, ...(text ? { dropped: "hallucination" as const } : {}) };
   return { text, model };
 }
 
