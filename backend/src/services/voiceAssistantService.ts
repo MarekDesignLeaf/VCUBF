@@ -278,12 +278,72 @@ export async function transcribeVoiceAudio(
   // invents plausible sentences from near-silent audio (observed: Czech website
   // names), so anything shaped like a hallucination becomes empty text and the
   // caller simply ignores it.
+  // Asked again without the prompt, the decoder loses the name it was told to
+  // expect and writes what it heard ("Alfonso", "Al Fonzo"); the page then
+  // found no wake word and ignored the command (11. 10., 12:43–12:45 UTC:
+  // eight sentences in a row echoed, were heard again and went nowhere).
+  text = restoreWakeWord(text, wakeWord);
   const hallucination = isLikelyHallucination(text);
   // The language asked for and what came back, without the words: a sentence
   // heard in the wrong language is what a stray language switch looks like.
   console.log(`[transcription] lang=${isoLanguage} chars=${text.length}${hallucination && text ? " dropped=hallucination" : ""}`);
   if (hallucination) return { text: "", model, ...(text ? { dropped: "hallucination" as const } : {}) };
   return { text, model };
+}
+
+function editDistance(left: string, right: string): number {
+  const row = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i += 1) {
+    let diagonal = row[0];
+    row[0] = i;
+    for (let j = 1; j <= right.length; j += 1) {
+      const above = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, diagonal + (left[i - 1] === right[j - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return row[right.length];
+}
+
+/**
+ * The assistant's name written as it is configured wherever the transcript
+ * has a near miss of it: one word or two run together, starting with the same
+ * two letters and at most two letters different ("Alfonso", "Alfons", "Al
+ * Fonzo", "Alfonzu"). Only the name is touched; every other word stays as
+ * heard. Names shorter than five letters are left alone, as a near miss of a
+ * short word is too often a different word.
+ */
+export function restoreWakeWord(text: string, wakeWord: string): string {
+  const name = wakeWord.replace(/\{assistant\}/g, "").trim().split(/\s+/).pop() ?? "";
+  const fold = (value: string) => value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+  const target = fold(name);
+  if (target.length < 5) return text;
+  const near = (said: string) => {
+    const folded = fold(said);
+    return folded !== target && folded.slice(0, 2) === target.slice(0, 2)
+      && Math.abs(folded.length - target.length) <= 2 && editDistance(folded, target) <= 2;
+  };
+  const words = [...text.matchAll(/\p{L}+/gu)];
+  let result = "";
+  let from = 0;
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index];
+    const next = words[index + 1];
+    const start = word.index!;
+    const end = start + word[0].length;
+    // "Al Fonzo": two words, nothing but a space or hyphen between them.
+    const pairEnd = next && /^[\s-]$/.test(text.slice(end, next.index!)) ? next.index! + next[0].length : -1;
+    const pair = pairEnd > 0 ? word[0] + next[0] : "";
+    if (pair && (fold(pair) === target || near(pair)) && fold(word[0]) !== target && !near(word[0])) {
+      result += text.slice(from, start) + name;
+      from = pairEnd;
+      index += 1;
+    } else if (near(word[0])) {
+      result += text.slice(from, start) + name;
+      from = end;
+    }
+  }
+  return result + text.slice(from);
 }
 
 /** Transcription models that can stream their text (whisper-1 cannot). */
