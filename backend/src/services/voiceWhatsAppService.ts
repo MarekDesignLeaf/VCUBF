@@ -9,6 +9,7 @@ import {
   type ReviewedActionDefinition,
 } from "../lib/executionEngine.js";
 import { recentAuditedSend, repeatNote, sendFingerprint } from "../lib/repeatedSend.js";
+import { withDialledPlus } from "../lib/contactNormalization.js";
 import { validateWhatsAppConfiguration, WhatsAppBusinessAdapterError } from "../connectors/whatsappBusinessAdapter.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { prisma } from "../db.js";
@@ -67,7 +68,8 @@ export async function hasPendingVoiceWhatsAppMessage(user: AuthedUser) {
 
 export async function prepareVoiceWhatsAppMessage(user: AuthedUser, rawInput: unknown): Promise<ServiceResult<unknown>> {
   if (!canManageConnectors(user)) return fail(403, "MISSING_PERMISSION", "Connector management permission is required to send WhatsApp messages.");
-  const parsed = sendWhatsAppMessageSchema.safeParse(rawInput);
+  const input = rawInput && typeof rawInput === "object" ? rawInput as Record<string, unknown> : {};
+  const parsed = sendWhatsAppMessageSchema.safeParse({ ...input, to: withDialledPlus(input.to) });
   if (!parsed.success) return fail(400, "VALIDATION_FAILED", "I need a valid international phone number and a message.");
   const source = await eligibleSource(user);
   if (!source.ok) return source;

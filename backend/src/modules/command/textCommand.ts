@@ -22,7 +22,7 @@ import { evaluateEmmaCommand } from "../../services/emmaPolicyService.js";
 import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorService.js";
 import { getPendingEmmaActionName } from "../../services/emmaExecutableActionService.js";
 import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
-import { activeReading } from "../../services/messageReadingService.js";
+import { activeReading, senderJustRead } from "../../services/messageReadingService.js";
 import { assistantNameFor, nameAcknowledgement, onlyTheName } from "../../lib/assistantName.js";
 import { acceptedByService, observeShadow, parserOutcomeOf } from "../../agents/shadowAgent.js";
 import { isReviewPending, runWithApprovalBinding } from "../../lib/executionEngine.js";
@@ -588,6 +588,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
         history,
         memoryContext,
         behaviorScenario,
+        messageJustRead: senderJustRead(user),
       });
     } catch (error) {
       console.error("Voice assistant interpretation failed", error instanceof Error ? error.message : error);
