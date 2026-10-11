@@ -7,6 +7,7 @@ import { createRealtimeClientSession, interpretVoiceRequest, isPromptEcho, isPro
 const originalFetch = globalThis.fetch;
 const originalKey = process.env.OPENAI_API_KEY;
 const originalTranscriptionModel = process.env.OPENAI_TRANSCRIPTION_MODEL;
+const originalTranscriptionPrompt = process.env.OPENAI_TRANSCRIPTION_PROMPT;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -14,6 +15,8 @@ afterEach(() => {
   else process.env.OPENAI_API_KEY = originalKey;
   if (originalTranscriptionModel === undefined) delete process.env.OPENAI_TRANSCRIPTION_MODEL;
   else process.env.OPENAI_TRANSCRIPTION_MODEL = originalTranscriptionModel;
+  if (originalTranscriptionPrompt === undefined) delete process.env.OPENAI_TRANSCRIPTION_PROMPT;
+  else process.env.OPENAI_TRANSCRIPTION_PROMPT = originalTranscriptionPrompt;
 });
 
 /** The vocabulary prompt, word by word, as the model reads it back. */
@@ -220,39 +223,41 @@ describe("voice assistant interpretation", () => {
     assert.match(session.behaviorInstructions, /warm and conversational/);
   });
 
-  it("transcribes an in-memory WAV without persisting or exposing the server key", async () => {
+  it("transcribes an in-memory WAV without persisting or exposing the server key, and sends the gpt models no prompt", async () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    delete process.env.OPENAI_TRANSCRIPTION_PROMPT;
+    let calls = 0;
     globalThis.fetch = async (url, init) => {
+      calls += 1;
       assert.equal(String(url), "https://api.openai.com/v1/audio/transcriptions");
       assert.equal(new Headers(init?.headers).get("authorization"), "Bearer server-only-test-key");
       const form = init?.body as FormData;
-      // gpt-4o-transcribe is the default: it hears short Czech and English
-      // commands measurably better than whisper-1. It does treat the prompt as
-      // an instruction and echo it back when the audio carries no speech, which
-      // is what isPromptEcho() exists to catch, so the vocabulary prompt below
-      // is still asserted.
-      assert.equal(form.get("model"), process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe");
+      assert.equal(form.get("model"), "gpt-4o-transcribe");
       assert.equal(form.get("language"), "en");
       // Deterministic decoding, so unclear audio is not guessed through.
       assert.equal(form.get("temperature"), "0");
-      // The prompt biases the decoder rather than merely naming the wake word.
-      const prompt = String(form.get("prompt"));
-      assert.match(prompt, /Emma/);
-      assert.ok(prompt.length > "Emma".length, "prompt must carry vocabulary, not just the wake word");
+      // 11. 10.: gpt-4o-transcribe read the vocabulary prompt back instead of
+      // most sentences, and woke on "Alfonzo." from near-silence. No prompt.
+      assert.equal(form.get("prompt"), null);
+      assert.equal(form.get("stream"), null);
       const file = form.get("file") as Blob;
       assert.equal(file.type, "audio/wav");
       assert.equal(file.size, 48);
-      return new Response(JSON.stringify({ text: " Emma, show contacts. " }), {
+      return new Response(JSON.stringify({ text: " Alfonso, show contacts. " }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     };
-    const result = await transcribeVoiceAudio(Buffer.alloc(48), "en-GB", "Emma");
-    assert.deepEqual(result, { text: "Emma, show contacts.", model: process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe" });
+    const result = await transcribeVoiceAudio(Buffer.alloc(48), "en-GB", "Alfonzo");
+    // Without the prompt the name comes back as heard; it is written as configured.
+    assert.deepEqual(result, { text: "Alfonzo, show contacts.", model: "gpt-4o-transcribe" });
+    assert.equal(calls, 1, "one request, nothing to retry");
   });
 
-  it("passes learned vocabulary to the decoder so misheard words improve", async () => {
+  it("gives whisper-1 the vocabulary prompt with the wake word and learned words, so misheard words improve", async () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "whisper-1";
     let seenPrompt = "";
     globalThis.fetch = async (_url, init) => {
       seenPrompt = String((init?.body as FormData).get("prompt"));
@@ -264,6 +269,7 @@ describe("voice assistant interpretation", () => {
     await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Emma", ["Škoda Auto", "Kvasnička"]);
     // Correcting a misheard word after the fact is a patch; naming it up front
     // is what stops it being misheard in the first place.
+    assert.match(seenPrompt, /Emma/);
     assert.match(seenPrompt, /Škoda Auto/);
     assert.match(seenPrompt, /Kvasnička/);
   });
@@ -283,6 +289,8 @@ describe("voice assistant interpretation", () => {
   it("restores the name in the sentence asked for again without the prompt", async () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
     process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    // The streamed echo path runs only with the prompt, which is off for the gpt models by default.
+    process.env.OPENAI_TRANSCRIPTION_PROMPT = "on";
     globalThis.fetch = async (_url, init) => {
       const form = init?.body as FormData;
       if (form.get("prompt")) return sseResponse(ECHO);
@@ -304,6 +312,8 @@ describe("voice assistant interpretation", () => {
   it("cuts a streamed prompt echo off at its first words and asks again without the prompt", async () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
     process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    // The streamed echo path runs only with the prompt, which is off for the gpt models by default.
+    process.env.OPENAI_TRANSCRIPTION_PROMPT = "on";
     const read = { count: 0 };
     const cancelled = { value: false };
     const requests: Array<{ prompt: unknown; stream: unknown }> = [];
@@ -326,6 +336,8 @@ describe("voice assistant interpretation", () => {
   it("cuts an echo off over a real HTTP connection and still asks again (not an error)", async () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
     process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    // The streamed echo path runs only with the prompt, which is off for the gpt models by default.
+    process.env.OPENAI_TRANSCRIPTION_PROMPT = "on";
     const seen: Array<{ stream: boolean; prompt: boolean }> = [];
     let closedEarly = false;
     const server = http.createServer((req, res) => {
@@ -370,6 +382,8 @@ describe("voice assistant interpretation", () => {
   it("takes a streamed sentence from its closing event, in one request", async () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
     process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    // The streamed echo path runs only with the prompt, which is off for the gpt models by default.
+    process.env.OPENAI_TRANSCRIPTION_PROMPT = "on";
     let calls = 0;
     globalThis.fetch = async () => {
       calls += 1;
@@ -383,6 +397,8 @@ describe("voice assistant interpretation", () => {
   it("reads the closing event even without the blank line after it, and a CRLF split across chunks", async () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
     process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    // The streamed echo path runs only with the prompt, which is off for the gpt models by default.
+    process.env.OPENAI_TRANSCRIPTION_PROMPT = "on";
     const encoder = new TextEncoder();
     const parts = [
       `data: ${JSON.stringify({ type: "transcript.text.delta", delta: "Alfonzo, ukaž" })}\r\n\r`,
@@ -402,6 +418,8 @@ describe("voice assistant interpretation", () => {
   it("asks for the whole text when a stream breaks off or reports an error, never taking a shorter sentence", async () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
     process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    // The streamed echo path runs only with the prompt, which is off for the gpt models by default.
+    process.env.OPENAI_TRANSCRIPTION_PROMPT = "on";
     for (const broken of [
       () => sseResponse(["Alfonzo, pošli", " Honzovi"], { done: false }),
       () => new Response(`data: ${JSON.stringify({ error: { message: "server error" } })}\n\n`, { headers: { "Content-Type": "text/event-stream" } }),
@@ -421,6 +439,8 @@ describe("voice assistant interpretation", () => {
   it("asks for the whole text when streaming is refused, but does not repeat any other refusal", async () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
     process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    // The streamed echo path runs only with the prompt, which is off for the gpt models by default.
+    process.env.OPENAI_TRANSCRIPTION_PROMPT = "on";
     const streams: unknown[] = [];
     globalThis.fetch = async (_url, init) => {
       const form = init?.body as FormData;

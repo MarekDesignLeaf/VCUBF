@@ -247,16 +247,24 @@ export async function transcribeVoiceAudio(
   // Deterministic decoding: Whisper's default temperature lets it guess through
   // unclear audio, which is exactly where wrong words come from.
   form.append("temperature", "0");
-  // The prompt biases the decoder vocabulary. Short spoken commands carry little
-  // acoustic context, so naming the words the app expects is the single biggest
-  // accuracy win.
-  const prompt = buildTranscriptionPrompt(isoLanguage, wakeWord, extraVocabulary);
-
   // Voice runs on OpenAI only: there is no local recogniser and no other
   // provider to fall back to.
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
 
+  // The vocabulary prompt helped whisper-1. The gpt transcribe models read it
+  // back instead of the speech: on 11. 10. most sentences came back as the
+  // prompt and had to be asked for again without it — slower, and without the
+  // name, so commands were lost — and near-silence came back as the prompt's
+  // first word, "Alfonzo.", a wake-up nobody said. They get no prompt now; the
+  // name is restored from near misses below (restoreWakeWord).
+  // OPENAI_TRANSCRIPTION_PROMPT=on brings the prompt back for them.
+  if (!usesTranscriptionPrompt(model)) {
+    return finishTranscription((await requestTranscription(form)).text, model, wakeWord, isoLanguage);
+  }
+  // Short spoken commands carry little acoustic context, so naming the words
+  // the app expects helps whisper-1.
+  const prompt = buildTranscriptionPrompt(isoLanguage, wakeWord, extraVocabulary);
   form.append("prompt", prompt);
   // Streamed, so an echo is seen in its first words and cut off there rather
   // than read to the end (10.–11. 10.: most evening commands echoed, and each
@@ -274,19 +282,27 @@ export async function transcribeVoiceAudio(
     if (!retried || isPromptEcho(retried, prompt)) return { text: "", model, dropped: "prompt_echo" };
     text = retried;
   }
+  return finishTranscription(text, model, wakeWord, isoLanguage);
+}
+
+/** Whether the vocabulary prompt is sent: always to whisper-1, to the gpt models only when switched on. */
+function usesTranscriptionPrompt(model: string) {
+  return !STREAMING_TRANSCRIPTION.test(model) || process.env.OPENAI_TRANSCRIPTION_PROMPT?.trim().toLowerCase() === "on";
+}
+
+function finishTranscription(heard: string, model: string, wakeWord: string, isoLanguage: string): VoiceTranscription {
+  // Without the prompt the decoder does not know the name it should expect
+  // and writes what it heard ("Alfonso", "Al Fonzo"); the page then found no
+  // wake word and ignored the command (11. 10., 12:43–12:45 UTC).
+  const text = restoreWakeWord(heard, wakeWord);
   // Silence is a normal outcome of always-on listening, not an error. Whisper
   // invents plausible sentences from near-silent audio (observed: Czech website
   // names), so anything shaped like a hallucination becomes empty text and the
   // caller simply ignores it.
-  // Asked again without the prompt, the decoder loses the name it was told to
-  // expect and writes what it heard ("Alfonso", "Al Fonzo"); the page then
-  // found no wake word and ignored the command (11. 10., 12:43–12:45 UTC:
-  // eight sentences in a row echoed, were heard again and went nowhere).
-  text = restoreWakeWord(text, wakeWord);
   const hallucination = isLikelyHallucination(text);
-  // The language asked for and what came back, without the words: a sentence
-  // heard in the wrong language is what a stray language switch looks like.
-  console.log(`[transcription] lang=${isoLanguage} chars=${text.length}${hallucination && text ? " dropped=hallucination" : ""}`);
+  // What was heard, cut short, so it can be read from the logs without asking
+  // (Marek, 11. 10.: "zapni si logování, ať se mě nemusíš ptát").
+  console.log(`[transcription] lang=${isoLanguage} chars=${text.length}${hallucination && text ? " dropped=hallucination" : ""} heard=${JSON.stringify(text.length > 80 ? `${text.slice(0, 80)}…` : text)}`);
   if (hallucination) return { text: "", model, ...(text ? { dropped: "hallucination" as const } : {}) };
   return { text, model };
 }
