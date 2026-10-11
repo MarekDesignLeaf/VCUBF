@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { after, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import { isPromptEcho, transcribeVoiceAudio } from "../src/services/voiceAssistantService.js";
 
 const realFetch = globalThis.fetch;
@@ -10,7 +10,15 @@ const PROMPT =
   "přidej poznámku, naplánuj schůzku, kalendář, zákazník, termín, cena";
 
 describe("GPT transcription must not execute its own vocabulary prompt", () => {
-  after(() => { globalThis.fetch = realFetch; });
+  // The gpt models get no prompt by default (11. 10.); these cover the prompt
+  // when it is switched back on, where an echo must still never run.
+  const promptSetting = process.env.OPENAI_TRANSCRIPTION_PROMPT;
+  before(() => { process.env.OPENAI_TRANSCRIPTION_PROMPT = "on"; });
+  after(() => {
+    globalThis.fetch = realFetch;
+    if (promptSetting === undefined) delete process.env.OPENAI_TRANSCRIPTION_PROMPT;
+    else process.env.OPENAI_TRANSCRIPTION_PROMPT = promptSetting;
+  });
 
   it("recognises the prompt echoed back for silent audio", () => {
     assert.equal(isPromptEcho("context: ### Emma ###", PROMPT), true);
