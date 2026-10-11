@@ -31,7 +31,7 @@ import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction, g
 import { cancelAgentProposal, confirmAgentProposal } from "../agents/agentProposal.js";
 import { SAFE_MODE_ACTIVE, SafeModeActiveError, safeModeMessage, safeModeSince } from "./safeMode.js";
 import { commandAllowedInSafeMode } from "./safeModeCommands.js";
-import { spokenCancelled, spokenCompleted, spokenError, spokenNothingBeingRead, spokenOutcome, spokenReadingTurn, spokenReview } from "./spokenActionMessages.js";
+import { spokenCancelled, spokenCompleted, spokenError, spokenNothingBeingRead, spokenOutcome, spokenReadingTurn, spokenReview, spokenWhatsAppDetailsMissing } from "./spokenActionMessages.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -1289,7 +1289,8 @@ async function dispatchAllowedCommand(
         error: result.ok ? undefined : result.error,
         message: result.ok
           ? spokenReview("send_whatsapp", (result.data as { preview?: Record<string, unknown> }).preview, user.voiceLanguage) ?? (result.data as { message?: string }).message
-          : spokenError(result.error, result.extra, user.voiceLanguage) ?? result.message,
+          // 11. 10.: this came back in English ("I need a valid international phone number…") to a Czech user.
+          : (result.error === "VALIDATION_FAILED" ? spokenWhatsAppDetailsMissing(user.voiceLanguage) : spokenError(result.error, result.extra, user.voiceLanguage)) ?? result.message,
       };
       break;
     }

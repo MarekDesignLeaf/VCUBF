@@ -23,7 +23,7 @@ import { getActiveEmmaBehaviorScenario } from "../../services/emmaBehaviorServic
 import { getPendingEmmaActionName } from "../../services/emmaExecutableActionService.js";
 import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
 import { activeReading } from "../../services/messageReadingService.js";
-import { assistantNameFor } from "../../lib/assistantName.js";
+import { assistantNameFor, nameAcknowledgement, onlyTheName } from "../../lib/assistantName.js";
 import { acceptedByService, observeShadow, parserOutcomeOf } from "../../agents/shadowAgent.js";
 import { isReviewPending, runWithApprovalBinding } from "../../lib/executionEngine.js";
 import { agentMayHandle, hasAgentProposalPending, proposeWithAgent } from "../../agents/agentProposal.js";
@@ -559,6 +559,13 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
   // English while the menu and the rest of {assistant} are using another language.
   const language = user.voiceLanguage;
   let assistant: Awaited<ReturnType<typeof interpretVoiceRequest>> | undefined;
+  if (onlyTheName(text, [...addressedAs(user), assistantNameFor(user)])) {
+    // Just "Alfonzo." in an open conversation: he answers to his name, as he
+    // does when the conversation opens. The model used to get it and answered
+    // "Pracuji v češtině…" (11. 10.).
+    logAssistantOutcome(res, language, receivedAt, text, () => ({ path: "name" }));
+    return res.json({ ok: true, kind: "reply", actionExecuted: false, message: nameAcknowledgement(language) });
+  }
   const alias = await resolveLearningAliases(user, text);
   let command = await resolveUserCommand(user, alias.resolvedText, language);
   logAssistantOutcome(res, language, receivedAt, text, () => ({
@@ -594,6 +601,10 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
         error: "ASSISTANT_UNAVAILABLE",
         message: assistantServiceMessage(language, "unavailable"),
       });
+    }
+    if (assistant.kind === "ignore") {
+      // Not meant for Alfonzo (another language, a television): no answer at all.
+      return res.json({ ok: true, kind: "ignore", actionExecuted: false, message: "" });
     }
     if (assistant.kind !== "command" || !assistant.canonical_command) {
       // A multi-step objective goes to the agent where it may act (masterplan

@@ -525,6 +525,14 @@ export function spokenReadingTurn(turn: ReadingTurn, language: string, now = new
   return parts.join(" ");
 }
 
+/** A WhatsApp message to a number that is not a full international one, or with no text. */
+export function spokenWhatsAppDetailsMissing(language: string) {
+  const lang = locale(language);
+  return lang === "cs" ? "Potřebuji celé mezinárodní číslo i s předvolbou, například plus čtyři čtyři, a text zprávy."
+    : lang === "pl" ? "Potrzebuję pełnego numeru międzynarodowego z kierunkowym, na przykład plus czterdzieści cztery, i treści wiadomości."
+      : "I need the full international number with its country code, for example plus four four, and the message text.";
+}
+
 /** "Přeskoč" with nothing being read: say so, and how to start. */
 export function spokenNothingBeingRead(language: string) {
   const lang = locale(language);

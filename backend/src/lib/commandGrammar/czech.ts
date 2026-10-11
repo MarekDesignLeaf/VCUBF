@@ -225,9 +225,10 @@ function records(text: string): ParsedCommand | undefined {
 }
 
 // "přečti zprávy na WhatsAppu", "ukaž mi WhatsApp", "přečti e-maily.", "přečti
-// zprávy z e-mailu". Folded and without the full stop dictation adds, so reading
-// them needs no language model.
-const READ_MESSAGES = /^(?:ukaz|precti|otevri|zobraz)(?:\s+mi)?\s+(?:(?:zpravy|posledni\s+zpravy)\s+(?:na|z|ze|v|ve)\s+)?(whatsappu?|whatsappove\s+zpravy|e-?maily|e-?mailu|e-?mailove\s+zpravy|postu)$/u;
+// zprávy z e-mailu" — and the Slovak spelling the transcript sometimes gives
+// Czech ("prečti správy na WhatsApp"). Folded and without the full stop
+// dictation adds, so reading them needs no language model.
+const READ_MESSAGES = /^(?:ukaz|precti|precitaj|otevri|zobraz)(?:\s+mi)?\s+(?:(?:zpravy|spravy|posledni\s+(?:zpravy|spravy))\s+(?:na|z|ze|v|ve)\s+)?(whatsappu?|whatsappove\s+zpravy|e-?maily|e-?mailu|e-?mailove\s+zpravy|postu)$/u;
 
 function knowledge(text: string): ParsedCommand | undefined {
   // Only a direct "zapamatuj si" is ever kept. Dictation drops "že" far more

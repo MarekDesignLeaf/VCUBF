@@ -52,14 +52,18 @@ describe("Emma notification deletion", () => {
     assert.match(typed.body.message, /^Tomu příkazu nerozumím\./, "said in Czech, with a Czech example");
     assert.equal(await prisma.voicePendingAction.count({ where: { actionType: "delete_all_notifications" } }), 0, "nothing was prepared");
 
-    // The language model is told which language is on and to act on no other.
+    // The language model is told which language is on and to act on no other —
+    // and a sentence in another language gets no answer at all, not a lecture
+    // ("Pracuji v češtině…" on every sentence, 11. 10.).
     const previousKey = process.env.OPENAI_API_KEY;
     const previousFetch = globalThis.fetch;
     let instructions = "";
+    let modelCalls = 0;
     process.env.OPENAI_API_KEY = "test-key";
     globalThis.fetch = async (_input, init) => {
+      modelCalls += 1;
       instructions = JSON.parse(String(init?.body)).instructions;
-      return Response.json({ output: [{ content: [{ text: JSON.stringify({ kind: "reply", canonical_command: null, message: "Teď mluvím česky." }) }] }] });
+      return Response.json({ output: [{ content: [{ text: JSON.stringify({ kind: "ignore", canonical_command: null, message: "" }) }] }] });
     };
     try {
       const spoken = await request(app)
@@ -67,7 +71,21 @@ describe("Emma notification deletion", () => {
         .set("Authorization", `Bearer ${token}`)
         .send({ text: "usuń wszystkie powiadomienia", input_method: "voice_transcript", history: [] });
       assert.equal(spoken.body.actionExecuted, false);
-      assert.match(instructions, /The language switched on is Czech\. Act only on what the user says in Czech\./);
+      assert.equal(spoken.body.kind, "ignore", JSON.stringify(spoken.body));
+      assert.equal(spoken.body.message, "");
+      assert.match(instructions, /The language switched on is Czech\./);
+      assert.match(instructions, /Slovak forms/);
+      assert.match(instructions, /return kind ignore with an empty message/);
+      assert.doesNotMatch(instructions, /say, in Czech, that you are working in Czech/);
+
+      // The bare name is answered as the name is, without the model.
+      const named = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ text: "Alfonzo.", input_method: "voice_transcript", history: [] });
+      assert.equal(named.body.kind, "reply");
+      assert.equal(named.body.message, "Ano?");
+      assert.equal(modelCalls, 1, "the name alone never reaches the model");
     } finally {
       globalThis.fetch = previousFetch;
       if (previousKey === undefined) delete process.env.OPENAI_API_KEY;

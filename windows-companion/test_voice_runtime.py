@@ -99,6 +99,15 @@ class RuntimeControls(unittest.TestCase):
         self.assertEqual(calls[1]["ack_control"], "pause")
         self.assertFalse(calls[1]["listening"])
 
+    def test_sentence_not_meant_for_alfonzo_is_not_answered(self):
+        session = object.__new__(voice.VoiceSessionV2)
+        session.language = "cs-CZ"
+        # Secretary leaves a sentence in another language (a television)
+        # unanswered; the companion must not fill the silence with "completed".
+        self.assertEqual(session.result_message({"ok": True, "kind": "ignore", "actionExecuted": False, "message": ""}), "")
+        self.assertEqual(session.result_message({"ok": True, "kind": "reply", "message": "Ano?"}), "Ano?")
+        self.assertEqual(session.result_message({"ok": True, "kind": "action", "message": ""}), "Požadavek byl úspěšně dokončen.")
+
 
 if __name__ == "__main__":
     unittest.main()
