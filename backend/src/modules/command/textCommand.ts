@@ -496,21 +496,28 @@ commandRouter.post("/realtime/session", requirePermission(EXECUTE_TEXT_COMMAND_A
 
 /**
  * One line per answer, so how Alfonzo answered can be read from the logs
- * without asking (11. 10.: the model gave the same 49-token answer to almost
- * every sentence for half a day, and nothing showed which answer it was).
- * No words of the request or the reply are logged: only the language, which
- * path answered (the grammar, or the model and its kind of answer), the
- * intent, the error, the lengths and a short hash of the reply, which shows
- * the same reply repeating.
+ * without asking Marek (11. 10.: the model gave the same 49-token answer to
+ * almost every sentence for half a day, and nothing showed which answer it
+ * was; Marek: "zapni si logování, ať se mě nemusíš ptát").
+ *
+ * What was heard is logged exactly as the audit keeps it — the text of a
+ * message to be sent is redacted — and cut to 160 characters. Alfonzo's own
+ * reply is logged when it is not the result of a command (a model reply, a
+ * clarification, an error), cut to 200; a command's result can carry a
+ * customer's message, so only its length and a short hash are logged. The
+ * hash shows the same reply repeating.
  */
-function logAssistantOutcome(res: Response, language: string, receivedAt: number, text: string, path: () => string) {
+function logAssistantOutcome(res: Response, language: string, receivedAt: number, text: string, details: () => { path: string; canonical?: string }) {
   const send = res.json.bind(res);
+  const cut = (value: string, max: number) => JSON.stringify(value.length > max ? `${value.slice(0, max)}…` : value);
   res.json = (body: unknown) => {
     try {
       const answer = (body && typeof body === "object" ? body : {}) as { kind?: unknown; intent?: unknown; error?: unknown; assistantMessage?: unknown; message?: unknown };
       const reply = typeof answer.assistantMessage === "string" ? answer.assistantMessage : typeof answer.message === "string" ? answer.message : "";
       const replyId = reply ? createHash("sha256").update(reply).digest("hex").slice(0, 10) : "-";
-      console.log(`[assistant] lang=${language} path=${path()} status=${res.statusCode} kind=${String(answer.kind ?? "-")} intent=${String(answer.intent ?? "-")} error=${String(answer.error ?? "-")} heard_chars=${text.length} reply_chars=${reply.length} reply_id=${replyId} ms=${Date.now() - receivedAt}`);
+      const { path, canonical } = details();
+      const replyText = reply && (answer.kind !== "action" || answer.error) ? ` reply=${cut(reply, 200)}` : "";
+      console.log(`[assistant] lang=${language} path=${path} status=${res.statusCode} kind=${String(answer.kind ?? "-")} intent=${String(answer.intent ?? "-")} error=${String(answer.error ?? "-")} ms=${Date.now() - receivedAt} reply_chars=${reply.length} reply_id=${replyId} heard=${cut(auditAssistantInput(text), 160)}${canonical ? ` canonical=${cut(canonical, 120)}` : ""}${replyText}`);
     } catch { /* a log line must never cost the answer */ }
     return send(body);
   };
@@ -534,9 +541,13 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
   // English while the menu and the rest of {assistant} are using another language.
   const language = user.voiceLanguage;
   let assistant: Awaited<ReturnType<typeof interpretVoiceRequest>> | undefined;
-  logAssistantOutcome(res, language, receivedAt, text, () => (assistant ? `model:${assistant.kind}` : "grammar"));
   const alias = await resolveLearningAliases(user, text);
   let command = await resolveUserCommand(user, alias.resolvedText, language);
+  logAssistantOutcome(res, language, receivedAt, text, () => ({
+    path: assistant ? `model:${assistant.kind}` : "grammar",
+    // The model's command, redacted as the audit redacts it.
+    canonical: assistant?.canonical_command ? auditText(command, auditAssistantInput(assistant.canonical_command)) ?? undefined : undefined,
+  }));
 
   if (command.intent === "unrecognized") {
     try {
