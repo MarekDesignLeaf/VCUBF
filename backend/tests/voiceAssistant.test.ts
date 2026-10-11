@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { afterEach, describe, it } from "node:test";
 import type { AssistantContext } from "../src/services/assistantMemoryService.js";
-import { createRealtimeClientSession, interpretVoiceRequest, isPromptEcho, isPromptEchoStarting, needsApplicationMap, transcribeVoiceAudio } from "../src/services/voiceAssistantService.js";
+import { createRealtimeClientSession, interpretVoiceRequest, isPromptEcho, isPromptEchoStarting, needsApplicationMap, restoreWakeWord, transcribeVoiceAudio } from "../src/services/voiceAssistantService.js";
 
 const originalFetch = globalThis.fetch;
 const originalKey = process.env.OPENAI_API_KEY;
@@ -266,6 +266,30 @@ describe("voice assistant interpretation", () => {
     // is what stops it being misheard in the first place.
     assert.match(seenPrompt, /Škoda Auto/);
     assert.match(seenPrompt, /Kvasnička/);
+  });
+
+  it("writes the assistant's name as configured where the transcript has a near miss of it", () => {
+    assert.equal(restoreWakeWord("Alfonso, přečti zprávy na WhatsAppu.", "Alfonzo"), "Alfonzo, přečti zprávy na WhatsAppu.");
+    assert.equal(restoreWakeWord("Al Fonzo ukaž zakázky", "Alfonzo"), "Alfonzo ukaž zakázky");
+    assert.equal(restoreWakeWord("Al-fonso, přeskoč ho", "Alfonzo"), "Alfonzo, přeskoč ho");
+    assert.equal(restoreWakeWord("Tak Alfons, co mám zítra?", "Alfonzo"), "Tak Alfonzo, co mám zítra?");
+    assert.equal(restoreWakeWord("Alfonzu, ukaž klienty", "Hej Alfonzo"), "Alfonzo, ukaž klienty");
+    assert.equal(restoreWakeWord("Alfonzo, ukaž klienty", "Alfonzo"), "Alfonzo, ukaž klienty", "already right: unchanged");
+    // Ordinary words stay as they were heard.
+    for (const text of ["Alfa Romeo je v servisu", "alergie na pyl", "Pošli to Alfrédovi", "a fonzo"]) assert.equal(restoreWakeWord(text, "Alfonzo"), text, text);
+    assert.equal(restoreWakeWord("Emo, ukaž klienty", "Ema"), "Emo, ukaž klienty", "short names are left alone");
+  });
+
+  it("restores the name in the sentence asked for again without the prompt", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    globalThis.fetch = async (_url, init) => {
+      const form = init?.body as FormData;
+      if (form.get("prompt")) return sseResponse(ECHO);
+      return Response.json({ text: "Alfonso, přečti zprávy na WhatsAppu." });
+    };
+    const result = await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo");
+    assert.equal(result.text, "Alfonzo, přečti zprávy na WhatsAppu.");
   });
 
   it("tells a prompt being read back from the start of a real command", () => {
