@@ -429,6 +429,23 @@ async function blockedByEmmaPolicy(user: AuthedUser, command: ParsedTextCommand)
   return decision;
 }
 
+/**
+ * The words of a stretch of speech that names the assistant, or something
+ * close to it ("Alfonso", "Alfonzu", a learned alias), so a name that was
+ * heard but not recognised as his can be seen in the logs. Everything else
+ * the microphone hears in the room stays unlogged (only its length, in the
+ * transcription line); what reaches /command/assistant is logged there.
+ */
+function logIfAddressed(text: string, names: string[], aliases: string[]) {
+  if (!text) return;
+  const fold = (value: string) => value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+  const heard = fold(text);
+  const stems = names.map((name) => fold(name).replace(/\{assistant\}/g, "").replace(/^\s*(?:hej|hey|hi|ahoj)\s+/, "").trim().slice(0, 3)).filter((stem) => stem.length === 3);
+  const named = stems.some((stem) => new RegExp(`(?<!\\p{L})${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u").test(heard))
+    || aliases.some((alias) => alias.trim() && heard.includes(fold(alias.trim())));
+  if (named) console.log(`[transcribe] addressed heard=${JSON.stringify(text.length > 160 ? `${text.slice(0, 160)}…` : text)}`);
+}
+
 commandRouter.post(
   "/transcribe",
   requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission),
@@ -447,6 +464,7 @@ commandRouter.post(
       const language = await currentVoiceLanguage(req.user!);
       const learned = await aliasVocabulary(req.user!.companyId, addressedAs(req.user!));
       const transcription = await transcribeVoiceAudio(audio, language, query.data.wake_word, learned);
+      logIfAddressed(transcription.text, [...addressedAs(req.user!), assistantNameFor(req.user!)], learned);
       await recordAudit({
         companyId: req.user!.companyId,
         userId: req.user!.id,
