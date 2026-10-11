@@ -1,16 +1,51 @@
 import assert from "node:assert/strict";
+import http from "node:http";
 import { afterEach, describe, it } from "node:test";
 import type { AssistantContext } from "../src/services/assistantMemoryService.js";
-import { createRealtimeClientSession, interpretVoiceRequest, needsApplicationMap, transcribeVoiceAudio } from "../src/services/voiceAssistantService.js";
+import { createRealtimeClientSession, interpretVoiceRequest, isPromptEcho, isPromptEchoStarting, needsApplicationMap, transcribeVoiceAudio } from "../src/services/voiceAssistantService.js";
 
 const originalFetch = globalThis.fetch;
 const originalKey = process.env.OPENAI_API_KEY;
+const originalTranscriptionModel = process.env.OPENAI_TRANSCRIPTION_MODEL;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
   if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
   else process.env.OPENAI_API_KEY = originalKey;
+  if (originalTranscriptionModel === undefined) delete process.env.OPENAI_TRANSCRIPTION_MODEL;
+  else process.env.OPENAI_TRANSCRIPTION_MODEL = originalTranscriptionModel;
 });
+
+/** The vocabulary prompt, word by word, as the model reads it back. */
+const ECHO = ["Alfonzo.", " Vytvoř", " klienta,", " nový", " klient,", " zakázka,", " nabídka,", " faktura,", " úkol,", " poptávka,", " ukaž", " zakázky,", " ukaž", " faktury"];
+
+/**
+ * A streamed transcription as OpenAI sends it: one delta per piece, then the
+ * closing event — unless `done` is false. Pieces are produced on demand, so a
+ * request cut off early is never read to the end.
+ */
+function sseResponse(pieces: string[], options: { done?: boolean; read?: { count: number }; cancelled?: { value: boolean } } = {}) {
+  const encoder = new TextEncoder();
+  let index = 0;
+  const body = new ReadableStream<Uint8Array>({
+    cancel() {
+      if (options.cancelled) options.cancelled.value = true;
+    },
+    pull(controller) {
+      if (index < pieces.length) {
+        if (options.read) options.read.count += 1;
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "transcript.text.delta", delta: pieces[index] })}\n\n`));
+        index += 1;
+        return;
+      }
+      if (options.done !== false) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "transcript.text.done", text: pieces.join(""), usage: { input_tokens: 100, output_tokens: pieces.length } })}\n\n`));
+      }
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+}
 
 describe("voice assistant interpretation", () => {
   it("requires server-side OpenAI configuration", async () => {
@@ -231,6 +266,168 @@ describe("voice assistant interpretation", () => {
     // is what stops it being misheard in the first place.
     assert.match(seenPrompt, /Škoda Auto/);
     assert.match(seenPrompt, /Kvasnička/);
+  });
+
+  it("tells a prompt being read back from the start of a real command", () => {
+    const prompt = "Alfonzo. vytvoř klienta, nový klient, zakázka, nabídka, faktura, úkol";
+    assert.equal(isPromptEchoStarting("Alfonzo. Vytvoř klienta, nový klient", prompt), false, "three phrases may still be a sentence");
+    assert.equal(isPromptEchoStarting("Alfonzo. Vytvoř klienta, nový klient, zakázka", prompt), true);
+    assert.equal(isPromptEchoStarting("Alfonzo, vytvoř klienta Jan Novák", prompt), false);
+    assert.equal(isPromptEchoStarting("Context: ### Alfonzo", prompt), true);
+    assert.equal(isPromptEcho("Alfonzo, vytvoř klienta", prompt), false, "the finished-sentence rule is unchanged");
+  });
+
+  it("cuts a streamed prompt echo off at its first words and asks again without the prompt", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    const read = { count: 0 };
+    const cancelled = { value: false };
+    const requests: Array<{ prompt: unknown; stream: unknown }> = [];
+    globalThis.fetch = async (_url, init) => {
+      const form = init?.body as FormData;
+      requests.push({ prompt: form.get("prompt"), stream: form.get("stream") });
+      if (form.get("prompt")) return sseResponse(ECHO, { read, cancelled });
+      return Response.json({ text: "Alfonzo, ukaž klienty." });
+    };
+    const result = await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo");
+    assert.deepEqual(result, { text: "Alfonzo, ukaž klienty.", model: "gpt-4o-transcribe" });
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].stream, "true", "the first request is streamed");
+    assert.equal(cancelled.value, true, "and its body cancelled once the echo is plain");
+    assert.ok(read.count <= 7, `cut off after ${read.count} pieces, not read to the end`);
+    assert.equal(requests[1].prompt, null, "the second asks without the prompt");
+    assert.equal(requests[1].stream, null, "and needs no stream");
+  });
+
+  it("cuts an echo off over a real HTTP connection and still asks again (not an error)", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    const seen: Array<{ stream: boolean; prompt: boolean }> = [];
+    let closedEarly = false;
+    const server = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => chunks.push(chunk));
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("latin1");
+        const stream = /name="stream"\r\n\r\ntrue/.test(body);
+        seen.push({ stream, prompt: /name="prompt"/.test(body) });
+        if (!stream) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ text: "Alfonzo, ukaž klienty." }));
+          return;
+        }
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        let index = 0;
+        const timer = setInterval(() => {
+          if (res.destroyed) { closedEarly = index < ECHO.length; clearInterval(timer); return; }
+          if (index < ECHO.length) { res.write(`data: ${JSON.stringify({ type: "transcript.text.delta", delta: ECHO[index] })}\n\n`); index += 1; return; }
+          res.end(`data: ${JSON.stringify({ type: "transcript.text.done", text: ECHO.join("") })}\n\n`);
+          clearInterval(timer);
+        }, 20);
+        res.on("close", () => { if (index < ECHO.length) closedEarly = true; clearInterval(timer); });
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    // The real fetch (undici), only pointed at this server instead of OpenAI.
+    globalThis.fetch = ((url: string | URL | Request, init?: RequestInit) =>
+      originalFetch(String(url).replace("https://api.openai.com", `http://127.0.0.1:${port}`), init)) as typeof fetch;
+    try {
+      const result = await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo");
+      assert.deepEqual(result, { text: "Alfonzo, ukaž klienty.", model: "gpt-4o-transcribe" });
+      assert.deepEqual(seen, [{ stream: true, prompt: true }, { stream: false, prompt: false }]);
+      assert.equal(closedEarly, true, "the echoing stream was closed before its end");
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("takes a streamed sentence from its closing event, in one request", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return sseResponse(["Alfonzo,", " vytvoř klienta", " Jan Novák."]);
+    };
+    const result = await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo");
+    assert.deepEqual(result, { text: "Alfonzo, vytvoř klienta Jan Novák.", model: "gpt-4o-transcribe" });
+    assert.equal(calls, 1);
+  });
+
+  it("reads the closing event even without the blank line after it, and a CRLF split across chunks", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    const encoder = new TextEncoder();
+    const parts = [
+      `data: ${JSON.stringify({ type: "transcript.text.delta", delta: "Alfonzo, ukaž" })}\r\n\r`,
+      `\ndata: ${JSON.stringify({ type: "transcript.text.delta", delta: " klienty." })}\r\n\r\n`,
+      `data: ${JSON.stringify({ type: "transcript.text.done", text: "Alfonzo, ukaž klienty." })}\n`,
+    ];
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return new Response(new ReadableStream({ start(controller) { for (const part of parts) controller.enqueue(encoder.encode(part)); controller.close(); } }), { headers: { "Content-Type": "text/event-stream" } });
+    };
+    const result = await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo");
+    assert.equal(result.text, "Alfonzo, ukaž klienty.");
+    assert.equal(calls, 1);
+  });
+
+  it("asks for the whole text when a stream breaks off or reports an error, never taking a shorter sentence", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    for (const broken of [
+      () => sseResponse(["Alfonzo, pošli", " Honzovi"], { done: false }),
+      () => new Response(`data: ${JSON.stringify({ error: { message: "server error" } })}\n\n`, { headers: { "Content-Type": "text/event-stream" } }),
+    ]) {
+      const streams: unknown[] = [];
+      globalThis.fetch = async (_url, init) => {
+        const form = init?.body as FormData;
+        streams.push(form.get("stream"));
+        return form.get("stream") ? broken() : Response.json({ text: "Alfonzo, pošli Honzovi, že přijedeme v pondělí." });
+      };
+      const result = await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo");
+      assert.equal(result.text, "Alfonzo, pošli Honzovi, že přijedeme v pondělí.");
+      assert.deepEqual(streams, ["true", null]);
+    }
+  });
+
+  it("asks for the whole text when streaming is refused, but does not repeat any other refusal", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+    const streams: unknown[] = [];
+    globalThis.fetch = async (_url, init) => {
+      const form = init?.body as FormData;
+      streams.push(form.get("stream"));
+      if (form.get("stream")) return Response.json({ error: { message: "stream is not supported" } }, { status: 400 });
+      return Response.json({ text: "Alfonzo, ukaž klienty." });
+    };
+    const result = await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo");
+    assert.equal(result.text, "Alfonzo, ukaž klienty.");
+    assert.deepEqual(streams, ["true", null]);
+
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return Response.json({ error: { message: "Audio file is too short." } }, { status: 400 });
+    };
+    await assert.rejects(transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo"), /OPENAI_TRANSCRIPTION_FAILED_400/);
+    assert.equal(calls, 1, "bad audio is not sent twice");
+  });
+
+  it("asks whisper-1, which cannot stream, for the whole text", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "whisper-1";
+    let stream: unknown = "unset";
+    globalThis.fetch = async (_url, init) => {
+      stream = (init?.body as FormData).get("stream");
+      return Response.json({ text: "Alfonzo, ukaž klienty." });
+    };
+    const result = await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo");
+    assert.equal(result.text, "Alfonzo, ukaž klienty.");
+    assert.equal(stream, null);
   });
 
   it("returns empty text for a hallucination instead of executing it", async () => {
