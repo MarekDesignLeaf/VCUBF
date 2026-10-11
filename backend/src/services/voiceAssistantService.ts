@@ -4,7 +4,7 @@ import { VOICE_LANGUAGE_LABELS, isVoiceLanguage } from "../lib/voiceLanguages.js
 import { CANONICAL_COMMAND_FORMS } from "../lib/canonicalCommands.js";
 import type { AssistantContext } from "./assistantMemoryService.js";
 import { buildEmmaBehaviorInstructions } from "./emmaBehaviorService.js";
-import { modelFor, modelRequest, recordUsage, taskTimeoutMs } from "../lib/modelGateway.js";
+import { modelFor, modelRequest, recordUsage } from "../lib/modelGateway.js";
 import { EMMA_EXECUTABLE_ACTION_GUIDE } from "../lib/emmaExecutableActionCatalogue.js";
 import { DEFAULT_ASSISTANT_NAME, withAssistantName } from "../lib/assistantName.js";
 import { assistantRealtimeVoice } from "./voiceSpeechService.js";
@@ -285,32 +285,41 @@ export async function transcribeVoiceAudio(
 /** Transcription models that can stream their text (whisper-1 cannot). */
 const STREAMING_TRANSCRIPTION = /^gpt-/;
 
+type StreamEvent = { type?: unknown; delta?: unknown; text?: unknown; usage?: unknown; error?: unknown };
+
+/** The JSON of one server-sent event, or undefined for a comment, a keep-alive or "[DONE]". */
+function eventData(block: string): StreamEvent | undefined {
+  const data = block.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+  if (!data || data === "[DONE]") return undefined;
+  try { return JSON.parse(data) as StreamEvent; } catch { return undefined; }
+}
+
+class StreamBroken extends Error {}
+
 /**
  * One transcription request; the text, trimmed.
  *
  * With `stopWhen`, a model that can stream is asked to, and the request is
  * cut off as soon as the text so far satisfies it — `stopped` then says the
- * text is only the beginning. A stream that ends without its closing event is
- * an error, never a shorter sentence.
+ * text is only the beginning. Streaming is only ever a way to hear an echo
+ * sooner: a stream that is refused, breaks, reports an error or ends without
+ * its closing event is asked for again as one whole text, so voice never
+ * stops working on a streaming oddity, and a broken stream is never taken for
+ * a shorter sentence.
  */
 async function requestTranscription(form: FormData, stopWhen?: (text: string) => boolean): Promise<{ text: string; stopped: boolean }> {
   const streamed = Boolean(stopWhen) && STREAMING_TRANSCRIPTION.test(modelFor("transcription"));
   if (streamed) form.set("stream", "true");
   else form.delete("stream");
-  const cutOff = new AbortController();
-  const response = await modelRequest("transcription", "/v1/audio/transcriptions", {
-    method: "POST",
-    body: form,
-    signal: AbortSignal.any([cutOff.signal, AbortSignal.timeout(taskTimeoutMs("transcription"))]),
-  });
-  if (!response.ok && streamed && response.status === 400) {
-    // A model or account that refuses to stream still hears the sentence: ask
-    // for the whole text instead, as before streaming.
-    await response.body?.cancel().catch(() => undefined);
-    console.log("[transcription] streaming refused (400), asked again without it");
-    return requestTranscription(form);
+  const response = await modelRequest("transcription", "/v1/audio/transcriptions", { method: "POST", body: form });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    if (streamed && response.status === 400 && /stream/i.test(detail)) {
+      console.log("[transcription] streaming refused (400), asked again without it");
+      return requestTranscription(form);
+    }
+    throw new Error(`OPENAI_TRANSCRIPTION_FAILED_${response.status}`);
   }
-  if (!response.ok) throw new Error(`OPENAI_TRANSCRIPTION_FAILED_${response.status}`);
   if (!streamed || !response.body || !response.headers.get("content-type")?.includes("text/event-stream")) {
     const parsed = await response.json();
     // The transcription is the highest-volume AI call (every heard stretch of
@@ -322,35 +331,59 @@ async function requestTranscription(form: FormData, stopWhen?: (text: string) =>
   // The gateway logs when the headers came; a streamed sentence is over only
   // at its last event, so its whole time is logged here.
   const finished = (outcome: string) => console.log(`[transcription] streamed outcome=${outcome} ms=${Date.now() - startedAt}`);
+  try {
+    const result = await readTranscriptionStream(response.body, stopWhen!);
+    finished(result.stopped ? "cut_off" : "done");
+    return result;
+  } catch (error) {
+    // Out of time is out of time; asking again would only double the wait.
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) throw error;
+    finished(error instanceof StreamBroken ? error.message : "broken");
+    return requestTranscription(form);
+  }
+}
+
+/**
+ * Reads a streamed transcription. Returns as soon as `stopWhen` holds — the
+ * loop is left first and the body cancelled by that, so nothing is aborted
+ * under a read in progress (an abort there turned the cut-off into an error
+ * instead of a retry) — or at the closing event. Anything else throws.
+ */
+async function readTranscriptionStream(body: ReadableStream<Uint8Array>, stopWhen: (text: string) => boolean): Promise<{ text: string; stopped: boolean }> {
   let text = "";
   let pending = "";
   const decoder = new TextDecoder();
-  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-    pending += decoder.decode(chunk, { stream: true }).replace(/\r\n/g, "\n");
+  const handle = (block: string): { text: string; stopped: boolean } | undefined => {
+    const event = eventData(block);
+    if (!event) return undefined;
+    if (event.type === "transcript.text.delta" && typeof event.delta === "string") {
+      text += event.delta;
+      return stopWhen(text) ? { text: text.trim(), stopped: true } : undefined;
+    }
+    if (event.type === "transcript.text.done") {
+      recordUsage("transcription", event.usage);
+      return { text: (typeof event.text === "string" ? event.text : text).trim(), stopped: false };
+    }
+    if (event.type === "error" || event.error !== undefined) throw new StreamBroken("error_event");
+    return undefined;
+  };
+  let outcome: { text: string; stopped: boolean } | undefined;
+  reading: for await (const chunk of body as unknown as AsyncIterable<Uint8Array>) {
+    // Normalised on the whole buffer, so a CRLF split between two chunks is still one line end.
+    pending = (pending + decoder.decode(chunk, { stream: true })).replace(/\r\n/g, "\n");
     let end: number;
     while ((end = pending.indexOf("\n\n")) >= 0) {
-      const data = pending.slice(0, end).split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+      const block = pending.slice(0, end);
       pending = pending.slice(end + 2);
-      if (!data || data === "[DONE]") continue;
-      let event: { type?: unknown; delta?: unknown; text?: unknown; usage?: unknown };
-      try { event = JSON.parse(data); } catch { continue; }
-      if (event.type === "transcript.text.delta" && typeof event.delta === "string") {
-        text += event.delta;
-        if (stopWhen!(text)) {
-          cutOff.abort();
-          finished("cut_off");
-          return { text: text.trim(), stopped: true };
-        }
-      } else if (event.type === "transcript.text.done") {
-        recordUsage("transcription", event.usage);
-        finished("done");
-        return { text: (typeof event.text === "string" ? event.text : text).trim(), stopped: false };
-      } else if (event.type === "error") {
-        throw new Error("OPENAI_TRANSCRIPTION_FAILED_STREAM");
-      }
+      outcome = handle(block);
+      if (outcome) break reading;
     }
   }
-  throw new Error("OPENAI_TRANSCRIPTION_INCOMPLETE");
+  if (outcome) return outcome;
+  // The last event may come without the blank line after it.
+  outcome = handle((pending + decoder.decode()).replace(/\r\n/g, "\n").trim());
+  if (outcome) return outcome;
+  throw new StreamBroken("incomplete");
 }
 
 /**
