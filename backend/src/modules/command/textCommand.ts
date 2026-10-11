@@ -1,4 +1,5 @@
-import { Router, raw } from "express";
+import { createHash } from "node:crypto";
+import { Router, raw, type Response } from "express";
 import { z } from "zod";
 import { requireAuth, type AuthedUser } from "../../middleware/auth.js";
 import { prisma } from "../../db.js";
@@ -428,6 +429,23 @@ async function blockedByEmmaPolicy(user: AuthedUser, command: ParsedTextCommand)
   return decision;
 }
 
+/**
+ * The words of a stretch of speech that names the assistant, or something
+ * close to it ("Alfonso", "Alfonzu", a learned alias), so a name that was
+ * heard but not recognised as his can be seen in the logs. Everything else
+ * the microphone hears in the room stays unlogged (only its length, in the
+ * transcription line); what reaches /command/assistant is logged there.
+ */
+function logIfAddressed(text: string, names: string[], aliases: string[]) {
+  if (!text) return;
+  const fold = (value: string) => value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+  const heard = fold(text);
+  const stems = names.map((name) => fold(name).replace(/\{assistant\}/g, "").replace(/^\s*(?:hej|hey|hi|ahoj)\s+/, "").trim().slice(0, 3)).filter((stem) => stem.length === 3);
+  const named = stems.some((stem) => new RegExp(`(?<!\\p{L})${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u").test(heard))
+    || aliases.some((alias) => alias.trim() && heard.includes(fold(alias.trim())));
+  if (named) console.log(`[transcribe] addressed heard=${JSON.stringify(text.length > 160 ? `${text.slice(0, 160)}…` : text)}`);
+}
+
 commandRouter.post(
   "/transcribe",
   requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requiredPermission),
@@ -446,6 +464,7 @@ commandRouter.post(
       const language = await currentVoiceLanguage(req.user!);
       const learned = await aliasVocabulary(req.user!.companyId, addressedAs(req.user!));
       const transcription = await transcribeVoiceAudio(audio, language, query.data.wake_word, learned);
+      logIfAddressed(transcription.text, [...addressedAs(req.user!), assistantNameFor(req.user!)], learned);
       await recordAudit({
         companyId: req.user!.companyId,
         userId: req.user!.id,
@@ -494,6 +513,35 @@ commandRouter.post("/realtime/session", requirePermission(EXECUTE_TEXT_COMMAND_A
 });
 
 /**
+ * One line per answer, so how Alfonzo answered can be read from the logs
+ * without asking Marek (11. 10.: the model gave the same 49-token answer to
+ * almost every sentence for half a day, and nothing showed which answer it
+ * was; Marek: "zapni si logování, ať se mě nemusíš ptát").
+ *
+ * What was heard is logged exactly as the audit keeps it — the text of a
+ * message to be sent is redacted — and cut to 160 characters. Alfonzo's own
+ * reply is logged when it is not the result of a command (a model reply, a
+ * clarification, an error), cut to 200; a command's result can carry a
+ * customer's message, so only its length and a short hash are logged. The
+ * hash shows the same reply repeating.
+ */
+function logAssistantOutcome(res: Response, language: string, receivedAt: number, text: string, details: () => { path: string; canonical?: string }) {
+  const send = res.json.bind(res);
+  const cut = (value: string, max: number) => JSON.stringify(value.length > max ? `${value.slice(0, max)}…` : value);
+  res.json = (body: unknown) => {
+    try {
+      const answer = (body && typeof body === "object" ? body : {}) as { kind?: unknown; intent?: unknown; error?: unknown; assistantMessage?: unknown; message?: unknown };
+      const reply = typeof answer.assistantMessage === "string" ? answer.assistantMessage : typeof answer.message === "string" ? answer.message : "";
+      const replyId = reply ? createHash("sha256").update(reply).digest("hex").slice(0, 10) : "-";
+      const { path, canonical } = details();
+      const replyText = reply && (answer.kind !== "action" || answer.error) ? ` reply=${cut(reply, 200)}` : "";
+      console.log(`[assistant] lang=${language} path=${path} status=${res.statusCode} kind=${String(answer.kind ?? "-")} intent=${String(answer.intent ?? "-")} error=${String(answer.error ?? "-")} ms=${Date.now() - receivedAt} reply_chars=${reply.length} reply_id=${replyId} heard=${cut(auditAssistantInput(text), 160)}${canonical ? ` canonical=${cut(canonical, 120)}` : ""}${replyText}`);
+    } catch { /* a log line must never cost the answer */ }
+    return send(body);
+  };
+}
+
+/**
  * When an answer to the voice assistant must be ready. The Windows companion
  * gives up after eighteen seconds; an agent run that would end later is
  * pointless, so it gets what is left of these sixteen.
@@ -510,9 +558,14 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
   // A stale desktop/browser payload must never switch one response back to
   // English while the menu and the rest of {assistant} are using another language.
   const language = user.voiceLanguage;
+  let assistant: Awaited<ReturnType<typeof interpretVoiceRequest>> | undefined;
   const alias = await resolveLearningAliases(user, text);
   let command = await resolveUserCommand(user, alias.resolvedText, language);
-  let assistant: Awaited<ReturnType<typeof interpretVoiceRequest>> | undefined;
+  logAssistantOutcome(res, language, receivedAt, text, () => ({
+    path: assistant ? `model:${assistant.kind}` : "grammar",
+    // The model's command, redacted as the audit redacts it.
+    canonical: assistant?.canonical_command ? auditText(command, auditAssistantInput(assistant.canonical_command)) ?? undefined : undefined,
+  }));
 
   if (command.intent === "unrecognized") {
     try {
