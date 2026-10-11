@@ -452,6 +452,44 @@ const DEFAULT_REPLY_LANGUAGE = "en-GB";
 // which this connector does not send, so the reply is refused up front rather
 // than failing at Meta after the person has approved it.
 const REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const WHATSAPP_REPLY_WINDOW_MS = REPLY_WINDOW_MS;
+
+/**
+ * When the free-form reply window closes, for each received WhatsApp message
+ * given — by its sender's latest message, the one that opens the window.
+ *
+ * Only messages that came through the WhatsApp Business connector count (the
+ * 24-hour rule is the Business API's; a chat logged by hand may come from a
+ * personal number). A sender whose latest message has already been answered
+ * from Secretary has no window to warn about, and is left out.
+ */
+export async function whatsAppReplyWindows(companyId: string, intakeIds: string[]): Promise<Map<string, Date>> {
+  if (!intakeIds.length) return new Map();
+  const intakes = await prisma.communicationIntake.findMany({
+    where: { companyId, id: { in: intakeIds }, channel: "whatsapp", senderPhone: { not: null }, externalMessageId: { not: null } },
+    select: { id: true, senderPhone: true },
+  });
+  const phones = [...new Set(intakes.map((intake) => intake.senderPhone!))];
+  if (!phones.length) return new Map();
+  const latest = await prisma.communicationIntake.findMany({
+    where: { companyId, channel: "whatsapp", senderPhone: { in: phones }, externalMessageId: { not: null } },
+    orderBy: { receivedAt: "desc" },
+    distinct: ["senderPhone"],
+    select: { senderPhone: true, receivedAt: true, sourceMetadata: true },
+  });
+  const closesAt = new Map<string, Date>();
+  for (const message of latest) {
+    const metadata = message.sourceMetadata && typeof message.sourceMetadata === "object" && !Array.isArray(message.sourceMetadata)
+      ? message.sourceMetadata as Record<string, unknown>
+      : {};
+    const answered = Array.isArray(metadata.replies) && metadata.replies.length > 0;
+    if (!answered && message.senderPhone) closesAt.set(message.senderPhone, new Date(message.receivedAt.getTime() + REPLY_WINDOW_MS));
+  }
+  return new Map(intakes.flatMap((intake) => {
+    const closes = closesAt.get(intake.senderPhone!);
+    return closes ? [[intake.id, closes] as const] : [];
+  }));
+}
 const LATEST_WORDS = new Set(["last", "latest", "newest", "recent", "posledni", "nejnovejsi", "ostatni", "ostatnia", "najnowsza"]);
 
 function plainText(value: unknown) {

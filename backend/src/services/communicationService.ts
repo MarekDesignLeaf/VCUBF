@@ -643,6 +643,7 @@ export async function updateCommunicationIntakeResolution(
           notificationKey: {
             in: [
               `unresolved_enquiry:${existing.id}`,
+              `whatsapp_reply_window:${existing.id}`,
               ...(intake.communicationRecordId ? [`follow_up:${intake.communicationRecordId}`] : []),
             ],
           },

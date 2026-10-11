@@ -1618,6 +1618,7 @@ export const NOTIFICATION_TYPES = [
   "overdue_task",
   "invoice_overdue",
   "resource_not_ready",
+  "whatsapp_reply_window",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

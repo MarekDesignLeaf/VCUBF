@@ -14,6 +14,7 @@ import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 import { listFollowUpsDue, listUnresolvedIntakeEnquiries } from "./communicationService.js";
 import { detectUpcomingOverload } from "./calendarService.js";
+import { whatsAppReplyWindows } from "./whatsappBusinessConnectorService.js";
 import { buildDataQualityItems } from "./dataQualityService.js";
 import { getNotificationThresholds, type NotificationThresholds } from "./notificationThresholdService.js";
 
@@ -24,7 +25,9 @@ import { getNotificationThresholds, type NotificationThresholds } from "./notifi
 //   - Communication Log Module: follow-ups that are overdue or never had a
 //     date entered (communicationService.listFollowUpsDue).
 //   - Communication Intelligence Module: preserved inbound intakes whose
-//     explicit resolutionNeeded flag remains true before CRM conversion.
+//     explicit resolutionNeeded flag remains true before CRM conversion. An
+//     unanswered WhatsApp message carries WhatsApp's own 24-hour reply window
+//     as its deadline, and turns urgent in its last four hours.
 //   - Job Allocation and Capacity Management / Calendar and Scheduling
 //     Intelligence Module: upcoming weeks where a real employee's computed
 //     workload exceeds their declared capacity (calendarService.
@@ -119,20 +122,71 @@ async function buildFollowUpItems(user: AuthedUser): Promise<AttentionItemBase[]
   });
 }
 
+/**
+ * How long before WhatsApp's reply window closes an unanswered message becomes
+ * urgent. The window itself is Meta's rule, not an invented deadline: a
+ * free-form reply is accepted only within 24 hours of the customer's last
+ * message, and Secretary cannot send the approved templates needed after it.
+ */
+const WHATSAPP_WINDOW_URGENT_MS = 4 * 60 * 60 * 1000;
+
+/** "about 3 h" / "about 40 min", rounded down so it never promises more time than is left. */
+function timeLeft(ms: number): string {
+  const minutes = Math.max(1, Math.floor(ms / 60_000));
+  return minutes >= 120 ? `about ${Math.floor(minutes / 60)} h` : `about ${minutes} min`;
+}
+
 async function buildUnresolvedEnquiryItems(user: AuthedUser): Promise<AttentionItemBase[]> {
   const enquiries = await listUnresolvedIntakeEnquiries(user);
-  return enquiries.map((enquiry) => ({
-    key: `unresolved_enquiry:${enquiry.sourceId}`,
-    type: "unresolved_enquiry",
-    // No deadline/SLA is stored for a raw intake, so urgency must not be
-    // fabricated from age alone. The explicit unresolved state warrants a
-    // warning; only records with real overdue dates can become urgent.
-    severity: "warning",
-    title: `Unresolved enquiry from ${enquiry.senderLabel}`,
-    message: `Inbound ${enquiry.channel.replace(/_/g, " ")} enquiry is still marked as needing resolution. No response deadline is recorded.`,
-    dueAt: null,
-    entity: { type: "communication_intake", id: enquiry.sourceId, label: enquiry.senderLabel },
-  }));
+  const windows = await whatsAppReplyWindows(
+    user.companyId,
+    enquiries.filter((enquiry) => enquiry.channel === "whatsapp").map((enquiry) => enquiry.sourceId),
+  );
+  const now = Date.now();
+  return enquiries.map((enquiry): AttentionItemBase => {
+    const entity = { type: "communication_intake", id: enquiry.sourceId, label: enquiry.senderLabel };
+    const unresolved: AttentionItemBase = {
+      key: `unresolved_enquiry:${enquiry.sourceId}`,
+      type: "unresolved_enquiry",
+      // No deadline/SLA is stored for a raw intake, so urgency must not be
+      // fabricated from age alone. The explicit unresolved state warrants a
+      // warning; only records with real overdue dates can become urgent.
+      severity: "warning",
+      title: `Unresolved enquiry from ${enquiry.senderLabel}`,
+      message: `Inbound ${enquiry.channel.replace(/_/g, " ")} enquiry is still marked as needing resolution. No response deadline is recorded.`,
+      dueAt: null,
+      entity,
+    };
+    // An unanswered WhatsApp message does have a real deadline: the platform's
+    // reply window.
+    const closesAt = windows.get(enquiry.sourceId);
+    if (!closesAt) return unresolved;
+    const left = closesAt.getTime() - now;
+    if (left <= 0) {
+      return {
+        ...unresolved,
+        message: "Still unanswered, and WhatsApp's 24-hour reply window has closed: WhatsApp now accepts only approved template messages, which Secretary does not send yet. Call or email them instead.",
+      };
+    }
+    if (left <= WHATSAPP_WINDOW_URGENT_MS) {
+      // A key of its own, so a warning acknowledged earlier still comes back
+      // when the window is about to close.
+      return {
+        key: `whatsapp_reply_window:${enquiry.sourceId}`,
+        type: "whatsapp_reply_window",
+        severity: "urgent",
+        title: `Reply to ${enquiry.senderLabel} on WhatsApp soon`,
+        message: `A free-form WhatsApp reply is possible for ${timeLeft(left)} more — until 24 hours after their last message. After that WhatsApp accepts only approved templates, which Secretary does not send yet.`,
+        dueAt: closesAt.toISOString(),
+        entity,
+      };
+    }
+    return {
+      ...unresolved,
+      message: `Still unanswered. WhatsApp accepts a free-form reply for ${timeLeft(left)} more (until 24 hours after their last message).`,
+      dueAt: closesAt.toISOString(),
+    };
+  });
 }
 
 async function buildOverloadItems(user: AuthedUser): Promise<AttentionItemBase[]> {

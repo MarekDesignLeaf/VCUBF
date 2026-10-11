@@ -1227,6 +1227,7 @@ export const NOTIFICATION_TYPES = [
   "overdue_task",
   "invoice_overdue",
   "resource_not_ready",
+  "whatsapp_reply_window",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -1243,6 +1244,7 @@ export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   overdue_task: "Overdue task",
   invoice_overdue: "Invoice overdue",
   resource_not_ready: "Resources not ready",
+  whatsapp_reply_window: "WhatsApp reply window closing",
 };
 
 export const NOTIFICATION_SEVERITIES = ["info", "warning", "urgent"] as const;

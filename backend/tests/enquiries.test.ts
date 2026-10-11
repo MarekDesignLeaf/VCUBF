@@ -3,7 +3,7 @@ import { after, before, describe, it } from "node:test";
 import request from "supertest";
 import { createServer } from "../src/server.js";
 import { prisma } from "../src/db.js";
-import { resetDb, seedCompanyAndAdmin } from "./setup.js";
+import { resetDb, seedCompanyAndAdmin, TEST_COMPANY_ID } from "./setup.js";
 
 const app = createServer();
 
@@ -331,4 +331,70 @@ describe("Unresolved Enquiry Monitoring", () => {
       .send({ resolution_needed: false });
     assert.equal(update.status, 404);
   });
+
+  it("gives an unanswered WhatsApp message its real deadline: the 24-hour reply window", async () => {
+    const hour = 60 * 60 * 1000;
+    const now = Date.now();
+    const whatsapp = (phone: string, hoursAgo: number, extra: Record<string, unknown> = {}) => prisma.communicationIntake.create({
+      data: {
+        companyId: TEST_COMPANY_ID,
+        channel: "whatsapp",
+        senderName: `Sender ${phone.slice(-3)}`,
+        senderPhone: phone,
+        externalMessageId: `wamid.${phone}.${hoursAgo}`,
+        messageText: "Can you come and look at the hedge?",
+        receivedAt: new Date(now - hoursAgo * hour),
+        ...extra,
+      },
+    });
+    const closing = await whatsapp("+447700900101", 21);
+    const fresh = await whatsapp("+447700900102", 2);
+    const closed = await whatsapp("+447700900103", 30);
+    const answered = await whatsapp("+447700900104", 21, { sourceMetadata: { replies: [{ messageId: "wamid.out", sentAt: new Date(now - hour).toISOString() }] } });
+    // An older message whose sender wrote again an hour ago: the newer one opens the window.
+    const older = await whatsapp("+447700900105", 21);
+    await whatsapp("+447700900105", 1, { resolutionNeeded: false, resolvedAt: new Date() });
+    // Logged by hand (no message id from WhatsApp): may be a personal number, no window.
+    const manual = await prisma.communicationIntake.create({
+      data: { companyId: TEST_COMPANY_ID, channel: "whatsapp", senderName: "Manual", senderPhone: "+447700900106", messageText: "hello", receivedAt: new Date(now - 21 * hour) },
+    });
+
+    const response = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+    assert.equal(response.status, 200);
+    const byKey = new Map(response.body.map((item: any) => [item.key, item]));
+
+    const urgent: any = byKey.get(`whatsapp_reply_window:${closing.id}`);
+    assert.ok(urgent, "the last four hours of the window are urgent, under a key of their own");
+    assert.equal(urgent.type, "whatsapp_reply_window");
+    assert.equal(urgent.severity, "urgent");
+    assert.equal(urgent.dueAt, new Date(closing.receivedAt.getTime() + 24 * hour).toISOString());
+    assert.match(urgent.message, /about 2 h more/);
+    assert.equal(byKey.has(`unresolved_enquiry:${closing.id}`), false, "not both at once");
+
+    const open: any = byKey.get(`unresolved_enquiry:${fresh.id}`);
+    assert.equal(open.severity, "warning");
+    assert.equal(open.dueAt, new Date(fresh.receivedAt.getTime() + 24 * hour).toISOString());
+    assert.match(open.message, /free-form reply for about 2\d h more/);
+
+    const gone: any = byKey.get(`unresolved_enquiry:${closed.id}`);
+    assert.equal(gone.severity, "warning");
+    assert.equal(gone.dueAt, null);
+    assert.match(gone.message, /reply window has closed/);
+
+    for (const plain of [answered, manual]) {
+      const item: any = byKey.get(`unresolved_enquiry:${plain.id}`);
+      assert.equal(item.dueAt, null);
+      assert.match(item.message, /No response deadline is recorded/);
+    }
+
+    const renewed: any = byKey.get(`unresolved_enquiry:${older.id}`);
+    assert.equal(renewed.severity, "warning", "the sender wrote again, so the window is open for another day");
+    assert.ok(Date.parse(renewed.dueAt) > now + 22 * hour);
+
+    // Acknowledged while it was only a warning, it still comes back when the window is about to close.
+    await request(app).post("/notifications/acknowledge").set("Authorization", `Bearer ${adminToken}`).send({ notification_key: `unresolved_enquiry:${closing.id}` });
+    const again = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+    assert.ok(again.body.some((item: any) => item.key === `whatsapp_reply_window:${closing.id}`));
+  });
 });
+
