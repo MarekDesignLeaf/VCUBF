@@ -6,6 +6,7 @@
 // this grammar whatever language is switched on. A sentence the user says is
 // read with it only while English is switched on.
 
+import { BUSINESS_TIME_ZONE, localDateTime, resolveSpokenDate } from "../spokenDate.js";
 import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
@@ -160,6 +161,12 @@ function connectors(text: string): ParsedCommand | undefined {
 }
 
 function records(text: string): ParsedCommand | undefined {
+  // "move task order materials to Friday": a new due day, said as a day.
+  const moved = withoutFinalPunctuation(text).match(/^(?:move|push|postpone)\s+(?:the\s+)?task\s+(.+?)\s+to\s+(.+)$/iu);
+  if (moved && resolveSpokenDate(moved[2], localDateTime(new Date(), BUSINESS_TIME_ZONE).date)) {
+    return { intent: "execute_action", entities: { action: "update_task", parameters: { task: moved[1].trim(), due: moved[2].trim() } } };
+  }
+
   let m = text.match(/^(?:create|add|new)\s+client\s+(.+)$/i);
   if (m) {
     const contact = extractContact(m[1], { email: ["email"], phone: ["phone"] });

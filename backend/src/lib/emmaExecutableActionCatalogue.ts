@@ -122,6 +122,15 @@ export const EMMA_EXECUTABLE_ACTIONS = {
   // The PDF of a quote or an issued invoice by e-mail to its client, through
   // the company's Gmail. quote/invoice: its title or number, or the client's
   // name, as said; to only when an address is said. Read back before sending.
+  // Edits the pages make, by voice. A price or an invoice is read back first.
+  update_task: { capabilityAction: "update_task", fields: "task, title?, due?, due_time?, assignee?, priority?, description?", confirmation: "none" },
+  update_service: { capabilityAction: "update_service_catalogue_item", fields: "service, name?, description?, category?, price_min?, price_max?, price_unit?, duration_hours?", confirmation: "service_preview" },
+  update_invoice: { capabilityAction: "update_invoice", fields: "invoice, title?, invoice_number?, due_date?, notes?", confirmation: "service_preview" },
+  update_document: { capabilityAction: "update_document_record", fields: "document, title?, reference?, expires?, notes?", confirmation: "none" },
+  update_business_context: { capabilityAction: "update_business_context_item", fields: "label, new_label?, value?, notes?", confirmation: "none" },
+  update_industry: { capabilityAction: "update_industry", fields: "industry, name?, description?, notes?", confirmation: "none" },
+  set_notification_digest: { capabilityAction: "update_notification_digest_preferences", fields: "enabled, hour?", confirmation: "none" },
+  send_notification_digest: { capabilityAction: "send_notification_digest", fields: "", confirmation: "service_preview" },
   send_quote: { capabilityAction: "send_quote_pdf", fields: "quote, to[]?", confirmation: "service_preview" },
   send_invoice: { capabilityAction: "send_invoice_pdf", fields: "invoice, to[]?", confirmation: "service_preview" },
 } as const satisfies Record<string, EmmaExecutableActionDefinition>;
@@ -180,6 +189,9 @@ export const EMMA_EXECUTABLE_ACTION_PAGES: Record<EmmaExecutableActionName, stri
   reactivate_learning_rule: "learning", archive_memory: "memory_model", get_metrics: "metrics", suggest_schedule: "calendar",
   get_recruitment_recommendation: "recruitment", merge_clients: "data_quality",
   send_quote: "quotes", send_invoice: "invoices",
+  update_task: "tasks", update_service: "services", update_invoice: "invoices", update_document: "documents",
+  update_business_context: "business_context", update_industry: "industries",
+  set_notification_digest: "notifications", send_notification_digest: "notifications",
   check_capacity: "employees", update_communication: "communications", update_portfolio_photo: "photos",
   create_playbook: "playbooks", update_playbook: "playbooks", run_playbook: "playbooks", create_website_audit: "website_audit",
   prepare_website_content: "website_content", decide_website_content: "website_content", list_reference_activities: "services",
@@ -227,8 +239,6 @@ export const EMMA_NON_DIRECT_ACTIONS = {
   prepare_voice_email_deletion: { executionClass: "superseded", note: "Handled by the generic delete_gmail_message reviewed action." },
   confirm_voice_email_deletion: { executionClass: "superseded", note: "Handled by confirm action for delete_gmail_message." },
   cancel_voice_email_deletion: { executionClass: "superseded", note: "Handled by cancel action for delete_gmail_message." },
-  update_notification_digest_preferences: { executionClass: "interactive", note: "The digest opt-in and hour are set by the user on the Notifications page." },
-  send_notification_digest: { executionClass: "interactive", note: "The digest is reviewed and confirmed on the Notifications page, or sent by the scheduled sweep for users who enabled it." },
   update_notification_thresholds: { executionClass: "interactive", note: "Threshold days are edited in Company settings by an administrator; not a spoken command." },
   set_company_agent_mode: { executionClass: "interactive", note: "The agent switch is set by an administrator on the agent control tower page; Secretary has no tool for it, so it cannot raise its own autonomy (masterplan F2, §39)." },
   set_company_safe_mode: { executionClass: "interactive", note: "The emergency stop is switched by an administrator in Company settings; Secretary has no tool to switch it, so it cannot lift a stop by itself (masterplan layer H)." },

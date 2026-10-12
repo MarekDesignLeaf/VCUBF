@@ -8,7 +8,7 @@
 // languages fall back to English. The assistant is male, so first-person
 // Czech and Polish forms are masculine or neutral.
 
-import { addDays, localDateTime } from "./spokenDate.js";
+import { addDays, BUSINESS_TIME_ZONE, localDateTime } from "./spokenDate.js";
 import type { ReadingTurn } from "../services/messageReadingService.js";
 import type { RecordKind } from "./recordKinds.js";
 
@@ -219,6 +219,26 @@ export function spokenReview(action: string, preview: Row | undefined, language:
       if (lang === "pl") return `Wyślę${from ? ` z konta ${from}` : ""} e-mail do ${recipients}${cc ? `, w kopii ${cc}` : ""}${bcc ? `, w ukrytej kopii ${bcc}` : ""}${how}. Temat: „${quote(preview.subject)}”. Treść: „${quote(preview.body)}”.${again} Czy mam go wysłać?`;
       return `I will email ${recipients}${cc ? `, copying ${cc}` : ""}${bcc ? `, blind-copying ${bcc}` : ""}${from ? `, from ${from}` : ""}${how}. Subject: “${quote(preview.subject)}”. Text: “${quote(preview.body)}”.${again} Shall I send it?`;
     }
+    case "update_service":
+    case "update_invoice": {
+      const changes = spokenChanges(preview.changes, lang);
+      if (action === "update_service") {
+        if (lang === "cs") return `Změním službu „${quote(preview.service)}“: ${changes}. Mám to uložit?`;
+        if (lang === "pl") return `Zmienię usługę „${quote(preview.service)}”: ${changes}. Czy mam to zapisać?`;
+        return `I will change the service “${quote(preview.service)}”: ${changes}. Shall I save it?`;
+      }
+      if (lang === "cs") return `Změním fakturu ${quote(preview.invoice)}${preview.client ? ` (${quote(preview.client)})` : ""}: ${changes}. Mám to uložit?`;
+      if (lang === "pl") return `Zmienię fakturę ${quote(preview.invoice)}${preview.client ? ` (${quote(preview.client)})` : ""}: ${changes}. Czy mam to zapisać?`;
+      return `I will change the invoice ${quote(preview.invoice)}${preview.client ? ` (${quote(preview.client)})` : ""}: ${changes}. Shall I save it?`;
+    }
+    case "send_notification_digest": {
+      const count = Number(preview.itemCount) || 0;
+      const urgent = Number(preview.urgentCount) || 0;
+      const to = (Array.isArray(preview.to) ? preview.to : [preview.to]).filter(Boolean).join(", ");
+      if (lang === "cs") return `Pošlu vám souhrn na ${to}: ${count} ${count === 1 ? "položka" : count < 5 ? "položky" : "položek"}${urgent ? `, z toho ${urgent} naléhav${urgent === 1 ? "á" : urgent < 5 ? "é" : "ých"}` : ""}. Předmět: „${quote(preview.subject)}“. Mám ho odeslat?`;
+      if (lang === "pl") return `Wyślę Ci podsumowanie na ${to}: pozycji ${count}${urgent ? `, w tym pilnych ${urgent}` : ""}. Temat: „${quote(preview.subject)}”. Czy mam je wysłać?`;
+      return `I will email you the summary at ${to}: ${count} item${count === 1 ? "" : "s"}${urgent ? `, ${urgent} urgent` : ""}. Subject: “${quote(preview.subject)}”. Shall I send it?`;
+    }
     case "send_quote":
     case "send_invoice": {
       const isQuote = action === "send_quote";
@@ -290,6 +310,29 @@ export function spokenOutcome(action: string | undefined, data: Row | undefined,
     case "send_email":
     case "reply_email":
       return lang === "cs" ? "E-mail je odeslaný." : lang === "pl" ? "E-mail został wysłany." : "The email has been sent.";
+    case "update_task":
+      return lang === "cs" ? `Úkol „${quote(data?.title)}“ je upravený.` : lang === "pl" ? `Zadanie „${quote(data?.title)}” zostało zmienione.` : `The task “${quote(data?.title)}” has been updated.`;
+    case "update_service":
+      return lang === "cs" ? `Služba „${quote(data?.name)}“ je upravená.` : lang === "pl" ? `Usługa „${quote(data?.name)}” została zmieniona.` : `The service “${quote(data?.name)}” has been updated.`;
+    case "update_invoice":
+      return lang === "cs" ? `Faktura ${quote(data?.invoiceNumber)} je upravená.` : lang === "pl" ? `Faktura ${quote(data?.invoiceNumber)} została zmieniona.` : `The invoice ${quote(data?.invoiceNumber)} has been updated.`;
+    case "update_document":
+      return lang === "cs" ? `Dokument „${quote(data?.title)}“ je upravený.` : lang === "pl" ? `Dokument „${quote(data?.title)}” został zmieniony.` : `The document “${quote(data?.title)}” has been updated.`;
+    case "update_business_context":
+      return lang === "cs" ? `Položka „${quote(data?.label)}“ je upravená.` : lang === "pl" ? `Pozycja „${quote(data?.label)}” została zmieniona.` : `“${quote(data?.label)}” has been updated.`;
+    case "update_industry":
+      return lang === "cs" ? `Odvětví „${quote(data?.name)}“ je upravené.` : lang === "pl" ? `Branża „${quote(data?.name)}” została zmieniona.` : `The industry “${quote(data?.name)}” has been updated.`;
+    case "set_notification_digest": {
+      if (!data?.enabled) return lang === "cs" ? "Denní souhrn je vypnutý." : lang === "pl" ? "Codzienne podsumowanie jest wyłączone." : "The daily summary is off.";
+      // The stored UTC hour said as today's UK clock time.
+      const today = new Date();
+      const local = typeof data.hourUtc === "number"
+        ? localDateTime(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), data.hourUtc)), BUSINESS_TIME_ZONE).time
+        : "";
+      return lang === "cs" ? `Denní souhrn je zapnutý${local ? `, chodí v ${local}` : ""}.` : lang === "pl" ? `Codzienne podsumowanie jest włączone${local ? `, przychodzi o ${local}` : ""}.` : `The daily summary is on${local ? `, sent at ${local}` : ""}.`;
+    }
+    case "send_notification_digest":
+      return lang === "cs" ? "Souhrn je odeslaný." : lang === "pl" ? "Podsumowanie zostało wysłane." : "The summary has been sent.";
     case "send_quote":
       return lang === "cs" ? "Nabídka je odeslaná." : lang === "pl" ? "Oferta została wysłana." : "The quote has been sent.";
     case "send_invoice":
@@ -355,9 +398,24 @@ export function spokenError(error: string | undefined, extra: Row | undefined, l
       en: "I could not find that received WhatsApp message.",
     },
     RECORD_NOT_FOUND: {
-      cs: `Nenašel jsem ${extra?.kind && extra.kind in RECORD_WORDS ? RECORD_WORDS[extra.kind as RecordKind].cs : "záznam"}${extra?.said ? ` „${extra.said}“` : ""}.`,
-      pl: `Nie znalazłem: ${extra?.kind && extra.kind in RECORD_WORDS ? RECORD_WORDS[extra.kind as RecordKind].pl : "rekord"}${extra?.said ? ` „${extra.said}”` : ""}.`,
-      en: `I could not find ${extra?.kind && extra.kind in RECORD_WORDS ? `a ${RECORD_WORDS[extra.kind as RecordKind].en}` : "it"}${extra?.said ? ` called “${extra.said}”` : ""}.`,
+      cs: `Nenašel jsem ${recordWord(extra?.kind, "cs") ?? "záznam"}${extra?.said ? ` „${extra.said}“` : ""}.`,
+      pl: `Nie znalazłem: ${recordWord(extra?.kind, "pl") ?? "rekord"}${extra?.said ? ` „${extra.said}”` : ""}.`,
+      en: `I could not find ${recordWord(extra?.kind, "en") ? `a ${recordWord(extra?.kind, "en")}` : "it"}${extra?.said ? ` called “${extra.said}”` : ""}.`,
+    },
+    INVOICE_NOT_EDITABLE: {
+      cs: "Upravit jde jen koncept faktury. Vystavenou fakturu je potřeba stornovat a vystavit novou.",
+      pl: "Edytować można tylko szkic faktury. Wystawioną fakturę trzeba anulować i wystawić nową.",
+      en: "Only a draft invoice can be changed. An issued invoice has to be voided and replaced.",
+    },
+    DIGEST_DISABLED: {
+      cs: "Denní souhrn máte vypnutý. Řekněte „zapni denní souhrn“.",
+      pl: "Codzienne podsumowanie jest wyłączone. Powiedz „włącz codzienne podsumowanie”.",
+      en: "Your daily summary is off. Say “turn on the daily summary” first.",
+    },
+    DIGEST_EMPTY: {
+      cs: "Teď nic nevyžaduje pozornost, souhrn by byl prázdný.",
+      pl: "Teraz nic nie wymaga uwagi, podsumowanie byłoby puste.",
+      en: "Nothing needs attention right now, so the summary would be empty.",
     },
     RECIPIENT_REQUIRED: {
       cs: "Klient nemá uložený e-mail. Řekněte adresu, nebo ji doplňte u klienta.",
@@ -645,5 +703,53 @@ export function spokenOpenRecord(
   return lang === "cs" ? `Nenašel jsem ${what} „${outcome.said}“.`
     : lang === "pl" ? `Nie znalazłem: ${what} „${outcome.said}”.`
       : `I could not find a ${what} called “${outcome.said}”.`;
+}
+
+/** Other things looked up by name, said after "Nenašel jsem". */
+const OTHER_WORDS: Record<string, Record<Locale, string>> = {
+  task: { cs: "úkol", pl: "zadanie", en: "task" },
+  service: { cs: "službu", pl: "usługę", en: "service" },
+  document: { cs: "dokument", pl: "dokument", en: "document" },
+  business_context: { cs: "položku", pl: "pozycję", en: "business context item" },
+  industry: { cs: "odvětví", pl: "branżę", en: "industry" },
+};
+
+function recordWord(kind: unknown, lang: Locale): string | undefined {
+  if (typeof kind !== "string") return undefined;
+  if (kind in RECORD_WORDS) return RECORD_WORDS[kind as RecordKind][lang];
+  return OTHER_WORDS[kind]?.[lang];
+}
+
+const CHANGE_LABELS: Record<string, Record<Locale, string>> = {
+  name: { cs: "název", pl: "nazwa", en: "name" },
+  title: { cs: "název", pl: "tytuł", en: "title" },
+  description: { cs: "popis", pl: "opis", en: "description" },
+  category: { cs: "kategorie", pl: "kategoria", en: "category" },
+  price_min: { cs: "cena od", pl: "cena od", en: "price from" },
+  price_max: { cs: "cena do", pl: "cena do", en: "price up to" },
+  price_unit: { cs: "jednotka ceny", pl: "jednostka ceny", en: "price unit" },
+  duration_hours: { cs: "obvyklá délka v hodinách", pl: "zwykły czas w godzinach", en: "usual length in hours" },
+  invoice_number: { cs: "číslo", pl: "numer", en: "number" },
+  due_date: { cs: "splatnost", pl: "termin płatności", en: "due date" },
+  notes: { cs: "poznámka", pl: "uwagi", en: "notes" },
+};
+
+/** "cena od 500,00 £, splatnost 16. 10. 2026" — each change as it will be saved. */
+function spokenChanges(changes: unknown, lang: Locale): string {
+  if (!changes || typeof changes !== "object") return "";
+  const locale = lang === "cs" ? "cs-CZ" : lang === "pl" ? "pl-PL" : "en-GB";
+  const parts = Object.entries(changes as Record<string, unknown>).map(([key, value]) => {
+    const label = CHANGE_LABELS[key]?.[lang] ?? key;
+    let said = String(value);
+    if ((key === "price_min" || key === "price_max") && typeof value === "number") {
+      said = new Intl.NumberFormat(locale, { style: "currency", currency: "GBP" }).format(value);
+    } else if (key === "due_date" && typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      said = new Intl.DateTimeFormat(locale, { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`));
+    } else {
+      said = lang === "en" ? `“${quote(value)}”` : lang === "pl" ? `„${quote(value)}”` : `„${quote(value)}“`;
+    }
+    return `${label} ${said}`;
+  });
+  return spokenList(parts, lang);
 }
 

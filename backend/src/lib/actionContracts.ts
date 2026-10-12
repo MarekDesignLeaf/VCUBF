@@ -894,6 +894,17 @@ export const GET_UNPAID_INVOICES_ACTION: ActionContract = {
 };
 
 export const CREATE_INVOICE_ACTION: ActionContract = { actionName:"create_invoice",purpose:"Create an itemised draft invoice from entered client and line data.",requiredPermission:"crm.manage",riskLevel:2,confirmationRequired:false,dataSources:["user_input","crm.clients"],possibleErrors:["MISSING_PERMISSION","VALIDATION_FAILED","CLIENT_NOT_FOUND","INVOICE_NUMBER_EXISTS"] };
+// update_invoice — a draft invoice's number, title, dates, notes or lines. An
+// issued invoice is not edited; it is voided and replaced.
+export const UPDATE_INVOICE_ACTION: ActionContract = {
+  actionName: "update_invoice",
+  purpose: "Edit a draft invoice's number, title, issue or due date, notes or lines; an issued invoice cannot be edited.",
+  requiredPermission: "crm.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "crm.invoices"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "INVOICE_NOT_FOUND", "INVOICE_NOT_EDITABLE", "INVOICE_NUMBER_EXISTS"],
+};
 export const CHANGE_INVOICE_STATUS_ACTION: ActionContract = { actionName:"change_invoice_status",purpose:"Change the internal invoice lifecycle state without sending it.",requiredPermission:"crm.manage",riskLevel:2,confirmationRequired:false,dataSources:["user_input","crm.invoices"],possibleErrors:["MISSING_PERMISSION","VALIDATION_FAILED","INVOICE_NOT_FOUND","INVALID_INVOICE_STATUS_TRANSITION"] };
 export const RECORD_INVOICE_PAYMENT_ACTION: ActionContract = { actionName:"record_invoice_payment",purpose:"Record a payment actually received against an issued invoice after explicit preview confirmation.",requiredPermission:"crm.manage",riskLevel:3,confirmationRequired:true,dataSources:["user_input","crm.invoices","crm.payments"],possibleErrors:["MISSING_PERMISSION","VALIDATION_FAILED","INVOICE_NOT_FOUND","INVOICE_NOT_PAYABLE","PAYMENT_EXCEEDS_BALANCE","CONFIRMATION_REQUIRED"] };
 export const EXPORT_INVOICE_PDF_ACTION: ActionContract = { actionName:"export_invoice_pdf",purpose:"Render a client-facing invoice PDF without sending or changing it.",requiredPermission:"crm.read",riskLevel:1,confirmationRequired:false,dataSources:["crm.invoices","crm.clients","crm.payments"],possibleErrors:["MISSING_PERMISSION","INVOICE_NOT_FOUND"] };

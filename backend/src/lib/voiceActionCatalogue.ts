@@ -11,6 +11,7 @@ import {
   JOB_OPENING_STATUSES,
   JOB_OPENING_URGENCY_LEVELS,
   QUOTE_STATUSES,
+  TASK_PRIORITIES,
   TASK_STATUSES,
 } from "./actionContracts.js";
 
@@ -132,6 +133,62 @@ export const voiceActionSchemas = {
     })
     .strict(),
   issue_invoice: z.object({ invoice_number: nonEmpty }).strict(),
+  // Editing what the pages edit. The record is named as said and looked up;
+  // dates are passed as spoken and resolved in the business's time zone. The
+  // *_id fields are only ever the reviewed operation's, never the model's.
+  update_task: z
+    .object({
+      task: nonEmpty,
+      title: optionalText,
+      due: optionalText,
+      due_time: optionalText,
+      assignee: optionalText,
+      priority: z.enum(TASK_PRIORITIES).optional(),
+      description: optionalText,
+    })
+    .strict()
+    .refine((value) => Object.keys(value).length > 1, { message: "say what to change" }),
+  update_service: z
+    .object({
+      service: optionalText,
+      service_id: z.string().uuid().optional(),
+      name: optionalText,
+      description: optionalText,
+      category: optionalText,
+      price_min: nonNegative.optional(),
+      price_max: nonNegative.optional(),
+      price_unit: optionalText,
+      duration_hours: positive.optional(),
+    })
+    .strict()
+    .refine((value) => value.service || value.service_id, { message: "name the service" }),
+  update_invoice: z
+    .object({
+      invoice: optionalText,
+      invoice_id: z.string().uuid().optional(),
+      title: optionalText,
+      invoice_number: optionalText,
+      due_date: optionalText,
+      notes: optionalText,
+    })
+    .strict()
+    .refine((value) => value.invoice || value.invoice_id, { message: "name the invoice" }),
+  update_document: z
+    .object({ document: nonEmpty, title: optionalText, reference: optionalText, expires: optionalText, notes: optionalText })
+    .strict()
+    .refine((value) => Object.keys(value).length > 1, { message: "say what to change" }),
+  update_business_context: z
+    .object({ label: nonEmpty, new_label: optionalText, value: optionalText, notes: optionalText })
+    .strict()
+    .refine((value) => Object.keys(value).length > 1, { message: "say what to change" }),
+  update_industry: z
+    .object({ industry: nonEmpty, name: optionalText, description: optionalText, notes: optionalText })
+    .strict()
+    .refine((value) => Object.keys(value).length > 1, { message: "say what to change" }),
+  set_notification_digest: z
+    .object({ enabled: z.boolean(), hour: z.number().int().min(0).max(23).optional() })
+    .strict(),
+  send_notification_digest: z.object({}).strict(),
   // E-mailing the PDF of a quote or an issued invoice to the client. The
   // document is named as said (its title or number, or its client); the
   // reviewed operation names it exactly (document_id) with the recipients,
@@ -344,6 +401,11 @@ The JSON must be valid, contain only the documented fields and preserve every us
 - set_quote_status {"quote_title","quote_status"}; quote_status is draft, sent, accepted, rejected or expired
 - create_invoice {"client_name","invoice_number","title","items":[{"description","quantity?","unit_price"}],"issue_date?","due_date?","notes?"}
 - issue_invoice {"invoice_number"}; record_invoice_payment {"invoice_number","amount","paid_at?","method?","reference?"}. A payment is always previewed and needs a separate confirmation.
+- update_task {"task","title?","due?","due_time?","assignee?","priority?","description?"}: task is its title as said; due is the day as spoken (zítra, v pátek, 16. října), due_time HH:MM only when said; assignee is the employee's name as said; priority is low, normal, high or urgent.
+- update_service {"service","name?","description?","category?","price_min?","price_max?","price_unit?","duration_hours?"}; prices in pounds as numbers. Always read back and needs a separate confirmation.
+- update_invoice {"invoice","title?","invoice_number?","due_date?","notes?"}: a draft invoice only; invoice is its number or client as said; due_date as spoken. Always read back and needs a separate confirmation.
+- update_document {"document","title?","reference?","expires?","notes?"}; update_business_context {"label","new_label?","value?","notes?"}; update_industry {"industry","name?","description?","notes?"}.
+- set_notification_digest {"enabled","hour?"}: the user's own daily e-mail summary of what needs attention, hour 0-23 in UK time. send_notification_digest {}: send that summary now; read back and needs a separate confirmation.
 - send_quote {"quote","to?"}; send_invoice {"invoice","to?"}: e-mail the PDF to the client. quote/invoice is the title, number or client name as said; to only when the user says an address, otherwise the client's stored e-mail is used. Always previewed and needs a separate confirmation.
 - add_job_resource {"job_title","resource_type","name","quantity?","unit?","estimated_cost?","notes?"}; resource_type is material, equipment, vehicle, hire or waste
 - set_job_resource_status {"job_title","resource_name","requirement_status"}; status is needed, ordered, ready or unavailable
