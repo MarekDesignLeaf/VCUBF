@@ -62,7 +62,9 @@ export function createServer() {
     "https://localhost",
     "capacitor://localhost",
   ])];
-  app.use(cors({ origin: allowedOrigins }));
+  // Preflights kept for two hours (the browser's limit): a voice command used
+  // to pay an extra round trip for OPTIONS before /command/transcribe (12. 10.).
+  app.use(cors({ origin: allowedOrigins, maxAge: 7200 }));
   app.use(express.json({
     verify: (req, _res, buffer) => {
       const request = req as express.Request;

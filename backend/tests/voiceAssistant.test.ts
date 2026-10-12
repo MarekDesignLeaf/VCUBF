@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { afterEach, describe, it } from "node:test";
 import type { AssistantContext } from "../src/services/assistantMemoryService.js";
-import { createRealtimeClientSession, interpretVoiceRequest, isPromptEcho, isPromptEchoStarting, needsApplicationMap, restoreWakeWord, transcribeVoiceAudio } from "../src/services/voiceAssistantService.js";
+import { createRealtimeClientSession, interpretVoiceRequest, isPromptEcho, isPromptEchoStarting, needsApplicationMap, resetTranscriptionFallback, restoreWakeWord, transcribeVoiceAudio, transcriptionKeywords } from "../src/services/voiceAssistantService.js";
 
 const originalFetch = globalThis.fetch;
 const originalKey = process.env.OPENAI_API_KEY;
@@ -289,6 +289,70 @@ describe("voice assistant interpretation", () => {
     assert.equal(calls, 1, "one request, nothing to retry");
   });
 
+  it("gives gpt-transcribe the language and the words to expect as data, never as a prompt", async () => {
+    // 12. 10. 00:14 UTC: "Přečti zprávy na WhatsApp" came back in Polish and
+    // "Alfonzo" as "Afonso" from gpt-4o-transcribe, which takes the language
+    // only as a hint.
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-transcribe";
+    resetTranscriptionFallback();
+    let calls = 0;
+    globalThis.fetch = async (_url, init) => {
+      calls += 1;
+      const form = init?.body as FormData;
+      assert.equal(form.get("model"), "gpt-transcribe");
+      assert.deepEqual(form.getAll("languages[]"), ["cs"]);
+      assert.equal(form.get("language"), null, "languages replaces language; both are not sent");
+      assert.deepEqual(form.getAll("keywords[]"), ["Alfonzo", "WhatsApp", "Gmail", "e-mail", "Kvasnička"]);
+      assert.equal(form.get("prompt"), null);
+      assert.equal(form.get("temperature"), null);
+      assert.equal(form.get("stream"), null);
+      return Response.json({ text: " Alfonzo, přečti zprávy na WhatsApp. ", languages: [{ code: "cs" }] });
+    };
+    const result = await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo", ["Alfonzo", "Kvasnička"]);
+    assert.deepEqual(result, { text: "Alfonzo, přečti zprávy na WhatsApp.", model: "gpt-transcribe" });
+    assert.equal(calls, 1);
+  });
+
+  it("asks the previous model when gpt-transcribe is refused, and keeps using it for a while", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-transcribe";
+    resetTranscriptionFallback();
+    const models: string[] = [];
+    globalThis.fetch = async (_url, init) => {
+      const form = init?.body as FormData;
+      models.push(String(form.get("model")));
+      if (form.get("model") === "gpt-transcribe") return new Response(JSON.stringify({ error: { message: "The model gpt-transcribe does not exist" } }), { status: 404 });
+      assert.equal(form.get("language"), "cs");
+      assert.equal(form.getAll("languages[]").length, 0);
+      assert.equal(form.getAll("keywords[]").length, 0);
+      return Response.json({ text: "Ukaž klienty." });
+    };
+    const first = await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo");
+    assert.deepEqual(first, { text: "Ukaž klienty.", model: "gpt-4o-transcribe" });
+    assert.deepEqual(models, ["gpt-transcribe", "gpt-4o-transcribe"]);
+    // The next sentence does not wait for a second refusal.
+    await transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo");
+    assert.deepEqual(models, ["gpt-transcribe", "gpt-4o-transcribe", "gpt-4o-transcribe"]);
+    resetTranscriptionFallback();
+  });
+
+  it("does not take an outage of gpt-transcribe for a refusal of the request", async () => {
+    process.env.OPENAI_API_KEY = "server-only-test-key";
+    process.env.OPENAI_TRANSCRIPTION_MODEL = "gpt-transcribe";
+    resetTranscriptionFallback();
+    let calls = 0;
+    globalThis.fetch = async () => { calls += 1; return new Response("upstream down", { status: 503 }); };
+    await assert.rejects(() => transcribeVoiceAudio(Buffer.alloc(48), "cs-CZ", "Alfonzo"), /OPENAI_TRANSCRIPTION_FAILED_503/);
+    assert.equal(calls, 1);
+  });
+
+  it("keeps the keywords OpenAI accepts: no angle brackets or line breaks, no repeats", () => {
+    assert.deepEqual(transcriptionKeywords("Hej {assistant}", ["<b>Novák</b>", "dva\nřádky", "whatsapp", ""]),
+      ["Alfonzo", "WhatsApp", "Gmail", "e-mail", "b Novák /b", "dva řádky"]);
+    assert.deepEqual(transcriptionKeywords("Hej Alfonzo").slice(0, 1), ["Alfonzo"]);
+  });
+
   it("gives whisper-1 the vocabulary prompt with the wake word and learned words, so misheard words improve", async () => {
     process.env.OPENAI_API_KEY = "server-only-test-key";
     process.env.OPENAI_TRANSCRIPTION_MODEL = "whisper-1";
@@ -315,6 +379,8 @@ describe("voice assistant interpretation", () => {
     assert.equal(restoreWakeWord("Tak Alfons, co mám zítra?", "Alfonzo"), "Tak Alfonzo, co mám zítra?");
     assert.equal(restoreWakeWord("Alfonzu, ukaž klienty", "Hej Alfonzo"), "Alfonzo, ukaž klienty");
     assert.equal(restoreWakeWord("Alfonzo, ukaž klienty", "Alfonzo"), "Alfonzo, ukaž klienty", "already right: unchanged");
+    // 12. 10.: the second letter lost in a long name.
+    assert.equal(restoreWakeWord("Afonso.", "Alfonzo"), "Alfonzo.");
     // Ordinary words stay as they were heard.
     for (const text of ["Alfa Romeo je v servisu", "alergie na pyl", "Pošli to Alfrédovi", "a fonzo"]) assert.equal(restoreWakeWord(text, "Alfonzo"), text, text);
     assert.equal(restoreWakeWord("Emo, ukaž klienty", "Ema"), "Emo, ukaž klienty", "short names are left alone");
