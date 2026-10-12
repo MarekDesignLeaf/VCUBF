@@ -463,7 +463,8 @@ commandRouter.post(
       // applies to the very next utterance.
       const language = await currentVoiceLanguage(req.user!);
       const learned = await aliasVocabulary(req.user!.companyId, addressedAs(req.user!));
-      const transcription = await transcribeVoiceAudio(audio, language, query.data.wake_word, learned);
+      // The name goes along as a word to expect (gpt-transcribe's keywords).
+      const transcription = await transcribeVoiceAudio(audio, language, query.data.wake_word, [assistantNameFor(req.user!), ...learned]);
       logIfAddressed(transcription.text, [...addressedAs(req.user!), assistantNameFor(req.user!)], learned);
       await recordAudit({
         companyId: req.user!.companyId,

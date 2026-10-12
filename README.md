@@ -975,7 +975,10 @@ Build order should follow the roadmap in the master documentation (Phase 1 → P
   (`WHATSAPP_GRAPH_API_VERSION`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_ACCOUNT_ID`,
   `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `META_APP_SECRET`), the Alfonzo assistant
   values (`OPENAI_API_KEY`, optionally `OPENAI_REALTIME_MODEL`, `OPENAI_REALTIME_VOICE`,
-  `OPENAI_TRANSCRIPTION_MODEL`, `OPENAI_TRANSCRIPTION_PROMPT` (the gpt transcribe models get no
+  `OPENAI_TRANSCRIPTION_MODEL` (`gpt-transcribe` gets the voice language as `languages[]` and the
+  assistant's name, the channels and the taught phrases as `keywords[]`; if OpenAI refuses it, the
+  sentence is transcribed by `gpt-4o-transcribe` and that is used for ten minutes),
+  `OPENAI_TRANSCRIPTION_PROMPT` (the gpt-4o transcribe models get no
   vocabulary prompt, because they read it back instead of the speech; `on` restores it),
   `OPENAI_VOICE_MODEL`, `OPENAI_VOICE_TIMEOUT_MS`, `OPENAI_TTS_MODEL`,
   `OPENAI_TTS_VOICE`; Alfonzo is a man, so a voice setting that does not name a man's voice is

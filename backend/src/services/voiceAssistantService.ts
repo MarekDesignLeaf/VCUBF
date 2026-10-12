@@ -255,19 +255,40 @@ export async function transcribeVoiceAudio(
   // treat the prompt as an instruction and can echo it back when the audio
   // carries no speech (seen as "context: ### {assistant} ###"); isPromptEcho() below
   // turns that into "heard nothing" instead of a command.
-  const model = modelFor("transcription");
-  const form = new FormData();
-  form.append("file", new Blob([new Uint8Array(audio)], { type: "audio/wav" }), "emma-command.wav");
-  form.append("model", model);
+  let model = modelFor("transcription");
   const isoLanguage = language.trim().split("-", 1)[0]?.toLowerCase();
-  if (/^[a-z]{2}$/.test(isoLanguage)) form.append("language", isoLanguage);
-  // Deterministic decoding: Whisper's default temperature lets it guess through
-  // unclear audio, which is exactly where wrong words come from.
-  form.append("temperature", "0");
   // Voice runs on OpenAI only: there is no local recogniser and no other
   // provider to fall back to.
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_NOT_CONFIGURED");
+
+  // gpt-transcribe takes the expected languages and the rare words as data
+  // rather than as a prompt it could read back (12. 10. 00:14 UTC: "Přečti
+  // zprávy na WhatsApp" came back in Polish, "Przycisk prawy na WhatsApp", and
+  // "Alfonzo" as "Afonso"). Should OpenAI refuse it, the sentence is asked for
+  // again from the previous model and voice carries on.
+  if (LANGUAGE_LIST_TRANSCRIPTION.test(model)) {
+    if (Date.now() >= languageListRefusedUntil) {
+      const form = transcriptionForm(audio, model);
+      if (/^[a-z]{2}$/.test(isoLanguage)) form.append("languages[]", isoLanguage);
+      for (const keyword of transcriptionKeywords(wakeWord, extraVocabulary)) form.append("keywords[]", keyword);
+      try {
+        const result = await requestTranscription(form);
+        return finishTranscription(result.text, model, wakeWord, isoLanguage, result.languages);
+      } catch (error) {
+        if (!(error instanceof TranscriptionRefused)) throw error;
+        languageListRefusedUntil = Date.now() + LANGUAGE_LIST_RETRY_MS;
+        console.log(`[transcription] ${model} refused (${error.status}): ${error.detail.slice(0, 200)}; using ${FALLBACK_TRANSCRIPTION_MODEL} for ${LANGUAGE_LIST_RETRY_MS / 60_000} min`);
+      }
+    }
+    model = FALLBACK_TRANSCRIPTION_MODEL;
+  }
+
+  const form = transcriptionForm(audio, model);
+  if (/^[a-z]{2}$/.test(isoLanguage)) form.append("language", isoLanguage);
+  // Deterministic decoding: Whisper's default temperature lets it guess through
+  // unclear audio, which is exactly where wrong words come from.
+  form.append("temperature", "0");
 
   // The vocabulary prompt helped whisper-1. The gpt transcribe models read it
   // back instead of the speech: on 11. 10. most sentences came back as the
@@ -302,12 +323,52 @@ export async function transcribeVoiceAudio(
   return finishTranscription(text, model, wakeWord, isoLanguage);
 }
 
+/** Transcription models that take `languages[]` and `keywords[]` instead of `language` and a prompt. */
+const LANGUAGE_LIST_TRANSCRIPTION = /^gpt-transcribe/;
+/** What a refused gpt-transcribe request is asked of instead. */
+export const FALLBACK_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+/** After a refusal, how long the fallback is used before gpt-transcribe is tried again. */
+const LANGUAGE_LIST_RETRY_MS = 10 * 60 * 1000;
+let languageListRefusedUntil = 0;
+
+/** Tests: forget a refusal. */
+export function resetTranscriptionFallback() {
+  languageListRefusedUntil = 0;
+}
+
+function transcriptionForm(audio: Buffer, model: string) {
+  const form = new FormData();
+  form.append("file", new Blob([new Uint8Array(audio)], { type: "audio/wav" }), "emma-command.wav");
+  form.append("model", model);
+  return form;
+}
+
+/**
+ * The rare words a command may contain, for gpt-transcribe: the assistant's
+ * name, the channels and the phrases this company has taught. Keywords are
+ * hints the model writes only when they are spoken. OpenAI refuses the whole
+ * request for a keyword with "<", ">" or a line break, so those are removed.
+ */
+export function transcriptionKeywords(wakeWord: string, extraVocabulary: string[] = []): string[] {
+  const spoken = wakeWord.replace(/\{assistant\}/g, "").trim().split(/\s+/).filter((word) => word && !/^(?:hej|hey|hi|ahoj)$/i.test(word));
+  const name = spoken.pop() || DEFAULT_ASSISTANT_NAME;
+  const clean = (value: string) => value.replace(/[<>\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+  const keywords = [name, "WhatsApp", "Gmail", "e-mail", ...extraVocabulary].map(clean).filter(Boolean);
+  const seen = new Set<string>();
+  return keywords.filter((keyword) => {
+    const key = keyword.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 40);
+}
+
 /** Whether the vocabulary prompt is sent: always to whisper-1, to the gpt models only when switched on. */
 function usesTranscriptionPrompt(model: string) {
   return !STREAMING_TRANSCRIPTION.test(model) || process.env.OPENAI_TRANSCRIPTION_PROMPT?.trim().toLowerCase() === "on";
 }
 
-function finishTranscription(heard: string, model: string, wakeWord: string, isoLanguage: string): VoiceTranscription {
+function finishTranscription(heard: string, model: string, wakeWord: string, isoLanguage: string, detected?: string[]): VoiceTranscription {
   // Without the prompt the decoder does not know the name it should expect
   // and writes what it heard ("Alfonso", "Al Fonzo"); the page then found no
   // wake word and ignored the command (11. 10., 12:43–12:45 UTC).
@@ -319,7 +380,10 @@ function finishTranscription(heard: string, model: string, wakeWord: string, iso
   const hallucination = isLikelyHallucination(text);
   // What was heard, cut short, so it can be read from the logs without asking
   // (Marek, 11. 10.: "zapni si logování, ať se mě nemusíš ptát").
-  console.log(`[transcription] lang=${isoLanguage} chars=${text.length}${hallucination && text ? " dropped=hallucination" : ""} heard=${JSON.stringify(text.length > 80 ? `${text.slice(0, 80)}…` : text)}`);
+  // gpt-transcribe says which language it heard: a sentence detected in
+  // another language is the first thing to look at when one is misheard.
+  const languages = detected ? ` detected=${detected.join(",") || "-"}` : "";
+  console.log(`[transcription] model=${model} lang=${isoLanguage}${languages} chars=${text.length}${hallucination && text ? " dropped=hallucination" : ""} heard=${JSON.stringify(text.length > 80 ? `${text.slice(0, 80)}…` : text)}`);
   if (hallucination) return { text: "", model, ...(text ? { dropped: "hallucination" as const } : {}) };
   return { text, model };
 }
@@ -341,8 +405,8 @@ function editDistance(left: string, right: string): number {
 /**
  * The assistant's name written as it is configured wherever the transcript
  * has a near miss of it: one word or two run together, starting with the same
- * two letters and at most two letters different ("Alfonso", "Alfons", "Al
- * Fonzo", "Alfonzu"). Only the name is touched; every other word stays as
+ * two letters (the same first letter for a name of seven or more) and at most
+ * two letters different ("Alfonso", "Alfons", "Al Fonzo", "Alfonzu", "Afonso"). Only the name is touched; every other word stays as
  * heard. Names shorter than five letters are left alone, as a near miss of a
  * short word is too often a different word.
  */
@@ -351,9 +415,13 @@ export function restoreWakeWord(text: string, wakeWord: string): string {
   const fold = (value: string) => value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
   const target = fold(name);
   if (target.length < 5) return text;
-  const near = (said: string) => {
+  const near = (said: string, oneWord = true) => {
     const folded = fold(said);
-    return folded !== target && folded.slice(0, 2) === target.slice(0, 2)
+    // A long name said as one word keeps its shape when its second letter is
+    // lost: "Afonso" for Alfonzo (12. 10. 00:14 UTC) went unanswered and had to
+    // be said again. Two words ("a fonzo") still need the first two letters.
+    const sameStart = folded.slice(0, 2) === target.slice(0, 2) || (oneWord && target.length >= 7 && folded[0] === target[0]);
+    return folded !== target && sameStart
       && Math.abs(folded.length - target.length) <= 2 && editDistance(folded, target) <= 2;
   };
   const words = [...text.matchAll(/\p{L}+/gu)];
@@ -367,7 +435,7 @@ export function restoreWakeWord(text: string, wakeWord: string): string {
     // "Al Fonzo": two words, nothing but a space or hyphen between them.
     const pairEnd = next && /^[\s-]$/.test(text.slice(end, next.index!)) ? next.index! + next[0].length : -1;
     const pair = pairEnd > 0 ? word[0] + next[0] : "";
-    if (pair && (fold(pair) === target || near(pair)) && fold(word[0]) !== target && !near(word[0])) {
+    if (pair && (fold(pair) === target || near(pair, false)) && fold(word[0]) !== target && !near(word[0])) {
       result += text.slice(from, start) + name;
       from = pairEnd;
       index += 1;
@@ -393,6 +461,13 @@ function eventData(block: string): StreamEvent | undefined {
 
 class StreamBroken extends Error {}
 
+/** OpenAI refused the request itself (an unknown model or parameter), not the audio's content. */
+class TranscriptionRefused extends Error {
+  constructor(readonly status: number, readonly detail: string) {
+    super(`OPENAI_TRANSCRIPTION_FAILED_${status}`);
+  }
+}
+
 /**
  * One transcription request; the text, trimmed.
  *
@@ -404,8 +479,8 @@ class StreamBroken extends Error {}
  * stops working on a streaming oddity, and a broken stream is never taken for
  * a shorter sentence.
  */
-async function requestTranscription(form: FormData, stopWhen?: (text: string) => boolean): Promise<{ text: string; stopped: boolean }> {
-  const streamed = Boolean(stopWhen) && STREAMING_TRANSCRIPTION.test(modelFor("transcription"));
+async function requestTranscription(form: FormData, stopWhen?: (text: string) => boolean): Promise<{ text: string; stopped: boolean; languages?: string[] }> {
+  const streamed = Boolean(stopWhen) && STREAMING_TRANSCRIPTION.test(String(form.get("model") ?? ""));
   if (streamed) form.set("stream", "true");
   else form.delete("stream");
   const response = await modelRequest("transcription", "/v1/audio/transcriptions", { method: "POST", body: form });
@@ -415,6 +490,7 @@ async function requestTranscription(form: FormData, stopWhen?: (text: string) =>
       console.log("[transcription] streaming refused (400), asked again without it");
       return requestTranscription(form);
     }
+    if ([400, 403, 404, 422].includes(response.status)) throw new TranscriptionRefused(response.status, detail);
     throw new Error(`OPENAI_TRANSCRIPTION_FAILED_${response.status}`);
   }
   if (!streamed || !response.body || !response.headers.get("content-type")?.includes("text/event-stream")) {
@@ -422,7 +498,11 @@ async function requestTranscription(form: FormData, stopWhen?: (text: string) =>
     // The transcription is the highest-volume AI call (every heard stretch of
     // speech), so its token usage is exactly what the cost decision needs.
     recordUsage("transcription", (parsed as { usage?: unknown })?.usage);
-    return { text: z.object({ text: z.string() }).parse(parsed).text.trim(), stopped: false };
+    const detected = (parsed as { languages?: unknown })?.languages;
+    const languages = Array.isArray(detected)
+      ? detected.map((entry) => (entry && typeof entry === "object" && typeof (entry as { code?: unknown }).code === "string" ? (entry as { code: string }).code : "")).filter(Boolean)
+      : undefined;
+    return { text: z.object({ text: z.string() }).parse(parsed).text.trim(), stopped: false, ...(languages ? { languages } : {}) };
   }
   const startedAt = Date.now();
   // The gateway logs when the headers came; a streamed sentence is over only

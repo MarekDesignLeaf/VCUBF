@@ -145,6 +145,8 @@ type Copy = {
    * finished there, so its outcome is unknown rather than failed.
    */
   unknownOutcome: string;
+  /** Said when a sentence addressed to him came back as not meant for him (misheard). */
+  notCaught: string;
   completed: string;
   failed: string;
   send: string;
@@ -199,6 +201,7 @@ function copyFor(language: string): Copy {
       unsupported: "This browser cannot recognise speech. Use Edge or Chrome.",
       connectionError: "Could not reach Secretary.", completed: "Done.",
       unknownOutcome: "Secretary did not answer in time. If you were confirming something, it may still have been done, so check before you say it again.",
+      notCaught: "Sorry, I didn't catch that. Please say it again.",
       failed: "That request could not be completed.", send: "Send", typeHere: "…or type a command",
       monitor: "What was heard (this computer only)", monitorEmpty: "Nothing yet.", transcribing: "transcribing…", notRecognised: "Speech heard, but not recognised — please say it again.", transcriptionFailed: "Could not be transcribed (connection).",
       timing: (t) => `Response ${t.total} s — end of speech ${t.silence} · transcription ${t.heard}${t.understood ? ` · understanding ${t.understood}` : ""} · voice ${t.voice}`,
@@ -230,6 +233,7 @@ function copyFor(language: string): Copy {
       unsupported: "Tento prohlížeč neumí rozpoznávat řeč. Použijte Edge nebo Chrome.",
       connectionError: "Nepodařilo se spojit se Secretary.", completed: "Hotovo.",
       unknownOutcome: "Odpověď ze Secretary nepřišla včas. Pokud jste něco potvrzovali, mohlo se to přesto provést, tak to před zopakováním zkontrolujte.",
+      notCaught: "Promiňte, nerozuměl jsem. Zopakujte to prosím.",
       failed: "Tento požadavek se nepodařilo dokončit.", send: "Odeslat", typeHere: "…nebo napište příkaz",
       monitor: "Co bylo slyšet (jen tento počítač)", monitorEmpty: "Zatím nic.", transcribing: "přepisuji…", notRecognised: "Slyšel jsem řeč, ale nerozpoznal ji — řekněte to prosím znovu.", transcriptionFailed: "Přepis se nepovedl (spojení).",
       timing: (t) => `Odezva ${t.total} s — konec řeči ${t.silence} · přepis ${t.heard}${t.understood ? ` · porozumění ${t.understood}` : ""} · hlas ${t.voice}`,
@@ -261,6 +265,7 @@ function copyFor(language: string): Copy {
       unsupported: "Ta przeglądarka nie rozpoznaje mowy. Użyj Edge lub Chrome.",
       connectionError: "Nie udało się połączyć z Secretary.", completed: "Gotowe.",
       unknownOutcome: "Odpowiedź z Secretary nie przyszła na czas. Jeśli coś potwierdzałeś, mogło to zostać wykonane, więc sprawdź przed powtórzeniem.",
+      notCaught: "Przepraszam, nie zrozumiałem. Proszę powtórzyć.",
       failed: "Nie udało się wykonać tego żądania.", send: "Wyślij", typeHere: "…albo wpisz polecenie",
       monitor: "Co było słychać (tylko ten komputer)", monitorEmpty: "Jeszcze nic.", transcribing: "przepisuję…", notRecognised: "Słyszałem mowę, ale jej nie rozpoznałem — powtórz proszę.", transcriptionFailed: "Nie udało się przepisać (połączenie).",
       timing: (t) => `Czas reakcji ${t.total} s — koniec mowy ${t.silence} · transkrypcja ${t.heard}${t.understood ? ` · zrozumienie ${t.understood}` : ""} · głos ${t.voice}`,
@@ -292,6 +297,7 @@ function copyFor(language: string): Copy {
       unsupported: "Dieser Browser erkennt keine Sprache. Verwenden Sie Edge oder Chrome.",
       connectionError: "Secretary war nicht erreichbar.", completed: "Fertig.",
       unknownOutcome: "Secretary hat nicht rechtzeitig geantwortet. Falls Sie etwas bestätigt haben, wurde es vielleicht trotzdem ausgeführt; prüfen Sie das, bevor Sie es wiederholen.",
+      notCaught: "Entschuldigung, das habe ich nicht verstanden. Bitte wiederholen Sie es.",
       failed: "Diese Anfrage konnte nicht abgeschlossen werden.", send: "Senden", typeHere: "…oder Befehl eingeben",
       monitor: "Was zu hören war (nur dieser Computer)", monitorEmpty: "Noch nichts.", transcribing: "wird erkannt…", notRecognised: "Sprache gehört, aber nicht erkannt — bitte wiederholen.", transcriptionFailed: "Nicht erkannt (Verbindung).",
       timing: (t) => `Reaktionszeit ${t.total} s — Sprechende ${t.silence} · Transkription ${t.heard}${t.understood ? ` · Verstehen ${t.understood}` : ""} · Stimme ${t.voice}`,
@@ -323,6 +329,7 @@ function copyFor(language: string): Copy {
       unsupported: "Ce navigateur ne reconnaît pas la parole. Utilisez Edge ou Chrome.",
       connectionError: "Secretary est injoignable.", completed: "Terminé.",
       unknownOutcome: "Secretary n\u2019a pas répondu à temps. Si vous confirmiez quelque chose, cela a peut-être été fait ; vérifiez avant de le redire.",
+      notCaught: "Pardon, je n\u2019ai pas compris. Pouvez-vous répéter ?",
       failed: "Cette demande n’a pas pu être traitée.", send: "Envoyer", typeHere: "…ou tapez une commande",
       monitor: "Ce qui a été entendu (cet ordinateur uniquement)", monitorEmpty: "Rien pour l’instant.", transcribing: "transcription…", notRecognised: "Parole entendue mais non reconnue — répétez, s’il vous plaît.", transcriptionFailed: "Transcription impossible (connexion).",
       timing: (t) => `Temps de réponse ${t.total} s — fin de parole ${t.silence} · transcription ${t.heard}${t.understood ? ` · compréhension ${t.understood}` : ""} · voix ${t.voice}`,
@@ -354,6 +361,7 @@ function copyFor(language: string): Copy {
       unsupported: "Este navegador no reconoce el habla. Use Edge o Chrome.",
       connectionError: "No se ha podido contactar con Secretary.", completed: "Hecho.",
       unknownOutcome: "Secretary no respondió a tiempo. Si estaba confirmando algo, puede que se haya hecho igualmente; compruébelo antes de repetirlo.",
+      notCaught: "Perdón, no le he entendido. ¿Puede repetirlo?",
       failed: "No se ha podido completar la solicitud.", send: "Enviar", typeHere: "…o escriba una orden",
       monitor: "Lo que se ha oído (solo este ordenador)", monitorEmpty: "Todavía nada.", transcribing: "transcribiendo…", notRecognised: "Se oyó voz, pero no se reconoció — repítalo, por favor.", transcriptionFailed: "No se pudo transcribir (conexión).",
       timing: (t) => `Tiempo de respuesta ${t.total} s — fin del habla ${t.silence} · transcripción ${t.heard}${t.understood ? ` · comprensión ${t.understood}` : ""} · voz ${t.voice}`,
@@ -385,6 +393,7 @@ function copyFor(language: string): Copy {
       unsupported: "Questo browser non riconosce il parlato. Usate Edge o Chrome.",
       connectionError: "Secretary non è raggiungibile.", completed: "Fatto.",
       unknownOutcome: "Secretary non ha risposto in tempo. Se stavate confermando qualcosa, potrebbe essere stato eseguito comunque: controllate prima di ripeterlo.",
+      notCaught: "Scusi, non ho capito. Può ripetere?",
       failed: "Non è stato possibile completare la richiesta.", send: "Invia", typeHere: "…oppure scrivete un comando",
       monitor: "Ciò che è stato sentito (solo questo computer)", monitorEmpty: "Ancora nulla.", transcribing: "trascrizione…", notRecognised: "Voce sentita ma non riconosciuta — ripeta, per favore.", transcriptionFailed: "Trascrizione non riuscita (connessione).",
       timing: (t) => `Tempo di risposta ${t.total} s — fine del parlato ${t.silence} · trascrizione ${t.heard}${t.understood ? ` · comprensione ${t.understood}` : ""} · voce ${t.voice}`,
@@ -590,8 +599,12 @@ let currentPlayback: Playback | null = null;
  */
 const LEAD_IN_MS = 220;
 
-/** Silence that ends a sentence (the voice detector's redemption time). */
-const END_OF_SPEECH_MS = 900;
+/**
+ * Silence that ends a sentence (the voice detector's redemption time). 0.6 s
+ * since 12. 10., Marek's choice ("zkrať to"): the answer starts 0.3 s sooner;
+ * a longer pause in the middle of a sentence can now end it.
+ */
+const END_OF_SPEECH_MS = 600;
 
 /** Milliseconds as seconds with one decimal, in the language's own way of writing them. */
 function seconds(ms: number, language: string): string {
@@ -1360,6 +1373,8 @@ export function BrowserVoiceControl() {
   const aliasesRef = useRef<string[]>([]);
   const transcriptRef = useRef(transcript);
   const activeUntil = useRef(0);
+  /** He has just answered his bare name; the next sentence is meant for him. */
+  const answeredName = useRef(false);
   const conversationStartedAt = useRef(0);
   const speakingUntil = useRef(0);
   // Deliberately separate from speakingUntil: that one ends the moment she is cut off,
@@ -1820,7 +1835,13 @@ export function BrowserVoiceControl() {
     return false;
   }, [learningVoice, phrases, speak]);
 
-  const execute = useCallback(async (text: string, timed: Exchange | null = null) => {
+  /**
+   * `addressed`: the sentence was certainly meant for him — it carried his
+   * name, came first after his "Ano?", or was typed. If the backend still finds
+   * it not meant for him, it was misheard (12. 10.: Czech came back as Polish)
+   * and he says so instead of staying silent.
+   */
+  const execute = useCallback(async (text: string, timed: Exchange | null = null, addressed = true) => {
     /** Speak the answer with this exchange's times (a typed command has none). */
     const answer = (words: string) => {
       if (timed) timed.answeredAt ??= Date.now();
@@ -1843,6 +1864,11 @@ export function BrowserVoiceControl() {
           const last = current[current.length - 1];
           return last?.role === "user" && last.content === text ? current.slice(0, -1) : current;
         });
+        if (addressed) {
+          setAnswer(copy.notCaught);
+          answer(copy.notCaught);
+          extendConversation();
+        }
         setStatus("idle");
         return;
       }
@@ -1879,7 +1905,7 @@ export function BrowserVoiceControl() {
     } finally {
       setStatus("idle");
     }
-  }, [appendTurn, copy.completed, copy.connectionError, copy.failed, copy.unknownOutcome, extendConversation, language, learningVoice, navigate, speak, updateUser]);
+  }, [appendTurn, copy.completed, copy.connectionError, copy.failed, copy.notCaught, copy.unknownOutcome, extendConversation, language, learningVoice, navigate, speak, updateUser]);
 
   // One finished sentence from the recogniser.
   handleFinal.current = async (spoken: string, spokenAt = Date.now(), heard?: HeardAt) => {
@@ -1925,7 +1951,11 @@ export function BrowserVoiceControl() {
       }
       // A taught command waits for a confirmation dialog: not timed.
       if (learned) { await runLearned(learned); return; }
-      await execute(text, timed);
+      // In the open window a sentence may be the television; the first one
+      // after "Ano?", or one with his name in it, is meant for him.
+      const addressed = hit !== null || answeredName.current;
+      answeredName.current = false;
+      await execute(text, timed, addressed);
       return;
     }
     if (!hit) return;
@@ -1938,10 +1968,12 @@ export function BrowserVoiceControl() {
       // Shown as the answer, so its time is not read as the previous answer's.
       setAnswer(acknowledgement(language));
       speak(acknowledgement(language), timed);
+      answeredName.current = true;
       return;
     }
+    answeredName.current = false;
     if (!companionOwnsVoice) playCue();
-    await execute(remainder, timed);
+    await execute(remainder, timed, true);
   };
 
   // --- the local pipeline: our microphone, Silero, OpenAI transcription -------
@@ -2056,8 +2088,8 @@ export function BrowserVoiceControl() {
           // sure, 0.8 s kept before) let room noise hold a recording open: in
           // production a single "Alfonzo" arrived as 5.3 s of audio and a short
           // command as 6–8 s, so every request waited seconds for the sentence
-          // to "end" and then paid to transcribe the silence. Ending on 0.9 s
-          // below 0.35 still keeps normal pauses inside one sentence.
+          // to "end" and then paid to transcribe the silence. Ending on
+          // END_OF_SPEECH_MS below 0.35 keeps short pauses inside one sentence.
           positiveSpeechThreshold: 0.45,
           negativeSpeechThreshold: 0.35,
           redemptionMs: END_OF_SPEECH_MS,
