@@ -239,6 +239,11 @@ export function spokenReview(action: string, preview: Row | undefined, language:
       if (lang === "pl") return `Wyślę Ci podsumowanie na ${to}: pozycji ${count}${urgent ? `, w tym pilnych ${urgent}` : ""}. Temat: „${quote(preview.subject)}”. Czy mam je wysłać?`;
       return `I will email you the summary at ${to}: ${count} item${count === 1 ? "" : "s"}${urgent ? `, ${urgent} urgent` : ""}. Subject: “${quote(preview.subject)}”. Shall I send it?`;
     }
+    case "rename_company": {
+      if (lang === "cs") return `Přejmenuji firmu z „${quote(preview.from)}“ na „${quote(preview.to)}“. Nové jméno ponesou nabídky, faktury i odchozí zprávy. Mám to uložit?`;
+      if (lang === "pl") return `Zmienię nazwę firmy z „${quote(preview.from)}” na „${quote(preview.to)}”. Nową nazwę będą miały oferty, faktury i wysyłane wiadomości. Czy mam to zapisać?`;
+      return `I will rename the company from “${quote(preview.from)}” to “${quote(preview.to)}”. Quotes, invoices and outgoing messages will carry the new name. Shall I save it?`;
+    }
     case "clear_voice_history": {
       const how = counted(Number(preview.conversations) || 0, lang, CONVERSATIONS);
       const email = Number(preview.pendingEmails) > 0;
@@ -348,6 +353,8 @@ export function spokenOutcome(action: string | undefined, data: Row | undefined,
     }
     case "send_notification_digest":
       return lang === "cs" ? "Souhrn je odeslaný." : lang === "pl" ? "Podsumowanie zostało wysłane." : "The summary has been sent.";
+    case "rename_company":
+      return lang === "cs" ? `Firma se teď jmenuje „${quote(data?.name)}“.` : lang === "pl" ? `Firma nazywa się teraz „${quote(data?.name)}”.` : `The company is now called “${quote(data?.name)}”.`;
     case "clear_voice_history":
       if (!Number(data?.conversations) && !Number(data?.pendingEmails)) {
         return lang === "cs" ? "Žádné uložené rozhovory nemám, není co mazat." : lang === "pl" ? "Nie mam zapisanych rozmów, nie ma czego usuwać." : "There are no saved conversations to delete.";
@@ -423,6 +430,11 @@ export function spokenError(error: string | undefined, extra: Row | undefined, l
       cs: `Nenašel jsem ${recordWord(extra?.kind, "cs") ?? "záznam"}${extra?.said ? ` „${extra.said}“` : ""}.`,
       pl: `Nie znalazłem: ${recordWord(extra?.kind, "pl") ?? "rekord"}${extra?.said ? ` „${extra.said}”` : ""}.`,
       en: `I could not find ${recordWord(extra?.kind, "en") ? `a ${recordWord(extra?.kind, "en")}` : "it"}${extra?.said ? ` called “${extra.said}”` : ""}.`,
+    },
+    COMPANY_NAME_UNCHANGED: {
+      cs: `Firma se už jmenuje „${extra?.name ?? ""}“, nic jsem neměnil.`,
+      pl: `Firma już nazywa się „${extra?.name ?? ""}”, niczego nie zmieniłem.`,
+      en: `The company is already called “${extra?.name ?? ""}”; nothing was changed.`,
     },
     INVOICE_NOT_EDITABLE: {
       cs: "Upravit jde jen koncept faktury. Vystavenou fakturu je potřeba stornovat a vystavit novou.",

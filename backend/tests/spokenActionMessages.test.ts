@@ -181,3 +181,14 @@ describe("Commands answer in the language switched on", () => {
     assert.equal(spokenMemory({ kind: "recalled", contents: [] }, "en-GB"), "I do not have any active persistent memories yet.");
   });
 });
+
+describe("Renaming the company is read back", () => {
+  it("names both the old and the new name, and refuses no change in words", () => {
+    assert.equal(
+      spokenReview("rename_company", { from: "Marek DesignLeaf", to: "DesignLeaf Gardens" }, "cs-CZ"),
+      "Přejmenuji firmu z „Marek DesignLeaf“ na „DesignLeaf Gardens“. Nové jméno ponesou nabídky, faktury i odchozí zprávy. Mám to uložit?",
+    );
+    assert.equal(spokenOutcome("rename_company", { name: "DesignLeaf Gardens" }, "cs-CZ"), "Firma se teď jmenuje „DesignLeaf Gardens“.");
+    assert.equal(spokenError("COMPANY_NAME_UNCHANGED", { name: "DesignLeaf Gardens" }, "cs-CZ"), "Firma se už jmenuje „DesignLeaf Gardens“, nic jsem neměnil.");
+  });
+});

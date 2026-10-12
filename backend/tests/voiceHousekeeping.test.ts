@@ -113,6 +113,28 @@ describe("Voice housekeeping by voice", () => {
     assert.equal(response.body.message, "I could not find a learned word called “Bohumil”.");
   });
 
+  it("renames the company only after reading both names back, and says when the name is already that", async () => {
+    // The Company page's one field, said instead: every quote and invoice carries it.
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } });
+    const before = (await prisma.company.findUniqueOrThrow({ where: { id: admin.companyId } })).name;
+    const review = await say("Rename the company to Northwind Gardens Ltd.");
+    assert.equal(review.status, 409, JSON.stringify(review.body));
+    assert.equal(review.body.message, `I will rename the company from “${before}” to “Northwind Gardens Ltd”. Quotes, invoices and outgoing messages will carry the new name. Shall I save it?`);
+    assert.equal((await prisma.company.findUniqueOrThrow({ where: { id: admin.companyId } })).name, before, "nothing changes before the yes");
+
+    const yes = await say("yes");
+    assert.equal(yes.status, 200, JSON.stringify(yes.body));
+    assert.equal(yes.body.message, "The company is now called “Northwind Gardens Ltd”.");
+    assert.equal((await prisma.company.findUniqueOrThrow({ where: { id: admin.companyId } })).name, "Northwind Gardens Ltd");
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { actionName: "update_company_profile" }, orderBy: { createdAt: "desc" } });
+    assert.deepEqual(audit.dataBefore, { name: before });
+    assert.equal(audit.confirmed, true);
+
+    const same = await say('voice action rename_company {"name":"Northwind Gardens Ltd"}');
+    assert.equal(same.body.error, "COMPANY_NAME_UNCHANGED");
+    assert.equal(same.body.message, "The company is already called “Northwind Gardens Ltd”; nothing was changed.");
+  });
+
   it("removes only aliases through the alias page, never another learning rule", async () => {
     const admin = await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } });
     const rule = await prisma.learningRule.create({ data: { companyId: admin.companyId, term: "pergola", meaning: "A garden structure we build." } });

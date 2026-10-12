@@ -131,6 +131,8 @@ export const EMMA_EXECUTABLE_ACTIONS = {
   update_industry: { capabilityAction: "update_industry", fields: "industry, name?, description?, notes?", confirmation: "none" },
   set_notification_digest: { capabilityAction: "update_notification_digest_preferences", fields: "enabled, hour?", confirmation: "none" },
   send_notification_digest: { capabilityAction: "send_notification_digest", fields: "", confirmation: "service_preview" },
+  // The company's name, which its documents and messages carry: read back first.
+  rename_company: { capabilityAction: "update_company_profile", fields: "name", confirmation: "service_preview" },
   // The speaker's own voice housekeeping: transcripts deleted, a learned
   // spelling forgotten. Both read back before anything is removed.
   clear_voice_history: { capabilityAction: "clear_voice_device_history", fields: "", confirmation: "service_preview" },
@@ -196,7 +198,7 @@ export const EMMA_EXECUTABLE_ACTION_PAGES: Record<EmmaExecutableActionName, stri
   update_task: "tasks", update_service: "services", update_invoice: "invoices", update_document: "documents",
   update_business_context: "business_context", update_industry: "industries",
   set_notification_digest: "notifications", send_notification_digest: "notifications",
-  clear_voice_history: "account", remove_voice_alias: "voice_aliases",
+  clear_voice_history: "account", remove_voice_alias: "voice_aliases", rename_company: "company",
   check_capacity: "employees", update_communication: "communications", update_portfolio_photo: "photos",
   create_playbook: "playbooks", update_playbook: "playbooks", run_playbook: "playbooks", create_website_audit: "website_audit",
   prepare_website_content: "website_content", decide_website_content: "website_content", list_reference_activities: "services",
