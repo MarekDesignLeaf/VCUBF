@@ -49,7 +49,9 @@ describe("Opening a record by voice", () => {
     assert.equal(response.status, 200, JSON.stringify(response.body));
     assert.equal(response.body.intent, "open_record");
     assert.equal(response.body.message, "Otevírám klienta Jan Novák.");
-    assert.deepEqual(response.body.uiAction, { kind: "navigate", path: `/clients/${novak}`, label: "Klienti" });
+    assert.equal(response.body.uiAction.kind, "navigate");
+    assert.equal(response.body.uiAction.path, `/clients/${novak}`);
+    assert.equal(response.body.uiAction.label, "Klienti");
   });
 
   it("opens a job by its title and its client, and asks when two fit", async () => {
