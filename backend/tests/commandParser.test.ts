@@ -731,3 +731,13 @@ describe("e-mailing a quote or an invoice", () => {
     assert.equal(send("pošli nabídku", "cs-CZ").intent, "unrecognized");
   });
 });
+
+describe("moving a task to another day", () => {
+  it("takes the day as said, and leaves a sentence whose end is no day to the model", () => {
+    assert.deepEqual(parseTextCommand("Přesuň úkol objednat materiál na pátek.", "cs-CZ"), { intent: "execute_action", entities: { action: "update_task", parameters: { task: "objednat materiál", due: "pátek" } } });
+    assert.deepEqual(parseTextCommand("posuň úkol Zavolat Novákovi na 16. října", "cs-CZ"), { intent: "execute_action", entities: { action: "update_task", parameters: { task: "Zavolat Novákovi", due: "16. října" } } });
+    assert.deepEqual(parseTextCommand("move task order materials to Friday", "en-GB"), { intent: "execute_action", entities: { action: "update_task", parameters: { task: "order materials", due: "Friday" } } });
+    assert.equal(parseTextCommand("přesuň úkol objednat materiál na Petra", "cs-CZ").intent, "unrecognized");
+    assert.equal(parseTextCommand("move task order materials to the warehouse", "en-GB").intent, "unrecognized");
+  });
+});

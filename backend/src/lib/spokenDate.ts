@@ -8,6 +8,12 @@
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Where days and hours said without a calendar are read: Secretary serves UK
+ * businesses (see contactNormalization), so "v pátek" and "v sedm" are UK time.
+ */
+export const BUSINESS_TIME_ZONE = "Europe/London";
+
 function plain(value: string) {
   return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("en").replace(/[,]/g, " ").replace(/\s+/g, " ").trim();
 }

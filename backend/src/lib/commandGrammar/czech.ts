@@ -4,6 +4,7 @@
 // "telefon") and the words for yes and no. A sentence in another language is
 // not matched here, so with Czech on it is not understood.
 
+import { BUSINESS_TIME_ZONE, localDateTime, resolveSpokenDate } from "../spokenDate.js";
 import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
@@ -213,6 +214,12 @@ function records(text: string): ParsedCommand | undefined {
     const verb = fold(m[1]);
     const task_status = /^(?:zahaj|zacni)$/.test(verb) ? "in_progress" : /^(?:dokonc|hotovo)/.test(verb) ? "completed" : "cancelled";
     return { intent: "change_task_status", entities: { title: m[2].trim(), task_status } };
+  }
+
+  // "přesuň úkol objednat materiál na pátek": a new due day, said as a day.
+  m = withoutFinalPunctuation(text).match(/^(?:p[řr]esu[ňn]|posu[ňn]|odlo[žz])\s+[úu]kol\s+(.+?)\s+na\s+(.+)$/iu);
+  if (m && resolveSpokenDate(m[2], localDateTime(new Date(), BUSINESS_TIME_ZONE).date)) {
+    return { intent: "execute_action", entities: { action: "update_task", parameters: { task: m[1].trim(), due: m[2].trim() } } };
   }
 
   m = text.match(/^(?:vytvo[řr]|p[řr]idej|nov[áa])\s+(?:slu[žz]bu|slu[žz]ba)\s+(.+)$/iu);

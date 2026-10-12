@@ -1,5 +1,8 @@
 import * as documentDeliveryService from "./documentDeliveryService.js";
 import * as recordLookupService from "./recordLookupService.js";
+import * as notificationDigestService from "./notificationDigestService.js";
+import { matchRecord } from "../lib/recordMatch.js";
+import { BUSINESS_TIME_ZONE, localDateTime, resolveSpokenDate, resolveSpokenTime, zonedInstant } from "../lib/spokenDate.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { EMMA_EXECUTABLE_ACTIONS, type EmmaExecutableActionName, type EmmaExecutableActionRequest } from "../lib/emmaExecutableActionCatalogue.js";
 import { validateVoiceActionParameters } from "../lib/voiceActionCatalogue.js";
@@ -81,6 +84,41 @@ function lookup<T extends Row>(items: T[], query: string | undefined, fields: Ar
   if (!matches.length) return fail(404, `${entity.toUpperCase()}_NOT_FOUND`, `${entity} '${query}' was not found.`);
   if (matches.length > 1) return fail(409, "AMBIGUOUS_REFERENCE", `More than one ${entity} matches '${query}'. Please use the exact name.`);
   return ok(200, matches[0]);
+}
+
+/**
+ * A record of a list named as said: declined forms and all (recordMatch), so
+ * "úkol objednat materiál" and "službu Údržbě zahrady" find their record. Two
+ * that fit equally are named back, never guessed between.
+ */
+function byName<T>(items: T[], said: string | undefined, names: (item: T) => Array<string | null | undefined>, label: (item: T) => string, kind: string): ServiceResult<T> {
+  if (!said) return fail(400, "VALIDATION_FAILED", `${kind} name is required.`);
+  const match = matchRecord(said, items.map((item, index) => ({ id: String(index), label: label(item), names: names(item).filter((name): name is string => Boolean(name)) })));
+  if (match.outcome === "none") return fail(404, "RECORD_NOT_FOUND", `No ${kind} matches '${said}'.`, { kind, said });
+  if (match.outcome === "ambiguous") {
+    return fail(409, "AMBIGUOUS_REFERENCE", `More than one ${kind} matches '${said}'.`, { candidates: match.records.slice(0, 5).map((record) => record.label) });
+  }
+  return ok(200, items[Number(match.record.id)]);
+}
+
+/** Only the named fields that were given, as given. */
+function pick(parameters: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.filter((key) => parameters[key] !== undefined && parameters[key] !== "").map((key) => [key, parameters[key]]));
+}
+
+/** A day as spoken ("v pátek", "16. října", or an already resolved 2026-10-16), in the business's time zone. */
+function spokenDay(said: string): ServiceResult<string> {
+  const day = resolveSpokenDate(said, localDateTime(new Date(), BUSINESS_TIME_ZONE).date);
+  return day ? ok(200, day) : fail(400, "CALENDAR_DATE_NOT_UNDERSTOOD", `The date '${said}' was not understood.`);
+}
+
+/** A day and, when said, a time, as one instant; without a time, the start of that day. */
+function spokenInstant(day: string, time: string | undefined): ServiceResult<string> {
+  const date = spokenDay(day);
+  if (!date.ok) return date;
+  const clock = time ? resolveSpokenTime(time) : "00:00";
+  if (!clock) return fail(400, "CALENDAR_TIME_NOT_UNDERSTOOD", `The time '${time}' was not understood.`);
+  return ok(200, zonedInstant(date.data, clock, BUSINESS_TIME_ZONE).toISOString());
 }
 
 async function clientByName(user: AuthedUser, name: string | undefined) {
@@ -714,6 +752,118 @@ async function executeEmmaActionDirect(
         ? ok(200, await emmaPolicyService.updateEmmaPolicy(user, parsed.data.disabled_capabilities))
         : fail(400, "VALIDATION_FAILED", parsed.error.message);
     }
+    case "update_task": {
+      const task = byName(await taskService.listTasks(user), stringValue(p, "task"), (row) => [row.title], (row) => String(row.title), "task");
+      if (!task.ok) return task;
+      const changes: Record<string, unknown> = {};
+      if (stringValue(p, "title")) changes.title = stringValue(p, "title");
+      if (stringValue(p, "description")) changes.description = stringValue(p, "description");
+      if (typeof p.priority === "string") changes.priority = p.priority;
+      if (stringValue(p, "due")) {
+        const due = spokenInstant(stringValue(p, "due")!, stringValue(p, "due_time"));
+        if (!due.ok) return due;
+        changes.due_at = due.data;
+      }
+      if (stringValue(p, "assignee")) {
+        const employees = await prisma.user.findMany({ where: { companyId: user.companyId, isActive: true }, select: { id: true, displayName: true } });
+        const person = byName(employees, stringValue(p, "assignee"), (row) => [row.displayName], (row) => row.displayName, "employee");
+        if (!person.ok) return person;
+        changes.assigned_user_id = person.data.id;
+      }
+      return taskService.updateTask(user, task.data.id, changes);
+    }
+    case "update_service": {
+      // A price is read back before it changes (CLAUDE.md: never change prices silently).
+      const services = await serviceCatalogueService.listServices(user);
+      const id = stringValue(p, "service_id");
+      const service = id
+        ? (services.find((row) => row.id === id) ? ok(200, services.find((row) => row.id === id)!) : fail(404, "RECORD_NOT_FOUND", "The service no longer exists.", { kind: "service" }))
+        : byName(services, stringValue(p, "service"), (row) => [row.name], (row) => row.name, "service");
+      if (!service.ok) return service;
+      const spoken = pick(p, ["name", "description", "category", "price_min", "price_max", "price_unit", "duration_hours"]);
+      if (!Object.keys(spoken).length) return fail(400, "VALIDATION_FAILED", "Say what to change about the service.");
+      if (!confirmed) {
+        return fail(409, "CONFIRMATION_REQUIRED", "Review the change to the service, then confirm.", {
+          preview: { service: service.data.name, changes: spoken },
+          confirmInput: { service_id: service.data.id, ...spoken },
+        });
+      }
+      return serviceCatalogueService.updateService(user, service.data.id, {
+        ...(spoken.name !== undefined ? { name: spoken.name } : {}),
+        ...(spoken.description !== undefined ? { description: spoken.description } : {}),
+        ...(spoken.category !== undefined ? { category: spoken.category } : {}),
+        ...(spoken.price_min !== undefined ? { base_price_min: spoken.price_min } : {}),
+        ...(spoken.price_max !== undefined ? { base_price_max: spoken.price_max } : {}),
+        ...(spoken.price_unit !== undefined ? { price_unit: spoken.price_unit } : {}),
+        ...(spoken.duration_hours !== undefined ? { default_duration_hours: spoken.duration_hours } : {}),
+      });
+    }
+    case "update_invoice": {
+      const invoices = await invoiceService.listInvoices(user);
+      const id = stringValue(p, "invoice_id");
+      const invoice = id
+        ? (invoices.find((row) => row.id === id) ? ok(200, invoices.find((row) => row.id === id)!) : fail(404, "RECORD_NOT_FOUND", "The invoice no longer exists.", { kind: "invoice" }))
+        : byName(invoices, stringValue(p, "invoice"), (row) => [row.invoiceNumber, row.title, row.client?.displayName], (row) => `${row.invoiceNumber} (${row.client?.displayName ?? ""})`, "invoice");
+      if (!invoice.ok) return invoice;
+      if (invoice.data.invoiceStatus !== "draft") return fail(409, "INVOICE_NOT_EDITABLE", "Only a draft invoice can be edited.");
+      const spoken = pick(p, ["title", "invoice_number", "notes"]);
+      if (stringValue(p, "due_date")) {
+        const day = spokenDay(stringValue(p, "due_date")!);
+        if (!day.ok) return day;
+        spoken.due_date = day.data;
+      }
+      if (!Object.keys(spoken).length) return fail(400, "VALIDATION_FAILED", "Say what to change about the invoice.");
+      if (!confirmed) {
+        return fail(409, "CONFIRMATION_REQUIRED", "Review the change to the invoice, then confirm.", {
+          preview: { invoice: invoice.data.invoiceNumber, client: invoice.data.client?.displayName, changes: spoken },
+          confirmInput: { invoice_id: invoice.data.id, ...spoken },
+        });
+      }
+      return invoiceService.updateInvoice(user, invoice.data.id, {
+        ...(spoken.title !== undefined ? { title: spoken.title } : {}),
+        ...(spoken.invoice_number !== undefined ? { invoice_number: spoken.invoice_number } : {}),
+        ...(spoken.notes !== undefined ? { notes: spoken.notes } : {}),
+        // As the invoice page stores a due date: midnight UTC of that day.
+        ...(spoken.due_date !== undefined ? { due_date: `${spoken.due_date}T00:00:00.000Z` } : {}),
+      });
+    }
+    case "update_document": {
+      const document = byName(await documentRecordService.listDocumentRecords(user), stringValue(p, "document"), (row) => [row.title], (row) => String(row.title), "document");
+      if (!document.ok) return document;
+      const changes: Record<string, unknown> = {};
+      if (stringValue(p, "title")) changes.title = stringValue(p, "title");
+      if (stringValue(p, "reference")) changes.document_reference = stringValue(p, "reference");
+      if (stringValue(p, "notes")) changes.notes = stringValue(p, "notes");
+      if (stringValue(p, "expires")) {
+        const day = spokenDay(stringValue(p, "expires")!);
+        if (!day.ok) return day;
+        changes.expires_at = `${day.data}T00:00:00.000Z`;
+      }
+      return documentRecordService.updateDocumentRecord(user, document.data.id, changes);
+    }
+    case "update_business_context": {
+      const item = byName(await businessContextService.listBusinessContextItems(user), stringValue(p, "label"), (row) => [row.label], (row) => String(row.label), "business_context");
+      if (!item.ok) return item;
+      return businessContextService.updateBusinessContextItem(user, item.data.id, {
+        ...(stringValue(p, "new_label") ? { label: stringValue(p, "new_label") } : {}),
+        ...(stringValue(p, "value") ? { value: stringValue(p, "value") } : {}),
+        ...(stringValue(p, "notes") ? { notes: stringValue(p, "notes") } : {}),
+      });
+    }
+    case "update_industry": {
+      const industry = byName(await industryService.listIndustries(user), stringValue(p, "industry"), (row) => [row.name], (row) => String(row.name), "industry");
+      if (!industry.ok) return industry;
+      return industryService.updateIndustry(user, industry.data.id, pick(p, ["name", "description", "notes"]));
+    }
+    case "set_notification_digest": {
+      // The hour is said in UK time; it is stored in UTC, as the Notifications page stores it.
+      const current = await notificationDigestService.getDigestPreferences(user);
+      const hour = typeof p.hour === "number" ? p.hour : undefined;
+      const hourUtc = hour === undefined ? current.hourUtc : zonedInstant(localDateTime(new Date(), BUSINESS_TIME_ZONE).date, `${String(hour).padStart(2, "0")}:00`, BUSINESS_TIME_ZONE).getUTCHours();
+      return notificationDigestService.updateDigestPreferences(user, { enabled: p.enabled === true, hour_utc: hourUtc });
+    }
+    case "send_notification_digest":
+      return notificationDigestService.sendNotificationDigest(user, { confirmed });
     case "merge_clients": {
       const primary = await clientByName(user, stringValue(p, "primary_client_name"));
       if (!primary.ok) return primary;

@@ -39,7 +39,15 @@ for (const testFile of testFiles) {
   console.log(`Running ${testFile}...`);
   execFileSync(
     testNode,
-    ["--import", "tsx", "--test", "--test-concurrency=1", "--test-force-exit", testFile],
+    [
+      "--import", "tsx", "--test", "--test-concurrency=1", "--test-force-exit",
+      // On GitHub Actions each failure also becomes an annotation on the check,
+      // readable without the raw log.
+      ...(process.env.GITHUB_ACTIONS
+        ? ["--test-reporter=spec", "--test-reporter-destination=stdout", "--test-reporter=./scripts/github-test-annotations.mjs", "--test-reporter-destination=stdout"]
+        : []),
+      testFile,
+    ],
     // Every test imports createServer from server.ts. Force test mode for the
     // child process so that import never opens the production listener on
     // port 4000 while the local Secretary runtime is already running.

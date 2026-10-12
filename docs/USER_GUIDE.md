@@ -38,6 +38,15 @@ A single record opens by name, as clicking it in its list does: “Alfonzo, otev
 
 A quote or an issued invoice can be e-mailed to its client by voice: “Alfonzo, pošli nabídku Novákovi”, “pošli fakturu číslo 2026-014”, “send the quote for Smith”. The document is found as above; the PDF goes to the client's stored e-mail address through the company's Gmail, exactly as **Send by email** on the quote or invoice page. Before anything is sent Alfonzo reads back the document, the client, the address, the sending account, the subject and the text, and says that a draft quote will be marked as sent; only a yes sends it, and the yes sends exactly what was read back. A draft invoice is not sent: issue it first.
 
+The edits the pages make can be said too, each found by name as above:
+- **Task.** Move it to another day (“přesuň úkol objednat materiál na pátek”, “move task order materials to Friday”), give it to someone, rename it, change its priority or description. The day is understood as said and placed in UK time.
+- **Service.** Its name, description, category, prices, price unit and usual length. Alfonzo reads a price change back and saves it only after a yes.
+- **Draft invoice.** Its title, number, due date or notes, read back and saved only after a yes. An issued invoice is not edited.
+- **Document record.** Its title, reference, expiry and notes.
+- **Business context item.** Its label, value and notes.
+- **Industry.** Its name, description and notes.
+- **Daily summary of what needs attention.** It can be switched on at a UK hour (“zapni mi denní souhrn v sedm ráno”) or off, or sent now after a read-back.
+
 The installer also creates a single **VCUBF Secretary** desktop icon. Double-clicking it starts Alfonzo before opening one production sign-in flow in the default browser. The one-time device handoff completes automatically after a successful login, so the browser and companion use the same VCUBF account without a second approval click. On a fresh companion start Alfonzo says that she is active and listening. After the first successful login, the page pre-fills the last-used email on this PC; the browser remains responsible for offering any saved password. The encrypted device session lasts up to 30 days but is revoked by password changes, account disablement or session invalidation.
 
 ## 3. Enquiries, leads, clients and contacts
