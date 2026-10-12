@@ -2,6 +2,7 @@ import * as documentDeliveryService from "./documentDeliveryService.js";
 import * as recordLookupService from "./recordLookupService.js";
 import * as notificationDigestService from "./notificationDigestService.js";
 import * as voiceHistoryService from "./voiceHistoryService.js";
+import * as companyProfileService from "./companyProfileService.js";
 import * as voiceAliasService from "./voiceAliasService.js";
 import { matchRecord } from "../lib/recordMatch.js";
 import { BUSINESS_TIME_ZONE, localDateTime, resolveSpokenDate, resolveSpokenTime, zonedInstant } from "../lib/spokenDate.js";
@@ -866,6 +867,20 @@ async function executeEmmaActionDirect(
     }
     case "send_notification_digest":
       return notificationDigestService.sendNotificationDigest(user, { confirmed });
+    case "rename_company": {
+      // The name every quote, invoice and message carries: said back before it changes.
+      const name = stringValue(p, "name");
+      const current = await companyProfileService.currentCompanyName(user);
+      if (current === undefined) return fail(404, "COMPANY_NOT_FOUND");
+      if (name && name === current) return fail(409, "COMPANY_NAME_UNCHANGED", "The company already has that name.", { name });
+      if (!confirmed) {
+        return fail(409, "CONFIRMATION_REQUIRED", "Review the new company name, then confirm.", {
+          preview: { from: current, to: name },
+          confirmInput: { name },
+        });
+      }
+      return companyProfileService.renameCompany(user, name, "voice");
+    }
     case "clear_voice_history": {
       // Nothing of it comes back, so how much goes is read back first; with
       // nothing saved there is nothing to confirm.

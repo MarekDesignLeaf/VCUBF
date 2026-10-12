@@ -50,6 +50,8 @@ export const TOOL_CATALOGUE_FINGERPRINTS = {
   // clear_voice_history and remove_voice_alias: the speaker's own voice
   // housekeeping, read back before anything is removed.
   "1.4.0": "fbdf123feb3941ee46cfcc7112be2f8a97c64d695b96eec3f10ab1a0686d6bbf",
+  // rename_company: the company's name, read back before it changes.
+  "1.5.0": "c81f041f0ab8979307343db4851533017720b64967900a8bfaaa9dcf6e590532",
 } as const satisfies Record<string, string>;
 
 const ledger = Object.entries(TOOL_CATALOGUE_FINGERPRINTS);

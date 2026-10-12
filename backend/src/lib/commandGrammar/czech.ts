@@ -9,11 +9,14 @@ import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
   connectorTarget, extractContact, fold, nameOnly, normalizeDictatedPhone, parseAgendaCommand, parseEmailCommand,
-  parseLanguageSwitch, parseNavigation, parseOpenRecord, parseSendDocument, parseVoiceHousekeeping, parseWhatsAppCommand, withoutFinalPunctuation,
+  parseLanguageSwitch, parseNavigation, parseOpenRecord, parseRenameCompany, parseSendDocument, parseVoiceHousekeeping, parseWhatsAppCommand, withoutFinalPunctuation,
   type CommandGrammar, type OpenRecordWords, type Parsed, type SendDocumentWords, type VoiceHousekeepingWords,
 } from "./shared.js";
 
 // "smaž historii rozhovorů", "zapomeň slovo Alfons". Folded.
+// "přejmenuj firmu na …". Folded.
+const RENAME_COMPANY = /^(?:prejmenuj(?:te)?\s+(?:(?:nasi|moji|svou)\s+)?(?:firmu|spolecnost)|zmen(?:te)?\s+(?:nazev|jmeno)\s+(?:firmy|spolecnosti))\s+na\s+(.+)$/u;
+
 const VOICE_HOUSEKEEPING: VoiceHousekeepingWords = {
   clearHistory: /^(?:(?:smaz|vymaz|odstran)(?:te)?\s+(?:(?:celou|moji|mou|svou|tu)\s+)?(?:hlasovou\s+)?historii(?:\s+(?:rozhovoru|konverzaci|hovoru))?(?:\s+(?:s\s+tebou|se\s+mnou))?|(?:smaz|vymaz|odstran)(?:te)?\s+(?:vsechny\s+)?(?:(?:ulozene|nase|moje)\s+)?(?:rozhovory|konverzace)(?:\s+s\s+tebou)?)(?:\s+prosim)?$/u,
   forgetWord: /^(?:zapomen|zapomente|odeber|odeberte|odstran|odstrante|smaz|smazte)\s+(?:(?:to|naucene|ucene)\s+)?(?:slovo|alias)\s+(.+)$/u,
@@ -370,6 +373,7 @@ export const czech: CommandGrammar = {
         today: /dnes/iu,
       })
       ?? parseVoiceHousekeeping(text, VOICE_HOUSEKEEPING)
+      ?? parseRenameCompany(text, RENAME_COMPANY)
       ?? notificationDeletion(text)
       ?? clientMutation(text)
       ?? leadMutation(text)
