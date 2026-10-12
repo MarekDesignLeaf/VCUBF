@@ -42,6 +42,7 @@ confirm delete notifications
 cancel delete notifications
 list contacts
 open client|contact|lead|job|quote|invoice|employee|job opening|playbook NAME OR NUMBER AS SAID
+send quote|invoice TITLE, NUMBER OR CLIENT NAME AS SAID (e-mails the PDF to the client after a read-back)
 show emails
 show whatsapp messages
 skip to the next sender

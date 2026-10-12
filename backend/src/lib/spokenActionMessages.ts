@@ -219,6 +219,26 @@ export function spokenReview(action: string, preview: Row | undefined, language:
       if (lang === "pl") return `Wyślę${from ? ` z konta ${from}` : ""} e-mail do ${recipients}${cc ? `, w kopii ${cc}` : ""}${bcc ? `, w ukrytej kopii ${bcc}` : ""}${how}. Temat: „${quote(preview.subject)}”. Treść: „${quote(preview.body)}”.${again} Czy mam go wysłać?`;
       return `I will email ${recipients}${cc ? `, copying ${cc}` : ""}${bcc ? `, blind-copying ${bcc}` : ""}${from ? `, from ${from}` : ""}${how}. Subject: “${quote(preview.subject)}”. Text: “${quote(preview.body)}”.${again} Shall I send it?`;
     }
+    case "send_quote":
+    case "send_invoice": {
+      const isQuote = action === "send_quote";
+      const reference = String(preview.document?.reference ?? "");
+      // An invoice's reference carries its outstanding amount in English; only its number is said.
+      const named = isQuote ? `„${quote(reference)}“` : reference.split(" — ")[0].split(" (")[0];
+      const namedPl = isQuote ? `„${quote(reference)}”` : named;
+      const namedEn = isQuote ? `“${quote(reference)}”` : named;
+      const client = String(preview.document?.client?.label ?? "");
+      const recipients = (Array.isArray(preview.to) ? preview.to : [preview.to]).filter(Boolean).join(", ");
+      const account = String(preview.source?.accountEmail || preview.source?.displayName || "");
+      const marksSent = isQuote && preview.statusChange?.to === "sent";
+      if (lang === "cs") {
+        return `Pošlu ${isQuote ? "nabídku" : "fakturu"} ${named} klientovi ${client} na ${recipients} jako PDF${account ? ` z účtu ${account}` : ""}. Předmět: „${quote(preview.subject)}“. Text: „${quote(preview.body)}“.${marksSent ? " Nabídka se tím označí jako odeslaná." : ""} Mám ji odeslat?`;
+      }
+      if (lang === "pl") {
+        return `Wyślę ${isQuote ? "ofertę" : "fakturę"} ${namedPl} klientowi ${client} na ${recipients} jako PDF${account ? ` z konta ${account}` : ""}. Temat: „${quote(preview.subject)}”. Treść: „${quote(preview.body)}”.${marksSent ? " Oferta zostanie oznaczona jako wysłana." : ""} Czy mam ją wysłać?`;
+      }
+      return `I will email the ${isQuote ? "quote" : "invoice"} ${namedEn} to ${client} at ${recipients} as a PDF${account ? `, from ${account}` : ""}. Subject: “${quote(preview.subject)}”. Text: “${quote(preview.body)}”.${marksSent ? " The quote will be marked as sent." : ""} Shall I send it?`;
+    }
     case "create_calendar_event": {
       const when = spokenSlot(preview, preview.timeZone, lang);
       const assumed = preview.durationAssumed
@@ -270,6 +290,10 @@ export function spokenOutcome(action: string | undefined, data: Row | undefined,
     case "send_email":
     case "reply_email":
       return lang === "cs" ? "E-mail je odeslaný." : lang === "pl" ? "E-mail został wysłany." : "The email has been sent.";
+    case "send_quote":
+      return lang === "cs" ? "Nabídka je odeslaná." : lang === "pl" ? "Oferta została wysłana." : "The quote has been sent.";
+    case "send_invoice":
+      return lang === "cs" ? "Faktura je odeslaná." : lang === "pl" ? "Faktura została wysłana." : "The invoice has been sent.";
     case "create_calendar_event":
       if (data?.alreadyCreated) return lang === "cs" ? "Tahle událost už v kalendáři je, druhou jsem nezapsal." : lang === "pl" ? "To wydarzenie już jest w kalendarzu, drugiego nie dodałem." : "That event is already in the calendar; I did not add a second one.";
       return lang === "cs" ? "Zapsáno do kalendáře." : lang === "pl" ? "Zapisane w kalendarzu." : "It is in the calendar.";
@@ -329,6 +353,41 @@ export function spokenError(error: string | undefined, extra: Row | undefined, l
       cs: "Takovou přijatou WhatsApp zprávu jsem nenašel.",
       pl: "Nie znalazłem takiej odebranej wiadomości WhatsApp.",
       en: "I could not find that received WhatsApp message.",
+    },
+    RECORD_NOT_FOUND: {
+      cs: `Nenašel jsem ${extra?.kind && extra.kind in RECORD_WORDS ? RECORD_WORDS[extra.kind as RecordKind].cs : "záznam"}${extra?.said ? ` „${extra.said}“` : ""}.`,
+      pl: `Nie znalazłem: ${extra?.kind && extra.kind in RECORD_WORDS ? RECORD_WORDS[extra.kind as RecordKind].pl : "rekord"}${extra?.said ? ` „${extra.said}”` : ""}.`,
+      en: `I could not find ${extra?.kind && extra.kind in RECORD_WORDS ? `a ${RECORD_WORDS[extra.kind as RecordKind].en}` : "it"}${extra?.said ? ` called “${extra.said}”` : ""}.`,
+    },
+    RECIPIENT_REQUIRED: {
+      cs: "Klient nemá uložený e-mail. Řekněte adresu, nebo ji doplňte u klienta.",
+      pl: "Klient nie ma zapisanego adresu e-mail. Podaj adres albo uzupełnij go u klienta.",
+      en: "The client has no stored email address. Say the address, or add it to the client.",
+    },
+    INVOICE_NOT_ISSUED: {
+      cs: "Faktura je zatím koncept. Poslat jde až vystavená faktura, nejdřív ji vystavte.",
+      pl: "Faktura jest jeszcze szkicem. Wysłać można tylko wystawioną fakturę, najpierw ją wystaw.",
+      en: "The invoice is still a draft. Only an issued invoice can be sent; issue it first.",
+    },
+    GMAIL_NOT_CONFIGURED: {
+      cs: "Gmail pro odesílání není připojený. Připojte ho v Konektorech.",
+      pl: "Gmail do wysyłania nie jest podłączony. Podłącz go w Konektorach.",
+      en: "No Gmail account is connected for sending. Connect one in Connectors.",
+    },
+    CONNECTOR_AUTHORIZATION_REQUIRED: {
+      cs: "Gmail potřebuje znovu autorizovat. V Konektorech klikněte na Znovu autorizovat.",
+      pl: "Gmail wymaga ponownej autoryzacji. W Konektorach kliknij Autoryzuj ponownie.",
+      en: "Gmail needs to be authorised again. Use Reauthorise in Connectors.",
+    },
+    CONNECTOR_SCOPE_REQUIRED: {
+      cs: "Účet Gmail nemá povolené odesílání. Povolte ho v Konektorech.",
+      pl: "Konto Gmail nie ma uprawnienia do wysyłania. Włącz je w Konektorach.",
+      en: "The Gmail account is not allowed to send. Enable sending in Connectors.",
+    },
+    CONNECTOR_NOT_ENABLED: {
+      cs: "Konektor je vypnutý. Zapněte ho v Konektorech.",
+      pl: "Konektor jest wyłączony. Włącz go w Konektorach.",
+      en: "The connector is switched off. Switch it on in Connectors.",
     },
     AMBIGUOUS_REFERENCE: {
       cs: `Na to sedí víc možností${candidates ? `: ${candidates}` : ""}. Řekněte prosím přesněji, kterou myslíte.`,

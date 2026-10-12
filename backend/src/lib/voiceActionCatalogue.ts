@@ -132,6 +132,32 @@ export const voiceActionSchemas = {
     })
     .strict(),
   issue_invoice: z.object({ invoice_number: nonEmpty }).strict(),
+  // E-mailing the PDF of a quote or an issued invoice to the client. The
+  // document is named as said (its title or number, or its client); the
+  // reviewed operation names it exactly (document_id) with the recipients,
+  // subject, body and sending account that were read back.
+  send_quote: z
+    .object({
+      quote: optionalText,
+      document_id: z.string().uuid().optional(),
+      to: z.array(z.string().trim().email().max(254)).min(1).max(10).optional(),
+      subject: optionalText,
+      body: optionalText,
+      source_id: optionalText,
+    })
+    .strict()
+    .refine((value) => value.quote || value.document_id, { message: "name the quote" }),
+  send_invoice: z
+    .object({
+      invoice: optionalText,
+      document_id: z.string().uuid().optional(),
+      to: z.array(z.string().trim().email().max(254)).min(1).max(10).optional(),
+      subject: optionalText,
+      body: optionalText,
+      source_id: optionalText,
+    })
+    .strict()
+    .refine((value) => value.invoice || value.document_id, { message: "name the invoice" }),
   record_invoice_payment: z
     .object({
       invoice_number: nonEmpty,
@@ -318,6 +344,7 @@ The JSON must be valid, contain only the documented fields and preserve every us
 - set_quote_status {"quote_title","quote_status"}; quote_status is draft, sent, accepted, rejected or expired
 - create_invoice {"client_name","invoice_number","title","items":[{"description","quantity?","unit_price"}],"issue_date?","due_date?","notes?"}
 - issue_invoice {"invoice_number"}; record_invoice_payment {"invoice_number","amount","paid_at?","method?","reference?"}. A payment is always previewed and needs a separate confirmation.
+- send_quote {"quote","to?"}; send_invoice {"invoice","to?"}: e-mail the PDF to the client. quote/invoice is the title, number or client name as said; to only when the user says an address, otherwise the client's stored e-mail is used. Always previewed and needs a separate confirmation.
 - add_job_resource {"job_title","resource_type","name","quantity?","unit?","estimated_cost?","notes?"}; resource_type is material, equipment, vehicle, hire or waste
 - set_job_resource_status {"job_title","resource_name","requirement_status"}; status is needed, ordered, ready or unavailable
 - set_job_resource_cost {"job_title","resource_name","actual_cost?","estimated_cost?"}

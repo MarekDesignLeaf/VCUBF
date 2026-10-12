@@ -41,6 +41,8 @@ import { EMMA_CAPABILITIES, type EmmaCapability } from "../lib/emmaSurfaceCatalo
 export const TOOL_CATALOGUE_FINGERPRINTS = {
   "1.0.0": "b70815b9548f2cbd030e403dc64088ff6005f3a04c0644a6c139ecc0ff8d9afe",
   "1.1.0": "294829b964566c0cdd33e8ae65e2b2e8bd9d218cdf23e4ff2b3c46ce02f1308e",
+  // send_quote and send_invoice: the PDF by e-mail, reviewed before sending.
+  "1.2.0": "064e3270a98fe196eb343038cd84135ab85971a25410feebfbd8cb4a95b0f9e5",
 } as const satisfies Record<string, string>;
 
 const ledger = Object.entries(TOOL_CATALOGUE_FINGERPRINTS);

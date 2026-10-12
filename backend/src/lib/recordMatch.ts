@@ -24,6 +24,9 @@ const JOINING_WORDS = new Set([
   "pro", "od", "u", "s", "se", "a", "na", "z", "ze", "pan", "pana", "panu", "pani", "panem", "cislo", "c",
   "the", "for", "from", "of", "and", "mr", "mrs", "ms", "number", "no",
   "dla", "o", "i", "nr", "numer", "pania",
+  // The client said as a word ("nabídku klientovi Novákovi", "the quote for client Smith").
+  "klient", "klienta", "klientovi", "klientce", "klientky", "zakaznik", "zakaznika", "zakaznikovi", "zakaznici",
+  "client", "customer", "klientowi",
 ]);
 
 function words(value: string): string[] {

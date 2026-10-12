@@ -119,6 +119,11 @@ export const EMMA_EXECUTABLE_ACTIONS = {
   update_emma_behavior: { capabilityAction: "update_emma_behavior_scenario", fields: "enabled, scenario", confirmation: "none" },
   update_emma_permissions: { capabilityAction: "update_emma_company_policy", fields: "disabled_capabilities[]", confirmation: "none" },
   merge_clients: { capabilityAction: "merge_clients", fields: "primary_client_name, duplicate_client_name", confirmation: "service_preview" },
+  // The PDF of a quote or an issued invoice by e-mail to its client, through
+  // the company's Gmail. quote/invoice: its title or number, or the client's
+  // name, as said; to only when an address is said. Read back before sending.
+  send_quote: { capabilityAction: "send_quote_pdf", fields: "quote, to[]?", confirmation: "service_preview" },
+  send_invoice: { capabilityAction: "send_invoice_pdf", fields: "invoice, to[]?", confirmation: "service_preview" },
 } as const satisfies Record<string, EmmaExecutableActionDefinition>;
 
 export type EmmaExecutableActionName = keyof typeof EMMA_EXECUTABLE_ACTIONS;
@@ -174,6 +179,7 @@ export const EMMA_EXECUTABLE_ACTION_PAGES: Record<EmmaExecutableActionName, stri
   acknowledge_notification: "notifications", unacknowledge_notification: "notifications", archive_learning_rule: "learning",
   reactivate_learning_rule: "learning", archive_memory: "memory_model", get_metrics: "metrics", suggest_schedule: "calendar",
   get_recruitment_recommendation: "recruitment", merge_clients: "data_quality",
+  send_quote: "quotes", send_invoice: "invoices",
   check_capacity: "employees", update_communication: "communications", update_portfolio_photo: "photos",
   create_playbook: "playbooks", update_playbook: "playbooks", run_playbook: "playbooks", create_website_audit: "website_audit",
   prepare_website_content: "website_content", decide_website_content: "website_content", list_reference_activities: "services",
@@ -223,8 +229,6 @@ export const EMMA_NON_DIRECT_ACTIONS = {
   cancel_voice_email_deletion: { executionClass: "superseded", note: "Handled by cancel action for delete_gmail_message." },
   update_notification_digest_preferences: { executionClass: "interactive", note: "The digest opt-in and hour are set by the user on the Notifications page." },
   send_notification_digest: { executionClass: "interactive", note: "The digest is reviewed and confirmed on the Notifications page, or sent by the scheduled sweep for users who enabled it." },
-  send_quote_pdf: { executionClass: "interactive", note: "Recipients, subject, body and the PDF attachment are reviewed in the quote page before the confirmed send." },
-  send_invoice_pdf: { executionClass: "interactive", note: "Recipients, subject, body and the PDF attachment are reviewed in the invoice page before the confirmed send." },
   update_notification_thresholds: { executionClass: "interactive", note: "Threshold days are edited in Company settings by an administrator; not a spoken command." },
   set_company_agent_mode: { executionClass: "interactive", note: "The agent switch is set by an administrator on the agent control tower page; Secretary has no tool for it, so it cannot raise its own autonomy (masterplan F2, §39)." },
   set_company_safe_mode: { executionClass: "interactive", note: "The emergency stop is switched by an administrator in Company settings; Secretary has no tool to switch it, so it cannot lift a stop by itself (masterplan layer H)." },
