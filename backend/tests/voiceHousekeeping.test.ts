@@ -35,27 +35,36 @@ describe("Voice housekeeping by voice", () => {
     assert.equal(pending, 0);
   });
 
-  it("reads back how many conversations go, deletes them only after the yes, and withdraws the waiting email", async () => {
+  it("reads back how many conversations go and deletes them only after the yes", async () => {
     const admin = await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } });
     const started = await request(app).post("/command/voice-conversations").set(as()).send({ mode: "realtime" });
     await request(app).post(`/command/voice-conversations/${started.body.id}/messages`).set(as()).send({ role: "user", content: "Show my jobs.", sequence: 1 }).expect(201);
-    const email = await prisma.voicePendingAction.create({
-      data: { companyId: admin.companyId, userId: admin.id, actionType: "send_gmail_message", payload: { subject: "Draft" }, expiresAt: new Date(Date.now() + 300_000) },
-    });
 
     const review = await say("voice action clear_voice_history {}");
     assert.equal(review.status, 409, JSON.stringify(review.body));
-    assert.equal(review.body.message, "I will delete all your saved conversations with me, 1 conversation in total, and withdraw the email waiting for your yes. This conversation will end too, and it cannot be undone. Shall I delete them?");
+    assert.equal(review.body.message, "I will delete all your saved conversations with me, 1 conversation in total. This conversation will end too, and it cannot be undone. Shall I delete them?");
     assert.equal(await prisma.voiceConversation.count({ where: { userId: admin.id } }), 1, "nothing is deleted before the yes");
 
     const yes = await say("yes");
     assert.equal(yes.status, 200, JSON.stringify(yes.body));
     assert.equal(yes.body.message, "Your conversation history has been deleted.");
     assert.equal(await prisma.voiceConversation.count({ where: { userId: admin.id } }), 0);
-    assert.equal((await prisma.voicePendingAction.findUniqueOrThrow({ where: { id: email.id } })).status, "cancelled");
     const audit = await prisma.auditLog.findFirstOrThrow({ where: { actionName: "clear_voice_device_history" }, orderBy: { createdAt: "desc" } });
     assert.equal(audit.confirmed, true);
     assert.deepEqual(audit.inputPayload, { via: "voice" });
+    assert.deepEqual(audit.dataBefore, { conversations: 1, messages: 1, pendingEmails: 0 });
+  });
+
+  it("withdraws the email waiting for a yes when the page clears the history, as voice does", async () => {
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } });
+    const email = await prisma.voicePendingAction.create({
+      data: { companyId: admin.companyId, userId: admin.id, actionType: "send_gmail_message", payload: { subject: "Draft" }, expiresAt: new Date(Date.now() + 300_000) },
+    });
+    await request(app).delete("/command/voice-state/history").set(as()).expect(200);
+    assert.equal((await prisma.voicePendingAction.findUniqueOrThrow({ where: { id: email.id } })).status, "cancelled");
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { actionName: "clear_voice_device_history" }, orderBy: { createdAt: "desc" } });
+    assert.deepEqual(audit.inputPayload, { via: "page" });
+    assert.equal(audit.confirmed, false, "the page asks in the browser; the server does not see that yes");
   });
 
   it("forgets a learned spelling of the name after the yes, though the spelling itself is rewritten before it is understood", async () => {

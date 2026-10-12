@@ -58,8 +58,20 @@ Opening a list by voice also says what it lists, in two short sentences counted 
 - **Quotes:** how many are draft, sent and accepted.
 - **Leads:** how many are new, with the newest named.
 - **Job openings:** the open ones.
+- **Invoices:** how many are drafts, unpaid and overdue.
+- **Documents:** how many will expire within 30 days and how many have expired.
+- **Services and playbooks:** how many, and how many are switched off.
+- **What needs attention:** how many items, how many are urgent and the commonest kinds (“úkoly po termínu 3, faktury po splatnosti 2”), or that nothing needs attention.
+- **Unresolved enquiries:** how many, how many are overdue, and who has been waiting longest.
+- **Follow-ups:** how many, with the clients named.
+- **Communications, photos and learning rules:** how many (photos: how many are usable for marketing).
+- **Data quality:** how many possible duplicate clients and clients without contact details, or that nothing needs fixing.
 
-The summaries are spoken in Czech, Polish and English.
+This holds whether the list is asked for (“ukaž faktury”) or its page is opened (“otevři faktury”). A list is only read out to an account that may open its page: clients, jobs, quotes, invoices and the other customer lists need **crm.read**, job openings **recruitment.manage**, connector status **connectors.read**.
+
+The summaries are spoken in Czech, Polish and English. A record that is not found, or that fits more than once, is also answered in Czech or Polish when that language is switched on, and so is what Alfonzo remembers.
+
+A playbook runs with the permissions of whoever runs it: before any step runs, every step is checked exactly as if it had been said, against the account's permissions and the assistant capabilities the administrator has switched off. If one step is not allowed, none run.
 
 The installer also creates a single **VCUBF Secretary** desktop icon. Double-clicking it starts Alfonzo before opening one production sign-in flow in the default browser. The one-time device handoff completes automatically after a successful login, so the browser and companion use the same VCUBF account without a second approval click. On a fresh companion start Alfonzo says that she is active and listening. After the first successful login, the page pre-fills the last-used email on this PC; the browser remains responsible for offering any saved password. The encrypted device session lasts up to 30 days but is revoked by password changes, account disablement or session invalidation.
 

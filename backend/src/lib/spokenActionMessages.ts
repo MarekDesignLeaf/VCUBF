@@ -533,6 +533,55 @@ export function spokenError(error: string | undefined, extra: Row | undefined, l
   return error ? messages[error]?.[lang] : undefined;
 }
 
+/** A record named in a command, after "Nenašel jsem" (accusative) and after "víc" (genitive plural). */
+const LOOKUP_WORDS: Record<"client" | "contact" | "lead" | "job" | "employee" | "task", Record<"cs" | "pl", { one: string; many: string }>> = {
+  client: { cs: { one: "klienta", many: "klientů" }, pl: { one: "klienta", many: "klienta" } },
+  contact: { cs: { one: "kontakt", many: "kontaktů" }, pl: { one: "kontakt", many: "kontaktu" } },
+  lead: { cs: { one: "poptávku", many: "poptávek" }, pl: { one: "zapytanie", many: "zapytania" } },
+  job: { cs: { one: "zakázku", many: "zakázek" }, pl: { one: "zlecenie", many: "zlecenia" } },
+  employee: { cs: { one: "zaměstnance", many: "zaměstnanců" }, pl: { one: "pracownika", many: "pracownika" } },
+  task: { cs: { one: "úkol", many: "úkolů" }, pl: { one: "zadanie", many: "zadania" } },
+};
+export type LookupKind = keyof typeof LOOKUP_WORDS;
+
+/**
+ * A record named in a command was not found ("none"), or more than one fits
+ * ("many"). Czech and Polish are worded here; English keeps the wording the
+ * command has always used, passed in, so nothing an English user hears changes.
+ */
+export function spokenLookupFailure(outcome: "none" | "many", kind: LookupKind, said: string, language: string, english: string): string {
+  const lang = locale(language);
+  if (lang === "en") return english;
+  const words = LOOKUP_WORDS[kind][lang];
+  if (outcome === "none") return lang === "cs" ? `Nenašel jsem ${words.one} „${said}“.` : `Nie znalazłem: ${words.one} „${said}”.`;
+  return lang === "cs" ? `Na „${said}“ sedí víc ${words.many}. Řekněte to prosím přesněji.` : `„${said}” pasuje do więcej niż jednego ${words.many}. Powiedz dokładniej.`;
+}
+
+/** What is said when something is remembered, or recalled, by voice. */
+export function spokenMemory(
+  outcome: { kind: "saved"; scope: "user" | "company"; content: string; duplicate: boolean } | { kind: "recalled"; contents: string[]; query?: string },
+  language: string,
+): string {
+  const lang = locale(language);
+  if (outcome.kind === "saved") {
+    const scope = outcome.scope === "company"
+      ? { cs: "pro firmu", pl: "dla firmy", en: "for the company" }
+      : { cs: "pro vás", pl: "dla Ciebie", en: "for you" };
+    if (outcome.duplicate) {
+      return lang === "cs" ? `Tohle už si pamatuji ${scope.cs}: ${outcome.content}` : lang === "pl" ? `To już pamiętam ${scope.pl}: ${outcome.content}` : `I already remember this ${scope.en}: ${outcome.content}`;
+    }
+    return lang === "cs" ? `Zapamatuji si to ${scope.cs}: ${outcome.content}` : lang === "pl" ? `Zapamiętam to ${scope.pl}: ${outcome.content}` : `I will remember this ${scope.en}: ${outcome.content}`;
+  }
+  if (outcome.contents.length) {
+    const list = outcome.contents.join("; ");
+    return lang === "cs" ? `Pamatuji si: ${list}` : lang === "pl" ? `Pamiętam: ${list}` : `I remember: ${list}`;
+  }
+  if (outcome.query) {
+    return lang === "cs" ? `O „${outcome.query}“ si nic nepamatuji.` : lang === "pl" ? `Nie pamiętam niczego o „${outcome.query}”.` : `I do not have an active memory about ${outcome.query}.`;
+  }
+  return lang === "cs" ? "Zatím si nic trvale nepamatuji." : lang === "pl" ? "Na razie niczego trwale nie pamiętam." : "I do not have any active persistent memories yet.";
+}
+
 export function spokenCancelled(language: string) {
   const lang = locale(language);
   return lang === "cs" ? "Zrušeno, nic se neprovedlo." : lang === "pl" ? "Anulowane, nic nie zostało wykonane." : "Cancelled; nothing was done.";
@@ -787,6 +836,41 @@ const TASKS: Forms = { cs: ["otevřený úkol", "otevřené úkoly", "otevřený
 const QUOTES: Forms = { cs: ["nabídku", "nabídky", "nabídek"], pl: ["ofertę", "oferty", "ofert"], en: ["quote", "quotes"] };
 const LEADS: Forms = { cs: ["poptávku", "poptávky", "poptávek"], pl: ["zapytanie", "zapytania", "zapytań"], en: ["lead", "leads"] };
 const OPENINGS: Forms = { cs: ["otevřený inzerát", "otevřené inzeráty", "otevřených inzerátů"], pl: ["otwarte ogłoszenie", "otwarte ogłoszenia", "otwartych ogłoszeń"], en: ["open job opening", "open job openings"] };
+const INVOICES: Forms = { cs: ["fakturu", "faktury", "faktur"], pl: ["fakturę", "faktury", "faktur"], en: ["invoice", "invoices"] };
+const DOCUMENTS: Forms = { cs: ["dokument", "dokumenty", "dokumentů"], pl: ["dokument", "dokumenty", "dokumentów"], en: ["document", "documents"] };
+const SERVICES: Forms = { cs: ["službu", "služby", "služeb"], pl: ["usługę", "usługi", "usług"], en: ["service", "services"] };
+const PLAYBOOKS: Forms = { cs: ["postup", "postupy", "postupů"], pl: ["procedurę", "procedury", "procedur"], en: ["playbook", "playbooks"] };
+const ATTENTION: Forms = { cs: ["upozornění", "upozornění", "upozornění"], pl: ["powiadomienie", "powiadomienia", "powiadomień"], en: ["item needing attention", "items needing attention"] };
+const FOLLOW_UPS: Forms = { cs: ["připomenutí klientovi", "připomenutí klientům", "připomenutí klientům"], pl: ["przypomnienie dla klienta", "przypomnienia dla klientów", "przypomnień dla klientów"], en: ["follow-up due", "follow-ups due"] };
+const ENQUIRIES: Forms = { cs: ["nevyřízený dotaz", "nevyřízené dotazy", "nevyřízených dotazů"], pl: ["nierozwiązane zapytanie", "nierozwiązane zapytania", "nierozwiązanych zapytań"], en: ["unresolved enquiry", "unresolved enquiries"] };
+const COMMUNICATIONS: Forms = { cs: ["záznam komunikace", "záznamy komunikace", "záznamů komunikace"], pl: ["wpis komunikacji", "wpisy komunikacji", "wpisów komunikacji"], en: ["communication record", "communication records"] };
+const RULES: Forms = { cs: ["aktivní pravidlo", "aktivní pravidla", "aktivních pravidel"], pl: ["aktywną regułę", "aktywne reguły", "aktywnych reguł"], en: ["active rule", "active rules"] };
+const PHOTOS: Forms = { cs: ["fotku", "fotky", "fotek"], pl: ["zdjęcie", "zdjęcia", "zdjęć"], en: ["photo", "photos"] };
+
+/** What each kind of attention item is called, said with its count. */
+const ATTENTION_TYPES: Record<string, Record<Locale, string>> = {
+  unresolved_enquiry: { cs: "nevyřízené dotazy", pl: "nierozwiązane zapytania", en: "unresolved enquiries" },
+  whatsapp_reply_window: { cs: "WhatsApp čekající na odpověď", pl: "WhatsApp czekający na odpowiedź", en: "WhatsApp replies due" },
+  follow_up_due: { cs: "připomenutí klientům", pl: "przypomnienia dla klientów", en: "follow-ups due" },
+  capacity_overload: { cs: "přetížené týdny", pl: "przeciążone tygodnie", en: "overloaded weeks" },
+  quote_expiring: { cs: "nabídky před vypršením", pl: "oferty bliskie wygaśnięcia", en: "expiring quotes" },
+  duplicate_client_possible: { cs: "možné duplicity klientů", pl: "możliwe duplikaty klientów", en: "possible duplicate clients" },
+  missing_client_contact_info: { cs: "klienti bez kontaktu", pl: "klienci bez danych kontaktowych", en: "clients without contact details" },
+  portfolio_gap: { cs: "zakázky bez fotek", pl: "zlecenia bez zdjęć", en: "jobs without photos" },
+  stale_lead: { cs: "dlouho otevřené poptávky", pl: "długo otwarte zapytania", en: "stale leads" },
+  stuck_job: { cs: "uvízlé zakázky", pl: "utknięte zlecenia", en: "stuck jobs" },
+  overdue_task: { cs: "úkoly po termínu", pl: "zadania po terminie", en: "overdue tasks" },
+  invoice_overdue: { cs: "faktury po splatnosti", pl: "faktury po terminie", en: "overdue invoices" },
+  resource_not_ready: { cs: "nepřipravený materiál", pl: "nieprzygotowane zasoby", en: "resources not ready" },
+};
+
+/** "konceptů 2" in Czech and Polish, "2 draft" in English: a part of the whole, said after its count. */
+function part(count: number, words: Record<Locale, string>, lang: Locale): string {
+  if (!count) return "";
+  return lang === "en" ? `${count} ${words.en}` : `${words[lang]} ${count}`;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Newest first, by when the record was created. */
 function newestFirst(rows: Row[]): Row[] {
@@ -803,6 +887,7 @@ const NAMED_IN_SUMMARY = 3;
  * list, so the page is only announced as before.
  */
 export function spokenListSummary(intent: string, data: unknown, language: string, now = new Date()): string | undefined {
+  if (intent === "list_data_quality") return spokenDataQuality(data, locale(language));
   if (!Array.isArray(data)) return undefined;
   const lang = locale(language);
   const rows = data as Row[];
@@ -852,8 +937,87 @@ export function spokenListSummary(intent: string, data: unknown, language: strin
     }
     case "list_job_openings":
       return youHave(counted(rows.filter((row) => row.openingStatus === "open").length, lang, OPENINGS));
+    case "list_invoices": {
+      const unpaid = rows.filter((row) => row.invoiceStatus === "issued" && Number(row.totals?.balance) > 0).length;
+      const parts = [
+        part(rows.filter((row) => row.invoiceStatus === "draft").length, { cs: "konceptů", pl: "szkiców", en: "draft" }, lang),
+        part(unpaid, { cs: "neuhrazených", pl: "nieopłaconych", en: "unpaid" }, lang),
+        part(rows.filter((row) => row.isOverdue === true).length, { cs: "po splatnosti", pl: "po terminie", en: "overdue" }, lang),
+      ].filter(Boolean);
+      return youHave(counted(rows.length, lang, INVOICES) + (parts.length ? `, ${spokenList(parts, lang)}` : ""));
+    }
+    case "list_documents": {
+      const active = rows.filter((row) => row.isActive !== false);
+      const expires = (row: Row) => row.expiresAt ? new Date(row.expiresAt).getTime() : undefined;
+      const expired = active.filter((row) => (expires(row) ?? Infinity) < now.getTime()).length;
+      const soon = active.filter((row) => { const at = expires(row); return at !== undefined && at >= now.getTime() && at - now.getTime() <= 30 * DAY_MS; }).length;
+      const parts = [
+        part(soon, { cs: "do 30 dnů vyprší", pl: "w ciągu 30 dni wygaśnie", en: "expiring within 30 days" }, lang),
+        part(expired, { cs: "prošlých", pl: "wygasłych", en: "expired" }, lang),
+      ].filter(Boolean);
+      return youHave(counted(active.length, lang, DOCUMENTS) + (parts.length ? `, ${spokenList(parts, lang)}` : ""));
+    }
+    case "list_services": {
+      const off = part(rows.filter((row) => row.isActive === false).length, { cs: "vypnutých", pl: "wyłączonych", en: "switched off" }, lang);
+      return youHave(counted(rows.length, lang, SERVICES) + (off ? `, ${off}` : ""));
+    }
+    case "list_playbooks": {
+      const off = part(rows.filter((row) => row.isActive === false).length, { cs: "vypnutých", pl: "wyłączonych", en: "switched off" }, lang);
+      return youHave(counted(rows.length, lang, PLAYBOOKS) + (off ? `, ${off}` : ""));
+    }
+    case "list_notifications": {
+      if (!rows.length) return lang === "cs" ? "Nic teď nevyžaduje pozornost." : lang === "pl" ? "Nic teraz nie wymaga uwagi." : "Nothing needs attention right now.";
+      const urgent = part(rows.filter((row) => row.severity === "urgent").length, { cs: "naléhavých", pl: "pilnych", en: "urgent" }, lang);
+      const byType = new Map<string, number>();
+      for (const row of rows) byType.set(String(row.type), (byType.get(String(row.type)) ?? 0) + 1);
+      const kinds = [...byType.entries()]
+        .filter(([type]) => ATTENTION_TYPES[type])
+        .sort((left, right) => right[1] - left[1])
+        .slice(0, NAMED_IN_SUMMARY)
+        .map(([type, count]) => lang === "en" ? `${count} ${ATTENTION_TYPES[type].en}` : `${ATTENTION_TYPES[type][lang]} ${count}`);
+      const mostly = kinds.length ? (lang === "cs" ? ` Hlavně: ${spokenList(kinds, lang)}.` : lang === "pl" ? ` Głównie: ${spokenList(kinds, lang)}.` : ` Mostly: ${spokenList(kinds, lang)}.`) : "";
+      return youHave(counted(rows.length, lang, ATTENTION) + (urgent ? `, ${urgent}` : "")) + mostly;
+    }
+    case "list_follow_ups": {
+      // Each client once, in the order the page lists them (the longest overdue first).
+      const clients = [...new Set(rows.map((row) => String(row.client?.displayName ?? "")).filter(Boolean))].slice(0, NAMED_IN_SUMMARY);
+      const who = clients.length ? `: ${spokenList(clients, lang)}` : "";
+      return youHave(counted(rows.length, lang, FOLLOW_UPS) + who);
+    }
+    case "list_unresolved_enquiries": {
+      const overdue = part(rows.filter((row) => row.overdue === true).length, { cs: "po termínu", pl: "po terminie", en: "overdue" }, lang);
+      const waiting = [...rows].sort((left, right) => new Date(left.receivedAt ?? 0).getTime() - new Date(right.receivedAt ?? 0).getTime());
+      const senders = [...new Set(waiting.map((row) => String(row.senderLabel ?? "")).filter(Boolean))].slice(0, NAMED_IN_SUMMARY);
+      const longest = senders.length ? (lang === "cs" ? ` Nejdéle čekají: ${spokenList(senders, lang)}.` : lang === "pl" ? ` Najdłużej czekają: ${spokenList(senders, lang)}.` : ` Waiting longest: ${spokenList(senders, lang)}.`) : "";
+      return youHave(counted(rows.length, lang, ENQUIRIES) + (overdue ? `, ${overdue}` : "")) + longest;
+    }
+    case "list_communications": {
+      const latest = [...rows].sort((left, right) => new Date(right.occurredAt ?? 0).getTime() - new Date(left.occurredAt ?? 0).getTime());
+      const clients = [...new Set(latest.map((row) => String(row.client?.displayName ?? "")).filter(Boolean))].slice(0, NAMED_IN_SUMMARY);
+      return youHave(counted(rows.length, lang, COMMUNICATIONS)) + latestSentence(spokenList(clients, lang));
+    }
+    case "list_learning_rules":
+      return youHave(counted(rows.filter((row) => row.status === "active").length, lang, RULES));
+    case "list_portfolio_photos": {
+      const usable = part(rows.filter((row) => row.usableForMarketing === true).length, { cs: "pro marketing použitelných", pl: "nadających się do marketingu", en: "usable for marketing" }, lang);
+      return youHave(counted(rows.length, lang, PHOTOS) + (usable ? `, ${usable}` : ""));
+    }
     default:
       return undefined;
   }
+}
+
+/** The data-quality report is two lists, said as two counts — or that nothing is wrong. */
+function spokenDataQuality(data: unknown, lang: Locale): string | undefined {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  const report = data as Row;
+  const duplicates = Array.isArray(report.duplicateClientGroups) ? report.duplicateClientGroups.length : 0;
+  const missing = Array.isArray(report.missingContactIssues) ? report.missingContactIssues.length : 0;
+  if (!duplicates && !missing) return lang === "cs" ? "V datech teď nevidím žádný problém." : lang === "pl" ? "Nie widzę teraz problemów w danych." : "I see no data problems right now.";
+  const parts = [
+    duplicates ? `${ATTENTION_TYPES.duplicate_client_possible[lang]} ${duplicates}` : "",
+    missing ? `${ATTENTION_TYPES.missing_client_contact_info[lang]} ${missing}` : "",
+  ].filter(Boolean);
+  return lang === "cs" ? `K řešení: ${spokenList(parts, lang)}.` : lang === "pl" ? `Do poprawy: ${spokenList(parts, lang)}.` : `To fix: ${spokenList(parts, lang)}.`;
 }
 

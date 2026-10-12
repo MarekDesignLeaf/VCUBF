@@ -18,6 +18,8 @@ import * as portfolioService from "../services/portfolioService.js";
 import * as memoryModelService from "../services/memoryModelService.js";
 import * as assistantMemoryService from "../services/assistantMemoryService.js";
 import * as taskService from "../services/taskService.js";
+import * as invoiceService from "../services/invoiceService.js";
+import * as documentRecordService from "../services/documentRecordService.js";
 import * as contactService from "../services/contactService.js";
 import * as connectorSetupService from "../services/connectorSetupService.js";
 import * as voiceGmailService from "../services/voiceGmailService.js";
@@ -26,13 +28,13 @@ import * as voiceNotificationService from "../services/voiceNotificationService.
 import * as voicePreferenceService from "../services/voicePreferenceService.js";
 import * as googleCalendarConnectorService from "../services/googleCalendarConnectorService.js";
 import * as messageReadingService from "../services/messageReadingService.js";
-import { buildCommandUiAction, completedVoiceCommandMessage, openingVoiceLabelMessage, openingVoicePageMessage, type CommandUiAction } from "./voiceNavigation.js";
+import { buildCommandUiAction, completedVoiceCommandMessage, openingVoiceLabelMessage, openingVoicePageMessage, type CommandUiAction, type VoicePage } from "./voiceNavigation.js";
 import { getNavigationCatalogue } from "./navigationCatalogue.js";
 import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction, getPendingEmmaActionName } from "../services/emmaExecutableActionService.js";
 import { cancelAgentProposal, confirmAgentProposal } from "../agents/agentProposal.js";
 import { SAFE_MODE_ACTIVE, SafeModeActiveError, safeModeMessage, safeModeSince } from "./safeMode.js";
 import { commandAllowedInSafeMode } from "./safeModeCommands.js";
-import { spokenCancelled, spokenCompleted, spokenError, spokenNothingBeingRead, spokenOutcome, spokenReadingTurn, spokenListSummary, spokenOpenRecord, spokenReview, spokenWhatsAppDetailsMissing } from "./spokenActionMessages.js";
+import { spokenCancelled, spokenCompleted, spokenError, spokenListSummary, spokenLookupFailure, spokenMemory, spokenNothingBeingRead, spokenOpenRecord, spokenOutcome, spokenReadingTurn, spokenReview, spokenWhatsAppDetailsMissing } from "./spokenActionMessages.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -206,6 +208,42 @@ function safeModeRefusal(user: AuthedUser, command: ParsedCommand): CommandRespo
 }
 
 /**
+ * A list page opened by voice ("otevři faktury") says what it lists, as a list
+ * command does: read with the permission the page itself needs, so nothing is
+ * said that the page would not show. Each loader is the one the page's own
+ * list uses.
+ */
+const PAGE_LISTS: Partial<Record<VoicePage, { summary: string; permission: string; rows: (user: AuthedUser) => Promise<unknown> }>> = {
+  clients: { summary: "list_clients", permission: "crm.read", rows: (user) => clientService.listClients(user) },
+  contacts: { summary: "list_contacts", permission: "crm.read", rows: (user) => contactService.listContacts(user, { activeOnly: true }) },
+  leads: { summary: "list_leads", permission: "crm.read", rows: (user) => leadService.listLeads(user, {}) },
+  jobs: { summary: "list_jobs", permission: "crm.read", rows: (user) => jobService.listJobs(user, {}) },
+  tasks: { summary: "list_tasks", permission: "crm.read", rows: (user) => taskService.listTasks(user) },
+  quotes: { summary: "list_quotes", permission: "crm.read", rows: (user) => quoteService.listQuotes(user, {}) },
+  invoices: { summary: "list_invoices", permission: "crm.read", rows: (user) => invoiceService.listInvoices(user) },
+  documents: { summary: "list_documents", permission: "crm.read", rows: (user) => documentRecordService.listDocumentRecords(user, { activeOnly: true }) },
+  services: { summary: "list_services", permission: "crm.read", rows: (user) => serviceCatalogueService.listServices(user) },
+  playbooks: { summary: "list_playbooks", permission: "voice.execute", rows: (user) => prisma.playbook.findMany({ where: { companyId: user.companyId }, select: { name: true, isActive: true } }) },
+  notifications: { summary: "list_notifications", permission: "crm.read", rows: (user) => notificationService.getAttentionFeed(user) },
+  recruitment: { summary: "list_job_openings", permission: "recruitment.manage", rows: (user) => recruitmentService.listJobOpenings(user, {}) },
+  photos: { summary: "list_portfolio_photos", permission: "crm.read", rows: (user) => portfolioService.listPortfolioPhotos(user, {}) },
+  data_quality: { summary: "list_data_quality", permission: "crm.read", rows: (user) => dataQualityService.getDataQualityReport(user) },
+};
+
+async function spokenPageSummary(user: AuthedUser, page: VoicePage): Promise<string | undefined> {
+  const list = PAGE_LISTS[page];
+  // Written in Czech, Polish and English only.
+  if (!list || !user.permissions.includes(list.permission) || !/^(?:cs|pl|en)/.test(user.voiceLanguage)) return undefined;
+  try {
+    return spokenListSummary(list.summary, await list.rows(user), user.voiceLanguage);
+  } catch (error) {
+    // The page still opens; only what it lists goes unsaid.
+    console.error("[navigate] page summary failed", page, error instanceof Error ? error.message : error);
+    return undefined;
+  }
+}
+
+/**
  * Voice, text and playbook commands all arrive here. While the company is in
  * safe mode (emergency stop, layer H) only reads, withdrawals and the
  * speaker's own voice settings run; everything else is refused in words. A
@@ -361,7 +399,7 @@ async function dispatchAllowedCommand(
     case "update_client": {
       const matches = await clientService.findClientsByName(user, command.entities.client_name);
       if (matches.length === 0) {
-        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 404, error: "CLIENT_NOT_FOUND", message: `No active client matches "${command.entities.client_name}".` };
+        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 404, error: "CLIENT_NOT_FOUND", message: spokenLookupFailure("none", "client", command.entities.client_name, user.voiceLanguage, `No active client matches "${command.entities.client_name}".`) };
       } else if (matches.length > 1) {
         response = {
           intent: command.intent,
@@ -369,7 +407,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 409,
           error: "AMBIGUOUS_REFERENCE",
-          message: `Multiple active clients match "${command.entities.client_name}". Say the full name.`,
+          message: spokenLookupFailure("many", "client", command.entities.client_name, user.voiceLanguage, `Multiple active clients match "${command.entities.client_name}". Say the full name.`),
           data: matches.map((client) => ({ id: client.id, displayName: client.displayName })),
         };
       } else {
@@ -455,7 +493,7 @@ async function dispatchAllowedCommand(
     case "update_contact": {
       const matches = await contactService.findContactsByName(user, command.entities.contact_name);
       if (matches.length === 0) {
-        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 404, error: "CONTACT_NOT_FOUND", message: `No active contact matches "${command.entities.contact_name}".` };
+        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 404, error: "CONTACT_NOT_FOUND", message: spokenLookupFailure("none", "contact", command.entities.contact_name, user.voiceLanguage, `No active contact matches "${command.entities.contact_name}".`) };
       } else if (matches.length > 1) {
         response = {
           intent: command.intent,
@@ -463,7 +501,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 409,
           error: "AMBIGUOUS_REFERENCE",
-          message: `Multiple active contacts match "${command.entities.contact_name}". Say the full name.`,
+          message: spokenLookupFailure("many", "contact", command.entities.contact_name, user.voiceLanguage, `Multiple active contacts match "${command.entities.contact_name}". Say the full name.`),
           data: matches.map((contact) => ({ id: contact.id, displayName: contact.displayName })),
         };
       } else {
@@ -555,7 +593,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 404,
           error: "CLIENT_NOT_FOUND",
-          message: `No client matching "${command.entities.client_name}".`,
+          message: spokenLookupFailure("none", "client", command.entities.client_name, user.voiceLanguage, `No client matching "${command.entities.client_name}".`),
         };
       } else if (matches.length > 1) {
         response = {
@@ -564,7 +602,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 409,
           error: "AMBIGUOUS_REFERENCE",
-          message: `Multiple clients match "${command.entities.client_name}" — be more specific.`,
+          message: spokenLookupFailure("many", "client", command.entities.client_name, user.voiceLanguage, `Multiple clients match "${command.entities.client_name}" — be more specific.`),
           data: matches.map((c) => ({ id: c.id, displayName: c.displayName })),
         };
       } else {
@@ -594,7 +632,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 404,
           error: "NOT_FOUND",
-          message: `No job matching "${command.entities.job_title}".`,
+          message: spokenLookupFailure("none", "job", command.entities.job_title, user.voiceLanguage, `No job matching "${command.entities.job_title}".`),
         };
       } else if (jobMatches.length > 1) {
         response = {
@@ -603,7 +641,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 409,
           error: "AMBIGUOUS_REFERENCE",
-          message: `Multiple jobs match "${command.entities.job_title}" — be more specific.`,
+          message: spokenLookupFailure("many", "job", command.entities.job_title, user.voiceLanguage, `Multiple jobs match "${command.entities.job_title}" — be more specific.`),
           data: jobMatches.map((j) => ({ id: j.id, jobTitle: j.jobTitle })),
         };
       } else {
@@ -625,7 +663,7 @@ async function dispatchAllowedCommand(
     case "update_lead": {
       const leadMatches = await leadService.findLeadsByName(user, command.entities.lead_name);
       if (leadMatches.length === 0) {
-        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 404, error: "LEAD_NOT_FOUND", message: `No lead matches "${command.entities.lead_name}".` };
+        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 404, error: "LEAD_NOT_FOUND", message: spokenLookupFailure("none", "lead", command.entities.lead_name, user.voiceLanguage, `No lead matches "${command.entities.lead_name}".`) };
       } else if (leadMatches.length > 1) {
         response = {
           intent: command.intent,
@@ -633,7 +671,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 409,
           error: "AMBIGUOUS_REFERENCE",
-          message: `Multiple leads match "${command.entities.lead_name}". Say the full name.`,
+          message: spokenLookupFailure("many", "lead", command.entities.lead_name, user.voiceLanguage, `Multiple leads match "${command.entities.lead_name}". Say the full name.`),
           data: leadMatches.map((lead) => ({ id: lead.id, name: lead.name })),
         };
       } else {
@@ -665,7 +703,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 404,
           error: "NOT_FOUND",
-          message: `No lead matching "${command.entities.lead_name}".`,
+          message: spokenLookupFailure("none", "lead", command.entities.lead_name, user.voiceLanguage, `No lead matching "${command.entities.lead_name}".`),
         };
       } else if (leadMatches.length > 1) {
         response = {
@@ -674,7 +712,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 409,
           error: "AMBIGUOUS_REFERENCE",
-          message: `Multiple leads match "${command.entities.lead_name}" — be more specific.`,
+          message: spokenLookupFailure("many", "lead", command.entities.lead_name, user.voiceLanguage, `Multiple leads match "${command.entities.lead_name}" — be more specific.`),
           data: leadMatches.map((l) => ({ id: l.id, name: l.name })),
         };
       } else {
@@ -702,7 +740,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 404,
           error: "NOT_FOUND",
-          message: `No job matching "${command.entities.job_title}".`,
+          message: spokenLookupFailure("none", "job", command.entities.job_title, user.voiceLanguage, `No job matching "${command.entities.job_title}".`),
         };
       } else if (jobMatches.length > 1) {
         response = {
@@ -711,7 +749,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 409,
           error: "AMBIGUOUS_REFERENCE",
-          message: `Multiple jobs match "${command.entities.job_title}" — be more specific.`,
+          message: spokenLookupFailure("many", "job", command.entities.job_title, user.voiceLanguage, `Multiple jobs match "${command.entities.job_title}" — be more specific.`),
           data: jobMatches.map((j) => ({ id: j.id, jobTitle: j.jobTitle })),
         };
       } else if (employeeMatches.length === 0) {
@@ -721,7 +759,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 404,
           error: "EMPLOYEE_NOT_FOUND",
-          message: `No employee matching "${command.entities.employee_name}".`,
+          message: spokenLookupFailure("none", "employee", command.entities.employee_name, user.voiceLanguage, `No employee matching "${command.entities.employee_name}".`),
         };
       } else if (employeeMatches.length > 1) {
         response = {
@@ -730,7 +768,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 409,
           error: "AMBIGUOUS_REFERENCE",
-          message: `Multiple employees match "${command.entities.employee_name}" — be more specific.`,
+          message: spokenLookupFailure("many", "employee", command.entities.employee_name, user.voiceLanguage, `Multiple employees match "${command.entities.employee_name}" — be more specific.`),
           data: employeeMatches.map((e) => ({ id: e.id, displayName: e.displayName })),
         };
       } else {
@@ -767,7 +805,7 @@ async function dispatchAllowedCommand(
             ok: false,
             httpStatus: 404,
             error: "EMPLOYEE_NOT_FOUND",
-            message: `No employee matching "${command.entities.employee_name}".`,
+            message: spokenLookupFailure("none", "employee", command.entities.employee_name, user.voiceLanguage, `No employee matching "${command.entities.employee_name}".`),
           };
           break;
         }
@@ -778,7 +816,7 @@ async function dispatchAllowedCommand(
             ok: false,
             httpStatus: 409,
             error: "AMBIGUOUS_REFERENCE",
-            message: `Multiple employees match "${command.entities.employee_name}" — be more specific.`,
+            message: spokenLookupFailure("many", "employee", command.entities.employee_name, user.voiceLanguage, `Multiple employees match "${command.entities.employee_name}" — be more specific.`),
             data: matches.map((employee) => ({ id: employee.id, displayName: employee.displayName })),
           };
           break;
@@ -812,11 +850,11 @@ async function dispatchAllowedCommand(
       const tasks = await taskService.listTasks(user);
       const matches = tasks.filter((task) => task.title.toLocaleLowerCase() === command.entities.title.toLocaleLowerCase());
       if (matches.length === 0) {
-        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 404, error: "TASK_NOT_FOUND", message: `No task matching "${command.entities.title}".` };
+        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 404, error: "TASK_NOT_FOUND", message: spokenLookupFailure("none", "task", command.entities.title, user.voiceLanguage, `No task matching "${command.entities.title}".`) };
         break;
       }
       if (matches.length > 1) {
-        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 409, error: "AMBIGUOUS_REFERENCE", message: `Multiple tasks match "${command.entities.title}" — be more specific.` };
+        response = { intent: command.intent, interpreted: command.entities, ok: false, httpStatus: 409, error: "AMBIGUOUS_REFERENCE", message: spokenLookupFailure("many", "task", command.entities.title, user.voiceLanguage, `Multiple tasks match "${command.entities.title}" — be more specific.`) };
         break;
       }
       const result = await taskService.updateTask(user, matches[0].id, { task_status: command.entities.task_status });
@@ -851,7 +889,7 @@ async function dispatchAllowedCommand(
             ok: false,
             httpStatus: 404,
             error: "CLIENT_NOT_FOUND",
-            message: `No client matching "${command.entities.client_name}".`,
+            message: spokenLookupFailure("none", "client", command.entities.client_name, user.voiceLanguage, `No client matching "${command.entities.client_name}".`),
           };
         } else if (matches.length > 1) {
           response = {
@@ -860,7 +898,7 @@ async function dispatchAllowedCommand(
             ok: false,
             httpStatus: 409,
             error: "AMBIGUOUS_REFERENCE",
-            message: `Multiple clients match "${command.entities.client_name}" — be more specific.`,
+            message: spokenLookupFailure("many", "client", command.entities.client_name, user.voiceLanguage, `Multiple clients match "${command.entities.client_name}" — be more specific.`),
             data: matches.map((c) => ({ id: c.id, displayName: c.displayName })),
           };
         } else {
@@ -905,7 +943,6 @@ async function dispatchAllowedCommand(
 
     case "create_assistant_memory": {
       const result = await assistantMemoryService.createAssistantMemory(user, command.entities);
-      const scopeLabel = command.entities.scope === "company" ? "for the company" : "for you";
       response = {
         intent: command.intent,
         interpreted: command.entities,
@@ -914,9 +951,7 @@ async function dispatchAllowedCommand(
         data: result.ok ? result.data : undefined,
         error: result.ok ? undefined : result.error,
         message: result.ok
-          ? result.data.duplicate
-            ? `I already remember this ${scopeLabel}: ${result.data.content}`
-            : `I will remember this ${scopeLabel}: ${result.data.content}`
+          ? spokenMemory({ kind: "saved", scope: command.entities.scope === "company" ? "company" : "user", content: result.data.content, duplicate: Boolean(result.data.duplicate) }, user.voiceLanguage)
           : result.message,
       };
       break;
@@ -930,11 +965,7 @@ async function dispatchAllowedCommand(
         ok: true,
         httpStatus: 200,
         data,
-        message: data.length
-          ? `I remember: ${data.map((memory) => memory.content).join("; ")}`
-          : command.entities.query
-            ? `I do not have an active memory about ${command.entities.query}.`
-            : "I do not have any active persistent memories yet.",
+        message: spokenMemory({ kind: "recalled", contents: data.map((memory) => memory.content), query: command.entities.query }, user.voiceLanguage),
       };
       break;
     }
@@ -948,7 +979,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 404,
           error: "CLIENT_NOT_FOUND",
-          message: `No client matching "${command.entities.client_name}".`,
+          message: spokenLookupFailure("none", "client", command.entities.client_name, user.voiceLanguage, `No client matching "${command.entities.client_name}".`),
         };
       } else if (matches.length > 1) {
         response = {
@@ -957,7 +988,7 @@ async function dispatchAllowedCommand(
           ok: false,
           httpStatus: 409,
           error: "AMBIGUOUS_REFERENCE",
-          message: `Multiple clients match "${command.entities.client_name}" — be more specific.`,
+          message: spokenLookupFailure("many", "client", command.entities.client_name, user.voiceLanguage, `Multiple clients match "${command.entities.client_name}" — be more specific.`),
           data: matches.map((c) => ({ id: c.id, displayName: c.displayName })),
         };
       } else {
@@ -991,7 +1022,7 @@ async function dispatchAllowedCommand(
             ok: false,
             httpStatus: 404,
             error: "CLIENT_NOT_FOUND",
-            message: `No client matching "${command.entities.client_name}".`,
+            message: spokenLookupFailure("none", "client", command.entities.client_name, user.voiceLanguage, `No client matching "${command.entities.client_name}".`),
           };
         } else if (matches.length > 1) {
           response = {
@@ -1000,7 +1031,7 @@ async function dispatchAllowedCommand(
             ok: false,
             httpStatus: 409,
             error: "AMBIGUOUS_REFERENCE",
-            message: `Multiple clients match "${command.entities.client_name}" — be more specific.`,
+            message: spokenLookupFailure("many", "client", command.entities.client_name, user.voiceLanguage, `Multiple clients match "${command.entities.client_name}" — be more specific.`),
             data: matches.map((c) => ({ id: c.id, displayName: c.displayName })),
           };
         } else {
@@ -1025,7 +1056,7 @@ async function dispatchAllowedCommand(
             ok: false,
             httpStatus: 404,
             error: "CLIENT_NOT_FOUND",
-            message: `No client matching "${command.entities.client_name}".`,
+            message: spokenLookupFailure("none", "client", command.entities.client_name, user.voiceLanguage, `No client matching "${command.entities.client_name}".`),
           };
           break;
         } else if (matches.length > 1) {
@@ -1035,7 +1066,7 @@ async function dispatchAllowedCommand(
             ok: false,
             httpStatus: 409,
             error: "AMBIGUOUS_REFERENCE",
-            message: `Multiple clients match "${command.entities.client_name}" — be more specific.`,
+            message: spokenLookupFailure("many", "client", command.entities.client_name, user.voiceLanguage, `Multiple clients match "${command.entities.client_name}" — be more specific.`),
             data: matches.map((c) => ({ id: c.id, displayName: c.displayName })),
           };
           break;
@@ -1075,7 +1106,7 @@ async function dispatchAllowedCommand(
             ok: false,
             httpStatus: 404,
             error: "CLIENT_NOT_FOUND",
-            message: `No client matching "${command.entities.client_name}".`,
+            message: spokenLookupFailure("none", "client", command.entities.client_name, user.voiceLanguage, `No client matching "${command.entities.client_name}".`),
           };
         } else if (matches.length > 1) {
           response = {
@@ -1084,7 +1115,7 @@ async function dispatchAllowedCommand(
             ok: false,
             httpStatus: 409,
             error: "AMBIGUOUS_REFERENCE",
-            message: `Multiple clients match "${command.entities.client_name}" — be more specific.`,
+            message: spokenLookupFailure("many", "client", command.entities.client_name, user.voiceLanguage, `Multiple clients match "${command.entities.client_name}" — be more specific.`),
             data: matches.map((c) => ({ id: c.id, displayName: c.displayName })),
           };
         } else {
@@ -1430,12 +1461,14 @@ async function dispatchAllowedCommand(
     }
 
     case "navigate": {
+      const opening = openingVoicePageMessage(command.entities.page, user.voiceLanguage);
+      const summary = await spokenPageSummary(user, command.entities.page);
       response = {
         intent: command.intent,
         interpreted: command.entities,
         ok: true,
         httpStatus: 200,
-        message: openingVoicePageMessage(command.entities.page, user.voiceLanguage),
+        message: summary ? `${opening} ${summary}` : opening,
       };
       break;
     }
