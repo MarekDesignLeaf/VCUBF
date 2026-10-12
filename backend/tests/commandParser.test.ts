@@ -669,3 +669,44 @@ describe("commandParser", () => {
     }
   });
 });
+
+describe("opening one record by name", () => {
+  const open = (text: string, reader: string) => parseTextCommand(text, reader);
+
+  it("reads Czech with the name as said, accents and all", () => {
+    assert.deepEqual(open("Otevři klienta Nováka.", "cs-CZ"), { intent: "open_record", entities: { kind: "client", name: "Nováka" } });
+    assert.deepEqual(open("Ukaž mi zakázku Plot u Nováka", "cs-CZ"), { intent: "open_record", entities: { kind: "job", name: "Plot u Nováka" } });
+    assert.deepEqual(open("otevři nabídku pro Dvořákovou", "cs-CZ"), { intent: "open_record", entities: { kind: "quote", name: "Dvořákovou" } });
+    assert.deepEqual(open("najdi fakturu číslo 2026-014", "cs-CZ"), { intent: "open_record", entities: { kind: "invoice", name: "2026-014" } });
+    assert.deepEqual(open("otevři poptávku Jana Malá prosím", "cs-CZ"), { intent: "open_record", entities: { kind: "lead", name: "Jana Malá" } });
+    assert.deepEqual(open("otevři zaměstnance Petra", "cs-CZ"), { intent: "open_record", entities: { kind: "employee", name: "Petra" } });
+    assert.deepEqual(open("otevři inzerát zahradník", "cs-CZ"), { intent: "open_record", entities: { kind: "job_opening", name: "zahradník" } });
+    assert.deepEqual(open("ukaž kontakt Petr Svoboda", "cs-CZ"), { intent: "open_record", entities: { kind: "contact", name: "Petr Svoboda" } });
+  });
+
+  it("leaves the plural to the list pages it has always opened", () => {
+    assert.equal(open("ukaž klienty", "cs-CZ").intent, "list_clients");
+    assert.equal(open("ukaž zakázky", "cs-CZ").intent, "list_jobs");
+    assert.deepEqual(open("otevři kontakty", "cs-CZ"), { intent: "navigate", entities: { page: "contacts" } });
+    assert.equal(open("show jobs", "en-GB").intent, "list_jobs");
+    assert.equal(open("show job openings", "en-GB").intent, "list_job_openings");
+  });
+
+  it("reads English, the model's canonical form, and Polish", () => {
+    assert.deepEqual(open("show me the quote for Smith", "en-GB"), { intent: "open_record", entities: { kind: "quote", name: "Smith" } });
+    assert.deepEqual(open("open invoice number 2026-014", "en-GB"), { intent: "open_record", entities: { kind: "invoice", name: "2026-014" } });
+    assert.deepEqual(open("open job opening Gardener", CANONICAL_COMMAND), { intent: "open_record", entities: { kind: "job_opening", name: "Gardener" } });
+    assert.deepEqual(open("open client Jan Novák", CANONICAL_COMMAND), { intent: "open_record", entities: { kind: "client", name: "Jan Novák" } });
+    assert.deepEqual(open("otwórz klienta Nowaka", "pl-PL"), { intent: "open_record", entities: { kind: "client", name: "Nowaka" } });
+    assert.deepEqual(open("pokaż fakturę nr 12", "pl-PL"), { intent: "open_record", entities: { kind: "invoice", name: "12" } });
+    // Czech is not read with Polish switched on, nor the other way round.
+    assert.notEqual(open("otevři klienta Nováka", "pl-PL").intent, "open_record");
+  });
+
+  it("opens the record's own page, or its list with the record picked out", () => {
+    const opened = (kind: string, path: string) => buildCommandUiAction("open_record", { kind, id: "x", label: "X", path }, {}, "cs-CZ");
+    assert.deepEqual(opened("client", "/clients/x"), { kind: "navigate", path: "/clients/x", label: "Klienti" });
+    assert.equal(opened("invoice", "/invoices?invoice=x")?.kind, "navigate");
+    assert.equal(buildCommandUiAction("open_record", { kind: "client" }, {}, "cs-CZ"), undefined, "nothing found: nothing opened");
+  });
+});

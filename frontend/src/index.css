@@ -1115,3 +1115,12 @@ table,
   flex: 0 0 auto; margin: 0; font-size: 10px; line-height: 1.3; color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* A row a voice command picked on a list without a detail page ("otevři fakturu …"). */
+.picked-row > td {
+  background: var(--accent-soft);
+}
+.picked-row > td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+

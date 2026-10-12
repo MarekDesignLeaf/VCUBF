@@ -105,6 +105,7 @@ export const COMMAND_POLICY = {
   sync_connectors: { category: "connectors", mode: "administration" },
   list_jobs: { category: "work", mode: "read" },
   list_leads: { category: "customers", mode: "read" },
+  open_record: { category: "navigation", mode: "read", description: "Open one record's own page by name (a client, contact, lead, job, quote, invoice, employee, job opening or playbook), as clicking it in its list does." },
   navigate: { category: "navigation", mode: "read" },
   unrecognized: { category: "navigation", mode: "read" },
 } as const satisfies Record<ParsedCommand["intent"], CommandPolicy>;

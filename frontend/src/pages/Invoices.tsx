@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError, type Client, type Invoice, type InvoiceItem } from "../api/client";
 import { SendDocumentDialog } from "../components/SendDocumentDialog";
+import { pickedRowId, usePickedRow } from "../components/pickedRow";
 
 export function Invoices() {
   const requestedClientId = useMemo(() => new URLSearchParams(window.location.search).get("client") ?? "", []);
@@ -15,6 +16,7 @@ export function Invoices() {
   const [sending, setSending] = useState<string | null>(null);
   const [sentNotice, setSentNotice] = useState<string | null>(null);
 
+  const picked = usePickedRow("invoice", rows);
   const selectedClient = clients.find((candidate) => candidate.id === client);
   const load = () => api.invoices.list().then(setRows).catch(() => setError("Could not load invoices."));
 
@@ -108,7 +110,7 @@ export function Invoices() {
             onCancel={() => setEditing(null)}
           />
         ) : (
-          <tr key={invoice.id}>
+          <tr key={invoice.id} id={pickedRowId("invoice", invoice.id)} className={picked === invoice.id ? "picked-row" : undefined}>
             <td>{invoice.invoiceNumber}</td><td>{invoice.client.displayName}</td><td>{invoice.isOverdue ? "overdue" : invoice.invoiceStatus}</td>
             <td>£{invoice.totals.total.toFixed(2)}</td><td>£{invoice.totals.paid.toFixed(2)}</td><td>£{invoice.totals.balance.toFixed(2)}</td>
             <td>{invoice.invoiceStatus === "draft" && <button data-action="invoice-edit" onClick={() => setEditing(invoice.id)}>Edit</button>} {invoice.invoiceStatus === "draft" && <button onClick={() => issue(invoice.id)}>Issue</button>} {invoice.invoiceStatus === "issued" && invoice.totals.balance > 0 && <button onClick={() => pay(invoice)}>Record payment</button>} <button onClick={() => pdf(invoice)}>PDF</button> {invoice.invoiceStatus === "issued" && <button onClick={() => setSending(invoice.id)}>Send by email</button>}</td>

@@ -15,6 +15,7 @@
 // language is on.
 //
 import type { VoicePage } from "./voiceNavigation.js";
+import type { RecordKind } from "./recordKinds.js";
 import type { ConnectorKey } from "../connectors/registry.js";
 import { mentionsLanguage, type VoiceLanguage } from "./voiceLanguages.js";
 import type { NavigationSectionId } from "./navigationCatalogue.js";
@@ -128,6 +129,8 @@ export type ParsedCommand =
   | { intent: "list_jobs"; entities: Record<string, never> }
   | { intent: "list_leads"; entities: Record<string, never> }
   | { intent: "navigate"; entities: { page: VoicePage } }
+  // "otevři klienta Novák", "open the quote for Smith": one record's own page.
+  | { intent: "open_record"; entities: { kind: RecordKind; name: string } }
   | { intent: "unrecognized"; entities: Record<string, never> };
 
 /**

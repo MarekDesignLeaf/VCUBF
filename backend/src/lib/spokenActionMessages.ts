@@ -10,6 +10,7 @@
 
 import { addDays, localDateTime } from "./spokenDate.js";
 import type { ReadingTurn } from "../services/messageReadingService.js";
+import type { RecordKind } from "./recordKinds.js";
 
 type Locale = "cs" | "pl" | "en";
 type Row = Record<string, any>;
@@ -540,3 +541,50 @@ export function spokenNothingBeingRead(language: string) {
     : lang === "pl" ? "Teraz nie czytam żadnych wiadomości. Powiedz na przykład: przeczytaj wiadomości z WhatsAppa."
       : "I am not reading any messages right now. Say, for example: read my WhatsApp messages.";
 }
+
+/** How a record of each kind is named after "Otevírám" / "Otwieram" / "Opening", and after "Nenašel jsem". */
+const RECORD_WORDS: Record<RecordKind, Record<Locale, string>> = {
+  client: { cs: "klienta", pl: "klienta", en: "client" },
+  contact: { cs: "kontakt", pl: "kontakt", en: "contact" },
+  lead: { cs: "poptávku", pl: "zapytanie", en: "lead" },
+  job: { cs: "zakázku", pl: "zlecenie", en: "job" },
+  quote: { cs: "nabídku", pl: "ofertę", en: "quote" },
+  invoice: { cs: "fakturu", pl: "fakturę", en: "invoice" },
+  employee: { cs: "zaměstnance", pl: "pracownika", en: "employee" },
+  job_opening: { cs: "inzerát", pl: "ogłoszenie", en: "job opening" },
+  playbook: { cs: "playbook", pl: "playbook", en: "playbook" },
+};
+
+/**
+ * "otevři klienta Nováka": which record is being opened, that none was found,
+ * or which ones fit equally well, so the user can say which.
+ */
+export function spokenOpenRecord(
+  outcome: { opened?: { kind: RecordKind; label: string }; kind: RecordKind; said: string; error?: string; candidates?: string[]; more?: number },
+  language: string,
+): string {
+  const lang = locale(language);
+  const what = RECORD_WORDS[outcome.kind][lang];
+  if (outcome.opened) {
+    return lang === "cs" ? `Otevírám ${what} ${outcome.opened.label}.`
+      : lang === "pl" ? `Otwieram ${what} ${outcome.opened.label}.`
+        : `Opening the ${what} ${outcome.opened.label}.`;
+  }
+  if (outcome.error === "AMBIGUOUS_REFERENCE" && outcome.candidates?.length) {
+    const named = [...outcome.candidates];
+    if (outcome.more) named.push(lang === "cs" ? `${outcome.more} další` : lang === "pl" ? `${outcome.more} innych` : `${outcome.more} more`);
+    const list = spokenList(named, lang);
+    return lang === "cs" ? `Tomu odpovídá víc záznamů: ${list}. Řekněte to přesněji.`
+      : lang === "pl" ? `Pasuje kilka pozycji: ${list}. Proszę powiedzieć dokładniej.`
+        : `More than one matches: ${list}. Which one do you mean?`;
+  }
+  if (outcome.error === "MISSING_PERMISSION") {
+    return lang === "cs" ? `K otevření tohoto záznamu nemáte oprávnění.`
+      : lang === "pl" ? `Nie masz uprawnień do otwarcia tego rekordu.`
+        : `You do not have permission to open this record.`;
+  }
+  return lang === "cs" ? `Nenašel jsem ${what} „${outcome.said}“.`
+    : lang === "pl" ? `Nie znalazłem: ${what} „${outcome.said}”.`
+      : `I could not find a ${what} called “${outcome.said}”.`;
+}
+

@@ -10,8 +10,8 @@ import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
   connectorTarget, extractContact, extractLabelled, fold, nameOnly, normalizeDictatedPhone, parseAgendaCommand,
-  parseEmailCommand, parseLanguageSwitch, parseNavigation, parseWhatsAppCommand, withoutFinalPunctuation,
-  type CommandGrammar, type Parsed,
+  parseEmailCommand, parseLanguageSwitch, parseNavigation, parseOpenRecord, parseWhatsAppCommand, withoutFinalPunctuation,
+  type CommandGrammar, type OpenRecordWords, type Parsed,
 } from "./shared.js";
 
 const UNPAID_INVOICE_QUESTION =
@@ -337,6 +337,24 @@ function knowledge(text: string): ParsedCommand | undefined {
   return undefined;
 }
 
+/** "open client Smith", "show the quote for Smith", "open invoice number 2026-014". Folded. Also the model's canonical "open KIND NAME". */
+const OPEN_RECORD: OpenRecordWords = {
+  verbs: "open|opan|oppen|show|find|look\\s+up|pull\\s+up|bring\\s+up|go\\s+to",
+  kinds: [
+    ["job_opening", "job\\s+opening|vacancy"],
+    ["quote", "quote|quotation|estimate"],
+    ["client", "client|customer"],
+    ["contact", "contact"],
+    ["lead", "lead|enquiry|inquiry"],
+    ["job", "job"],
+    ["invoice", "invoice"],
+    ["employee", "employee|worker|staff\\s+member|team\\s+member"],
+    ["playbook", "playbook"],
+  ],
+  joiners: "for|from|of|called|named|number|no",
+  trailing: "please",
+};
+
 export const english: CommandGrammar = {
   language: "en",
   yes: /^(?:yes|yeah|yep|confirm(?:\s+action)?|go ahead|do it|send it)$/iu,
@@ -398,6 +416,7 @@ export const english: CommandGrammar = {
     return connectors(text)
       ?? records(text)
       ?? knowledge(text)
+      ?? parseOpenRecord(text, OPEN_RECORD)
       ?? parseNavigation(text, "open|opan|oppen|go\\s+to|navigate\\s+to|take\\s+me\\s+to|show\\s+me");
   },
 };

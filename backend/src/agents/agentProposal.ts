@@ -138,11 +138,11 @@ export const AGENT_PROPOSABLE_COMMANDS: ReadonlySet<ParsedCommand["intent"]> = n
 ]);
 
 /**
- * Reading commands the planner gets no use from: pages and menus make sense
- * only on a screen, and moving through messages being read out is the user's
- * own place in a reading.
+ * Reading commands the planner gets no use from: pages, records opened on
+ * the screen and menus make sense only on a screen, and moving through
+ * messages being read out is the user's own place in a reading.
  */
-const READS_NOT_RUN = new Set<string>(["navigate", "describe_menu", "unrecognized", "next_message_sender", "older_sender_messages"]);
+const READS_NOT_RUN = new Set<string>(["navigate", "open_record", "describe_menu", "unrecognized", "next_message_sender", "older_sender_messages"]);
 
 function isApprovalTurn(intent: string) {
   return intent.startsWith("confirm_") || intent.startsWith("cancel_");

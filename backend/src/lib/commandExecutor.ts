@@ -2,6 +2,7 @@ import type { AuthedUser } from "../middleware/auth.js";
 import type { ParsedCommand } from "./commandParser.js";
 import { prisma } from "../db.js";
 import * as clientService from "../services/clientService.js";
+import * as recordLookupService from "../services/recordLookupService.js";
 import * as jobService from "../services/jobService.js";
 import * as leadService from "../services/leadService.js";
 import * as employeeService from "../services/employeeService.js";
@@ -31,7 +32,7 @@ import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction, g
 import { cancelAgentProposal, confirmAgentProposal } from "../agents/agentProposal.js";
 import { SAFE_MODE_ACTIVE, SafeModeActiveError, safeModeMessage, safeModeSince } from "./safeMode.js";
 import { commandAllowedInSafeMode } from "./safeModeCommands.js";
-import { spokenCancelled, spokenCompleted, spokenError, spokenNothingBeingRead, spokenOutcome, spokenReadingTurn, spokenReview, spokenWhatsAppDetailsMissing } from "./spokenActionMessages.js";
+import { spokenCancelled, spokenCompleted, spokenError, spokenNothingBeingRead, spokenOutcome, spokenReadingTurn, spokenOpenRecord, spokenReview, spokenWhatsAppDetailsMissing } from "./spokenActionMessages.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -1177,6 +1178,26 @@ async function dispatchAllowedCommand(
     case "detect_action_patterns": {
       const data = await memoryModelService.detectRepeatedActionPatterns(user);
       response = { intent: command.intent, interpreted: {}, ok: true, httpStatus: 200, data };
+      break;
+    }
+
+    case "open_record": {
+      // "otevři klienta Nováka": the record's own page, as a click in its list opens it.
+      const { kind, name } = command.entities;
+      const result = await recordLookupService.findRecordToOpen(user, kind, name);
+      const extra = result.ok ? undefined : result.extra as { candidates?: string[]; more?: number } | undefined;
+      response = {
+        intent: command.intent,
+        interpreted: command.entities,
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        data: result.ok ? result.data : extra,
+        error: result.ok ? undefined : result.error,
+        message: spokenOpenRecord({
+          kind, said: name, opened: result.ok ? result.data : undefined,
+          error: result.ok ? undefined : result.error, candidates: extra?.candidates, more: extra?.more,
+        }, user.voiceLanguage),
+      };
       break;
     }
 
