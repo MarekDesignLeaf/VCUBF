@@ -10,8 +10,8 @@ import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
   connectorTarget, extractContact, extractLabelled, fold, nameOnly, normalizeDictatedPhone, parseAgendaCommand,
-  parseEmailCommand, parseLanguageSwitch, parseNavigation, parseOpenRecord, parseWhatsAppCommand, withoutFinalPunctuation,
-  type CommandGrammar, type OpenRecordWords, type Parsed,
+  parseEmailCommand, parseLanguageSwitch, parseNavigation, parseOpenRecord, parseSendDocument, parseWhatsAppCommand, withoutFinalPunctuation,
+  type CommandGrammar, type OpenRecordWords, type Parsed, type SendDocumentWords,
 } from "./shared.js";
 
 const UNPAID_INVOICE_QUESTION =
@@ -337,6 +337,15 @@ function knowledge(text: string): ParsedCommand | undefined {
   return undefined;
 }
 
+/** "send the quote for Smith", "email Smith the invoice", "send invoice number INV-100". Folded. Also the model's canonical "send quote|invoice NAME". */
+const SEND_DOCUMENT: SendDocumentWords = {
+  verbs: "send|email|e-mail|mail",
+  quote: "quote|quotation|estimate",
+  invoice: "invoice",
+  joiners: "to|for|of|number|no|client|customer",
+  trailing: "by\\s+email|by\\s+e-mail|please",
+};
+
 /** "open client Smith", "show the quote for Smith", "open invoice number 2026-014". Folded. Also the model's canonical "open KIND NAME". */
 const OPEN_RECORD: OpenRecordWords = {
   verbs: "open|opan|oppen|show|find|look\\s+up|pull\\s+up|bring\\s+up|go\\s+to",
@@ -414,6 +423,7 @@ export const english: CommandGrammar = {
     // "Opan" and "oppen" are how speech recognition often writes "open". Only
     // the verb is forgiven; the page still has to be in the menu.
     return connectors(text)
+      ?? parseSendDocument(text, SEND_DOCUMENT)
       ?? records(text)
       ?? knowledge(text)
       ?? parseOpenRecord(text, OPEN_RECORD)

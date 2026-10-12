@@ -1,3 +1,5 @@
+import * as documentDeliveryService from "./documentDeliveryService.js";
+import * as recordLookupService from "./recordLookupService.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { EMMA_EXECUTABLE_ACTIONS, type EmmaExecutableActionName, type EmmaExecutableActionRequest } from "../lib/emmaExecutableActionCatalogue.js";
 import { validateVoiceActionParameters } from "../lib/voiceActionCatalogue.js";
@@ -259,6 +261,39 @@ async function executeEmmaActionDirect(
     case "update_quote": {
       const item = lookup(await quoteService.listQuotes(user), stringValue(p, "quote_title"), ["title"], "quote");
       return item.ok ? quoteService.updateQuote(user, item.data.id, without(p, "quote_title")) : item;
+    }
+    case "send_quote":
+    case "send_invoice": {
+      // "pošli nabídku Novákovi": the PDF by e-mail to the client. The spoken
+      // name is looked up as "otevři nabídku …" looks it up; the reviewed
+      // operation then names the document, recipients, subject, body and
+      // sending account exactly, and that is what the yes sends (section 41).
+      const kind = request.action === "send_quote" ? "quote" : "invoice";
+      let documentId = stringValue(p, "document_id");
+      if (!documentId) {
+        const found = await recordLookupService.findRecordToOpen(user, kind, stringValue(p, kind) ?? "");
+        if (!found.ok) return found;
+        documentId = found.data.id;
+      }
+      const input = {
+        ...(Array.isArray(p.to) ? { to: p.to } : {}),
+        ...(stringValue(p, "subject") ? { subject: stringValue(p, "subject") } : {}),
+        ...(stringValue(p, "body") ? { body: stringValue(p, "body") } : {}),
+        ...(stringValue(p, "source_id") ? { source_id: stringValue(p, "source_id") } : {}),
+        confirmed,
+      };
+      const result = kind === "quote"
+        ? await documentDeliveryService.sendQuoteByEmail(user, documentId, input)
+        : await documentDeliveryService.sendInvoiceByEmail(user, documentId, input);
+      if (result.ok || result.error !== "CONFIRMATION_REQUIRED") return result;
+      const preview = result.extra?.preview as { to?: string[]; subject?: string; body?: string; source?: { id?: string } } | undefined;
+      return {
+        ...result,
+        extra: {
+          ...result.extra,
+          confirmInput: { document_id: documentId, to: preview?.to, subject: preview?.subject, body: preview?.body, source_id: preview?.source?.id },
+        },
+      };
     }
     case "export_quote_pdf": {
       const item = lookup(await quoteService.listQuotes(user), stringValue(p, "quote_title"), ["title"], "quote");

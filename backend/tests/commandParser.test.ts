@@ -710,3 +710,24 @@ describe("opening one record by name", () => {
     assert.equal(buildCommandUiAction("open_record", { kind: "client" }, {}, "cs-CZ"), undefined, "nothing found: nothing opened");
   });
 });
+
+describe("e-mailing a quote or an invoice", () => {
+  const send = (text: string, reader: string) => parseTextCommand(text, reader);
+
+  it("reads Czech in either word order, English and Polish, as a reviewed voice action", () => {
+    assert.deepEqual(send("Pošli nabídku Novákovi.", "cs-CZ"), { intent: "execute_action", entities: { action: "send_quote", parameters: { quote: "Novákovi" } } });
+    assert.deepEqual(send("pošli Novákovi fakturu", "cs-CZ"), { intent: "execute_action", entities: { action: "send_invoice", parameters: { invoice: "Novákovi" } } });
+    assert.deepEqual(send("pošli fakturu číslo 2026-014 e-mailem", "cs-CZ"), { intent: "execute_action", entities: { action: "send_invoice", parameters: { invoice: "2026-014" } } });
+    assert.deepEqual(send("send the quote for Smith", "en-GB"), { intent: "execute_action", entities: { action: "send_quote", parameters: { quote: "Smith" } } });
+    assert.deepEqual(send("email Smith the invoice", "en-GB"), { intent: "execute_action", entities: { action: "send_invoice", parameters: { invoice: "Smith" } } });
+    assert.deepEqual(send("send invoice INV-100", CANONICAL_COMMAND), { intent: "execute_action", entities: { action: "send_invoice", parameters: { invoice: "INV-100" } } });
+    assert.deepEqual(send("wyślij ofertę dla Nowaka", "pl-PL"), { intent: "execute_action", entities: { action: "send_quote", parameters: { quote: "Nowaka" } } });
+  });
+
+  it("leaves e-mail, WhatsApp and a request for oneself alone", () => {
+    assert.equal(send("send email to a@b.com; subject x; body y", "en-GB").intent, "prepare_gmail_message");
+    assert.equal(send("pošli zprávu na WhatsApp na +447700900123 zpráva ahoj", "cs-CZ").intent, "prepare_whatsapp_message");
+    assert.notEqual(send("pošli mi fakturu", "cs-CZ").intent, "execute_action");
+    assert.equal(send("pošli nabídku", "cs-CZ").intent, "unrecognized");
+  });
+});

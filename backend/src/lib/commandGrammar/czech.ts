@@ -8,8 +8,8 @@ import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
   connectorTarget, extractContact, fold, nameOnly, normalizeDictatedPhone, parseAgendaCommand, parseEmailCommand,
-  parseLanguageSwitch, parseNavigation, parseOpenRecord, parseWhatsAppCommand, withoutFinalPunctuation,
-  type CommandGrammar, type OpenRecordWords, type Parsed,
+  parseLanguageSwitch, parseNavigation, parseOpenRecord, parseSendDocument, parseWhatsAppCommand, withoutFinalPunctuation,
+  type CommandGrammar, type OpenRecordWords, type Parsed, type SendDocumentWords,
 } from "./shared.js";
 
 // Compared without diacritics: the transcription decides whether they are there.
@@ -284,6 +284,15 @@ function knowledge(text: string): ParsedCommand | undefined {
   return undefined;
 }
 
+/** "pošli nabídku Novákovi", "pošli Novákovi fakturu", "pošli fakturu číslo 2026-014 e-mailem". Folded. */
+const SEND_DOCUMENT: SendDocumentWords = {
+  verbs: "posli|odesli|zasli|posli\\s+e-?mailem|odesli\\s+e-?mailem",
+  quote: "cenovou\\s+nabidku|nabidku",
+  invoice: "fakturu",
+  joiners: "pro|na|klientovi|klientce|zakaznikovi|zakaznici|cislo",
+  trailing: "e-?mailem|mailem|prosim|prosimte",
+};
+
 /** "otevři klienta Nováka", "ukaž zakázku Plot", "najdi fakturu číslo 2026-014". Folded. */
 const OPEN_RECORD: OpenRecordWords = {
   verbs: "otevri|ukaz|zobraz|najdi|vyhledej|prejdi\\s+na|jdi\\s+na",
@@ -357,6 +366,7 @@ export const czech: CommandGrammar = {
     if (/^(?:potvrď|potvrd|odešli|odesli)\s+(?:zprávu\s+)?(?:na\s+)?whatsapp$/iu.test(text)) return { intent: "confirm_whatsapp_message", entities: {} };
     if (/^(?:zruš|zrus)\s+(?:zprávu\s+)?(?:na\s+)?whatsapp$/iu.test(text)) return { intent: "cancel_whatsapp_message", entities: {} };
     return connectors(text)
+      ?? parseSendDocument(text, SEND_DOCUMENT)
       ?? records(text)
       ?? knowledge(text)
       ?? parseOpenRecord(text, OPEN_RECORD)

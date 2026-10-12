@@ -350,6 +350,46 @@ export function parseOpenRecord(text: string, words: OpenRecordWords): Parsed<"o
   return undefined;
 }
 
+/** One language's words for e-mailing a quote or an invoice. Folded, as OpenRecordWords. */
+export interface SendDocumentWords {
+  verbs: string;
+  quote: string;
+  invoice: string;
+  /** Words between the document and the name ("pro|klientovi|cislo"). */
+  joiners: string;
+  /** Words that may end the sentence ("e-mailem|prosim"). */
+  trailing: string;
+}
+
+/**
+ * "pošli nabídku Novákovi", "pošli Novákovi fakturu", "send the invoice
+ * INV-100": the PDF by e-mail to the client, as the voice action send_quote /
+ * send_invoice. The name is looked up and the whole e-mail read back before
+ * anything is sent.
+ */
+export function parseSendDocument(text: string, words: SendDocumentWords): Parsed<"execute_action"> | undefined {
+  const cleaned = withoutFinalPunctuation(text).normalize("NFC").replace(/[,;:]+/g, " ").replace(/\s+/g, " ").trim();
+  const said = fold(cleaned);
+  const document = `(?:(?<quote>${words.quote})|(?<invoice>${words.invoice}))`;
+  const end = `(?:\\s+(?:${words.trailing}))*$`;
+  const patterns = [
+    new RegExp(`^(?:${words.verbs})\\s+(?:(?:the|a)\\s+)?${document}\\s+(?:(?:${words.joiners})\\s+)*(?<name>.+?)${end}`, "du"),
+    new RegExp(`^(?:${words.verbs})\\s+(?:(?:${words.joiners})\\s+)*(?<name>.+?)\\s+(?:(?:the|their|his|her)\\s+)?${document}${end}`, "du"),
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(said);
+    const at = match?.indices?.groups?.name;
+    if (!match?.groups || !at) continue;
+    const name = (said.length === cleaned.length ? cleaned.slice(at[0], at[1]) : match.groups.name).trim();
+    // "pošli mi fakturu" asks for the invoice, it names no client.
+    if (!name || /^(?:mi|mne|me|nam|us|him|her|them|ho|ji|je|mu|jim|mnie|nam)$/u.test(fold(name))) return undefined;
+    return match.groups.quote
+      ? { intent: "execute_action", entities: { action: "send_quote", parameters: { quote: name } } }
+      : { intent: "execute_action", entities: { action: "send_invoice", parameters: { invoice: name } } };
+  }
+  return undefined;
+}
+
 /** "open calendar", "otevři kalendář": a verb of this language, then a page of the menu. */
 export function parseNavigation(text: string, verbs: string): Parsed<"navigate"> | undefined {
   const match = text.match(new RegExp(`^(?:${verbs})\\s+(.+)$`, "iu"));

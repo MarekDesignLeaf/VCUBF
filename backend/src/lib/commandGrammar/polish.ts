@@ -8,8 +8,8 @@ import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
   NEVER, connectorTarget, extractContact, fold, nameOnly, normalizeDictatedPhone, parseAgendaCommand, parseEmailCommand,
-  parseLanguageSwitch, parseNavigation, parseOpenRecord, parseWhatsAppCommand, withoutFinalPunctuation,
-  type CommandGrammar, type OpenRecordWords, type Parsed,
+  parseLanguageSwitch, parseNavigation, parseOpenRecord, parseSendDocument, parseWhatsAppCommand, withoutFinalPunctuation,
+  type CommandGrammar, type OpenRecordWords, type Parsed, type SendDocumentWords,
 } from "./shared.js";
 
 const CONNECTORS = {
@@ -144,6 +144,15 @@ function knowledge(text: string): ParsedCommand | undefined {
   return undefined;
 }
 
+/** "wyślij ofertę dla Nowaka", "wyślij fakturę nr 12 e-mailem". Folded. */
+const SEND_DOCUMENT: SendDocumentWords = {
+  verbs: "wyslij|przeslij",
+  quote: "oferte|wycene",
+  invoice: "fakture",
+  joiners: "dla|do|klientowi|numer|nr",
+  trailing: "e-?mailem|mailem|prosze",
+};
+
 /** "otwórz klienta Nowaka", "pokaż zlecenie Płot", "otwórz fakturę numer 2026-014". Folded. */
 const OPEN_RECORD: OpenRecordWords = {
   verbs: "otworz|pokaz|znajdz|wyszukaj|przejdz\\s+do",
@@ -218,6 +227,7 @@ export const polish: CommandGrammar = {
     if (/^(?:potwierdź|potwierdz|wyślij|wyslij)\s+(?:wiadomość\s+)?(?:na\s+)?whatsapp$/iu.test(text)) return { intent: "confirm_whatsapp_message", entities: {} };
     if (/^anuluj\s+(?:wiadomość\s+)?(?:na\s+)?whatsapp$/iu.test(text)) return { intent: "cancel_whatsapp_message", entities: {} };
     return connectors(text)
+      ?? parseSendDocument(text, SEND_DOCUMENT)
       ?? records(text)
       ?? knowledge(text)
       ?? parseOpenRecord(text, OPEN_RECORD)

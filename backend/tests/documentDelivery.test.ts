@@ -193,4 +193,46 @@ describe("Sending quote and invoice PDFs by email", () => {
     assert.equal(res.status, 404);
     assert.equal(res.body.error, "QUOTE_NOT_FOUND");
   });
+
+  it("sends a quote by voice: read back in full, sent only after the yes, exactly as read", async () => {
+    // Marek, 12. 10.: everything that can be clicked must be possible by voice.
+    const gardenId = (await request(app).post("/quotes").set("Authorization", `Bearer ${token}`)
+      .send({ client_id: clientId, title: "Garden quote", items: [{ description: "Garden", unit_price: 800, unit_cost: 400 }] })).body.id;
+    const say = (text: string) => request(app).post("/command/assistant").set("Authorization", `Bearer ${token}`).send({ text, input_method: "voice_transcript" });
+
+    let sent = 0;
+    let sentRaw = "";
+    globalThis.fetch = async (input, init) => {
+      assert.equal(requestUrl(input).pathname, "/gmail/v1/users/me/messages/send");
+      sent += 1;
+      sentRaw = JSON.parse(String(init?.body)).raw;
+      return Response.json({ id: "gmail-voice-1", threadId: "thread-voice-1" });
+    };
+    const review = await say("send quote Garden");
+    assert.equal(review.status, 409, JSON.stringify(review.body));
+    assert.equal(review.body.error, "CONFIRMATION_REQUIRED");
+    assert.match(review.body.message, /^I will email the quote “Garden quote” to Delivery Client at client@example\.test as a PDF.*Subject: “Quote from .*Garden quote”\. Text: “Dear Delivery Client,.*”\. The quote will be marked as sent\. Shall I send it\?$/s);
+    assert.equal(sent, 0, "nothing leaves before the yes");
+    assert.equal((await prisma.quote.findUniqueOrThrow({ where: { id: gardenId } })).quoteStatus, "draft");
+
+    const yes = await say("yes");
+    assert.equal(yes.status, 200, JSON.stringify(yes.body));
+    assert.equal(yes.body.message, "The quote has been sent.");
+    assert.equal(sent, 1);
+    assert.match(Buffer.from(sentRaw, "base64url").toString("utf8"), /Subject: Quote from .*Garden quote/);
+    assert.equal((await prisma.quote.findUniqueOrThrow({ where: { id: gardenId } })).quoteStatus, "sent");
+
+    // A draft invoice is not sent, and says why.
+    const draft = await say("send invoice INV-101");
+    assert.equal(draft.body.error, "INVOICE_NOT_ISSUED");
+    assert.equal(draft.body.message, "The invoice is still a draft. Only an issued invoice can be sent; issue it first.");
+    assert.equal(sent, 1);
+  });
+
+  it("does not send by voice for a user without crm.manage", async () => {
+    const refused = await request(app).post("/command/assistant").set("Authorization", `Bearer ${workerToken}`)
+      .send({ text: "send quote Garden", input_method: "voice_transcript" });
+    assert.notEqual(refused.status, 200);
+    assert.notEqual(refused.body.error, "CONFIRMATION_REQUIRED");
+  });
 });
