@@ -172,6 +172,15 @@ interface KeptReading extends ReadingPlace {
 
 const readings = new Map<string, KeptReading>();
 
+/**
+ * Who was read aloud last, kept for as long as a reading is and also after it
+ * has ended: "odpověz mu" right after hearing someone means that someone. On
+ * 11. 10. "pošli na to americké číslo" was answered "na které americké číslo?"
+ * although the number had just been read out.
+ */
+interface SenderRead { channel: MessageChannel; key: string; name: string; expiresAt: number }
+const lastRead = new Map<string, SenderRead>();
+
 function readingKey(user: AuthedUser) {
   return `${user.companyId}:${user.id}`;
 }
@@ -179,8 +188,13 @@ function readingKey(user: AuthedUser) {
 function remember(user: AuthedUser, place: ReadingPlace, turn: ReadingTurn) {
   const now = Date.now();
   for (const [key, kept] of readings) if (kept.expiresAt < now) readings.delete(key);
+  for (const [key, read] of lastRead) if (read.expiresAt < now) lastRead.delete(key);
   if (turn.done) readings.delete(readingKey(user));
   else readings.set(readingKey(user), { ...place, expiresAt: now + READING_KEPT_MS, names: { current: turn.sender?.name, next: turn.next?.sender } });
+  const key = place.order[place.index];
+  if (turn.sender?.messages.length && key && key !== "unknown") {
+    lastRead.set(readingKey(user), { channel: place.channel, key, name: turn.sender.name, expiresAt: now + READING_KEPT_MS });
+  }
 }
 
 function current(user: AuthedUser) {
@@ -199,6 +213,21 @@ function current(user: AuthedUser) {
  */
 export function activeReading(user: AuthedUser): { current?: string; next?: string } | undefined {
   return current(user)?.names;
+}
+
+/**
+ * The sender whose messages were read aloud last: the channel, their name and
+ * the number (WhatsApp) or address (e-mail) a reply goes to. Kept a quarter of
+ * an hour, also after the reading has ended.
+ */
+export function senderJustRead(user: AuthedUser): { channel: MessageChannel; name: string; address: string } | undefined {
+  const read = lastRead.get(readingKey(user));
+  if (!read) return undefined;
+  if (read.expiresAt < Date.now()) {
+    lastRead.delete(readingKey(user));
+    return undefined;
+  }
+  return { channel: read.channel, name: read.name, address: read.key };
 }
 
 async function loadGroups(user: AuthedUser, channel: MessageChannel): Promise<SenderGroup[]> {
@@ -266,4 +295,5 @@ export async function readOlderFromSender(user: AuthedUser): Promise<ReadingTurn
 /** Forget a reading (tests, and a new list replaces the old one anyway). */
 export function forgetReading(user: AuthedUser) {
   readings.delete(readingKey(user));
+  lastRead.delete(readingKey(user));
 }

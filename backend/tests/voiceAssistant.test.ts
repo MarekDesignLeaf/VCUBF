@@ -172,6 +172,25 @@ describe("voice assistant interpretation", () => {
     assert.equal(result.kind, "ignore");
     assert.match(instructions, /Slovak forms such as správy, povieš, prečti/);
     assert.match(instructions, /Never tell the user which language you work in/);
+    // The text of a message he asked for is his, in whatever language.
+    assert.match(instructions, /A sentence that answers your own question .* is always meant for you, whatever its language\./);
+  });
+
+  it("names the sender just read only when there is one, after the cached rules", async () => {
+    process.env.OPENAI_API_KEY = "test-only-key";
+    const seen: string[] = [];
+    globalThis.fetch = async (_url, init) => {
+      seen.push(JSON.parse(String(init?.body)).instructions);
+      return Response.json({ output: [{ content: [{ text: JSON.stringify({ kind: "clarification", canonical_command: null, message: "Co mám odpovědět?" }) }] }] });
+    };
+    await interpretVoiceRequest({ text: "Pošli na to americké číslo.", userName: "Marek", assistantName: "Alfonzo", language: "cs-CZ",
+      messageJustRead: { channel: "whatsapp", name: "+16729102114", address: "+16729102114" } });
+    await interpretVoiceRequest({ text: "Pošli na to americké číslo.", userName: "Marek", assistantName: "Alfonzo", language: "cs-CZ" });
+    assert.match(seen[0], /\nMESSAGE_JUST_READ=\{"channel":"whatsapp","name":"\+16729102114","address":"\+16729102114"\}$/);
+    assert.doesNotMatch(seen[1], /MESSAGE_JUST_READ=/);
+    // The rule itself is in both, so the leading text stays the same for the prompt cache.
+    for (const instructions of seen) assert.match(instructions, /never ask for a number or an address then/);
+    assert.equal(seen[0].slice(0, seen[0].indexOf("EMMA_CONTEXT=")), seen[1].slice(0, seen[1].indexOf("EMMA_CONTEXT=")));
   });
 
   it("loads the administrator behavior scenario as subordinate instructions", async () => {

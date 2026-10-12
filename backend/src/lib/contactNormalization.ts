@@ -34,6 +34,23 @@ export function isValidPhoneNumberFormat(phone: string | null | undefined): phon
   return normalizePhone(phone) !== null;
 }
 
+/**
+ * A number dictated with its country code but without "plus". On 11. 10. a
+ * North American number was spoken digit by digit ("1 6 7 2 9 1 0 2 1 1 4"),
+ * read as a UK national number, found invalid, and the WhatsApp message was
+ * refused. The plus is added only when the digits are no valid number as they
+ * stand and are one with it; a UK number (07700…, 7700…) keeps its meaning.
+ * The review reads the number back before anything is sent.
+ */
+export function withDialledPlus(phone: unknown): unknown {
+  if (typeof phone !== "string") return phone;
+  const spoken = phone.trim();
+  if (!spoken || spoken.startsWith("+") || normalizePhone(spoken)) return phone;
+  const digits = spoken.replace(/[\s().-]/g, "");
+  if (!/^[1-9]\d{6,14}$/.test(digits)) return phone;
+  return normalizePhone(`+${digits}`) ? `+${digits}` : phone;
+}
+
 export const phoneNumberSchema = z
   .string()
   .trim()

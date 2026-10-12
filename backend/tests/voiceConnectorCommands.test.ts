@@ -171,4 +171,50 @@ describe("Emma connector commands", () => {
     if (originalOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = originalOpenAiKey;
   });
+
+  it("takes a number dictated with its country code but without \"plus\"", async () => {
+    // 11. 10.: "1 6 7 2 9 1 0 2 1 1 4" was read as a UK number, found invalid
+    // and the message refused. It is a North American number; the review says
+    // it back with the plus before anything is sent.
+    await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "cs-CZ" } });
+    const originalOpenAiKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    let sends = 0;
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
+      if (url.hostname === "api.openai.com") return Response.json({ output_text: "Good morning" });
+      if (init?.method === "POST") sends += 1;
+      return Response.json({ id: "123456789", display_phone_number: "+44 7700 900123", verified_name: "VCUBF", quality_rating: "GREEN" });
+    };
+    try {
+      const preview = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ text: "pošli zprávu na WhatsApp na 1 6 7 2 9 1 0 2 1 1 4 zpráva Dobré ráno", input_method: "voice_transcript", language: "cs-CZ", history: [] });
+      assert.equal(preview.status, 202, JSON.stringify(preview.body));
+      assert.equal(preview.body.intent, "prepare_whatsapp_message");
+      assert.equal(preview.body.data.preview.to, "+16729102114");
+      assert.match(preview.body.message, /^Pošlu na WhatsApp na číslo \+16729102114 anglicky: „Good morning“\. Mám ji odeslat\?$/, JSON.stringify(preview.body));
+
+      // A UK number keeps its meaning, and a number that is not one either way
+      // is explained in Czech.
+      const uk = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ text: "pošli zprávu na WhatsApp na 07700 900123 zpráva Dobré ráno", input_method: "voice_transcript", language: "cs-CZ", history: [] });
+      assert.equal(uk.body.data.preview.to, "+447700900123", JSON.stringify(uk.body));
+      const invalid = await request(app)
+        .post("/command/assistant")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ text: "pošli zprávu na WhatsApp na 1234567 zpráva Dobré ráno", input_method: "voice_transcript", language: "cs-CZ", history: [] });
+      assert.equal(invalid.body.error, "VALIDATION_FAILED", JSON.stringify(invalid.body));
+      assert.equal(invalid.body.message, "Potřebuji celé mezinárodní číslo i s předvolbou, například plus čtyři čtyři, a text zprávy.");
+      assert.equal(sends, 0, "a review sends nothing");
+    } finally {
+      await prisma.voicePendingAction.deleteMany({});
+      await prisma.user.update({ where: { email: "admin@test.local" }, data: { voiceLanguage: "en-GB" } });
+      if (originalOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenAiKey;
+    }
+  });
 });

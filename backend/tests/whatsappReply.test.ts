@@ -219,6 +219,40 @@ describe("Replying to a received WhatsApp message", () => {
     assert.match(skipped.body.message, /^Jana Malá\. 3 hours ago: „Jana 1“\./);
   });
 
+  it("tells the model whose messages were just read, so a reply to \"that number\" needs no number", async () => {
+    // 11. 10.: Marek heard a message from an American number, said "pošli na
+    // to americké číslo" and was asked which number.
+    await received({ phone: "+16729102114", name: "+16729102114", text: "Are you available?", hoursAgo: 1, wamid: "wamid.US1" });
+    await received({ phone: "+447700900222", name: "Petra Dvořáková", text: "Petra 1", hoursAgo: 2, wamid: "wamid.US2" });
+    const instructions: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (!url.includes("api.openai.com")) return new Response("unexpected call", { status: 500 });
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      if (typeof body.instructions === "string" && body.instructions.includes("the concise voice interface")) instructions.push(body.instructions);
+      return new Response(JSON.stringify({ output_text: JSON.stringify({ kind: "clarification", canonical_command: null, message: "What should the reply say?" }) }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof globalThis.fetch;
+
+    await speak("show whatsapp messages");
+    const asked = await speak("send something to that American number");
+    assert.equal(asked.body.kind, "clarification", JSON.stringify(asked.body));
+    assert.equal(instructions.length, 1);
+    assert.match(instructions[0], /MESSAGE_JUST_READ=\{"channel":"whatsapp","name":"\+16729102114","address":"\+16729102114"\}$/);
+    assert.match(instructions[0], /it is a reply to that sender: use reply_whatsapp/);
+
+    // After "skip" it is the next sender, and still after the reading is over.
+    await speak("skip");
+    await speak("reply to her");
+    assert.match(instructions[1], /MESSAGE_JUST_READ=\{"channel":"whatsapp","name":"Petra Dvořáková","address":"\+447700900222"\}$/);
+
+    // The model's reply then goes to that sender without a number being asked for.
+    stubProviders();
+    const reply = await replyAction({ sender_or_message: "+16729102114", body: DICTATED });
+    assert.equal(reply.body.error, "CONFIRMATION_REQUIRED", JSON.stringify(reply.body));
+    assert.equal(reply.body.data.preview.to, "+16729102114");
+    assert.equal(reply.body.data.preview.inReplyTo.text, "Are you available?");
+  });
+
   it("'last' answers the most recent message from anyone", async () => {
     await received({ phone: "+447700900111", name: "Honza Novák", text: "Older message", hoursAgo: 5, wamid: "wamid.OLD" });
     await received({ phone: "+447700900222", name: "Petra Dvořáková", text: "Newest message", hoursAgo: 1, wamid: "wamid.NEW" });

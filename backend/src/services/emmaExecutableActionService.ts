@@ -3,7 +3,7 @@ import { EMMA_EXECUTABLE_ACTIONS, type EmmaExecutableActionName, type EmmaExecut
 import { validateVoiceActionParameters } from "../lib/voiceActionCatalogue.js";
 import { z } from "zod";
 import { prisma } from "../db.js";
-import { isValidPhoneNumberFormat } from "../lib/contactNormalization.js";
+import { isValidPhoneNumberFormat, withDialledPlus } from "../lib/contactNormalization.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 import {
   cancelReviewedAction,
@@ -587,7 +587,7 @@ async function executeEmmaActionDirect(
     }
     case "send_whatsapp": {
       const source = await connectorSource(user, "whatsapp_business");
-      return source.ok ? whatsappBusinessConnectorService.sendWhatsAppMessage(user, source.data.id, { ...p, ...englishByDefault(p, confirmed), confirmed }) : source;
+      return source.ok ? whatsappBusinessConnectorService.sendWhatsAppMessage(user, source.data.id, { ...p, to: withDialledPlus(p.to), ...englishByDefault(p, confirmed), confirmed }) : source;
     }
     case "create_calendar_event":
       return googleCalendarWriteService.createCalendarEvent(user, { ...p, confirmed });
