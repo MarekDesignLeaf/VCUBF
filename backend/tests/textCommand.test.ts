@@ -246,7 +246,8 @@ describe("command/text", () => {
       .send({ text: "open invoices", input_method: "voice_transcript", language: "en-GB", history: [] });
     assert.equal(res.status, 200);
     assert.equal(res.body.intent, "navigate");
-    assert.equal(res.body.message, "Opening Invoices.");
+    // An opened list says what it lists (counted from the invoices page's own list).
+    assert.match(res.body.message, /^Opening Invoices\. You have \d+ invoices?[.,]/);
     assert.equal(res.body.uiAction.path, "/invoices");
   });
 

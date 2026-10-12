@@ -8,9 +8,15 @@ import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
   NEVER, connectorTarget, extractContact, fold, nameOnly, normalizeDictatedPhone, parseAgendaCommand, parseEmailCommand,
-  parseLanguageSwitch, parseNavigation, parseOpenRecord, parseSendDocument, parseWhatsAppCommand, withoutFinalPunctuation,
-  type CommandGrammar, type OpenRecordWords, type Parsed, type SendDocumentWords,
+  parseLanguageSwitch, parseNavigation, parseOpenRecord, parseSendDocument, parseVoiceHousekeeping, parseWhatsAppCommand, withoutFinalPunctuation,
+  type CommandGrammar, type OpenRecordWords, type Parsed, type SendDocumentWords, type VoiceHousekeepingWords,
 } from "./shared.js";
+// "usuń historię rozmów", "zapomnij słowo Alfons". Folded; ł survives folding.
+const VOICE_HOUSEKEEPING: VoiceHousekeepingWords = {
+  clearHistory: /^(?:(?:usun|wyczysc|skasuj)\s+(?:(?:ca[lł]a|moja)\s+)?historie(?:\s+(?:rozmow|g[lł]osowa))?(?:\s+ze\s+mna)?|(?:usun|skasuj)\s+(?:wszystkie\s+)?(?:zapisane\s+)?rozmowy(?:\s+ze\s+mna)?)(?:\s+prosze)?$/u,
+  forgetWord: /^(?:zapomnij|usun|skasuj)\s+(?:(?:to|nauczone)\s+)?(?:s[lł]owo|alias)\s+(.+)$/u,
+};
+
 
 const CONNECTORS = {
   wszystkie: "all", integracje: "all", konektory: "all",
@@ -217,6 +223,7 @@ export const polish: CommandGrammar = {
         week: /(?:najbliższe\s+(?:siedem|7)\s+dni|ten\s+tydzień)/iu,
         today: /(?:dzisiaj|dziś)/iu,
       })
+      ?? parseVoiceHousekeeping(text, VOICE_HOUSEKEEPING)
       ?? notificationDeletion(text)
       ?? clientMutation(text)
       ?? leadMutation(text)

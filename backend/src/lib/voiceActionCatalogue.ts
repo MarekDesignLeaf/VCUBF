@@ -189,6 +189,14 @@ export const voiceActionSchemas = {
     .object({ enabled: z.boolean(), hour: z.number().int().min(0).max(23).optional() })
     .strict(),
   send_notification_digest: z.object({}).strict(),
+  // The speaker's own saved transcripts, deleted. Read back first.
+  clear_voice_history: z.object({}).strict(),
+  // A learned spelling forgotten: heard is the word as said; the reviewed
+  // operation names the exact alias (alias_id) that was read back.
+  remove_voice_alias: z
+    .object({ heard: optionalText, alias_id: z.string().uuid().optional() })
+    .strict()
+    .refine((value) => value.heard || value.alias_id, { message: "say which word to forget" }),
   // E-mailing the PDF of a quote or an issued invoice to the client. The
   // document is named as said (its title or number, or its client); the
   // reviewed operation names it exactly (document_id) with the recipients,
@@ -394,7 +402,7 @@ The JSON must be valid, contain only the documented fields and preserve every us
 - create_industry {"name","description?","notes?"}; archive_industry {"name"}
 - link_industry_service {"industry_name","service_name","notes?"}; archive_industry_service_link {"industry_name","service_name"}
 - set_assistant_name {"name"}; what to call the assistant, separate from the hotword
-- set_hotword {"hotword"}; the word or phrase that wakes her
+- set_hotword {"hotword"}; the word or phrase that wakes him
 - set_speech_rate {"rate?"|"change?"}; rate is 0.5 to 2.0, change is faster, slower or normal
 - set_service_active {"service_name","is_active"}
 - create_quote {"client_name","title","items":[{"description","quantity?","unit_price","unit_cost?"}],"job_title?","notes?","valid_until?"}
@@ -406,6 +414,8 @@ The JSON must be valid, contain only the documented fields and preserve every us
 - update_invoice {"invoice","title?","invoice_number?","due_date?","notes?"}: a draft invoice only; invoice is its number or client as said; due_date as spoken. Always read back and needs a separate confirmation.
 - update_document {"document","title?","reference?","expires?","notes?"}; update_business_context {"label","new_label?","value?","notes?"}; update_industry {"industry","name?","description?","notes?"}.
 - set_notification_digest {"enabled","hour?"}: the user's own daily e-mail summary of what needs attention, hour 0-23 in UK time. send_notification_digest {}: send that summary now; read back and needs a separate confirmation.
+- clear_voice_history {}: delete the user's own saved conversations with the assistant ("smaž historii rozhovorů", "clear my voice history"); read back and needs a separate confirmation.
+- remove_voice_alias {"heard"}: forget a learned spelling of the assistant's name or of a command ("zapomeň slovo Alfons", "remove the alias Alfons"); heard is the spelling as said. Read back and needs a separate confirmation.
 - send_quote {"quote","to?"}; send_invoice {"invoice","to?"}: e-mail the PDF to the client. quote/invoice is the title, number or client name as said; to only when the user says an address, otherwise the client's stored e-mail is used. Always previewed and needs a separate confirmation.
 - add_job_resource {"job_title","resource_type","name","quantity?","unit?","estimated_cost?","notes?"}; resource_type is material, equipment, vehicle, hire or waste
 - set_job_resource_status {"job_title","resource_name","requirement_status"}; status is needed, ordered, ready or unavailable

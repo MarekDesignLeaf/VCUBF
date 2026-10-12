@@ -9,9 +9,15 @@ import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
   connectorTarget, extractContact, fold, nameOnly, normalizeDictatedPhone, parseAgendaCommand, parseEmailCommand,
-  parseLanguageSwitch, parseNavigation, parseOpenRecord, parseSendDocument, parseWhatsAppCommand, withoutFinalPunctuation,
-  type CommandGrammar, type OpenRecordWords, type Parsed, type SendDocumentWords,
+  parseLanguageSwitch, parseNavigation, parseOpenRecord, parseSendDocument, parseVoiceHousekeeping, parseWhatsAppCommand, withoutFinalPunctuation,
+  type CommandGrammar, type OpenRecordWords, type Parsed, type SendDocumentWords, type VoiceHousekeepingWords,
 } from "./shared.js";
+
+// "smaž historii rozhovorů", "zapomeň slovo Alfons". Folded.
+const VOICE_HOUSEKEEPING: VoiceHousekeepingWords = {
+  clearHistory: /^(?:(?:smaz|vymaz|odstran)(?:te)?\s+(?:(?:celou|moji|mou|svou|tu)\s+)?(?:hlasovou\s+)?historii(?:\s+(?:rozhovoru|konverzaci|hovoru))?(?:\s+(?:s\s+tebou|se\s+mnou))?|(?:smaz|vymaz|odstran)(?:te)?\s+(?:vsechny\s+)?(?:(?:ulozene|nase|moje)\s+)?(?:rozhovory|konverzace)(?:\s+s\s+tebou)?)(?:\s+prosim)?$/u,
+  forgetWord: /^(?:zapomen|zapomente|odeber|odeberte|odstran|odstrante|smaz|smazte)\s+(?:(?:to|naucene|ucene)\s+)?(?:slovo|alias)\s+(.+)$/u,
+};
 
 // Compared without diacritics: the transcription decides whether they are there.
 const UNPAID_INVOICE_QUESTION =
@@ -363,6 +369,7 @@ export const czech: CommandGrammar = {
         week: /(?:př[ií]št[ií]ch\s+(?:sedm|7)\s+dn[ií]|tento\s+t[yý]den)/iu,
         today: /dnes/iu,
       })
+      ?? parseVoiceHousekeeping(text, VOICE_HOUSEKEEPING)
       ?? notificationDeletion(text)
       ?? clientMutation(text)
       ?? leadMutation(text)

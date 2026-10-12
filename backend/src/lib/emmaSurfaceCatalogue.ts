@@ -33,6 +33,12 @@ type CommandPolicy = {
   mode: EmmaCapabilityMode;
   actionName?: string;
   description?: string;
+  /**
+   * For a command with no Action Contract of its own: the permission its page
+   * needs. Saying it must not reach more than clicking it (a list read out by
+   * voice names what the page would show).
+   */
+  requiredPermission?: string;
 };
 
 // Exhaustive by type: adding a new ParsedCommand intent cannot compile until
@@ -64,19 +70,19 @@ export const COMMAND_POLICY = {
   detect_overload: { category: "work", mode: "read", actionName: "detect_overload" },
   create_service: { category: "sales", mode: "write", actionName: "create_service_catalogue_item" },
   create_task: { category: "work", mode: "write", actionName: "create_task" },
-  list_tasks: { category: "work", mode: "read" },
+  list_tasks: { category: "work", mode: "read", requiredPermission: "crm.read" },
   change_task_status: { category: "work", mode: "write", actionName: "update_task" },
-  list_quotes: { category: "sales", mode: "read" },
-  list_job_openings: { category: "people", mode: "read" },
+  list_quotes: { category: "sales", mode: "read", requiredPermission: "crm.read" },
+  list_job_openings: { category: "people", mode: "read", requiredPermission: "recruitment.manage" },
   create_learning_rule: { category: "learning", mode: "write", actionName: "create_learning_rule" },
-  list_learning_rules: { category: "learning", mode: "read" },
+  list_learning_rules: { category: "learning", mode: "read", requiredPermission: "voice.execute" },
   create_assistant_memory: { category: "learning", mode: "write", actionName: "create_assistant_memory" },
   recall_assistant_memory: { category: "learning", mode: "read", actionName: "recall_assistant_memory" },
   log_communication: { category: "communication", mode: "write", actionName: "log_communication" },
-  list_communications: { category: "communication", mode: "read" },
+  list_communications: { category: "communication", mode: "read", requiredPermission: "crm.read" },
   log_portfolio_photo: { category: "evidence", mode: "write", actionName: "log_portfolio_photo" },
-  list_portfolio_photos: { category: "evidence", mode: "read" },
-  list_follow_ups: { category: "communication", mode: "read" },
+  list_portfolio_photos: { category: "evidence", mode: "read", requiredPermission: "crm.read" },
+  list_follow_ups: { category: "communication", mode: "read", requiredPermission: "crm.read" },
   list_unresolved_enquiries: { category: "communication", mode: "read", actionName: "find_unresolved_enquiries" },
   list_notifications: { category: "attention", mode: "read", actionName: "get_attention_feed" },
   prepare_delete_notifications: { category: "attention", mode: "write", actionName: "prepare_voice_notification_deletion" },
@@ -84,15 +90,16 @@ export const COMMAND_POLICY = {
   cancel_delete_notifications: { category: "attention", mode: "write", actionName: "cancel_voice_notification_deletion" },
   list_data_quality: { category: "attention", mode: "read", actionName: "analyze_data_quality" },
   detect_action_patterns: { category: "attention", mode: "read", actionName: "detect_action_patterns" },
-  list_clients: { category: "customers", mode: "read" },
-  list_contacts: { category: "customers", mode: "read" },
-  list_channel_messages: { category: "communication", mode: "read" },
-  next_message_sender: { category: "communication", mode: "read" },
-  older_sender_messages: { category: "communication", mode: "read" },
+  list_clients: { category: "customers", mode: "read", requiredPermission: "crm.read" },
+  list_contacts: { category: "customers", mode: "read", requiredPermission: "crm.read" },
+  list_channel_messages: { category: "communication", mode: "read", requiredPermission: "crm.read" },
+  next_message_sender: { category: "communication", mode: "read", requiredPermission: "crm.read" },
+  older_sender_messages: { category: "communication", mode: "read", requiredPermission: "crm.read" },
   prepare_gmail_message: { category: "communication", mode: "external", actionName: "prepare_voice_gmail_message" },
   confirm_gmail_message: { category: "communication", mode: "external", actionName: "confirm_voice_gmail_message" },
   cancel_gmail_message: { category: "communication", mode: "external", actionName: "cancel_voice_gmail_message" },
-  list_calendar_events: { category: "work", mode: "read" },
+  // Google Calendar events: on the web they come from the connector, which needs connectors.read.
+  list_calendar_events: { category: "work", mode: "read", requiredPermission: "connectors.read" },
   prepare_whatsapp_message: { category: "communication", mode: "external", actionName: "send_whatsapp_message" },
   confirm_whatsapp_message: { category: "communication", mode: "external", actionName: "send_whatsapp_message" },
   cancel_whatsapp_message: { category: "communication", mode: "external", actionName: "send_whatsapp_message" },
@@ -100,11 +107,11 @@ export const COMMAND_POLICY = {
   // Same operation as the language change: it adjusts her own settings.
   set_speech_rate: { category: "navigation", mode: "write", actionName: "update_voice_preferences" },
   describe_menu: { category: "navigation", mode: "read" },
-  connector_status: { category: "connectors", mode: "read" },
+  connector_status: { category: "connectors", mode: "read", requiredPermission: "connectors.read" },
   setup_connectors: { category: "connectors", mode: "administration" },
   sync_connectors: { category: "connectors", mode: "administration" },
-  list_jobs: { category: "work", mode: "read" },
-  list_leads: { category: "customers", mode: "read" },
+  list_jobs: { category: "work", mode: "read", requiredPermission: "crm.read" },
+  list_leads: { category: "customers", mode: "read", requiredPermission: "crm.read" },
   open_record: { category: "navigation", mode: "read", description: "Open one record's own page by name (a client, contact, lead, job, quote, invoice, employee, job opening or playbook), as clicking it in its list does." },
   navigate: { category: "navigation", mode: "read" },
   unrecognized: { category: "navigation", mode: "read" },
@@ -250,6 +257,7 @@ const commandCapabilities: EmmaCapability[] = (Object.entries(COMMAND_POLICY) as
     label: humanize(intent),
     description: policy.description ?? `{assistant} may execute the ${humanize(intent).toLowerCase()} voice operation.`,
     intents: [intent],
+    ...(policy.requiredPermission ? { requiredPermission: policy.requiredPermission } : {}),
   }));
 
 export const EMMA_CAPABILITIES = [...pageCapabilities, ...actionCapabilities, ...commandCapabilities]

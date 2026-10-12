@@ -33,6 +33,30 @@ export const UPDATE_VOICE_PREFERENCES_ACTION: ActionContract = {
   possibleErrors: ["VALIDATION_FAILED", "USER_NOT_FOUND"],
 };
 
+// The speaker's own transcripts. Said by voice it is read back first: nothing
+// of it can be brought back. Audio is never stored, so there is none to delete.
+export const CLEAR_VOICE_DEVICE_HISTORY_ACTION: ActionContract = {
+  actionName: "clear_voice_device_history",
+  purpose: "Delete the speaker's own saved {assistant} conversation transcripts, withdraw the e-mail waiting in a voice review and end the active conversation.",
+  requiredPermission: "voice.execute",
+  riskLevel: 2,
+  confirmationRequired: true,
+  dataSources: ["voice.conversations", "voice.pending_actions", "voice.device_state"],
+  possibleErrors: ["MISSING_PERMISSION", "CONFIRMATION_REQUIRED", "SAFE_MODE_ACTIVE"],
+};
+
+// A learned or hand-added spelling of the assistant's name or of a command.
+// Removed, it no longer corrects what is heard; it can be taught again.
+export const DELETE_VOICE_ALIAS_ACTION: ActionContract = {
+  actionName: "delete_voice_alias",
+  purpose: "Remove a voice alias — a misheard spelling of the {assistant} name or of a command — so it no longer corrects what is heard.",
+  requiredPermission: "voice.execute",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["user_input", "learning.rules"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "RECORD_NOT_FOUND", "AMBIGUOUS_REFERENCE"],
+};
+
 export const APPROVE_DEVICE_PAIRING_ACTION: ActionContract = {
   actionName: "approve_device_pairing",
   purpose: "Approve a short-lived one-time token handoff from an authenticated browser session to the Windows {assistant} companion.",

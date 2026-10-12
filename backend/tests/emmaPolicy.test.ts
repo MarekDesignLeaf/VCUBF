@@ -134,4 +134,19 @@ describe("company Emma capability policy", () => {
     assert.equal((await evaluateEmmaCommand(authedUser, "prepare_archive_contact")).allowed, false);
     assert.equal((await evaluateEmmaCommand(authedUser, "cancel_archive_contact")).allowed, true);
   });
+  it("asks a list read out by voice for the permission its page needs", async () => {
+    // "ukaž klienty" names clients aloud; a voice account that may not open
+    // the client list must not hear it either.
+    const voiceOnly = {
+      id: adminUser.id, companyId: adminUser.companyId, email: adminUser.email, displayName: adminUser.displayName,
+      role: "custom", permissions: ["voice.execute"], mustChangePassword: false,
+      voiceWakeWord: adminUser.voiceWakeWord, voiceContinuous: adminUser.voiceContinuous, voiceLanguage: "cs-CZ",
+    };
+    const refused = await evaluateEmmaCommand(voiceOnly, { intent: "list_clients", entities: {} } as Parameters<typeof evaluateEmmaCommand>[1]);
+    assert.equal(refused.allowed, false);
+    assert.equal((refused as { message?: string }).message, "Váš účet nemá požadované oprávnění: crm.read.");
+    const openings = await evaluateEmmaCommand({ ...voiceOnly, permissions: ["voice.execute", "crm.read"] }, "list_job_openings");
+    assert.equal(openings.allowed, false, "job openings need recruitment.manage, as their page does");
+    assert.equal((await evaluateEmmaCommand({ ...voiceOnly, permissions: ["voice.execute", "crm.read"] }, "list_clients")).allowed, true);
+  });
 });

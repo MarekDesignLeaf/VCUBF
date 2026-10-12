@@ -5,6 +5,7 @@ import { CREATE_PLAYBOOK_ACTION, UPDATE_PLAYBOOK_ACTION, RUN_PLAYBOOK_ACTION } f
 import { parseStoredCommand } from "../lib/commandParser.js";
 import { dispatchParsedCommand, type CommandResponse } from "../lib/commandExecutor.js";
 import { resolveLearningAliases } from "./learningService.js";
+import { evaluateEmmaCommand } from "./emmaPolicyService.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 
@@ -239,6 +240,30 @@ export async function runPlaybook(user: AuthedUser, playbookId: string, rawInput
     });
     return fail(400, "MISSING_VARIABLE", `Missing value(s) for: ${Array.from(allMissing).join(", ")}`, {
       missingVariables: Array.from(allMissing),
+    });
+  }
+
+  // A playbook runs with the permissions of whoever runs it, each step through
+  // the same gate a spoken or typed command passes (§45, §48): a stored step
+  // must not do what this account could not do by saying it — an invoice
+  // issued by someone who may only read. Every step is checked before any
+  // runs, so a refused step never leaves the ones before it half done.
+  for (const [index, step] of resolved.entries()) {
+    const decision = await evaluateEmmaCommand(user, parseStoredCommand(step.text));
+    if (decision.allowed) continue;
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: RUN_PLAYBOOK_ACTION.actionName,
+      inputPayload: { playbookId, variables, step: index + 1, capabilityId: decision.capabilityId },
+      riskLevel: RUN_PLAYBOOK_ACTION.riskLevel,
+      confirmationRequired: RUN_PLAYBOOK_ACTION.confirmationRequired,
+      result: "rejected",
+      errorMessage: "EMMA_CAPABILITY_DISABLED",
+    });
+    return fail(403, "EMMA_CAPABILITY_DISABLED", `Step ${index + 1} cannot run: ${decision.message}`, {
+      step: index + 1,
+      capabilityId: decision.capabilityId,
     });
   }
 

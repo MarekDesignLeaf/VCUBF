@@ -47,6 +47,10 @@ The edits the pages make can be said too, each found by name as above:
 - **Industry.** Its name, description and notes.
 - **Daily summary of what needs attention.** It can be switched on at a UK hour (“zapni mi denní souhrn v sedm ráno”) or off, or sent now after a read-back.
 
+Your own voice housekeeping can be said as well, and both are read back before anything is removed:
+- **Delete the saved conversations** (“Alfonzo, smaž historii rozhovorů”, “clear my voice history”). Alfonzo says how many conversations will go and whether an e-mail waiting for your yes will be withdrawn; after the yes the transcripts are deleted, the waiting e-mail is withdrawn and the current conversation ends. Microphone audio is never stored, so there is none to delete. When an e-mail and this review both wait, the web app tells Secretary which one it read out, so the yes answers the history review.
+- **Forget a learned word** (“zapomeň slovo Alfons”, “remove the alias Alfons”). Alfonzo names the spelling and what he has been taking it to mean, and removes it after the yes; it can be taught again later. Only voice aliases are removed this way, never other learning rules.
+
 Opening a list by voice also says what it lists, in two short sentences counted from the rows on the page:
 - **Clients and contacts:** how many, with the newest clients named.
 - **Jobs:** how many and how many are still open, with the newest open ones named.
@@ -54,8 +58,20 @@ Opening a list by voice also says what it lists, in two short sentences counted 
 - **Quotes:** how many are draft, sent and accepted.
 - **Leads:** how many are new, with the newest named.
 - **Job openings:** the open ones.
+- **Invoices:** how many are drafts, unpaid and overdue.
+- **Documents:** how many will expire within 30 days and how many have expired.
+- **Services and playbooks:** how many, and how many are switched off.
+- **What needs attention:** how many items, how many are urgent and the commonest kinds (“úkoly po termínu 3, faktury po splatnosti 2”), or that nothing needs attention.
+- **Unresolved enquiries:** how many, how many are overdue, and who has been waiting longest.
+- **Follow-ups:** how many, with the clients named.
+- **Communications, photos and learning rules:** how many (photos: how many are usable for marketing).
+- **Data quality:** how many possible duplicate clients and clients without contact details, or that nothing needs fixing.
 
-The summaries are spoken in Czech, Polish and English.
+This holds whether the list is asked for (“ukaž faktury”) or its page is opened (“otevři faktury”). A list is only read out to an account that may open its page: clients, jobs, quotes, invoices and the other customer lists need **crm.read**, job openings **recruitment.manage**, connector status and the Google Calendar agenda (“co mám zítra”) **connectors.read**. Where a list has its own assistant capability, switching it off for the company also stops the list being read out when its page is opened.
+
+The summaries are spoken in Czech, Polish and English. A record that is not found, or that fits more than once, is also answered in Czech or Polish when that language is switched on, and so is what Alfonzo remembers.
+
+A playbook runs with the permissions of whoever runs it: before any step runs, every step is checked exactly as if it had been said, against the account's permissions and the assistant capabilities the administrator has switched off. If one step is not allowed, none run.
 
 The installer also creates a single **VCUBF Secretary** desktop icon. Double-clicking it starts Alfonzo before opening one production sign-in flow in the default browser. The one-time device handoff completes automatically after a successful login, so the browser and companion use the same VCUBF account without a second approval click. On a fresh companion start Alfonzo says that she is active and listening. After the first successful login, the page pre-fills the last-used email on this PC; the browser remains responsible for offering any saved password. The encrypted device session lasts up to 30 days but is revoked by password changes, account disablement or session invalidation.
 

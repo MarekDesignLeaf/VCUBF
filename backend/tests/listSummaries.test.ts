@@ -49,3 +49,62 @@ describe("what a list says when it is opened by voice", () => {
     assert.equal(spokenListSummary("create_client", { id: "x" }, "cs-CZ"), undefined);
   });
 });
+
+describe("what the other lists say", () => {
+  const now = new Date("2026-10-12T10:00:00Z");
+
+  it("splits invoices into drafts, unpaid and overdue, and documents by expiry", () => {
+    const invoices = [
+      { invoiceStatus: "draft", totals: { balance: 100 } },
+      { invoiceStatus: "issued", totals: { balance: 250 }, isOverdue: true },
+      { invoiceStatus: "issued", totals: { balance: 80 }, isOverdue: false },
+      { invoiceStatus: "paid", totals: { balance: 0 } },
+    ];
+    assert.equal(spokenListSummary("list_invoices", invoices, "cs-CZ", now), "Máte 4 faktury, konceptů 1, neuhrazených 2 a po splatnosti 1.");
+    assert.equal(spokenListSummary("list_invoices", invoices, "en-GB", now), "You have 4 invoices, 1 draft, 2 unpaid and 1 overdue.");
+    assert.equal(spokenListSummary("list_invoices", [...invoices, { invoiceStatus: "void", totals: { balance: 0 } }], "en-GB", now), "You have 4 invoices, 1 draft, 2 unpaid and 1 overdue.", "a voided invoice is not counted");
+    const documents = [
+      { isActive: true, expiresAt: "2026-10-20T00:00:00Z" },
+      { isActive: true, expiresAt: "2026-09-01T00:00:00Z" },
+      { isActive: true, expiresAt: null },
+      { isActive: true, expiresAt: "2027-06-01T00:00:00Z" },
+      { isActive: true, expiresAt: "2026-10-30T00:00:00Z" },
+    ];
+    assert.equal(spokenListSummary("list_documents", documents, "cs-CZ", now), "Máte 5 dokumentů, do 30 dnů vyprší 2 a prošlých 1.");
+  });
+
+  it("counts services and playbooks, and those switched off", () => {
+    assert.equal(spokenListSummary("list_services", [{ isActive: true }, { isActive: false }], "cs-CZ"), "Máte 2 služby, vypnutých 1.");
+    assert.equal(spokenListSummary("list_playbooks", [{ isActive: true }], "pl-PL"), "Masz 1 procedurę.");
+  });
+
+  it("says what needs attention by kind, the most first, and when nothing does", () => {
+    const feed = [
+      { type: "overdue_task", severity: "warning" }, { type: "overdue_task", severity: "warning" }, { type: "overdue_task", severity: "urgent" },
+      { type: "invoice_overdue", severity: "urgent" }, { type: "invoice_overdue", severity: "urgent" },
+      { type: "unresolved_enquiry", severity: "info" },
+      { type: "stale_lead", severity: "info" },
+    ];
+    assert.equal(
+      spokenListSummary("list_notifications", feed, "cs-CZ"),
+      "Máte 7 upozornění, naléhavých 3. Hlavně: úkoly po termínu 3, faktury po splatnosti 2 a nevyřízené dotazy 1.",
+    );
+    assert.equal(spokenListSummary("list_notifications", [], "cs-CZ"), "Nic teď nevyžaduje pozornost.");
+  });
+
+  it("names who is waiting longest, and whom to follow up", () => {
+    const enquiries = [
+      { senderLabel: "Eva Malá", receivedAt: "2026-10-10T10:00:00Z", overdue: false },
+      { senderLabel: "+447700900111", receivedAt: "2026-10-01T10:00:00Z", overdue: true },
+    ];
+    assert.equal(spokenListSummary("list_unresolved_enquiries", enquiries, "cs-CZ"), "Máte 2 nevyřízené dotazy, po termínu 1. Nejdéle čekají: +447700900111 a Eva Malá.");
+    assert.equal(spokenListSummary("list_unresolved_enquiries", [{ senderLabel: "Unknown sender", receivedAt: "2026-10-01T10:00:00Z" }], "cs-CZ"), "Máte 1 nevyřízený dotaz.", "a sender with no name is counted, not named in English");
+    const followUps = [{ client: { displayName: "Jan Novák" } }, { client: { displayName: "Jan Novák" } }, { client: { displayName: "Eva Malá" } }];
+    assert.equal(spokenListSummary("list_follow_ups", followUps, "cs-CZ"), "Máte 3 připomenutí klientům: Jan Novák a Eva Malá.");
+  });
+
+  it("says the data-quality report as two counts, or that it is clean", () => {
+    assert.equal(spokenListSummary("list_data_quality", { duplicateClientGroups: [{}, {}], missingContactIssues: [{}] }, "cs-CZ"), "K řešení: možné duplicity klientů 2 a klienti bez kontaktu 1.");
+    assert.equal(spokenListSummary("list_data_quality", { duplicateClientGroups: [], missingContactIssues: [] }, "en-GB"), "I see no data problems right now.");
+  });
+});

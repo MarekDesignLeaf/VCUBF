@@ -47,6 +47,9 @@ export const TOOL_CATALOGUE_FINGERPRINTS = {
   // update_business_context, update_industry, set_notification_digest and
   // send_notification_digest: the edits the pages make.
   "1.3.0": "ae38ec6e80ab19562d742e86c0c5b3f08faf2e6f936da2edff05e6b87bf8ebb1",
+  // clear_voice_history and remove_voice_alias: the speaker's own voice
+  // housekeeping, read back before anything is removed.
+  "1.4.0": "fbdf123feb3941ee46cfcc7112be2f8a97c64d695b96eec3f10ab1a0686d6bbf",
 } as const satisfies Record<string, string>;
 
 const ledger = Object.entries(TOOL_CATALOGUE_FINGERPRINTS);

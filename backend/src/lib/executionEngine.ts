@@ -118,6 +118,18 @@ export async function isReviewPending(user: ActingUser, id: string, now = new Da
   );
 }
 
+/**
+ * Which queue a review still waiting for this user's yes belongs to — so a yes
+ * given while two reviews wait answers the one the client says it read out.
+ */
+export async function pendingReviewType(user: ActingUser, id: string, now = new Date()): Promise<string | undefined> {
+  const review = await prisma.voicePendingAction.findFirst({
+    where: { id, companyId: user.companyId, userId: user.id, status: "pending", expiresAt: { gt: now } },
+    select: { actionType: true },
+  });
+  return review?.actionType;
+}
+
 function scope(user: ActingUser, actionType: string) {
   return { companyId: user.companyId, userId: user.id, actionType };
 }

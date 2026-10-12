@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { spokenError, spokenOutcome, spokenReview } from "../src/lib/spokenActionMessages.js";
+import { spokenError, spokenLookupFailure, spokenMemory, spokenOutcome, spokenReview } from "../src/lib/spokenActionMessages.js";
 import { addDays, localDateTime } from "../src/lib/spokenDate.js";
 import { speechChunks } from "../src/services/voiceSpeechService.js";
 
@@ -142,5 +142,42 @@ describe("Long reviews are heard in full", () => {
   it("says copy and blind copy separately", () => {
     const spoken = spokenReview("send_email", { to: ["a@example.com"], cc: ["b@example.com"], bcc: ["c@example.com"], subject: "S", body: "B" }, "cs-CZ")!;
     assert.equal(spoken, "Pošlu e-mail na a@example.com, v kopii b@example.com, ve skryté kopii c@example.com. Předmět: „S“. Text: „B“. Mám ho odeslat?");
+  });
+});
+
+describe("Voice housekeeping is read back in Czech and Polish", () => {
+  it("counts the conversations to be deleted and names the learned word to be forgotten", () => {
+    assert.equal(
+      spokenReview("clear_voice_history", { conversations: 3, messages: 12, pendingEmails: 0 }, "cs-CZ"),
+      "Smažu všechny uložené rozhovory se mnou, celkem 3 rozhovory. Skončí tím i tenhle rozhovor a vrátit to nepůjde. Mám je smazat?",
+    );
+    assert.equal(
+      spokenReview("clear_voice_history", { conversations: 5, messages: 20, pendingEmails: 1 }, "pl-PL"),
+      "Usunę wszystkie zapisane rozmowy ze mną, razem 5 rozmów, i anuluję e-mail czekający na potwierdzenie. Zakończy się też ta rozmowa i nie da się tego cofnąć. Czy mam je usunąć?",
+    );
+    assert.equal(spokenOutcome("clear_voice_history", { conversations: 3 }, "cs-CZ"), "Historie rozhovorů je smazaná.");
+    assert.equal(spokenOutcome("clear_voice_history", { conversations: 0, pendingEmails: 0 }, "cs-CZ"), "Žádné uložené rozhovory nemám, není co mazat.");
+    assert.equal(
+      spokenReview("remove_voice_alias", { heard: "alfons", means: "Alfonzo", category: "wake_word" }, "cs-CZ"),
+      "Zapomenu slovo „alfons“, které jsem bral jako „Alfonzo“. Mám ho odebrat?",
+    );
+    assert.equal(spokenOutcome("remove_voice_alias", { term: "alfons" }, "cs-CZ"), "Slovo „alfons“ jsem zapomněl.");
+    assert.equal(spokenError("RECORD_NOT_FOUND", { kind: "voice_alias", said: "Bohumil" }, "cs-CZ"), "Nenašel jsem naučené slovo „Bohumil“.");
+  });
+});
+
+describe("Commands answer in the language switched on", () => {
+  it("says a record was not found, or fits more than once, in Czech and Polish; English keeps its wording", () => {
+    assert.equal(spokenLookupFailure("none", "client", "Novák", "cs-CZ", 'No client matching "Novák".'), "Nenašel jsem klienta „Novák“.");
+    assert.equal(spokenLookupFailure("many", "job", "Plot", "cs-CZ", "x"), "Na „Plot“ sedí víc zakázek. Řekněte to prosím přesněji.");
+    assert.equal(spokenLookupFailure("many", "task", "Faktura", "pl-PL", "x"), "„Faktura” pasuje do więcej niż jednego zadania. Powiedz dokładniej.");
+    assert.equal(spokenLookupFailure("none", "client", "Novák", "en-GB", 'No client matching "Novák".'), 'No client matching "Novák".');
+  });
+
+  it("says what was remembered and what is recalled", () => {
+    assert.equal(spokenMemory({ kind: "saved", scope: "company", content: "faktury číslujeme od 2026-001", duplicate: false }, "cs-CZ"), "Zapamatuji si to pro firmu: faktury číslujeme od 2026-001");
+    assert.equal(spokenMemory({ kind: "recalled", contents: ["a", "b"] }, "cs-CZ"), "Pamatuji si: a; b");
+    assert.equal(spokenMemory({ kind: "recalled", contents: [], query: "faktury" }, "cs-CZ"), "O „faktury“ si nic nepamatuji.");
+    assert.equal(spokenMemory({ kind: "recalled", contents: [] }, "en-GB"), "I do not have any active persistent memories yet.");
   });
 });

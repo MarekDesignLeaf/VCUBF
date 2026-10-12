@@ -1387,7 +1387,15 @@ class TranscriptStore:
         if not self.conversation_id:
             return
         identifier, self.conversation_id = self.conversation_id, None
-        await asyncio.to_thread(backend_json, "POST", f"/command/voice-conversations/{identifier}/end", {"status": status})
+        try:
+            await asyncio.to_thread(backend_json, "POST", f"/command/voice-conversations/{identifier}/end", {"status": status})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # The conversation may already be gone: clearing the voice history
+            # (by voice or on the page) deletes it while it is still live. The
+            # session must still close its speaker and microphone after this.
+            log(f"v2 transcript end error: {type(exc).__name__}")
 
 
 class VoiceSessionV2:

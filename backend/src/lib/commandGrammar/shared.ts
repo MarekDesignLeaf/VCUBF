@@ -390,6 +390,33 @@ export function parseSendDocument(text: string, words: SendDocumentWords): Parse
   return undefined;
 }
 
+/** One language's words for the speaker's own voice housekeeping. Folded, as OpenRecordWords. */
+export interface VoiceHousekeepingWords {
+  /** Whole folded sentences that ask for the saved conversations to be deleted. */
+  clearHistory: RegExp;
+  /** A folded sentence asking to forget a learned word; the word itself follows. */
+  forgetWord: RegExp;
+}
+
+/**
+ * "smaž historii rozhovorů", "zapomeň slovo Alfons": the voice actions
+ * clear_voice_history and remove_voice_alias. Both are read back before
+ * anything is removed, so the grammar only has to recognise the request.
+ */
+export function parseVoiceHousekeeping(text: string, words: VoiceHousekeepingWords): Parsed<"execute_action"> | undefined {
+  const cleaned = withoutFinalPunctuation(text).normalize("NFC").replace(/\s+/g, " ").trim();
+  const said = fold(cleaned);
+  if (words.clearHistory.test(said)) return { intent: "execute_action", entities: { action: "clear_voice_history", parameters: {} } };
+  const forget = new RegExp(words.forgetWord.source, "du").exec(said);
+  const at = forget?.indices?.[1];
+  if (!at) return undefined;
+  // The word as said, accents and all, without the quotes it may be dictated in.
+  const heard = (said.length === cleaned.length ? cleaned.slice(at[0], at[1]) : forget![1])
+    .replace(/^[\s"'“”„«»‘’]+|[\s"'“”„«»‘’]+$/gu, "")
+    .trim();
+  return heard ? { intent: "execute_action", entities: { action: "remove_voice_alias", parameters: { heard } } } : undefined;
+}
+
 /** "open calendar", "otevři kalendář": a verb of this language, then a page of the menu. */
 export function parseNavigation(text: string, verbs: string): Parsed<"navigate"> | undefined {
   const match = text.match(new RegExp(`^(?:${verbs})\\s+(.+)$`, "iu"));

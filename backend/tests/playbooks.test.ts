@@ -204,4 +204,26 @@ describe("Playbook Engine", () => {
     assert.equal(runsRes.body.length, 1);
     assert.equal(runsRes.body[0].overallOk, true);
   });
+  it("runs steps only with the permissions of whoever runs it, and refuses before any step runs", async () => {
+    // A field worker reads and talks to Alfonzo; changing customers is not theirs.
+    // A stored step must not do what saying it would be refused (§45).
+    await prisma.user.update({ where: { email: "worker@test.local" }, data: { permissions: ["crm.read", "voice.execute"] } });
+    const fieldToken = await loginAs("worker@test.local");
+    const created = await request(app)
+      .post("/playbooks")
+      .set("Authorization", `Bearer ${fieldToken}`)
+      .send({ name: "Not mine to run", step_templates: ["show tasks", "create client Escalated Client"] });
+    assert.equal(created.status, 201);
+
+    const run = await request(app)
+      .post(`/playbooks/${created.body.id}/run`)
+      .set("Authorization", `Bearer ${fieldToken}`)
+      .send({ confirmed: true });
+    assert.equal(run.status, 403, JSON.stringify(run.body));
+    assert.equal(run.body.error, "EMMA_CAPABILITY_DISABLED");
+    assert.equal(run.body.step, 2);
+    assert.match(run.body.message, /crm\.manage/);
+    assert.equal(await prisma.client.count({ where: { displayName: "Escalated Client" } }), 0);
+    assert.equal(await prisma.playbookRun.count({ where: { playbookId: created.body.id } }), 0, "no step ran, not even the allowed first one");
+  });
 });

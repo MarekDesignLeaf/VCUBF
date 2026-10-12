@@ -1,6 +1,8 @@
 import * as documentDeliveryService from "./documentDeliveryService.js";
 import * as recordLookupService from "./recordLookupService.js";
 import * as notificationDigestService from "./notificationDigestService.js";
+import * as voiceHistoryService from "./voiceHistoryService.js";
+import * as voiceAliasService from "./voiceAliasService.js";
 import { matchRecord } from "../lib/recordMatch.js";
 import { BUSINESS_TIME_ZONE, localDateTime, resolveSpokenDate, resolveSpokenTime, zonedInstant } from "../lib/spokenDate.js";
 import type { AuthedUser } from "../middleware/auth.js";
@@ -864,6 +866,44 @@ async function executeEmmaActionDirect(
     }
     case "send_notification_digest":
       return notificationDigestService.sendNotificationDigest(user, { confirmed });
+    case "clear_voice_history": {
+      // Nothing of it comes back, so how much goes is read back first; with
+      // nothing saved there is nothing to confirm.
+      if (!confirmed) {
+        const size = await voiceHistoryService.voiceHistorySize(user);
+        if (!size.conversations && !size.pendingEmails) return ok(200, size);
+        return fail(409, "CONFIRMATION_REQUIRED", "Review what will be deleted, then confirm.", { preview: size, confirmInput: {} });
+      }
+      const cleared = await voiceHistoryService.clearVoiceHistory(user, "voice");
+      return ok(200, { conversations: cleared.conversations, messages: cleared.messages, pendingEmails: cleared.pendingEmails });
+    }
+    case "remove_voice_alias": {
+      const aliases = await voiceAliasService.listAliases(user);
+      const id = stringValue(p, "alias_id");
+      const heard = stringValue(p, "heard");
+      let alias = id
+        ? (aliases.find((row) => row.id === id) ? ok(200, aliases.find((row) => row.id === id)!) : fail(404, "RECORD_NOT_FOUND", "The alias no longer exists.", { kind: "voice_alias" }))
+        : byName(aliases, heard, (row) => [row.term], (row) => `${row.term} → ${row.aliasFor ?? ""}`, "voice_alias");
+      if (!alias.ok && alias.error === "RECORD_NOT_FOUND" && heard) {
+        // The recogniser may already have written the misheard word as the
+        // word it stands for ("Alfons" heard as "Alfonzo"). Then the spelling
+        // that means it is the one meant; several are named back to choose from.
+        const meaning = aliases.filter((row) => row.aliasFor && voiceAliasService.normalisePhrase(row.aliasFor) === voiceAliasService.normalisePhrase(heard));
+        if (meaning.length === 1) alias = ok(200, meaning[0]);
+        else if (meaning.length > 1) {
+          return fail(409, "AMBIGUOUS_REFERENCE", `More than one learned word means '${heard}'.`, { candidates: meaning.slice(0, 5).map((row) => row.term) });
+        }
+      }
+      if (!alias.ok) return alias;
+      if (!confirmed) {
+        return fail(409, "CONFIRMATION_REQUIRED", "Review the alias to remove, then confirm.", {
+          preview: { heard: alias.data.term, means: alias.data.aliasFor, category: alias.data.category, status: alias.data.status },
+          confirmInput: { alias_id: alias.data.id },
+        });
+      }
+      const removed = await voiceAliasService.deleteAlias(user, alias.data.id, "voice");
+      return removed ? ok(200, removed) : fail(404, "RECORD_NOT_FOUND", "The alias no longer exists.", { kind: "voice_alias" });
+    }
     case "merge_clients": {
       const primary = await clientByName(user, stringValue(p, "primary_client_name"));
       if (!primary.ok) return primary;
