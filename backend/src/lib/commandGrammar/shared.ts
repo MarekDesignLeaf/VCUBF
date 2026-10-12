@@ -5,6 +5,7 @@
 // by Czech words and a Polish one only by Polish words.
 
 import type { ParsedCommand } from "../commandParser.js";
+import type { RecordKind } from "../recordKinds.js";
 import type { ConnectorKey } from "../../connectors/registry.js";
 import { resolveSpokenLanguageName, resolveVoiceLanguage } from "../voiceLanguages.js";
 import { resolveVoicePage } from "../voiceNavigation.js";
@@ -313,6 +314,41 @@ export function parseLanguageName(text: string): Parsed<"set_voice_language"> | 
 }
 
 // --- navigation --------------------------------------------------------------
+
+/** One language's words for opening a record by name. All folded (lowercase, no accents). */
+export interface OpenRecordWords {
+  /** The verbs, as alternatives ("otevri|ukaz|najdi"). */
+  verbs: string;
+  /** Each kind's words as said after the verb, singular ("klienta|zakaznika"). Tried in this order. */
+  kinds: Array<[RecordKind, string]>;
+  /** Words that may come between the kind and the name ("pro|u|cislo"). */
+  joiners: string;
+  /** Polite words that may end the sentence and are not part of the name ("prosim"). */
+  trailing: string;
+}
+
+/**
+ * "otevři klienta Nováka", "ukaž zakázku Plot", "open the invoice number
+ * 2026-014": a verb, a kind in the singular, then the name. The plural ("ukaž
+ * klienty") is a page of the menu, read by parseNavigation, not a record. The
+ * name keeps its accents and capitals; it is looked up, never trusted.
+ */
+export function parseOpenRecord(text: string, words: OpenRecordWords): Parsed<"open_record"> | undefined {
+  const cleaned = withoutFinalPunctuation(text).normalize("NFC").replace(/[,;:]+/g, " ").replace(/\s+/g, " ").trim();
+  const said = fold(cleaned);
+  for (const [kind, kindWords] of words.kinds) {
+    const match = new RegExp(`^(?:${words.verbs})(?:\\s+(?:mi|me|the|a|an))*\\s+((?:${kindWords})\\s+(?:(?:${words.joiners})\\s+)?(.+?))(?:\\s+(?:${words.trailing}))?$`, "du").exec(said);
+    if (!match?.indices?.[2]) continue;
+    // "show job openings" is the recruitment page, not a job called "openings".
+    if (resolveVoicePage(match[1])) return undefined;
+    // fold() keeps the length of an NFC sentence, so the name is cut from the
+    // sentence as said, with its accents and capitals.
+    const [from, to] = match.indices[2];
+    const name = (said.length === cleaned.length ? cleaned.slice(from, to) : match[2]).trim();
+    if (name) return { intent: "open_record", entities: { kind, name } };
+  }
+  return undefined;
+}
 
 /** "open calendar", "otevři kalendář": a verb of this language, then a page of the menu. */
 export function parseNavigation(text: string, verbs: string): Parsed<"navigate"> | undefined {

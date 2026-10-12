@@ -41,6 +41,7 @@ delete all notifications
 confirm delete notifications
 cancel delete notifications
 list contacts
+open client|contact|lead|job|quote|invoice|employee|job opening|playbook NAME OR NUMBER AS SAID
 show emails
 show whatsapp messages
 skip to the next sender

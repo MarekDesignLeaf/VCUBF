@@ -8,8 +8,8 @@ import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
   NEVER, connectorTarget, extractContact, fold, nameOnly, normalizeDictatedPhone, parseAgendaCommand, parseEmailCommand,
-  parseLanguageSwitch, parseNavigation, parseWhatsAppCommand, withoutFinalPunctuation,
-  type CommandGrammar, type Parsed,
+  parseLanguageSwitch, parseNavigation, parseOpenRecord, parseWhatsAppCommand, withoutFinalPunctuation,
+  type CommandGrammar, type OpenRecordWords, type Parsed,
 } from "./shared.js";
 
 const CONNECTORS = {
@@ -144,6 +144,24 @@ function knowledge(text: string): ParsedCommand | undefined {
   return undefined;
 }
 
+/** "otwórz klienta Nowaka", "pokaż zlecenie Płot", "otwórz fakturę numer 2026-014". Folded. */
+const OPEN_RECORD: OpenRecordWords = {
+  verbs: "otworz|pokaz|znajdz|wyszukaj|przejdz\\s+do",
+  kinds: [
+    ["job_opening", "ogloszenie(?:\\s+o\\s+prace)?|oferte\\s+pracy"],
+    ["quote", "oferte|wycene"],
+    ["client", "klienta|klientke|klient"],
+    ["contact", "kontakt"],
+    ["lead", "zapytanie|lead"],
+    ["job", "zlecenie"],
+    ["invoice", "fakture"],
+    ["employee", "pracownika|pracownice"],
+    ["playbook", "playbook|procedure"],
+  ],
+  joiners: "dla|od|u|o\\s+nazwie|numer|nr",
+  trailing: "prosze",
+};
+
 export const polish: CommandGrammar = {
   language: "pl",
   yes: /^(?:potwierdzam|potwierdź|potwierdz|potwierdź\s+akcję|potwierdz\s+akcje|wyślij|wyslij)$/iu,
@@ -202,6 +220,7 @@ export const polish: CommandGrammar = {
     return connectors(text)
       ?? records(text)
       ?? knowledge(text)
+      ?? parseOpenRecord(text, OPEN_RECORD)
       ?? parseNavigation(text, "otwórz|otworz|przejdź\\s+do|przejdz\\s+do|pokaż|pokaz");
   },
 };

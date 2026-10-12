@@ -10,9 +10,11 @@ import {
   type ContactChannel,
   type ContactLanguage,
 } from "../api/client";
+import { pickedRowId, usePickedRow } from "../components/pickedRow";
 
 export function Contacts() {
   const [contacts, setContacts] = useState<Contact[] | null>(null);
+  const picked = usePickedRow("contact", contacts);
   const [search, setSearch] = useState("");
   const [activeOnly, setActiveOnly] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -56,7 +58,7 @@ export function Contacts() {
       <table className="data-table"><thead><tr><th>Name</th><th>Client</th><th>Role</th><th>Email</th><th>Phone</th><th>Preference</th><th>Source</th><th>Status</th><th></th></tr></thead>
       <tbody>{contacts.map((contact) => editing?.id === contact.id
         ? <ContactEditRow key={contact.id} contact={contact} onSaved={() => { setEditing(null); load(); }} onCancel={() => setEditing(null)} />
-        : <tr key={contact.id}>
+        : <tr key={contact.id} id={pickedRowId("contact", contact.id)} className={picked === contact.id ? "picked-row" : undefined}>
         <td><strong>{contact.displayName}</strong></td>
         <td>{contact.client ? <Link to={`/clients/${contact.client.id}`}>{contact.client.displayName}</Link> : "Independent"}</td>
         <td>{[contact.jobTitle, contact.department].filter(Boolean).join(" · ") || "—"}</td>

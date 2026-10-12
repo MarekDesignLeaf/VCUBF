@@ -8,8 +8,8 @@ import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
   connectorTarget, extractContact, fold, nameOnly, normalizeDictatedPhone, parseAgendaCommand, parseEmailCommand,
-  parseLanguageSwitch, parseNavigation, parseWhatsAppCommand, withoutFinalPunctuation,
-  type CommandGrammar, type Parsed,
+  parseLanguageSwitch, parseNavigation, parseOpenRecord, parseWhatsAppCommand, withoutFinalPunctuation,
+  type CommandGrammar, type OpenRecordWords, type Parsed,
 } from "./shared.js";
 
 // Compared without diacritics: the transcription decides whether they are there.
@@ -284,6 +284,24 @@ function knowledge(text: string): ParsedCommand | undefined {
   return undefined;
 }
 
+/** "otevři klienta Nováka", "ukaž zakázku Plot", "najdi fakturu číslo 2026-014". Folded. */
+const OPEN_RECORD: OpenRecordWords = {
+  verbs: "otevri|ukaz|zobraz|najdi|vyhledej|prejdi\\s+na|jdi\\s+na",
+  kinds: [
+    ["job_opening", "inzerat|pracovni\\s+pozici|nabor"],
+    ["quote", "cenovou\\s+nabidku|nabidku"],
+    ["client", "klienta|klientku|zakaznika|zakaznici|klient|zakaznik"],
+    ["contact", "kontaktni\\s+osobu|kontakt"],
+    ["lead", "poptavku|lead"],
+    ["job", "zakazku"],
+    ["invoice", "fakturu"],
+    ["employee", "zamestnance|zamestnankyni|pracovnika|pracovnici|kolegu|kolegyni"],
+    ["playbook", "playbook|postup"],
+  ],
+  joiners: "pro|od|u|s\\s+nazvem|se\\s+jmenem|jmenem|cislo",
+  trailing: "prosim|prosimte",
+};
+
 export const czech: CommandGrammar = {
   language: "cs",
   yes: /^(?:ano|potvrzuji|potvrďuji|potvrdit|potvrď\s+akci|potvrd\s+akci|odešli|odesli|tak\s+ano|tak\s+jo)$/iu,
@@ -341,6 +359,7 @@ export const czech: CommandGrammar = {
     return connectors(text)
       ?? records(text)
       ?? knowledge(text)
+      ?? parseOpenRecord(text, OPEN_RECORD)
       ?? parseNavigation(text, "otevři|otevri|přejdi\\s+na|prejdi\\s+na|ukaž|ukaz");
   },
 };

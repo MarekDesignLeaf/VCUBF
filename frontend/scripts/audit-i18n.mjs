@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const sourceRoot = path.resolve("src");
-const ignoredAttributes = new Set(["className", "to", "href", "type", "name", "value", "method"]);
+const ignoredAttributes = new Set(["className", "id", "to", "href", "type", "name", "value", "method"]);
 const visibleAttributes = new Set(["placeholder", "title", "aria-label", "alt"]);
 const entries = new Map();
 

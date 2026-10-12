@@ -1,4 +1,5 @@
 import { isVoiceLanguage, VOICE_LANGUAGE_LABELS, type VoiceLanguage } from "./voiceLanguages.js";
+import { RECORD_PAGE, type RecordKind } from "./recordKinds.js";
 import { EMMA_EXECUTABLE_ACTION_PAGES, isEmmaExecutableActionName } from "./emmaExecutableActionCatalogue.js";
 import { ASSISTANT_NAME_TOKEN } from "./assistantName.js";
 
@@ -340,6 +341,12 @@ export function buildCommandUiAction(intent: string, data: unknown, interpreted:
     case "navigate": {
       const page = entities.page as VoicePage;
       return navigate(page);
+    }
+    case "open_record": {
+      const kind = payload.kind as RecordKind | undefined;
+      return kind && kind in RECORD_PAGE && typeof payload.path === "string" && payload.path.startsWith("/")
+        ? navigate(RECORD_PAGE[kind], payload.path)
+        : undefined;
     }
     case "create_client": return navigate("clients", directId ? `/clients/${directId}` : "/clients");
     case "confirm_create_client": return navigate("clients", directId ? `/clients/${directId}` : "/clients");
