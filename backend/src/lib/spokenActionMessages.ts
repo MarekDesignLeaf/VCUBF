@@ -756,3 +756,82 @@ function spokenChanges(changes: unknown, lang: Locale): string {
   return spokenList(parts, lang);
 }
 
+type Forms = { cs: [string, string, string]; pl: [string, string, string]; en: [string, string] };
+// After "Máte" / "Masz": the accusative ("Máte 1 klienta, 4 klienty, 5 klientů").
+const CLIENTS: Forms = { cs: ["klienta", "klienty", "klientů"], pl: ["klienta", "klientów", "klientów"], en: ["client", "clients"] };
+const CONTACTS: Forms = { cs: ["kontakt", "kontakty", "kontaktů"], pl: ["kontakt", "kontakty", "kontaktów"], en: ["contact", "contacts"] };
+const JOBS: Forms = { cs: ["zakázku", "zakázky", "zakázek"], pl: ["zlecenie", "zlecenia", "zleceń"], en: ["job", "jobs"] };
+const TASKS: Forms = { cs: ["otevřený úkol", "otevřené úkoly", "otevřených úkolů"], pl: ["otwarte zadanie", "otwarte zadania", "otwartych zadań"], en: ["open task", "open tasks"] };
+const QUOTES: Forms = { cs: ["nabídku", "nabídky", "nabídek"], pl: ["ofertę", "oferty", "ofert"], en: ["quote", "quotes"] };
+const LEADS: Forms = { cs: ["poptávku", "poptávky", "poptávek"], pl: ["zapytanie", "zapytania", "zapytań"], en: ["lead", "leads"] };
+const OPENINGS: Forms = { cs: ["otevřený inzerát", "otevřené inzeráty", "otevřených inzerátů"], pl: ["otwarte ogłoszenie", "otwarte ogłoszenia", "otwartych ogłoszeń"], en: ["open job opening", "open job openings"] };
+
+/** Newest first, by when the record was created. */
+function newestFirst(rows: Row[]): Row[] {
+  return [...rows].sort((left, right) => new Date(right?.createdAt ?? 0).getTime() - new Date(left?.createdAt ?? 0).getTime());
+}
+
+/** How many are said by name after the count. */
+const NAMED_IN_SUMMARY = 3;
+
+/**
+ * What a list page shows, said in two short sentences when it is opened by
+ * voice ("ukaž zakázky"): how many, and the newest few by name. Counted from
+ * the rows the command read, nothing else. Undefined for a command that is no
+ * list, so the page is only announced as before.
+ */
+export function spokenListSummary(intent: string, data: unknown, language: string, now = new Date()): string | undefined {
+  if (!Array.isArray(data)) return undefined;
+  const lang = locale(language);
+  const rows = data as Row[];
+  const newest = (filter: (row: Row) => boolean, name: (row: Row) => string) =>
+    spokenList(newestFirst(rows.filter(filter)).slice(0, NAMED_IN_SUMMARY).map(name).filter(Boolean), lang);
+  const latestSentence = (names: string) => names
+    ? (lang === "cs" ? ` Nejnovější: ${names}.` : lang === "pl" ? ` Najnowsze: ${names}.` : ` Newest: ${names}.`)
+    : "";
+  const youHave = (what: string) => lang === "cs" ? `Máte ${what}.` : lang === "pl" ? `Masz ${what}.` : `You have ${what}.`;
+  switch (intent) {
+    case "list_clients":
+      return youHave(counted(rows.length, lang, CLIENTS)) + latestSentence(newest(() => true, (row) => String(row.displayName ?? "")));
+    case "list_contacts":
+      return youHave(counted(rows.length, lang, CONTACTS));
+    case "list_jobs": {
+      const open = (row: Row) => row.jobStatus !== "dokonceno" && row.jobStatus !== "zruseno";
+      const openCount = rows.filter(open).length;
+      const inProgress = lang === "cs" ? `, rozpracovaných ${openCount}` : lang === "pl" ? `, w toku ${openCount}` : `, ${openCount} still open`;
+      return youHave(counted(rows.length, lang, JOBS) + inProgress)
+        + latestSentence(newest(open, (row) => `${row.jobTitle}${row.client?.displayName ? ` (${row.client.displayName})` : ""}`));
+    }
+    case "list_tasks": {
+      const open = rows.filter((row) => row.taskStatus === "open" || row.taskStatus === "in_progress");
+      const today = localDateTime(now, BUSINESS_TIME_ZONE).date;
+      const due = (row: Row) => row.dueAt ? localDateTime(new Date(row.dueAt), BUSINESS_TIME_ZONE).date : undefined;
+      const overdue = open.filter((row) => row.dueAt && new Date(row.dueAt).getTime() < now.getTime() && due(row) !== today).length;
+      const dueToday = open.filter((row) => due(row) === today).length;
+      const extra = [
+        dueToday ? (lang === "cs" ? `na dnešek ${dueToday}` : lang === "pl" ? `na dziś ${dueToday}` : `${dueToday} due today`) : "",
+        overdue ? (lang === "cs" ? `po termínu ${overdue}` : lang === "pl" ? `po terminie ${overdue}` : `${overdue} overdue`) : "",
+      ].filter(Boolean);
+      return youHave(counted(open.length, lang, TASKS) + (extra.length ? `, ${spokenList(extra, lang)}` : ""));
+    }
+    case "list_quotes": {
+      const of = (status: string) => rows.filter((row) => row.quoteStatus === status).length;
+      const parts = [
+        of("draft") ? (lang === "cs" ? `rozpracovaných ${of("draft")}` : lang === "pl" ? `szkiców ${of("draft")}` : `${of("draft")} draft`) : "",
+        of("sent") ? (lang === "cs" ? `odeslaných ${of("sent")}` : lang === "pl" ? `wysłanych ${of("sent")}` : `${of("sent")} sent`) : "",
+        of("accepted") ? (lang === "cs" ? `přijatých ${of("accepted")}` : lang === "pl" ? `przyjętych ${of("accepted")}` : `${of("accepted")} accepted`) : "",
+      ].filter(Boolean);
+      return youHave(counted(rows.length, lang, QUOTES) + (parts.length ? `, ${spokenList(parts, lang)}` : ""));
+    }
+    case "list_leads": {
+      const fresh = rows.filter((row) => row.leadStatus === "new").length;
+      const extra = fresh ? (lang === "cs" ? `, nových ${fresh}` : lang === "pl" ? `, nowych ${fresh}` : `, ${fresh} new`) : "";
+      return youHave(counted(rows.length, lang, LEADS) + extra) + latestSentence(newest((row) => row.leadStatus === "new", (row) => String(row.name ?? "")));
+    }
+    case "list_job_openings":
+      return youHave(counted(rows.filter((row) => row.openingStatus === "open").length, lang, OPENINGS));
+    default:
+      return undefined;
+  }
+}
+
