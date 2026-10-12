@@ -1182,6 +1182,12 @@ SECRETARY_NAVIGATION={navigation_json}"""
             )
             if selected_language in LANGUAGE_NAMES and selected_language != self.configured_language:
                 await self.apply_language(selected_language)
+            if result.get("ok") is True and result.get("kind") == "ignore":
+                # Not meant for Alfonzo (another language, a television): no
+                # spoken answer at all; keep listening.
+                log("backend ignored a sentence not meant for the assistant")
+                await self.update_state("listening", True)
+                return
             server_message = str(result.get("message") or "").strip()
             exact_server_message = bool(server_message) and (
                 result.get("intent") == "create_client"

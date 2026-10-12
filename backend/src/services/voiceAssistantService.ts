@@ -10,7 +10,9 @@ import { DEFAULT_ASSISTANT_NAME, withAssistantName } from "../lib/assistantName.
 import { assistantRealtimeVoice } from "./voiceSpeechService.js";
 
 const assistantResultSchema = z.object({
-  kind: z.enum(["command", "reply", "clarification", "plan"]),
+  // ignore: the sentence was not for the assistant (another language, a
+  // television, someone else in the room); nothing is said back.
+  kind: z.enum(["command", "reply", "clarification", "plan", "ignore"]),
   canonical_command: z.string().nullable(),
   // A deliberate request to read the complete menu can be longer than an
   // ordinary spoken answer. The caller still asks {assistant} to keep normal turns
@@ -21,7 +23,7 @@ const assistantResultSchema = z.object({
   // success/failure result for commands. OpenAI may therefore correctly emit
   // an empty message alongside a canonical command. Conversational responses
   // still need actual text to speak.
-  if (result.kind !== "command" && !result.message.trim()) {
+  if (result.kind !== "command" && result.kind !== "ignore" && !result.message.trim()) {
     context.addIssue({ code: z.ZodIssueCode.too_small, minimum: 1, type: "string", inclusive: true, path: ["message"], message: "message is required" });
   }
 });
@@ -66,14 +68,20 @@ export const SELF_REFERENCE_RULE =
   "{assistant} is male and speaks with a male voice. Whenever a language marks the speaker's grammatical gender, refer to yourself only in masculine forms (Czech: připravil jsem, rozuměl jsem, jsem připraven; Polish: przygotowałem, zrozumiałem, jestem gotowy). Never use feminine forms for yourself, whatever name you are given or persona you are asked to play.";
 
 /**
- * Only the language switched on is understood. The deterministic grammar is
- * already chosen by it; this keeps the model from acting on a sentence in
- * another language either. Names, addresses and the text of a message are not
- * the language of the request, so they may be in any language.
+ * Only the language switched on is understood — but nobody is lectured about
+ * it. The rule used to make the model answer every sentence it took for
+ * another language with "Pracuji v češtině…", and it took far too much for
+ * another language: on 11. 10. Marek heard it for "Alfonzo.", for English
+ * from the television, for transcripts of his own Czech that came out with
+ * Slovak spellings ("správy", "povieš") and finally for a plainly Czech
+ * sentence ("tahle hláška mě vytáčí"). Speech transcribed with another
+ * language's spelling is taken as the language switched on; speech that is
+ * really in another language is not addressed to the assistant and gets no
+ * answer at all. The language changes only when the user says its name.
  */
 export function activeLanguageRule(language: string): string {
   const name = isVoiceLanguage(language) ? VOICE_LANGUAGE_LABELS[language] : language;
-  return `The language switched on is ${name}. Act only on what the user says in ${name}. Judge that by the sentence's own grammar and command words, not by names, e-mail addresses, product names or the words of a message to be sent, which may be in any language. When the user speaks another language, do not interpret the request and do not return a command: return kind reply and say, in ${name}, that you are working in ${name} and that saying just the name of a language switches to it.`;
+  return `The language switched on is ${name}. The text you get is a speech transcript, and transcripts of ${name} speech often come out with a neighbouring language's spelling or with mixed words (for Czech: Slovak forms such as správy, povieš, prečti, čo). Treat such a sentence as ${name} and act on it. Names, e-mail addresses, product names and the words of a message to be sent may be in any language and never make a sentence foreign. Only when a sentence is clearly and entirely in another language — typically a television, a radio or someone else in the room — is it not meant for you: return kind ignore with an empty message and no command. Never tell the user which language you work in and never ask them to change language; the language changes only when the user says its name.`;
 }
 
 function outputText(payload: any): string | undefined {
@@ -561,7 +569,7 @@ EMMA_CONTEXT=${contextJson}`, input.assistantName),
             additionalProperties: false,
             required: ["kind", "canonical_command", "message"],
             properties: {
-              kind: { type: "string", enum: ["command", "reply", "clarification", "plan"] },
+              kind: { type: "string", enum: ["command", "reply", "clarification", "plan", "ignore"] },
               canonical_command: { type: ["string", "null"] },
               message: { type: "string" },
             },

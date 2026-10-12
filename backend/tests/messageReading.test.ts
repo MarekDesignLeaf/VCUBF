@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { CANONICAL_COMMAND, parseTextCommand, readingControl } from "../src/lib/commandParser.js";
-import { spokenNothingBeingRead, spokenReadingTurn } from "../src/lib/spokenActionMessages.js";
+import { spokenNothingBeingRead, spokenReadingTurn, spokenWhatsAppDetailsMissing } from "../src/lib/spokenActionMessages.js";
+import { nameAcknowledgement, onlyTheName } from "../src/lib/assistantName.js";
 import { groupBySender, MESSAGES_PER_TURN, turnAt, type ReadingPlace, type SenderGroup } from "../src/services/messageReadingService.js";
 
 // Reading received messages one sender at a time (Marek, 10. 10.: "když řeknu
@@ -198,6 +199,8 @@ describe("the words that move through a reading", () => {
     assert.deepEqual(parseTextCommand("Přečti zprávy na WhatsAppu.", "cs-CZ").entities, { channel: "whatsapp" });
     assert.deepEqual(parseTextCommand("Přečti e-maily.", "cs-CZ").entities, { channel: "email" });
     assert.deepEqual(parseTextCommand("přečti zprávy v e-mailu", "cs-CZ").entities, { channel: "email" });
+    // The transcript sometimes spells Czech the Slovak way (11. 10.).
+    assert.deepEqual(parseTextCommand("Prečti správy na WhatsApp.", "cs-CZ").entities, { channel: "whatsapp" });
     assert.deepEqual(parseTextCommand("Przeczytaj wiadomości z WhatsAppa.", "pl-PL").entities, { channel: "whatsapp" });
     assert.deepEqual(parseTextCommand("pokaż e-maile", "pl-PL").entities, { channel: "email" });
   });
@@ -258,5 +261,18 @@ describe("what Alfonzo says while reading", () => {
 
   it("says plainly when nothing is being read, and how to start", () => {
     assert.equal(spokenNothingBeingRead("cs-CZ"), "Teď vám žádné zprávy nečtu. Řekněte třeba: přečti zprávy na WhatsAppu.");
+  });
+});
+
+describe("the assistant's bare name", () => {
+  it("is told from a sentence that only starts with it", () => {
+    for (const text of ["Alfonzo.", "alfonzo", "Hej Alfonzo!", "ALFONZO?"]) assert.equal(onlyTheName(text, ["Hej {assistant}", "Alfonzo"]), true, text);
+    for (const text of ["Alfonzo, přečti zprávy", "Alfonzo přeskoč", "", "Ano"]) assert.equal(onlyTheName(text, ["Alfonzo"]), false, text);
+    assert.equal(nameAcknowledgement("cs-CZ"), "Ano?");
+    assert.equal(nameAcknowledgement("en-GB"), "Yes?");
+  });
+
+  it("asks for a full international number in the user's language, not in English", () => {
+    assert.match(spokenWhatsAppDetailsMissing("cs-CZ"), /^Potřebuji celé mezinárodní číslo/);
   });
 });

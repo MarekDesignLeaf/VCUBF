@@ -1835,6 +1835,17 @@ export function BrowserVoiceControl() {
       // one could still answer; a cancelled request is reported as failed.
       const result: MobileAssistantResponse = await api.command.assistant(text, language, history, AbortSignal.timeout(ASSISTANT_LIMIT_MS));
       if (timed) timed.answeredAt = Date.now();
+      // Not meant for him (another language, a television): no answer, and the
+      // conversation is not kept open by it.
+      if (result.kind === "ignore") {
+        // Nor does it stay in the conversation the model is shown next time.
+        setTranscript((current) => {
+          const last = current[current.length - 1];
+          return last?.role === "user" && last.content === text ? current.slice(0, -1) : current;
+        });
+        setStatus("idle");
+        return;
+      }
       // Not understood: say so and offer to be taught, rather than repeating a
       // generic failure the user can do nothing with.
       const notUnderstood = result.intent === "unrecognized"

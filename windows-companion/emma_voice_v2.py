@@ -1867,6 +1867,10 @@ class VoiceSessionV2:
         """Never describe a successful Secretary command as a connection failure."""
         if not isinstance(result, dict):
             return self.localized_error_message()
+        if result.get("ok") and result.get("kind") == "ignore":
+            # Not meant for Alfonzo (another language, a television): nothing
+            # is said, not even "completed".
+            return ""
         explicit = str(result.get("message") or "").strip()
         if explicit:
             return explicit

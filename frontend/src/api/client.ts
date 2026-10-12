@@ -1803,7 +1803,8 @@ export interface PendingReview {
 
 export interface MobileAssistantResponse {
   ok: boolean;
-  kind: "action" | "reply" | "clarification" | "plan" | "error";
+  // ignore: the sentence was not for the assistant (another language, a television); nothing is said.
+  kind: "action" | "reply" | "clarification" | "plan" | "error" | "ignore";
   intent?: string;
   data?: unknown;
   error?: string;
