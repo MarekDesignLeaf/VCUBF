@@ -144,3 +144,24 @@ describe("Long reviews are heard in full", () => {
     assert.equal(spoken, "Pošlu e-mail na a@example.com, v kopii b@example.com, ve skryté kopii c@example.com. Předmět: „S“. Text: „B“. Mám ho odeslat?");
   });
 });
+
+describe("Voice housekeeping is read back in Czech and Polish", () => {
+  it("counts the conversations to be deleted and names the learned word to be forgotten", () => {
+    assert.equal(
+      spokenReview("clear_voice_history", { conversations: 3, messages: 12, pendingEmails: 0 }, "cs-CZ"),
+      "Smažu všechny uložené rozhovory se mnou, celkem 3 rozhovory. Skončí tím i tenhle rozhovor a vrátit to nepůjde. Mám je smazat?",
+    );
+    assert.equal(
+      spokenReview("clear_voice_history", { conversations: 5, messages: 20, pendingEmails: 1 }, "pl-PL"),
+      "Usunę wszystkie zapisane rozmowy ze mną, razem 5 rozmów, i anuluję e-mail czekający na potwierdzenie. Zakończy się też ta rozmowa i nie da się tego cofnąć. Czy mam je usunąć?",
+    );
+    assert.equal(spokenOutcome("clear_voice_history", { conversations: 3 }, "cs-CZ"), "Historie rozhovorů je smazaná.");
+    assert.equal(spokenOutcome("clear_voice_history", { conversations: 0, pendingEmails: 0 }, "cs-CZ"), "Žádné uložené rozhovory nemám, není co mazat.");
+    assert.equal(
+      spokenReview("remove_voice_alias", { heard: "alfons", means: "Alfonzo", category: "wake_word" }, "cs-CZ"),
+      "Zapomenu slovo „alfons“, které jsem bral jako „Alfonzo“. Mám ho odebrat?",
+    );
+    assert.equal(spokenOutcome("remove_voice_alias", { term: "alfons" }, "cs-CZ"), "Slovo „alfons“ jsem zapomněl.");
+    assert.equal(spokenError("RECORD_NOT_FOUND", { kind: "voice_alias", said: "Bohumil" }, "cs-CZ"), "Nenašel jsem naučené slovo „Bohumil“.");
+  });
+});

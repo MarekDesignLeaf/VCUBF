@@ -109,8 +109,9 @@ const catalogueTools = new Map(AGENT_TOOL_CATALOGUE.map((tool) => [tool.name as 
  *    reach and as whom; an administrator does these directly;
  *  - playbooks — running one executes stored steps that are neither read out
  *    nor checked step by step here, and writing one would store such steps;
- *  - the assistant's own settings, memory and learning rules, which change how
- *    Secretary hears and answers — only the user's explicit words do that.
+ *  - the assistant's own settings, memory, learning rules and voice aliases,
+ *    which change how Secretary hears and answers, and the speaker's own
+ *    voice history — only the user's explicit words do that.
  * A test keeps every administration tool on this list.
  */
 export const AGENT_NEVER_PROPOSES: ReadonlySet<string> = new Set([
@@ -120,6 +121,7 @@ export const AGENT_NEVER_PROPOSES: ReadonlySet<string> = new Set([
   "disconnect_whatsapp", "enable_connector_source", "disable_connector_source", "update_connector_source", "set_default_email_account",
   "run_playbook", "create_playbook", "update_playbook",
   "set_assistant_name", "set_hotword", "set_speech_rate", "archive_memory", "archive_learning_rule", "reactivate_learning_rule",
+  "clear_voice_history", "remove_voice_alias",
 ]);
 
 /**

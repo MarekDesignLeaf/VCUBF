@@ -9,7 +9,7 @@ import { EXECUTE_TEXT_COMMAND_ACTION } from "../../lib/actionContracts.js";
 import { CANONICAL_COMMAND, isExplicitVoiceLanguageChange, isGmailCancellationPhrase, isGmailConfirmationPhrase, parseTextCommand, readingControl } from "../../lib/commandParser.js";
 import { dispatchParsedCommand, type CommandResponse } from "../../lib/commandExecutor.js";
 import { resolveLearningAliases } from "../../services/learningService.js";
-import { addressedAs, aliasVocabulary } from "../../services/voiceAliasService.js";
+import { addressedAs, aliasVocabulary, withSpokenAliasRestored } from "../../services/voiceAliasService.js";
 import { createRealtimeClientSession, interpretVoiceRequest, transcribeVoiceAudio } from "../../services/voiceAssistantService.js";
 import { publishVoiceUiAction } from "../../services/voiceUiActionService.js";
 import { getAssistantContext } from "../../services/assistantMemoryService.js";
@@ -718,6 +718,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
       });
     }
   }
+  command = withSpokenAliasRestored(command, alias.appliedRules);
 
   const policyBlock = await blockedByEmmaPolicy(user, command);
   if (policyBlock) return res.status(403).json({
@@ -784,7 +785,7 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
   const user = req.user!;
 
   const alias = await resolveLearningAliases(user, text);
-  const command = await resolveUserCommand(user, alias.resolvedText, user.voiceLanguage);
+  const command = withSpokenAliasRestored(await resolveUserCommand(user, alias.resolvedText, user.voiceLanguage), alias.appliedRules);
 
   const policyBlock = await blockedByEmmaPolicy(user, command);
   if (policyBlock) return res.status(403).json({

@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { prisma } from "../db.js";
 import type { AuthedUser } from "../middleware/auth.js";
+import { recordAudit } from "../lib/audit.js";
+import { DELETE_VOICE_ALIAS_ACTION } from "../lib/actionContracts.js";
+import type { ParsedCommand } from "../lib/commandParser.js";
 
 /**
  * Learned voice aliases.
@@ -142,11 +145,44 @@ export async function listAliases(user: AuthedUser) {
   });
 }
 
-export async function deleteAlias(user: AuthedUser, id: string) {
-  const existing = await prisma.learningRule.findFirst({ where: { id, companyId: user.companyId } });
-  if (!existing) return false;
+/**
+ * Remove one alias. Only an alias: the id of another learning rule is not
+ * found here, so the alias permission cannot delete what the learning page
+ * governs. Audited whether the page asks or it is said.
+ */
+export async function deleteAlias(user: AuthedUser, id: string, via: "page" | "voice" = "page") {
+  const existing = await prisma.learningRule.findFirst({
+    where: { id, companyId: user.companyId, category: { in: [WAKE_WORD, VOICE_COMMAND] } },
+  });
+  if (!existing) return null;
   await prisma.learningRule.delete({ where: { id } });
-  return true;
+  await recordAudit({
+    companyId: user.companyId,
+    userId: user.id,
+    actionName: DELETE_VOICE_ALIAS_ACTION.actionName,
+    inputPayload: { aliasId: id, via },
+    dataBefore: { term: existing.term, aliasFor: existing.aliasFor, category: existing.category, status: existing.status },
+    riskLevel: DELETE_VOICE_ALIAS_ACTION.riskLevel,
+    confirmationRequired: via === "voice",
+    confirmed: via === "voice",
+    result: "success",
+  });
+  return { id: existing.id, term: existing.term, aliasFor: existing.aliasFor, category: existing.category };
+}
+
+/**
+ * Learned aliases rewrite a sentence before it is understood, so "zapomeň
+ * slovo Alfons" reaches the parser as "zapomeň slovo Alfonzo" — the alias
+ * would hide itself from the one command that names it. For that command the
+ * word actually spoken is put back, from the rewrite that was applied.
+ */
+export function withSpokenAliasRestored(command: ParsedCommand, applied: Array<{ term: string; aliasFor: string }>): ParsedCommand {
+  if (command.intent !== "execute_action" || command.entities.action !== "remove_voice_alias") return command;
+  const heard = command.entities.parameters.heard;
+  if (typeof heard !== "string") return command;
+  const rule = applied.find((candidate) => normalisePhrase(candidate.aliasFor) === normalisePhrase(heard));
+  if (!rule) return command;
+  return { ...command, entities: { ...command.entities, parameters: { ...command.entities.parameters, heard: rule.term } } };
 }
 
 /** Active wake-word spellings, so the client accepts every learned variant. */

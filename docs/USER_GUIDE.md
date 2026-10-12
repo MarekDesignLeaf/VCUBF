@@ -47,6 +47,10 @@ The edits the pages make can be said too, each found by name as above:
 - **Industry.** Its name, description and notes.
 - **Daily summary of what needs attention.** It can be switched on at a UK hour (“zapni mi denní souhrn v sedm ráno”) or off, or sent now after a read-back.
 
+Your own voice housekeeping can be said as well, and both are read back before anything is removed:
+- **Delete the saved conversations** (“Alfonzo, smaž historii rozhovorů”, “clear my voice history”). Alfonzo says how many conversations will go and whether an e-mail waiting for your yes will be withdrawn; after the yes the transcripts are deleted, the waiting e-mail is withdrawn and the current conversation ends. Microphone audio is never stored, so there is none to delete.
+- **Forget a learned word** (“zapomeň slovo Alfons”, “remove the alias Alfons”). Alfonzo names the spelling and what he has been taking it to mean, and removes it after the yes; it can be taught again later. Only voice aliases are removed this way, never other learning rules.
+
 Opening a list by voice also says what it lists, in two short sentences counted from the rows on the page:
 - **Clients and contacts:** how many, with the newest clients named.
 - **Jobs:** how many and how many are still open, with the newest open ones named.

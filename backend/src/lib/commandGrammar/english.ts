@@ -11,9 +11,15 @@ import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
   connectorTarget, extractContact, extractLabelled, fold, nameOnly, normalizeDictatedPhone, parseAgendaCommand,
-  parseEmailCommand, parseLanguageSwitch, parseNavigation, parseOpenRecord, parseSendDocument, parseWhatsAppCommand, withoutFinalPunctuation,
-  type CommandGrammar, type OpenRecordWords, type Parsed, type SendDocumentWords,
+  parseEmailCommand, parseLanguageSwitch, parseNavigation, parseOpenRecord, parseSendDocument, parseVoiceHousekeeping, parseWhatsAppCommand, withoutFinalPunctuation,
+  type CommandGrammar, type OpenRecordWords, type Parsed, type SendDocumentWords, type VoiceHousekeepingWords,
 } from "./shared.js";
+// "clear my voice history", "forget the word Alfons". Folded.
+const VOICE_HOUSEKEEPING: VoiceHousekeepingWords = {
+  clearHistory: /^(?:please\s+)?(?:(?:clear|delete|erase|wipe)\s+(?:all\s+)?(?:(?:of\s+)?(?:my|our|the)\s+)?(?:saved\s+)?(?:(?:voice|conversation|chat)\s+)*history|(?:clear|delete|erase)\s+(?:all\s+)?(?:(?:of\s+)?(?:my|our|the)\s+)?(?:saved\s+)?conversations(?:\s+with\s+you)?)(?:\s+please)?$/u,
+  forgetWord: /^(?:please\s+)?(?:forget|remove|delete)\s+(?:the\s+)?(?:learned\s+)?(?:word|alias)\s+(.+)$/u,
+};
+
 
 const UNPAID_INVOICE_QUESTION =
   /^(?:(?:how many )?unpaid invoices(?: do (?:i|we) have)?|how many outstanding invoices(?: do (?:i|we) have)?|who owes (?:us|me)(?: money)?|who (?:has|have)(?:n['’]?t| not) paid(?: (?:us|me))?|how much (?:are we|am i) owed)$/;
@@ -418,6 +424,7 @@ export const english: CommandGrammar = {
         week: /(?:next\s+(?:seven|7)\s+days|this\s+week)/iu,
         today: /today/iu,
       })
+      ?? parseVoiceHousekeeping(text, VOICE_HOUSEKEEPING)
       ?? notificationDeletion(text)
       ?? clientMutation(text)
       ?? leadMutation(text)

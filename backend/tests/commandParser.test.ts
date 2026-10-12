@@ -741,3 +741,30 @@ describe("moving a task to another day", () => {
     assert.equal(parseTextCommand("move task order materials to the warehouse", "en-GB").intent, "unrecognized");
   });
 });
+
+describe("the speaker's own voice housekeeping", () => {
+  const clear = { intent: "execute_action", entities: { action: "clear_voice_history", parameters: {} } };
+  const forget = (heard: string) => ({ intent: "execute_action", entities: { action: "remove_voice_alias", parameters: { heard } } });
+
+  it("asks for the saved conversations to be deleted in Czech, English and Polish", () => {
+    assert.deepEqual(parseTextCommand("Smaž historii rozhovorů.", "cs-CZ"), clear);
+    assert.deepEqual(parseTextCommand("vymažte celou historii konverzací", "cs-CZ"), clear);
+    assert.deepEqual(parseTextCommand("smaž všechny uložené rozhovory", "cs-CZ"), clear);
+    assert.deepEqual(parseTextCommand("Clear my voice history.", "en-GB"), clear);
+    assert.deepEqual(parseTextCommand("delete all my saved conversations", "en-GB"), clear);
+    assert.deepEqual(parseTextCommand("Usuń historię rozmów", "pl-PL"), clear);
+  });
+
+  it("names the learned word to forget as said, without the quotes", () => {
+    assert.deepEqual(parseTextCommand("Zapomeň slovo Alfons.", "cs-CZ"), forget("Alfons"));
+    assert.deepEqual(parseTextCommand("odeber naučené slovo „Alfonso“", "cs-CZ"), forget("Alfonso"));
+    assert.deepEqual(parseTextCommand("smaž alias ukaž zákazníky", "cs-CZ"), forget("ukaž zákazníky"));
+    assert.deepEqual(parseTextCommand("forget the word Alfons", "en-GB"), forget("Alfons"));
+    assert.deepEqual(parseTextCommand("zapomnij słowo Alfons", "pl-PL"), forget("Alfons"));
+  });
+
+  it("leaves the other deletions where they were", () => {
+    assert.equal(parseTextCommand("smaž klienta Novák", "cs-CZ").intent, "prepare_archive_client");
+    assert.equal(parseTextCommand("smaž oznámení", "cs-CZ").intent, "prepare_delete_notifications");
+  });
+});

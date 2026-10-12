@@ -108,6 +108,17 @@ class RuntimeControls(unittest.TestCase):
         self.assertEqual(session.result_message({"ok": True, "kind": "reply", "message": "Ano?"}), "Ano?")
         self.assertEqual(session.result_message({"ok": True, "kind": "action", "message": ""}), "Požadavek byl úspěšně dokončen.")
 
+    def test_ending_a_deleted_conversation_does_not_raise(self):
+        # Clearing the voice history deletes the live conversation; ending it
+        # afterwards answers 404, and the session must still shut down cleanly.
+        import asyncio
+        store = voice.TranscriptStore()
+        store.conversation_id = "deleted"
+        with patch.object(voice, "backend_json", side_effect=RuntimeError("404")), patch.object(voice, "log") as logged:
+            asyncio.run(store.end("completed"))
+        self.assertIsNone(store.conversation_id)
+        logged.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

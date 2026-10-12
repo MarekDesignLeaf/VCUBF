@@ -239,6 +239,18 @@ export function spokenReview(action: string, preview: Row | undefined, language:
       if (lang === "pl") return `Wyślę Ci podsumowanie na ${to}: pozycji ${count}${urgent ? `, w tym pilnych ${urgent}` : ""}. Temat: „${quote(preview.subject)}”. Czy mam je wysłać?`;
       return `I will email you the summary at ${to}: ${count} item${count === 1 ? "" : "s"}${urgent ? `, ${urgent} urgent` : ""}. Subject: “${quote(preview.subject)}”. Shall I send it?`;
     }
+    case "clear_voice_history": {
+      const how = counted(Number(preview.conversations) || 0, lang, CONVERSATIONS);
+      const email = Number(preview.pendingEmails) > 0;
+      if (lang === "cs") return `Smažu všechny uložené rozhovory se mnou, celkem ${how}${email ? ", a zruším e-mail, který čeká na vaše ano" : ""}. Skončí tím i tenhle rozhovor a vrátit to nepůjde. Mám je smazat?`;
+      if (lang === "pl") return `Usunę wszystkie zapisane rozmowy ze mną, razem ${how}${email ? ", i anuluję e-mail czekający na potwierdzenie" : ""}. Zakończy się też ta rozmowa i nie da się tego cofnąć. Czy mam je usunąć?`;
+      return `I will delete all your saved conversations with me, ${how} in total${email ? ", and withdraw the email waiting for your yes" : ""}. This conversation will end too, and it cannot be undone. Shall I delete them?`;
+    }
+    case "remove_voice_alias": {
+      if (lang === "cs") return `Zapomenu slovo „${quote(preview.heard)}“, které jsem bral jako „${quote(preview.means)}“. Mám ho odebrat?`;
+      if (lang === "pl") return `Zapomnę słowo „${quote(preview.heard)}”, które rozumiałem jako „${quote(preview.means)}”. Czy mam je usunąć?`;
+      return `I will forget “${quote(preview.heard)}”, which I have been taking as “${quote(preview.means)}”. Shall I remove it?`;
+    }
     case "send_quote":
     case "send_invoice": {
       const isQuote = action === "send_quote";
@@ -336,6 +348,13 @@ export function spokenOutcome(action: string | undefined, data: Row | undefined,
     }
     case "send_notification_digest":
       return lang === "cs" ? "Souhrn je odeslaný." : lang === "pl" ? "Podsumowanie zostało wysłane." : "The summary has been sent.";
+    case "clear_voice_history":
+      if (!Number(data?.conversations) && !Number(data?.pendingEmails)) {
+        return lang === "cs" ? "Žádné uložené rozhovory nemám, není co mazat." : lang === "pl" ? "Nie mam zapisanych rozmów, nie ma czego usuwać." : "There are no saved conversations to delete.";
+      }
+      return lang === "cs" ? "Historie rozhovorů je smazaná." : lang === "pl" ? "Historia rozmów została usunięta." : "Your conversation history has been deleted.";
+    case "remove_voice_alias":
+      return lang === "cs" ? `Slovo „${quote(data?.term)}“ jsem zapomněl.` : lang === "pl" ? `Zapomniałem słowo „${quote(data?.term)}”.` : `I have forgotten “${quote(data?.term)}”.`;
     case "send_quote":
       return lang === "cs" ? "Nabídka je odeslaná." : lang === "pl" ? "Oferta została wysłana." : "The quote has been sent.";
     case "send_invoice":
@@ -551,6 +570,8 @@ function counted(count: number, lang: Locale, forms: { cs: [string, string, stri
   return `${count} ${few ? forms[lang][1] : forms[lang][2]}`;
 }
 
+// After "celkem" / "razem": the accusative ("1 rozhovor", "1 rozmowę").
+const CONVERSATIONS = { cs: ["rozhovor", "rozhovory", "rozhovorů"], pl: ["rozmowę", "rozmowy", "rozmów"], en: ["conversation", "conversations"] } as { cs: [string, string, string]; pl: [string, string, string]; en: [string, string] };
 const MESSAGES = { cs: ["zpráva", "zprávy", "zpráv"], pl: ["wiadomość", "wiadomości", "wiadomości"], en: ["message", "messages"] } as { cs: [string, string, string]; pl: [string, string, string]; en: [string, string] };
 const OLDER = { cs: ["starší zpráva", "starší zprávy", "starších zpráv"], pl: ["starsza wiadomość", "starsze wiadomości", "starszych wiadomości"], en: ["older message", "older messages"] } as { cs: [string, string, string]; pl: [string, string, string]; en: [string, string] };
 const SENDERS = { cs: ["odesílatele", "odesílatelů", "odesílatelů"], pl: ["nadawcy", "nadawców", "nadawców"], en: ["sender", "senders"] } as { cs: [string, string, string]; pl: [string, string, string]; en: [string, string] };
@@ -715,6 +736,7 @@ const OTHER_WORDS: Record<string, Record<Locale, string>> = {
   document: { cs: "dokument", pl: "dokument", en: "document" },
   business_context: { cs: "položku", pl: "pozycję", en: "business context item" },
   industry: { cs: "odvětví", pl: "branżę", en: "industry" },
+  voice_alias: { cs: "naučené slovo", pl: "nauczone słowo", en: "learned word" },
 };
 
 function recordWord(kind: unknown, lang: Locale): string | undefined {

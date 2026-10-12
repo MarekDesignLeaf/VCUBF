@@ -18,8 +18,8 @@ const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const ALLOWED = new Map<string, string>([
   ["lib/executionEngine.ts", "the engine itself"],
   [
-    "modules/command/voiceState.ts",
-    "clearing the voice history withdraws the waiting email in the same transaction as the transcript deletion",
+    "services/voiceHistoryService.ts",
+    "clearing the voice history withdraws the waiting email in the same transaction as the transcript deletion (moved from the route so voice and page clear the same way)",
   ],
 ]);
 

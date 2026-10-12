@@ -6,6 +6,7 @@ import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { recordAudit } from "../../lib/audit.js";
 import { getAssistantContext } from "../../services/assistantMemoryService.js";
+import { clearVoiceHistory } from "../../services/voiceHistoryService.js";
 
 export const voiceStateRouter = Router();
 voiceStateRouter.use(requireAuth, requirePermission("voice.execute"));
@@ -236,27 +237,6 @@ voiceStateRouter.post("/voice-state/control", async (req, res) => {
 });
 
 voiceStateRouter.delete("/voice-state/history", async (req, res) => {
-  await prisma.$transaction([
-    prisma.voiceConversation.deleteMany({ where: { userId: req.user!.id, companyId: req.user!.companyId } }),
-    prisma.voicePendingAction.updateMany({
-      where: { userId: req.user!.id, companyId: req.user!.companyId, actionType: "send_gmail_message", status: "pending" },
-      data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: new Date() },
-    }),
-    prisma.voiceDeviceState.updateMany({
-      where: { userId: req.user!.id, companyId: req.user!.companyId },
-      data: { lastTranscript: null, lastResponse: null, lastUiAction: Prisma.DbNull, lastHeardAt: null, pendingControl: "end_conversation" },
-    }),
-  ]);
-  await recordAudit({
-    companyId: req.user!.companyId,
-    userId: req.user!.id,
-    actionName: "clear_voice_device_history",
-    interpretedIntent: "end active voice conversation and clear transcript history",
-    inputPayload: {},
-    riskLevel: 0,
-    confirmationRequired: false,
-    result: "success",
-  });
-  const state = await prisma.voiceDeviceState.findUnique({ where: { userId: req.user!.id } });
-  res.json(publicState(state));
+  const cleared = await clearVoiceHistory(req.user!, "page");
+  res.json(publicState(cleared.state));
 });
