@@ -32,7 +32,7 @@ import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction, g
 import { cancelAgentProposal, confirmAgentProposal } from "../agents/agentProposal.js";
 import { SAFE_MODE_ACTIVE, SafeModeActiveError, safeModeMessage, safeModeSince } from "./safeMode.js";
 import { commandAllowedInSafeMode } from "./safeModeCommands.js";
-import { spokenCancelled, spokenCompleted, spokenError, spokenNothingBeingRead, spokenOutcome, spokenReadingTurn, spokenOpenRecord, spokenReview, spokenWhatsAppDetailsMissing } from "./spokenActionMessages.js";
+import { spokenCancelled, spokenCompleted, spokenError, spokenNothingBeingRead, spokenOutcome, spokenReadingTurn, spokenListSummary, spokenOpenRecord, spokenReview, spokenWhatsAppDetailsMissing } from "./spokenActionMessages.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
 // service function(s) and returns a uniform, structured response. This is
@@ -1460,9 +1460,13 @@ async function dispatchAllowedCommand(
       ? undefined
       : buildCommandUiAction(response.intent, response.data, response.interpreted, user.voiceLanguage);
     if (!response.message) {
-      response.message = response.uiAction?.kind === "navigate"
+      const opening = response.uiAction?.kind === "navigate"
         ? openingVoiceLabelMessage(response.uiAction.label, user.voiceLanguage)
         : completedVoiceCommandMessage(user.voiceLanguage);
+      // A list opened by voice is also said: how many, and the newest by name.
+      // Said in Czech, Polish and English only, the languages the summaries are written in.
+      const summary = /^(?:cs|pl|en)/.test(user.voiceLanguage) ? spokenListSummary(response.intent, response.data, user.voiceLanguage) : undefined;
+      response.message = summary ? `${opening} ${summary}` : opening;
     }
   }
   return response;

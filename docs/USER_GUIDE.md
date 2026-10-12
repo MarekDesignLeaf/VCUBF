@@ -47,6 +47,16 @@ The edits the pages make can be said too, each found by name as above:
 - **Industry.** Its name, description and notes.
 - **Daily summary of what needs attention.** It can be switched on at a UK hour (“zapni mi denní souhrn v sedm ráno”) or off, or sent now after a read-back.
 
+Opening a list by voice also says what it lists, in two short sentences counted from the rows on the page:
+- **Clients and contacts:** how many, with the newest clients named.
+- **Jobs:** how many and how many are still open, with the newest open ones named.
+- **Tasks:** the open ones, how many are due today and how many are overdue, in UK time.
+- **Quotes:** how many are draft, sent and accepted.
+- **Leads:** how many are new, with the newest named.
+- **Job openings:** the open ones.
+
+The summaries are spoken in Czech, Polish and English.
+
 The installer also creates a single **VCUBF Secretary** desktop icon. Double-clicking it starts Alfonzo before opening one production sign-in flow in the default browser. The one-time device handoff completes automatically after a successful login, so the browser and companion use the same VCUBF account without a second approval click. On a fresh companion start Alfonzo says that she is active and listening. After the first successful login, the page pre-fills the last-used email on this PC; the browser remains responsible for offering any saved password. The encrypted device session lasts up to 30 days but is revoked by password changes, account disablement or session invalidation.
 
 ## 3. Enquiries, leads, clients and contacts

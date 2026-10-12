@@ -208,7 +208,8 @@ describe("command/text", () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.intent, "list_clients");
     assert.equal(res.body.ok, true);
-    assert.equal(res.body.message, "Opening Clients.");
+    // The page is opened and what it lists is said: how many, and the newest by name.
+    assert.match(res.body.message, /^Opening Clients\. You have \d+ clients?\./);
     assert.equal(res.body.uiAction.path, "/clients");
 
     const state = await request(app)
@@ -234,7 +235,8 @@ describe("command/text", () => {
     assert.equal(res.body.kind, "action");
     assert.equal(res.body.intent, "list_clients");
     assert.equal(res.body.ok, true);
-    assert.equal(res.body.message, "Opening Clients.");
+    // The page is opened and what it lists is said: how many, and the newest by name.
+    assert.match(res.body.message, /^Opening Clients\. You have \d+ clients?\./);
   });
 
   it("navigates the signed-in application without changing business data", async () => {
