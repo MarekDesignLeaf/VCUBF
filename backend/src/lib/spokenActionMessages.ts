@@ -310,8 +310,11 @@ export function spokenOutcome(action: string | undefined, data: Row | undefined,
     case "send_email":
     case "reply_email":
       return lang === "cs" ? "E-mail je odeslaný." : lang === "pl" ? "E-mail został wysłany." : "The email has been sent.";
-    case "update_task":
-      return lang === "cs" ? `Úkol „${quote(data?.title)}“ je upravený.` : lang === "pl" ? `Zadanie „${quote(data?.title)}” zostało zmienione.` : `The task “${quote(data?.title)}” has been updated.`;
+    case "update_task": {
+      // The task service answers with the task and any capacity warning beside it.
+      const title = data?.task?.title ?? data?.title;
+      return lang === "cs" ? `Úkol „${quote(title)}“ je upravený.` : lang === "pl" ? `Zadanie „${quote(title)}” zostało zmienione.` : `The task “${quote(title)}” has been updated.`;
+    }
     case "update_service":
       return lang === "cs" ? `Služba „${quote(data?.name)}“ je upravená.` : lang === "pl" ? `Usługa „${quote(data?.name)}” została zmieniona.` : `The service “${quote(data?.name)}” has been updated.`;
     case "update_invoice":
