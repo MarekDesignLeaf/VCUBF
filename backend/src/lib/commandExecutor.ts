@@ -34,6 +34,7 @@ import { cancelPendingEmmaAction, confirmPendingEmmaAction, executeEmmaAction, g
 import { cancelAgentProposal, confirmAgentProposal } from "../agents/agentProposal.js";
 import { SAFE_MODE_ACTIVE, SafeModeActiveError, safeModeMessage, safeModeSince } from "./safeMode.js";
 import { commandAllowedInSafeMode } from "./safeModeCommands.js";
+import { evaluateEmmaCommand } from "../services/emmaPolicyService.js";
 import { spokenCancelled, spokenCompleted, spokenError, spokenListSummary, spokenLookupFailure, spokenMemory, spokenNothingBeingRead, spokenOpenRecord, spokenOutcome, spokenReadingTurn, spokenReview, spokenWhatsAppDetailsMissing } from "./spokenActionMessages.js";
 
 // Action Engine — dispatches a already-parsed command to the matching
@@ -209,31 +210,40 @@ function safeModeRefusal(user: AuthedUser, command: ParsedCommand): CommandRespo
 
 /**
  * A list page opened by voice ("otevři faktury") says what it lists, as a list
- * command does: read with the permission the page itself needs, so nothing is
- * said that the page would not show. Each loader is the one the page's own
- * list uses.
+ * command does. Nothing is said that the list would not say: where a list
+ * command exists, the summary passes that command's own gate (the user's
+ * permission and what the company has switched off for the assistant);
+ * otherwise the page's permission. Each loader is the one the page's own list uses.
  */
-const PAGE_LISTS: Partial<Record<VoicePage, { summary: string; permission: string; rows: (user: AuthedUser) => Promise<unknown> }>> = {
-  clients: { summary: "list_clients", permission: "crm.read", rows: (user) => clientService.listClients(user) },
-  contacts: { summary: "list_contacts", permission: "crm.read", rows: (user) => contactService.listContacts(user, { activeOnly: true }) },
-  leads: { summary: "list_leads", permission: "crm.read", rows: (user) => leadService.listLeads(user, {}) },
-  jobs: { summary: "list_jobs", permission: "crm.read", rows: (user) => jobService.listJobs(user, {}) },
-  tasks: { summary: "list_tasks", permission: "crm.read", rows: (user) => taskService.listTasks(user) },
-  quotes: { summary: "list_quotes", permission: "crm.read", rows: (user) => quoteService.listQuotes(user, {}) },
+type PageList = { summary: string; rows: (user: AuthedUser) => Promise<unknown> } & (
+  | { command: ParsedCommand["intent"]; permission?: never }
+  | { permission: string; command?: never }
+);
+const PAGE_LISTS: Partial<Record<VoicePage, PageList>> = {
+  clients: { summary: "list_clients", command: "list_clients", rows: (user) => clientService.listClients(user) },
+  contacts: { summary: "list_contacts", command: "list_contacts", rows: (user) => contactService.listContacts(user, { activeOnly: true }) },
+  leads: { summary: "list_leads", command: "list_leads", rows: (user) => leadService.listLeads(user, {}) },
+  jobs: { summary: "list_jobs", command: "list_jobs", rows: (user) => jobService.listJobs(user, {}) },
+  tasks: { summary: "list_tasks", command: "list_tasks", rows: (user) => taskService.listTasks(user) },
+  quotes: { summary: "list_quotes", command: "list_quotes", rows: (user) => quoteService.listQuotes(user, {}) },
+  notifications: { summary: "list_notifications", command: "list_notifications", rows: (user) => notificationService.getAttentionFeed(user) },
+  recruitment: { summary: "list_job_openings", command: "list_job_openings", rows: (user) => recruitmentService.listJobOpenings(user, {}) },
+  photos: { summary: "list_portfolio_photos", command: "list_portfolio_photos", rows: (user) => portfolioService.listPortfolioPhotos(user, {}) },
+  data_quality: { summary: "list_data_quality", command: "list_data_quality", rows: (user) => dataQualityService.getDataQualityReport(user) },
   invoices: { summary: "list_invoices", permission: "crm.read", rows: (user) => invoiceService.listInvoices(user) },
   documents: { summary: "list_documents", permission: "crm.read", rows: (user) => documentRecordService.listDocumentRecords(user, { activeOnly: true }) },
   services: { summary: "list_services", permission: "crm.read", rows: (user) => serviceCatalogueService.listServices(user) },
   playbooks: { summary: "list_playbooks", permission: "voice.execute", rows: (user) => prisma.playbook.findMany({ where: { companyId: user.companyId }, select: { name: true, isActive: true } }) },
-  notifications: { summary: "list_notifications", permission: "crm.read", rows: (user) => notificationService.getAttentionFeed(user) },
-  recruitment: { summary: "list_job_openings", permission: "recruitment.manage", rows: (user) => recruitmentService.listJobOpenings(user, {}) },
-  photos: { summary: "list_portfolio_photos", permission: "crm.read", rows: (user) => portfolioService.listPortfolioPhotos(user, {}) },
-  data_quality: { summary: "list_data_quality", permission: "crm.read", rows: (user) => dataQualityService.getDataQualityReport(user) },
 };
 
 async function spokenPageSummary(user: AuthedUser, page: VoicePage): Promise<string | undefined> {
   const list = PAGE_LISTS[page];
   // Written in Czech, Polish and English only.
-  if (!list || !user.permissions.includes(list.permission) || !/^(?:cs|pl|en)/.test(user.voiceLanguage)) return undefined;
+  if (!list || !/^(?:cs|pl|en)/.test(user.voiceLanguage)) return undefined;
+  const allowed = list.command
+    ? (await evaluateEmmaCommand(user, list.command)).allowed
+    : user.permissions.includes(list.permission);
+  if (!allowed) return undefined;
   try {
     return spokenListSummary(list.summary, await list.rows(user), user.voiceLanguage);
   } catch (error) {

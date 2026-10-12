@@ -62,6 +62,7 @@ describe("what the other lists say", () => {
     ];
     assert.equal(spokenListSummary("list_invoices", invoices, "cs-CZ", now), "Máte 4 faktury, konceptů 1, neuhrazených 2 a po splatnosti 1.");
     assert.equal(spokenListSummary("list_invoices", invoices, "en-GB", now), "You have 4 invoices, 1 draft, 2 unpaid and 1 overdue.");
+    assert.equal(spokenListSummary("list_invoices", [...invoices, { invoiceStatus: "void", totals: { balance: 0 } }], "en-GB", now), "You have 4 invoices, 1 draft, 2 unpaid and 1 overdue.", "a voided invoice is not counted");
     const documents = [
       { isActive: true, expiresAt: "2026-10-20T00:00:00Z" },
       { isActive: true, expiresAt: "2026-09-01T00:00:00Z" },
@@ -97,6 +98,7 @@ describe("what the other lists say", () => {
       { senderLabel: "+447700900111", receivedAt: "2026-10-01T10:00:00Z", overdue: true },
     ];
     assert.equal(spokenListSummary("list_unresolved_enquiries", enquiries, "cs-CZ"), "Máte 2 nevyřízené dotazy, po termínu 1. Nejdéle čekají: +447700900111 a Eva Malá.");
+    assert.equal(spokenListSummary("list_unresolved_enquiries", [{ senderLabel: "Unknown sender", receivedAt: "2026-10-01T10:00:00Z" }], "cs-CZ"), "Máte 1 nevyřízený dotaz.", "a sender with no name is counted, not named in English");
     const followUps = [{ client: { displayName: "Jan Novák" } }, { client: { displayName: "Jan Novák" } }, { client: { displayName: "Eva Malá" } }];
     assert.equal(spokenListSummary("list_follow_ups", followUps, "cs-CZ"), "Máte 3 připomenutí klientům: Jan Novák a Eva Malá.");
   });

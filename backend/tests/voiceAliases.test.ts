@@ -5,7 +5,7 @@ import { createServer } from "../src/server.js";
 import { prisma } from "../src/db.js";
 import { resetDb, seedCompanyAndAdmin } from "./setup.js";
 import { resolveLearningAliases } from "../src/services/learningService.js";
-import { aliasVocabulary } from "../src/services/voiceAliasService.js";
+import { aliasVocabulary, withSpokenAliasRestored } from "../src/services/voiceAliasService.js";
 
 const app = createServer();
 
@@ -196,5 +196,14 @@ describe("Voice aliases", () => {
     const forAlfonzo = await aliasVocabulary(admin.companyId, ["Alfonzo", "Alfonzo"]);
     assert.ok(!forAlfonzo.includes("Emma"), "the old name must not be suggested to the decoder");
     assert.ok(forAlfonzo.includes("ukaž klienty"), "command aliases survive a rename");
+  });
+
+  it("puts back the word to forget, not the misheard name that addressed him", () => {
+    // "Alfonso, zapomeň slovo Alfons": both spellings were rewritten to Alfonzo.
+    const command = { intent: "execute_action", entities: { action: "remove_voice_alias", parameters: { heard: "Alfonzo" } } } as Parameters<typeof withSpokenAliasRestored>[0];
+    const restored = withSpokenAliasRestored(command, [{ term: "alfonso", aliasFor: "Alfonzo" }, { term: "alfons", aliasFor: "Alfonzo" }]);
+    assert.deepEqual((restored as { entities: { parameters: unknown } }).entities.parameters, { heard: "alfons" });
+    const other = { intent: "list_clients", entities: {} } as Parameters<typeof withSpokenAliasRestored>[0];
+    assert.equal(withSpokenAliasRestored(other, [{ term: "alfons", aliasFor: "Alfonzo" }]), other);
   });
 });

@@ -55,6 +55,27 @@ describe("Voice housekeeping by voice", () => {
     assert.deepEqual(audit.dataBefore, { conversations: 1, messages: 1, pendingEmails: 0 });
   });
 
+  it("answers the review it read out when an email is waiting for a yes too", async () => {
+    // Two reviews at once: a bare yes would be a guess. The client says which
+    // review it read out (review_id), and that one is answered.
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } });
+    await request(app).post("/command/voice-conversations").set(as()).send({ mode: "realtime" }).expect(201);
+    const email = await prisma.voicePendingAction.create({
+      data: { companyId: admin.companyId, userId: admin.id, actionType: "send_gmail_message", payload: { subject: "Draft" }, expiresAt: new Date(Date.now() + 300_000) },
+    });
+    const review = await say("voice action clear_voice_history {}");
+    assert.equal(review.status, 409, JSON.stringify(review.body));
+    assert.match(review.body.message, /, and withdraw the email waiting for your yes\. /);
+    const heard = review.body.pendingReview?.id;
+    assert.ok(heard, "the client is told which review it read out");
+
+    const yes = await request(app).post("/command/assistant").set(as()).send({ text: "yes", input_method: "voice_transcript", review_id: heard });
+    assert.equal(yes.status, 200, JSON.stringify(yes.body));
+    assert.equal(yes.body.message, "Your conversation history has been deleted.");
+    assert.equal(await prisma.voiceConversation.count({ where: { userId: admin.id } }), 0);
+    assert.equal((await prisma.voicePendingAction.findUniqueOrThrow({ where: { id: email.id } })).status, "cancelled", "the email that was read out as withdrawn is withdrawn");
+  });
+
   it("withdraws the email waiting for a yes when the page clears the history, as voice does", async () => {
     const admin = await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } });
     const email = await prisma.voicePendingAction.create({

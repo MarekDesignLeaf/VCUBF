@@ -98,7 +98,8 @@ export const COMMAND_POLICY = {
   prepare_gmail_message: { category: "communication", mode: "external", actionName: "prepare_voice_gmail_message" },
   confirm_gmail_message: { category: "communication", mode: "external", actionName: "confirm_voice_gmail_message" },
   cancel_gmail_message: { category: "communication", mode: "external", actionName: "cancel_voice_gmail_message" },
-  list_calendar_events: { category: "work", mode: "read", requiredPermission: "crm.read" },
+  // Google Calendar events: on the web they come from the connector, which needs connectors.read.
+  list_calendar_events: { category: "work", mode: "read", requiredPermission: "connectors.read" },
   prepare_whatsapp_message: { category: "communication", mode: "external", actionName: "send_whatsapp_message" },
   confirm_whatsapp_message: { category: "communication", mode: "external", actionName: "send_whatsapp_message" },
   cancel_whatsapp_message: { category: "communication", mode: "external", actionName: "send_whatsapp_message" },

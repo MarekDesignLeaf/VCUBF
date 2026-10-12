@@ -25,7 +25,7 @@ import { hasPendingVoiceClientCreation } from "../../services/clientService.js";
 import { activeReading, senderJustRead } from "../../services/messageReadingService.js";
 import { assistantNameFor, nameAcknowledgement, onlyTheName } from "../../lib/assistantName.js";
 import { acceptedByService, observeShadow, parserOutcomeOf } from "../../agents/shadowAgent.js";
-import { isReviewPending, runWithApprovalBinding } from "../../lib/executionEngine.js";
+import { isReviewPending, pendingReviewType, runWithApprovalBinding } from "../../lib/executionEngine.js";
 import { agentMayHandle, hasAgentProposalPending, proposeWithAgent } from "../../agents/agentProposal.js";
 
 /**
@@ -134,7 +134,7 @@ type ParsedTextCommand = ReturnType<typeof parseTextCommand>;
  * a sentence is read only with that language's grammar, so with Czech on a
  * Polish sentence is not understood.
  */
-async function resolveUserCommand(user: AuthedUser, text: string, reader: string): Promise<ParsedTextCommand> {
+async function resolveUserCommand(user: AuthedUser, text: string, reader: string, reviewId?: string | null): Promise<ParsedTextCommand> {
   // While messages are read out one sender at a time, "přeskoč ho", "další"
   // and "starší" move through them — before anything else, and only then: at
   // any other time a bare "další" means nothing.
@@ -153,42 +153,57 @@ async function resolveUserCommand(user: AuthedUser, text: string, reader: string
     getPendingEmmaActionName(user),
     hasAgentProposalPending(user),
   ]);
-  const pendingActions: Array<{ pending: boolean; confirm: ParsedTextCommand; cancel: ParsedTextCommand }> = [
+  const pendingActions: Array<{ actionType: string; pending: boolean; confirm: ParsedTextCommand; cancel: ParsedTextCommand }> = [
     {
+      actionType: "create_client",
       pending: clientCreatePending,
       confirm: { intent: "confirm_create_client", entities: {} },
       cancel: { intent: "cancel_create_client", entities: {} },
     },
     {
+      actionType: "send_gmail_message",
       pending: gmailPending,
       confirm: { intent: "confirm_gmail_message", entities: {} },
       cancel: { intent: "cancel_gmail_message", entities: {} },
     },
     {
+      actionType: "send_whatsapp_message",
       pending: whatsappPending,
       confirm: { intent: "confirm_whatsapp_message", entities: {} },
       cancel: { intent: "cancel_whatsapp_message", entities: {} },
     },
     {
+      actionType: "delete_all_notifications",
       pending: notificationDeletionPending,
       confirm: { intent: "confirm_delete_notifications", entities: {} },
       cancel: { intent: "cancel_delete_notifications", entities: {} },
     },
     {
+      actionType: "emma_universal_action",
       pending: Boolean(pendingEmmaAction),
       confirm: { intent: "confirm_execute_action", entities: { action: pendingEmmaAction! } },
       cancel: { intent: "cancel_execute_action", entities: { action: pendingEmmaAction! } },
     },
     {
+      actionType: "agent_proposal",
       pending: agentProposalPending,
       confirm: { intent: "confirm_agent_proposal", entities: {} },
       cancel: { intent: "cancel_agent_proposal", entities: {} },
     },
   ];
   const active = pendingActions.filter((candidate) => candidate.pending);
-  if (active.length !== 1) return parsed;
-  if (isGmailConfirmationPhrase(text, reader)) return active[0].confirm;
-  if (isGmailCancellationPhrase(text, reader)) return active[0].cancel;
+  // Two reviews waiting at once (an e-mail, and then clearing the history that
+  // mentions it): a bare yes would be a guess. When the client says which
+  // review it read out (review_id, §41), that one is answered; without it,
+  // nothing is chosen. The approval binding then checks the claim is that review.
+  let answered = active.length === 1 ? active[0] : undefined;
+  if (!answered && active.length > 1 && reviewId) {
+    const heard = await pendingReviewType(user, reviewId);
+    answered = heard ? active.find((candidate) => candidate.actionType === heard) : undefined;
+  }
+  if (!answered) return parsed;
+  if (isGmailConfirmationPhrase(text, reader)) return answered.confirm;
+  if (isGmailCancellationPhrase(text, reader)) return answered.cancel;
   return parsed;
 }
 
@@ -568,7 +583,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
     return res.json({ ok: true, kind: "reply", actionExecuted: false, message: nameAcknowledgement(language) });
   }
   const alias = await resolveLearningAliases(user, text);
-  let command = await resolveUserCommand(user, alias.resolvedText, language);
+  let command = await resolveUserCommand(user, alias.resolvedText, language, parsedBody.data.review_id);
   logAssistantOutcome(res, language, receivedAt, text, () => ({
     path: assistant ? `model:${assistant.kind}` : "grammar",
     // The model's command, redacted as the audit redacts it.
@@ -677,7 +692,7 @@ commandRouter.post("/assistant", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.r
         message: safeNonActionAssistantMessage(assistant.message, language),
       });
     }
-    command = await resolveUserCommand(user, assistant.canonical_command, CANONICAL_COMMAND);
+    command = await resolveUserCommand(user, assistant.canonical_command, CANONICAL_COMMAND, parsedBody.data.review_id);
     if (command.intent === "unrecognized") {
       // The user hears "not supported yet" while the command the model
       // actually produced disappears. Recording it is what tells the
@@ -785,7 +800,7 @@ commandRouter.post("/text", requirePermission(EXECUTE_TEXT_COMMAND_ACTION.requir
   const user = req.user!;
 
   const alias = await resolveLearningAliases(user, text);
-  const command = withSpokenAliasRestored(await resolveUserCommand(user, alias.resolvedText, user.voiceLanguage), alias.appliedRules);
+  const command = withSpokenAliasRestored(await resolveUserCommand(user, alias.resolvedText, user.voiceLanguage, parsedBody.data.review_id), alias.appliedRules);
 
   const policyBlock = await blockedByEmmaPolicy(user, command);
   if (policyBlock) return res.status(403).json({

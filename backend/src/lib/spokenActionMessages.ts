@@ -944,7 +944,8 @@ export function spokenListSummary(intent: string, data: unknown, language: strin
         part(unpaid, { cs: "neuhrazených", pl: "nieopłaconych", en: "unpaid" }, lang),
         part(rows.filter((row) => row.isOverdue === true).length, { cs: "po splatnosti", pl: "po terminie", en: "overdue" }, lang),
       ].filter(Boolean);
-      return youHave(counted(rows.length, lang, INVOICES) + (parts.length ? `, ${spokenList(parts, lang)}` : ""));
+      // A voided invoice is no longer one of yours to deal with.
+      return youHave(counted(rows.filter((row) => row.invoiceStatus !== "void").length, lang, INVOICES) + (parts.length ? `, ${spokenList(parts, lang)}` : ""));
     }
     case "list_documents": {
       const active = rows.filter((row) => row.isActive !== false);
@@ -987,7 +988,8 @@ export function spokenListSummary(intent: string, data: unknown, language: strin
     case "list_unresolved_enquiries": {
       const overdue = part(rows.filter((row) => row.overdue === true).length, { cs: "po termínu", pl: "po terminie", en: "overdue" }, lang);
       const waiting = [...rows].sort((left, right) => new Date(left.receivedAt ?? 0).getTime() - new Date(right.receivedAt ?? 0).getTime());
-      const senders = [...new Set(waiting.map((row) => String(row.senderLabel ?? "")).filter(Boolean))].slice(0, NAMED_IN_SUMMARY);
+      // A sender with no name, address or number is counted, not named ("Unknown sender" is the page's English label).
+      const senders = [...new Set(waiting.map((row) => String(row.senderLabel ?? "")).filter((label) => label && label !== "Unknown sender"))].slice(0, NAMED_IN_SUMMARY);
       const longest = senders.length ? (lang === "cs" ? ` Nejdéle čekají: ${spokenList(senders, lang)}.` : lang === "pl" ? ` Najdłużej czekają: ${spokenList(senders, lang)}.` : ` Waiting longest: ${spokenList(senders, lang)}.`) : "";
       return youHave(counted(rows.length, lang, ENQUIRIES) + (overdue ? `, ${overdue}` : "")) + longest;
     }

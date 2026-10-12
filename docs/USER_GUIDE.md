@@ -48,7 +48,7 @@ The edits the pages make can be said too, each found by name as above:
 - **Daily summary of what needs attention.** It can be switched on at a UK hour (“zapni mi denní souhrn v sedm ráno”) or off, or sent now after a read-back.
 
 Your own voice housekeeping can be said as well, and both are read back before anything is removed:
-- **Delete the saved conversations** (“Alfonzo, smaž historii rozhovorů”, “clear my voice history”). Alfonzo says how many conversations will go and whether an e-mail waiting for your yes will be withdrawn; after the yes the transcripts are deleted, the waiting e-mail is withdrawn and the current conversation ends. Microphone audio is never stored, so there is none to delete.
+- **Delete the saved conversations** (“Alfonzo, smaž historii rozhovorů”, “clear my voice history”). Alfonzo says how many conversations will go and whether an e-mail waiting for your yes will be withdrawn; after the yes the transcripts are deleted, the waiting e-mail is withdrawn and the current conversation ends. Microphone audio is never stored, so there is none to delete. When an e-mail and this review both wait, the web app tells Secretary which one it read out, so the yes answers the history review.
 - **Forget a learned word** (“zapomeň slovo Alfons”, “remove the alias Alfons”). Alfonzo names the spelling and what he has been taking it to mean, and removes it after the yes; it can be taught again later. Only voice aliases are removed this way, never other learning rules.
 
 Opening a list by voice also says what it lists, in two short sentences counted from the rows on the page:
@@ -67,7 +67,7 @@ Opening a list by voice also says what it lists, in two short sentences counted 
 - **Communications, photos and learning rules:** how many (photos: how many are usable for marketing).
 - **Data quality:** how many possible duplicate clients and clients without contact details, or that nothing needs fixing.
 
-This holds whether the list is asked for (“ukaž faktury”) or its page is opened (“otevři faktury”). A list is only read out to an account that may open its page: clients, jobs, quotes, invoices and the other customer lists need **crm.read**, job openings **recruitment.manage**, connector status **connectors.read**.
+This holds whether the list is asked for (“ukaž faktury”) or its page is opened (“otevři faktury”). A list is only read out to an account that may open its page: clients, jobs, quotes, invoices and the other customer lists need **crm.read**, job openings **recruitment.manage**, connector status and the Google Calendar agenda (“co mám zítra”) **connectors.read**. Where a list has its own assistant capability, switching it off for the company also stops the list being read out when its page is opened.
 
 The summaries are spoken in Czech, Polish and English. A record that is not found, or that fits more than once, is also answered in Czech or Polish when that language is switched on, and so is what Alfonzo remembers.
 

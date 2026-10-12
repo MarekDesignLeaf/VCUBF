@@ -180,7 +180,9 @@ export function withSpokenAliasRestored(command: ParsedCommand, applied: Array<{
   if (command.intent !== "execute_action" || command.entities.action !== "remove_voice_alias") return command;
   const heard = command.entities.parameters.heard;
   if (typeof heard !== "string") return command;
-  const rule = applied.find((candidate) => normalisePhrase(candidate.aliasFor) === normalisePhrase(heard));
+  // The last such rewrite: the word to forget follows the command ("zapomeň
+  // slovo Alfons"), while a misheard name that addresses him comes first.
+  const rule = [...applied].reverse().find((candidate) => normalisePhrase(candidate.aliasFor) === normalisePhrase(heard));
   if (!rule) return command;
   return { ...command, entities: { ...command.entities, parameters: { ...command.entities.parameters, heard: rule.term } } };
 }
