@@ -29,7 +29,8 @@ describe("Editing by voice", () => {
   });
 
   it("moves a task to a spoken day without the model, and assigns it to someone named as said", async () => {
-    const task = (await api("post", "/tasks", { title: "Objednat materiál" })).body;
+    // The task service answers with the task beside any capacity warning.
+    const task = (await api("post", "/tasks", { title: "Objednat materiál" })).body.task;
     // The account speaks English here; the Czech "přesuň úkol … na pátek" is the same action (commandParser tests).
     const moved = await say("Move task Objednat materiál to Friday.");
     assert.equal(moved.status, 200, JSON.stringify(moved.body));
