@@ -150,7 +150,8 @@ function isApprovalTurn(intent: string) {
   return intent.startsWith("confirm_") || intent.startsWith("cancel_");
 }
 
-function isReadCommand(intent: ParsedCommand["intent"]) {
+/** A command that only reads: run straight away by the agent, and the only commands the read-only MCP gateway runs. */
+export function isReadCommand(intent: ParsedCommand["intent"]) {
   return COMMAND_POLICY[intent].mode === "read" && !READS_NOT_RUN.has(intent);
 }
 

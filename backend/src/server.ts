@@ -41,6 +41,7 @@ import { invoicesRouter } from "./modules/invoices/routes.js";
 import { devicePairingRouter } from "./modules/auth/devicePairing.js";
 import { voiceStateRouter } from "./modules/command/voiceState.js";
 import { companyRouter } from "./modules/company/routes.js";
+import { mcpRouter } from "./modules/mcp/routes.js";
 import { startConnectorBackgroundSync } from "./services/connectorBackgroundSyncService.js";
 import { SafeModeActiveError, safeModeMessage } from "./lib/safeMode.js";
 import { ASSISTANT_NAME_TOKEN, assistantNameFor, withAssistantName } from "./lib/assistantName.js";
@@ -127,6 +128,8 @@ export function createServer() {
   app.use("/connectors", connectorsRouter);
   app.use("/metrics", metricsRouter);
   app.use("/invoices", invoicesRouter);
+  // Read-only MCP gateway for external AI clients; answers 404 unless MCP_GATEWAY_ENABLED=true.
+  app.use("/mcp", mcpRouter);
 
   // Fallback error handler — the system must fail safely, never crash silently.
   app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
