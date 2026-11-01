@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 35 mounted route groups, 53 Prisma models, 151 Action Contracts,
+- **Backend**: 37 mounted route groups, 55 Prisma models, 152 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,
@@ -109,7 +109,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 104 test files, including database integration tests and checks that only
+- **Tests**: 105 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -905,8 +905,18 @@ it as a read. Every call goes through `requireAuth` (identity, emergency stop), 
 permissions and the administrator's capability switches, and is audited as `mcp_read_tool`
 with the tool name, the result and a keyed fingerprint of the arguments. Nothing can be
 written, sent or deleted through it. The path answers 404 unless `MCP_GATEWAY_ENABLED=true`.
-Authentication is the existing Bearer token; OAuth 2.1 for ChatGPT and Claude connectors is
-the next step and is not implemented yet. Covered by `tests/mcpGateway.test.ts`; no live
+ChatGPT and Claude connect through OAuth 2.1 (`backend/src/modules/mcp/oauth.ts`):
+discovery at `/.well-known/oauth-protected-resource[/mcp]` and
+`/.well-known/oauth-authorization-server`, Dynamic Client Registration at
+`/oauth/register` (public clients only), authorization code with PKCE S256 at
+`/oauth/authorize` (the person approves with their Secretary e-mail and password; the only
+scope is `secretary.read`; audited as `authorize_mcp_client`) and `/oauth/token` with
+refresh tokens rotated on every use. Codes and refresh tokens are stored as hashes
+(`McpOAuthClient`, `McpOAuthGrant`); access tokens are one-hour, purpose-restricted JWTs
+bound to the `/mcp` resource that every other route refuses. A replayed code or refresh
+token revokes the chain; a password change ends every connection. The issuer is
+`MCP_PUBLIC_URL`, or the request origin when unset. The owner's own Bearer token still
+works on `/mcp`. Covered by `tests/mcpGateway.test.ts` and `tests/mcpOAuth.test.ts`; no live
 ChatGPT or Claude connection has been accepted.
 
 ## What's deliberately NOT here yet

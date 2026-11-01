@@ -102,3 +102,47 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return res.status(401).json({ error: "MISSING_PERMISSION", message: "Invalid token" });
   }
 }
+
+/** The account as every authenticated route sees it, from its database row. */
+export function authedUserFromRecord(record: {
+  id: string; companyId: string; email: string; displayName: string; role: string; permissions: string[];
+  mustChangePassword: boolean; voiceWakeWord: string; voiceContinuous: boolean; voiceLanguage: string;
+  assistantName: string; voiceSpeechRate: number;
+}): AuthedUser {
+  return {
+    id: record.id, companyId: record.companyId, email: record.email, displayName: record.displayName,
+    role: record.role, permissions: record.permissions, mustChangePassword: record.mustChangePassword,
+    voiceWakeWord: record.voiceWakeWord, voiceContinuous: record.voiceContinuous, voiceLanguage: record.voiceLanguage,
+    assistantName: record.assistantName, voiceSpeechRate: record.voiceSpeechRate,
+  };
+}
+
+export const MCP_ACCESS_PURPOSE = "mcp_access";
+
+export interface McpAccessClaims {
+  sub: string;
+  authVersion: number;
+  /** The OAuth client the token was issued to. */
+  cid: string;
+  scope: string;
+}
+
+/**
+ * An OAuth access token for the read-only MCP gateway: purpose-restricted, so
+ * requireAuth refuses it everywhere else, and bound to one resource (aud).
+ */
+export function signMcpAccessToken(claims: McpAccessClaims, audience: string, expiresInSeconds: number): string {
+  return jwt.sign({ ...claims, purpose: MCP_ACCESS_PURPOSE }, JWT_SECRET, { audience, expiresIn: expiresInSeconds });
+}
+
+/** The claims of a valid MCP access token for this audience, or null. */
+export function verifyMcpAccessToken(token: string, audience: string): McpAccessClaims | null {
+  try {
+    const payload = jwt.verify(token, JWT_SECRET, { audience }) as Partial<McpAccessClaims> & { purpose?: string };
+    if (payload.purpose !== MCP_ACCESS_PURPOSE) return null;
+    if (typeof payload.sub !== "string" || typeof payload.authVersion !== "number" || typeof payload.cid !== "string" || typeof payload.scope !== "string") return null;
+    return { sub: payload.sub, authVersion: payload.authVersion, cid: payload.cid, scope: payload.scope };
+  } catch {
+    return null;
+  }
+}
