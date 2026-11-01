@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 34 mounted route groups, 53 Prisma models, 150 Action Contracts,
+- **Backend**: 35 mounted route groups, 53 Prisma models, 151 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,
@@ -109,7 +109,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 103 test files, including database integration tests and checks that only
+- **Tests**: 104 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -894,6 +894,20 @@ that revision; the suite has since grown to 73 suites (see Current snapshot).
 Frontend: `npm run lint` and `npm run build` verified working with no warnings. The auth
 provider, context state and `useAuth` hook live in separate modules so Fast Refresh can
 identify the component-only provider module correctly.
+
+### MCP gateway, read only (`POST /mcp`, off by default)
+
+One Model Context Protocol endpoint for external AI clients (ChatGPT first, Claude second),
+stateless Streamable HTTP with JSON answers (`initialize`, `ping`, `tools/list`, `tools/call`).
+It exposes only the catalogue tools whose mode is read and that need no confirmation, plus
+`run_read_command`, which runs a canonical parser command only when the parser classifies
+it as a read. Every call goes through `requireAuth` (identity, emergency stop), the user's
+permissions and the administrator's capability switches, and is audited as `mcp_read_tool`
+with the tool name, the result and a keyed fingerprint of the arguments. Nothing can be
+written, sent or deleted through it. The path answers 404 unless `MCP_GATEWAY_ENABLED=true`.
+Authentication is the existing Bearer token; OAuth 2.1 for ChatGPT and Claude connectors is
+the next step and is not implemented yet. Covered by `tests/mcpGateway.test.ts`; no live
+ChatGPT or Claude connection has been accepted.
 
 ## What's deliberately NOT here yet
 

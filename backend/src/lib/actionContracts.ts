@@ -229,6 +229,17 @@ export const SET_COMPANY_AGENT_MODE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
 };
 
+export const MCP_READ_TOOL_ACTION: ActionContract = {
+  actionName: "mcp_read_tool",
+  purpose:
+    "Answer one read-only tool call from an external AI client (ChatGPT, Claude) through the MCP gateway: a catalogue tool that only reads and needs no confirmation, or a canonical parser command the parser classifies as a read. Runs under the caller's identity, permissions and the administrator's capability switches; refused during an emergency stop. Audited with the tool name, the result and a keyed fingerprint of the arguments, never the arguments or the data returned.",
+  requiredPermission: "authenticated",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["user_input", "company_records"],
+  possibleErrors: ["MISSING_PERMISSION", "NOT_ALLOWED", "READ_ONLY_GATEWAY", "UNRECOGNIZED_COMMAND", "VALIDATION_FAILED", "SAFE_MODE_ACTIVE"],
+};
+
 export const EXECUTE_AGENT_PROPOSAL_ACTION: ActionContract = {
   actionName: "execute_agent_proposal",
   purpose:
