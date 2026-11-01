@@ -72,7 +72,7 @@ import {
   runWithApprovalBinding,
   type ReviewedActionDefinition,
 } from "../../lib/executionEngine.js";
-import { assertNotInSafeMode, SafeModeActiveError } from "../../lib/safeMode.js";
+import { assertNotInSafeMode, SafeModeActiveError, whileNotInSafeMode } from "../../lib/safeMode.js";
 import { RESERVED_IDEMPOTENCY_PREFIX } from "../../middleware/idempotency.js";
 import { evaluateEmmaCapabilities } from "../../services/emmaPolicyService.js";
 import { fail, ok, type ServiceResult } from "../../services/result.js";
@@ -717,8 +717,15 @@ async function runDirect(caller: McpCaller, tool: WriteToolDefinition, args: Rec
     fingerprint,
     async (begin) => {
       await assertNotInSafeMode(caller.user.companyId);
-      begin();
-      return { ...asOutcome(await tool.run(caller.user, operation), "direct", tool.contract) };
+      // Serialised with the emergency-stop switch for the whole change: the
+      // owning services save through their own connections, so the company
+      // row is held FOR SHARE until they are done. A stop committed first is
+      // refused here, before anything starts; a stop requested meanwhile
+      // commits only after this change, never before it.
+      return whileNotInSafeMode(caller.user.companyId, async () => {
+        begin();
+        return asOutcome(await tool.run(caller.user, operation), "direct", tool.contract);
+      });
     },
     () => ({
       ok: false, phase: "direct", contract: tool.contract,

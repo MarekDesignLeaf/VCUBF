@@ -815,6 +815,33 @@ describe("MCP gateway write access", () => {
     await prisma.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: null } });
   });
 
+  it("serialises a direct write with the emergency-stop switch", async () => {
+    let release!: () => void;
+    let locked!: () => void;
+    const lockHeld = new Promise<void>((resolve) => { locked = resolve; });
+    const switching = prisma.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(`SELECT "safe_mode_since" FROM "companies" WHERE "id" = '${TEST_COMPANY_ID}' FOR UPDATE`);
+      await tx.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: new Date() } });
+      locked();
+      await new Promise<void>((resolve) => { release = resolve; });
+    }, { timeout: 15_000 });
+    await lockHeld;
+    // Sent while the switch is in flight: the gateway still reads no stop, so the write reaches the service layer.
+    const writing = call(writeToken, "create_client", { idempotency_key: key(), client: { display_name: "In Flight Ltd" } });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    release();
+    await switching;
+    const res = await writing;
+    assert.equal(res.status, 423);
+    assert.equal(await prisma.client.count({ where: { displayName: "In Flight Ltd" } }), 0, "nothing committed after the stop");
+    assert.equal(await prisma.idempotencyRecord.count({ where: { key: { startsWith: "mcp:direct:" }, status: "in_progress" } }), 0, "nothing started, so no claim is kept");
+    await prisma.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: null } });
+
+    // Once the stop is lifted, writing works again.
+    const created = result(await call(writeToken, "create_client", { idempotency_key: key(), client: { display_name: "After Stop Ltd" } }));
+    assert.equal(created.isError, false);
+  });
+
   it("keeps the gateway's idempotency records out of reach of Idempotency-Key headers", async () => {
     const marker = "Namespace Lead";
     await failAuditAfterWrite(`NEW.action_name = 'create_lead' AND NEW.input_payload::text LIKE '%Namespace Lead%'`, async () => {

@@ -61,6 +61,22 @@ export async function assertNotInSafeModeLocked(tx: Prisma.TransactionClient, co
   if (rows[0]?.safe_mode_since) throw new SafeModeActiveError();
 }
 
+/**
+ * Runs work while holding the company row FOR SHARE in a transaction of its
+ * own, after refusing if the stop is on. For owning services that write
+ * through their own connections rather than one transaction (the MCP
+ * gateway's direct writes): the switch's FOR UPDATE waits until work has
+ * finished, so nothing work saves can commit after the stop did, and a stop
+ * committed first is refused before work starts. Work must not lock the
+ * company row for update itself.
+ */
+export async function whileNotInSafeMode<T>(companyId: string, work: () => Promise<T>, timeoutMs = 60_000): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await assertNotInSafeModeLocked(tx, companyId);
+    return work();
+  }, { timeout: timeoutMs, maxWait: 10_000 });
+}
+
 export function safeModeMessage(language: string | undefined): string {
   const locale = (language ?? "en").slice(0, 2).toLowerCase();
   if (locale === "cs") return "Nouzové zastavení je zapnuté: nic neměním ani neodesílám. Číst a odpovídat na otázky můžu dál. Vypnout ho může správce v nastavení firmy.";
