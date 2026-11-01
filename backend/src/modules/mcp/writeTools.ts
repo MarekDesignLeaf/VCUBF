@@ -184,6 +184,7 @@ async function convertLeadPreview(user: AuthedUser, args: Record<string, any>): 
     client: existing ?? { displayName: lead.name, email: lead.email, phone: lead.phone },
     leadStatusAfter: "converted",
     irreversible: "A converted lead cannot be turned back into an open lead.",
+    revision: lead.updatedAt.toISOString(),
   });
 }
 
@@ -333,7 +334,8 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     reviewReason: "irreversible",
     fields: { lead_id: id("lead_id") },
     preview: convertLeadPreview,
-    run: (user, a) => leadService.convertLead(user, a.lead_id),
+    // Converted only as the revision the person approved, under the lead's row lock.
+    run: (user, a, verified) => leadService.convertLead(user, a.lead_id, verified?.revision ? { expectedRevision: verified.revision } : {}),
   },
   {
     name: "create_job",

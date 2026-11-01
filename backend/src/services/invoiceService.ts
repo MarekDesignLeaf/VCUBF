@@ -11,6 +11,10 @@ const item = z.object({ description: z.string().min(1), quantity: z.number().pos
 const createSchema = z.object({ client_id: z.string().uuid(), invoice_number: z.string().min(1), title: z.string().min(1), issue_date: z.string().datetime().optional(), due_date: z.string().datetime().optional(), notes: z.string().optional(), items: z.array(item).min(1) }).refine(d=>moneyLinesFit(d.items.map(i=>({quantity:i.quantity,unitAmount:i.unit_price}))),{message:"invoice total exceeds the supported money range",path:["items"]});
 const paymentSchema = z.object({ amount: positiveMoney, paid_at: z.string().datetime(), method: z.string().optional(), reference: z.string().optional(), confirmed:z.boolean().optional() });
 /**
+ * The revision of an invoice is its updatedAt. Every change to the document
+ * moves it: its own fields, its lines (updateInvoice) and its payments
+ * (addPayment), always under the invoice's row lock.
+ *
  * expected_revision (optional): the invoice's updatedAt as the caller last saw
  * it. With it, the change is made only if the invoice has not changed since —
  * a caller that showed the document for approval (the MCP gateway's preview)
@@ -135,8 +139,12 @@ export async function addPayment(u:AuthedUser,id:string,raw:unknown):Promise<Ser
     if(p.data.amount>before.totals.balance)return {error:"PAYMENT_EXCEEDS_BALANCE" as const};
     await tx.payment.create({data:{companyId:u.companyId,invoiceId:id,amount:p.data.amount,paidAt:new Date(p.data.paid_at),method:p.data.method,reference:p.data.reference}});
     const refreshed=await tx.invoice.findUniqueOrThrow({where:{id},include});const after=totals(refreshed);
-    if(after.totals.balance===0){const paid=await tx.invoice.update({where:{id},data:{invoiceStatus:"paid"},include});return {before,after:totals(paid)}}
-    return {before,after};
+    // Every payment moves the invoice's revision, partial ones included: a
+    // caller holding an older revision (an approved void) must not act on an
+    // invoice whose payments and balance have changed since.
+    if(after.totals.balance===0){const paid=await tx.invoice.update({where:{id},data:{invoiceStatus:"paid",updatedAt:new Date()},include});return {before,after:totals(paid)}}
+    const touched=await tx.invoice.update({where:{id},data:{updatedAt:new Date()},include});
+    return {before,after:totals(touched)};
   });
   if("error" in result&&result.error)return fail(result.error==="INVOICE_NOT_FOUND"?404:409,result.error);
   await recordAudit({companyId:u.companyId,userId:u.id,actionName:RECORD_INVOICE_PAYMENT_ACTION.actionName,inputPayload:input,dataBefore:{balance:result.before.totals.balance},dataAfter:{balance:result.after.totals.balance},riskLevel:RECORD_INVOICE_PAYMENT_ACTION.riskLevel,confirmationRequired:true,confirmed:true,result:"success"});return ok(201,result.after);

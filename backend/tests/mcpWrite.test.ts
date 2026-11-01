@@ -10,7 +10,8 @@ import { MCP_READ_SCOPE, MCP_WRITE_SCOPE } from "../src/modules/mcp/oauth.js";
 import { mcpTools } from "../src/modules/mcp/routes.js";
 import { MCP_CANCEL_TOOL, MCP_CONFIRM_TOOL, MCP_REVIEW, MCP_WRITE_TOOLS } from "../src/modules/mcp/writeTools.js";
 import { confirmPendingEmmaAction } from "../src/services/emmaExecutableActionService.js";
-import { changeInvoiceStatus } from "../src/services/invoiceService.js";
+import { addPayment, changeInvoiceStatus } from "../src/services/invoiceService.js";
+import { convertLead } from "../src/services/leadService.js";
 import { resetDb, seedCompanyAndAdmin, TEST_COMPANY_ID } from "./setup.js";
 
 // MCP gateway write access — voice assistant master document 1.1a, step P2c.
@@ -609,6 +610,33 @@ describe("MCP gateway write access", () => {
     const current = (await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).updatedAt.toISOString();
     const issued = await changeInvoiceStatus(user as unknown as AuthedUser, invoice.id, { invoice_status: "issued", expected_revision: current });
     assert.equal(issued.ok, true);
+  });
+
+  it("moves the revision on a partial payment, so an approved void cannot act on a changed balance", async () => {
+    const invoice = await draftInvoice("MCP-PAY-1", [{ description: "Patio", unit_price: 500 }]);
+    const user = (await prisma.user.findUniqueOrThrow({ where: { email: "admin@test.local" } })) as unknown as AuthedUser;
+    assert.equal((await changeInvoiceStatus(user, invoice.id, { invoice_status: "issued" })).ok, true);
+    const approved = (await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).updatedAt.toISOString();
+
+    // A partial payment lands between the verified preview and the status change.
+    const paid = await addPayment(user, invoice.id, { amount: 100, paid_at: new Date().toISOString(), confirmed: true });
+    assert.equal(paid.ok, true, JSON.stringify(paid));
+    assert.notEqual((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).updatedAt.toISOString(), approved);
+
+    const voided = await changeInvoiceStatus(user, invoice.id, { invoice_status: "void", expected_revision: approved });
+    assert.equal(!voided.ok && voided.error, "INVOICE_CHANGED");
+    assert.equal((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).invoiceStatus, "issued");
+  });
+
+  it("converts a lead only as the revision that was approved", async () => {
+    const lead = await prisma.lead.create({ data: { companyId: TEST_COMPANY_ID, name: "Revision Lead", email: "revision-lead@test.local" } });
+    const user = (await prisma.user.findUniqueOrThrow({ where: { email: "admin@test.local" } })) as unknown as AuthedUser;
+    const approved = lead.updatedAt.toISOString();
+    await prisma.lead.update({ where: { id: lead.id }, data: { email: "someone-else@test.local" } });
+    const refused = await convertLead(user, lead.id, { expectedRevision: approved });
+    assert.equal(!refused.ok && refused.error, "LEAD_CHANGED");
+    assert.equal((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).leadStatus, "new");
+    assert.equal(await prisma.client.count({ where: { emailPrimary: "someone-else@test.local" } }), 0, "no client was created");
   });
 
   it("refuses a preview too large to show whole, and leaves nothing to confirm", async () => {
