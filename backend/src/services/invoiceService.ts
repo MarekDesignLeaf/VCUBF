@@ -10,7 +10,14 @@ import { RECORD_INVOICE_PAYMENT_ACTION } from "../lib/actionContracts.js";
 const item = z.object({ description: z.string().min(1), quantity: z.number().positive().default(1), unit_price: nonnegativeMoney });
 const createSchema = z.object({ client_id: z.string().uuid(), invoice_number: z.string().min(1), title: z.string().min(1), issue_date: z.string().datetime().optional(), due_date: z.string().datetime().optional(), notes: z.string().optional(), items: z.array(item).min(1) }).refine(d=>moneyLinesFit(d.items.map(i=>({quantity:i.quantity,unitAmount:i.unit_price}))),{message:"invoice total exceeds the supported money range",path:["items"]});
 const paymentSchema = z.object({ amount: positiveMoney, paid_at: z.string().datetime(), method: z.string().optional(), reference: z.string().optional(), confirmed:z.boolean().optional() });
-const statusSchema = z.object({ invoice_status: z.enum(["draft", "issued", "void"]) });
+/**
+ * expected_revision (optional): the invoice's updatedAt as the caller last saw
+ * it. With it, the change is made only if the invoice has not changed since —
+ * a caller that showed the document for approval (the MCP gateway's preview)
+ * never issues or voids a different one.
+ */
+const statusSchema = z.object({ invoice_status: z.enum(["draft", "issued", "void"]), expected_revision: z.string().datetime().optional() });
+class InvoiceNotEditable extends Error {}
 /**
  * What may be corrected on a draft.
  *
@@ -63,7 +70,13 @@ export async function updateInvoice(u:AuthedUser,id:string,raw:unknown):Promise<
     const clash=await prisma.invoice.findUnique({where:{companyId_invoiceNumber:{companyId:u.companyId,invoiceNumber:d.invoice_number}}});
     if(clash)return fail(409,"INVOICE_NUMBER_EXISTS");
   }
-  const x=await prisma.$transaction(async(tx)=>{
+  let x;
+  try{x=await prisma.$transaction(async(tx)=>{
+    // The status is checked again under the row lock that a status change also
+    // takes: an invoice issued meanwhile is not edited after the fact.
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM invoices WHERE id = ${id} AND company_id = ${u.companyId} FOR UPDATE`);
+    const current=await tx.invoice.findFirst({where:{id,companyId:u.companyId},select:{invoiceStatus:true}});
+    if(current?.invoiceStatus!=="draft")throw new InvoiceNotEditable();
     if(d.items){
       // Replaced wholesale so the stored order matches what was submitted; leaving
       // old lines behind would silently add them to the total.
@@ -76,18 +89,36 @@ export async function updateInvoice(u:AuthedUser,id:string,raw:unknown):Promise<
       ...(d.issue_date!==undefined?{issueDate:d.issue_date?new Date(d.issue_date):null}:{}),
       ...(d.due_date!==undefined?{dueDate:d.due_date?new Date(d.due_date):null}:{}),
       ...(d.notes!==undefined?{notes:d.notes}:{}),
+      // Set explicitly so that a change of the lines alone also moves the revision.
+      updatedAt:new Date(),
     },include});
-  });
+  });}catch(error){
+    if(!(error instanceof InvoiceNotEditable))throw error;
+    return fail(409,"INVOICE_NOT_EDITABLE","Only a draft invoice can be edited. Void this one and issue a replacement.");
+  }
   await recordAudit({companyId:u.companyId,userId:u.id,actionName:"update_invoice",inputPayload:{id,...d},dataBefore:totals(old),dataAfter:totals(x),riskLevel:2,confirmationRequired:false,result:"success"});
   return ok(200,totals(x));
 }
 export async function changeInvoiceStatus(u:AuthedUser,id:string,raw:unknown):Promise<ServiceResult<unknown>>{
   const p=statusSchema.safeParse(raw);if(!p.success)return fail(400,"VALIDATION_FAILED");
-  const old=await prisma.invoice.findFirst({where:{id,companyId:u.companyId}});if(!old)return fail(404,"INVOICE_NOT_FOUND");
-  const allowed=(old.invoiceStatus==="draft"&&(p.data.invoice_status==="issued"||p.data.invoice_status==="void"))||(old.invoiceStatus==="issued"&&p.data.invoice_status==="void")||old.invoiceStatus===p.data.invoice_status;
-  if(!allowed)return fail(409,"INVALID_INVOICE_STATUS_TRANSITION");
-  const x=await prisma.invoice.update({where:{id},data:{invoiceStatus:p.data.invoice_status,issueDate:p.data.invoice_status==="issued"?(old.issueDate??new Date()):old.issueDate},include});
-  await recordAudit({companyId:u.companyId,userId:u.id,actionName:"change_invoice_status",inputPayload:{id,...p.data},dataBefore:old,dataAfter:x,riskLevel:2,confirmationRequired:false,result:"success"});return ok(200,totals(x));
+  const {invoice_status:target,expected_revision:expected}=p.data;
+  // Under a row lock, so the revision compared is the one changed: nothing can
+  // edit the invoice between the comparison and the status change.
+  const r=await prisma.$transaction(async(tx)=>{
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM invoices WHERE id = ${id} AND company_id = ${u.companyId} FOR UPDATE`);
+    const old=await tx.invoice.findFirst({where:{id,companyId:u.companyId}});if(!old)return {error:"INVOICE_NOT_FOUND" as const};
+    if(expected&&old.updatedAt.toISOString()!==expected)return {error:"INVOICE_CHANGED" as const};
+    const allowed=(old.invoiceStatus==="draft"&&(target==="issued"||target==="void"))||(old.invoiceStatus==="issued"&&target==="void")||old.invoiceStatus===target;
+    if(!allowed)return {error:"INVALID_INVOICE_STATUS_TRANSITION" as const};
+    const x=await tx.invoice.update({where:{id},data:{invoiceStatus:target,issueDate:target==="issued"?(old.issueDate??new Date()):old.issueDate},include});
+    return {old,x};
+  });
+  if(!r.x||!r.old){
+    if(r.error==="INVOICE_NOT_FOUND")return fail(404,r.error);
+    if(r.error==="INVOICE_CHANGED")return fail(409,r.error,"The invoice changed after it was shown. Review it again.");
+    return fail(409,r.error??"INVALID_INVOICE_STATUS_TRANSITION");
+  }
+  await recordAudit({companyId:u.companyId,userId:u.id,actionName:"change_invoice_status",inputPayload:{id,...p.data},dataBefore:r.old,dataAfter:r.x,riskLevel:2,confirmationRequired:false,result:"success"});return ok(200,totals(r.x));
 }
 export async function addPayment(u:AuthedUser,id:string,raw:unknown):Promise<ServiceResult<unknown>>{
   const p=paymentSchema.safeParse(raw);if(!p.success)return fail(400,"VALIDATION_FAILED",p.error.message);

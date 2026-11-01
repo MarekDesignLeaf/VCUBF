@@ -911,13 +911,17 @@ Writing (step P2c, `backend/src/modules/mcp/writeTools.ts`) is a second switch,
 `secretary.write`. The write tools are named, one per Action Contract, and call the owning
 service with its own schema; records are named by id only. Direct, each with a required
 `idempotency_key` (the first call runs, a repeat gets the first answer, the same key with
-other arguments is refused): `create_client`, `update_client`, `create_contact`,
+other arguments is refused; a call that fails after the change has started is kept as
+`OUTCOME_UNKNOWN` and never run again with that key, because a service may already have
+saved its record): `create_client`, `update_client`, `create_contact`,
 `update_contact`, `create_lead`, `update_lead` (including its status), `create_job`,
 `change_job_status`, `assign_job`, `create_task`, `update_task` (including its status),
 `create_quote`, `update_quote`, `change_quote_status`, `create_invoice_draft`,
 `update_invoice_draft`. Previewed first and run only by `confirm_action` with the returned
 `confirmation_id` (same user, same OAuth connection, ten minutes, newest preview only,
-once, and only if the preview computed again at that moment is identical):
+once, and only if the preview computed again at that moment is identical; an invoice
+preview is the whole document, every line, dates, notes, payments, totals and revision, and
+the status change is made under a row lock only for that revision):
 `archive_client`, `archive_contact` (destructive), `convert_lead` (irreversible),
 `change_invoice_status` to issued or void (financial); `cancel_action` withdraws one. The
 preview queue is its own (`mcp_write_review`), so Alfonzo's spoken yes cannot confirm it.

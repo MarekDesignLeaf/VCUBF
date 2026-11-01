@@ -10,6 +10,7 @@ import { MCP_READ_SCOPE, MCP_WRITE_SCOPE } from "../src/modules/mcp/oauth.js";
 import { mcpTools } from "../src/modules/mcp/routes.js";
 import { MCP_CANCEL_TOOL, MCP_CONFIRM_TOOL, MCP_REVIEW, MCP_WRITE_TOOLS } from "../src/modules/mcp/writeTools.js";
 import { confirmPendingEmmaAction } from "../src/services/emmaExecutableActionService.js";
+import { changeInvoiceStatus } from "../src/services/invoiceService.js";
 import { resetDb, seedCompanyAndAdmin, TEST_COMPANY_ID } from "./setup.js";
 
 // MCP gateway write access — voice assistant master document 1.1a, step P2c.
@@ -483,6 +484,131 @@ describe("MCP gateway write access", () => {
     assert.equal((await prisma.voicePendingAction.findUniqueOrThrow({ where: { id: prepared.body.confirmation_id } })).status, "pending");
     await prisma.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: null } });
     result(await call(writeToken, MCP_CANCEL_TOOL, { confirmation_id: prepared.body.confirmation_id }));
+  });
+
+  // ------------------------------------------------------------------------
+  // Unknown outcomes are kept, never repeated (review finding P1).
+
+  /**
+   * A real failure after a real write: the owning services save their record
+   * and then write their audit entry outside any transaction. This trigger
+   * makes that audit insert fail for marked records only, so the record is
+   * already committed when the service throws.
+   */
+  async function failAuditAfterWrite(condition: string, work: () => Promise<void>) {
+    await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION mcp_test_fail_audit() RETURNS trigger AS $$
+      BEGIN IF ${condition} THEN RAISE EXCEPTION 'injected audit failure after the write'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`);
+    await prisma.$executeRawUnsafe(`CREATE TRIGGER mcp_test_fail_audit BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION mcp_test_fail_audit()`);
+    try {
+      await work();
+    } finally {
+      await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS mcp_test_fail_audit ON audit_log`);
+      await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS mcp_test_fail_audit()`);
+    }
+  }
+
+  it("keeps a direct write whose outcome is unknown, and a retry with its key creates no duplicate", async () => {
+    const marker = "Trigger Fault Lead";
+    await failAuditAfterWrite(`NEW.action_name IN ('create_lead', 'create_task') AND NEW.input_payload::text LIKE '%Trigger Fault%'`, async () => {
+      const args = { idempotency_key: key(), lead: { name: marker, email: "fault-lead@test.local" } };
+      const first = result(await call(writeToken, "create_lead", args));
+      assert.equal(first.isError, true);
+      assert.equal(first.body.error, "OUTCOME_UNKNOWN");
+      assert.equal(await prisma.lead.count({ where: { name: marker } }), 1, "the lead was saved before the failure");
+
+      for (let retry = 0; retry < 2; retry += 1) {
+        const again = result(await call(writeToken, "create_lead", args));
+        assert.equal(again.body.error, "OUTCOME_UNKNOWN");
+        assert.equal(again.body.replayed, true);
+      }
+      assert.equal(await prisma.lead.count({ where: { name: marker } }), 1, "a retry with the same key creates no duplicate");
+
+      const taskArgs = { idempotency_key: key(), task: { title: "Trigger Fault Task" } };
+      assert.equal(result(await call(writeToken, "create_task", taskArgs)).body.error, "OUTCOME_UNKNOWN");
+      assert.equal(result(await call(writeToken, "create_task", taskArgs)).body.error, "OUTCOME_UNKNOWN");
+      assert.equal(await prisma.task.count({ where: { title: "Trigger Fault Task" } }), 1);
+    });
+    // Even with the fault gone and past its retention, the key never runs again.
+    await prisma.idempotencyRecord.updateMany({ where: { status: "unknown" }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    const later = result(await call(writeToken, "create_lead", { idempotency_key: (await prisma.idempotencyRecord.findFirstOrThrow({ where: { status: "unknown", key: { contains: ":k-" } }, orderBy: { createdAt: "asc" } })).key.split(":").pop(), lead: { name: "Trigger Fault Lead", email: "fault-lead@test.local" } }));
+    assert.equal(later.body.error, "OUTCOME_UNKNOWN");
+    assert.equal(await prisma.lead.count({ where: { name: "Trigger Fault Lead" } }), 1);
+    const audit = await prisma.auditLog.findFirst({ where: { actionName: "mcp_write_tool", interpretedIntent: "create_lead" }, orderBy: { createdAt: "desc" } });
+    assert.equal(audit?.errorMessage, "OUTCOME_UNKNOWN");
+  });
+
+  it("keeps a confirmed change whose outcome is unknown, and a repeated yes does nothing again", async () => {
+    const client = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Unknown Outcome Ltd" } });
+    const prepared = result(await call(writeToken, "archive_client", { client_id: client.id }));
+    await failAuditAfterWrite(`NEW.action_name = 'archive_client' AND NEW.result = 'success' AND NEW.input_payload->>'id' = '${client.id}'`, async () => {
+      const confirmed = result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: prepared.body.confirmation_id }));
+      assert.equal(confirmed.body.error, "OUTCOME_UNKNOWN");
+      assert.equal((await prisma.client.findUniqueOrThrow({ where: { id: client.id } })).isActive, false, "archived before the failure");
+      const again = result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: prepared.body.confirmation_id }));
+      assert.equal(again.body.error, "OUTCOME_UNKNOWN");
+    });
+    assert.notEqual((await prisma.voicePendingAction.findUniqueOrThrow({ where: { id: prepared.body.confirmation_id } })).status, "pending", "the review can never be claimed again");
+  });
+
+  // ------------------------------------------------------------------------
+  // An invoice is issued only as the whole document that was shown (review finding P2).
+
+  async function draftInvoice(number: string, items: Json[], extra: Json = {}) {
+    const client = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: `Client ${number}` } });
+    const created = result(await call(writeToken, "create_invoice_draft", {
+      idempotency_key: key(), invoice: { client_id: client.id, invoice_number: number, title: "Garden works", items, ...extra },
+    }));
+    assert.equal(created.isError, false, JSON.stringify(created.body));
+    return created.body.data as Json;
+  }
+
+  it("shows the whole invoice and refuses to issue it when its lines changed but the total did not", async () => {
+    const invoice = await draftInvoice("MCP-LINES-1", [{ description: "Hedge cutting", quantity: 1, unit_price: 100 }], { due_date: "2026-12-01T00:00:00.000Z", notes: "Payment within 14 days" });
+    const prepared = result(await call(writeToken, "change_invoice_status", { invoice_id: invoice.id, invoice_status: "issued" }));
+    assert.deepEqual(prepared.body.preview.items, [{ position: 0, description: "Hedge cutting", quantity: 1, unitPrice: 100, lineTotal: 100 }]);
+    assert.equal(prepared.body.preview.dueDate, "2026-12-01T00:00:00.000Z");
+    assert.equal(prepared.body.preview.notes, "Payment within 14 days");
+    assert.equal(prepared.body.preview.client.id, invoice.clientId);
+    assert.ok(prepared.body.preview.revision);
+
+    // Different work, same total.
+    result(await call(writeToken, "update_invoice_draft", { idempotency_key: key(), invoice_id: invoice.id, changes: { items: [{ description: "Turf laying", quantity: 2, unit_price: 50 }] } }));
+    const confirmed = result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: prepared.body.confirmation_id }));
+    assert.equal(confirmed.body.error, "PREVIEW_CHANGED");
+    assert.equal(confirmed.body.preview.totals.total, 100, "the total alone would not have shown it");
+    assert.equal(confirmed.body.preview.items[0].description, "Turf laying");
+    assert.equal((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).invoiceStatus, "draft");
+  });
+
+  it("refuses to issue an invoice whose due date or notes changed after the preview", async () => {
+    const invoice = await draftInvoice("MCP-DUE-1", [{ description: "Pruning", unit_price: 80 }], { due_date: "2026-12-01T00:00:00.000Z" });
+    const due = result(await call(writeToken, "change_invoice_status", { invoice_id: invoice.id, invoice_status: "issued" }));
+    result(await call(writeToken, "update_invoice_draft", { idempotency_key: key(), invoice_id: invoice.id, changes: { due_date: "2026-11-05T00:00:00.000Z" } }));
+    assert.equal(result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: due.body.confirmation_id })).body.error, "PREVIEW_CHANGED");
+
+    const notes = result(await call(writeToken, "change_invoice_status", { invoice_id: invoice.id, invoice_status: "issued" }));
+    result(await call(writeToken, "update_invoice_draft", { idempotency_key: key(), invoice_id: invoice.id, changes: { notes: "Payment on receipt" } }));
+    assert.equal(result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: notes.body.confirmation_id })).body.error, "PREVIEW_CHANGED");
+    assert.equal((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).invoiceStatus, "draft");
+  });
+
+  it("issues only the revision that was verified, under a row lock", async () => {
+    const invoice = await draftInvoice("MCP-REV-1", [{ description: "Mowing", unit_price: 30 }]);
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: "admin@test.local" } });
+    const stale = new Date(Date.now() - 60_000).toISOString();
+    const refused = await changeInvoiceStatus(user as unknown as AuthedUser, invoice.id, { invoice_status: "issued", expected_revision: stale });
+    assert.equal(refused.ok, false);
+    assert.equal(!refused.ok && refused.error, "INVOICE_CHANGED");
+    assert.equal((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).invoiceStatus, "draft");
+
+    // A change of the lines alone moves the revision.
+    const before = (await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).updatedAt;
+    result(await call(writeToken, "update_invoice_draft", { idempotency_key: key(), invoice_id: invoice.id, changes: { items: [{ description: "Mowing", unit_price: 30 }] } }));
+    assert.notEqual((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).updatedAt.getTime(), before.getTime());
+
+    const current = (await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).updatedAt.toISOString();
+    const issued = await changeInvoiceStatus(user as unknown as AuthedUser, invoice.id, { invoice_status: "issued", expected_revision: current });
+    assert.equal(issued.ok, true);
   });
 
   // ------------------------------------------------------------------------

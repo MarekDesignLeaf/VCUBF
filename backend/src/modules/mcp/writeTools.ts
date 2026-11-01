@@ -145,8 +145,11 @@ interface WriteToolDefinition {
   fields: Record<string, z.ZodTypeAny>;
   /** The record itself, checked by the owning service. */
   body?: Body;
-  /** Direct: the change. Reviewed: the change, run only after the yes. */
-  run: (user: AuthedUser, args: Record<string, any>) => Promise<ServiceResult<unknown>>;
+  /**
+   * Direct: the change. Reviewed: the change, run only after the yes, with the
+   * preview just verified against the one the person approved.
+   */
+  run: (user: AuthedUser, args: Record<string, any>, verifiedPreview?: any) => Promise<ServiceResult<unknown>>;
   /** Reviewed only: exactly what the change will do, without doing any of it. */
   preview?: (user: AuthedUser, args: Record<string, any>) => Promise<ServiceResult<unknown>>;
 }
@@ -189,20 +192,45 @@ function invoiceTransitionAllowed(from: string, to: string) {
   return (from === "draft" && (to === "issued" || to === "void")) || (from === "issued" && to === "void");
 }
 
+/**
+ * The preview of an invoice status change is the whole financial document as
+ * it stands: number, client, title, every line with its description, quantity
+ * and unit price in order, dates, payment terms in the notes, payments and
+ * totals, and the record's revision. The confirmation is bound to a hash of
+ * exactly this, so any change to the document after it was shown (lines
+ * swapped for others with the same total, a new due date, an edited note)
+ * makes confirm_action refuse with PREVIEW_CHANGED instead of issuing or
+ * voiding a document the person did not see.
+ */
 async function invoiceStatusPreview(user: AuthedUser, args: Record<string, any>): Promise<ServiceResult<unknown>> {
   const invoice = await invoiceService.getInvoice(user, args.invoice_id);
   if (!invoice) return fail(404, "INVOICE_NOT_FOUND");
   if (invoice.invoiceStatus === args.invoice_status) return fail(409, "NO_CHANGE", `The invoice is already ${args.invoice_status}.`);
   if (!invoiceTransitionAllowed(invoice.invoiceStatus, args.invoice_status)) return fail(409, "INVALID_INVOICE_STATUS_TRANSITION");
+  const day = (value: Date | null) => value?.toISOString() ?? null;
   return ok(200, {
     invoiceId: invoice.id,
     invoiceNumber: invoice.invoiceNumber,
     title: invoice.title,
-    client: invoice.client.displayName,
+    client: { id: invoice.client.id, displayName: invoice.client.displayName },
     statusBefore: invoice.invoiceStatus,
     statusAfter: args.invoice_status,
+    items: invoice.items.map((item) => ({
+      position: item.sortOrder,
+      description: item.description,
+      quantity: item.quantity,
+      unitPrice: Number(item.unitPrice),
+      lineTotal: Math.round((item.quantity * Number(item.unitPrice) + Number.EPSILON) * 100) / 100,
+    })),
     totals: invoice.totals,
-    issueDateAfter: args.invoice_status === "issued" ? (invoice.issueDate?.toISOString() ?? "the moment of confirmation") : invoice.issueDate?.toISOString() ?? null,
+    issueDate: day(invoice.issueDate),
+    issueDateAfter: args.invoice_status === "issued" ? (day(invoice.issueDate) ?? "the moment of confirmation") : day(invoice.issueDate),
+    dueDate: day(invoice.dueDate),
+    notes: invoice.notes,
+    payments: invoice.payments.map((payment) => ({
+      amount: Number(payment.amount), paidAt: day(payment.paidAt), method: payment.method, reference: payment.reference,
+    })),
+    revision: day(invoice.updatedAt),
     note: args.invoice_status === "void"
       ? "A void invoice cannot be issued or edited again."
       : "An issued invoice can no longer be edited; it can only be voided. Nothing is sent to the client.",
@@ -415,7 +443,13 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     reviewReason: "financial",
     fields: { invoice_id: id("invoice_id"), invoice_status: z.enum(["issued", "void"]).describe("issued: a draft becomes a final invoice. void: an invoice is cancelled for good.") },
     preview: invoiceStatusPreview,
-    run: (user, a) => invoiceService.changeInvoiceStatus(user, a.invoice_id, { invoice_status: a.invoice_status }),
+    // The revision of the approved document goes with the change, and the
+    // service makes it under a row lock only if the invoice is still that
+    // revision: nothing edited between the check and the change gets issued.
+    run: (user, a, verified) => invoiceService.changeInvoiceStatus(user, a.invoice_id, {
+      invoice_status: a.invoice_status,
+      ...(verified?.revision ? { expected_revision: verified.revision } : {}),
+    }),
   },
 ];
 
@@ -533,17 +567,32 @@ function isUniqueViolation(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
+/** The answer kept for a key whose change may or may not have been made. */
+const OUTCOME_UNKNOWN_MESSAGE =
+  "The change may or may not have been saved: it failed after Secretary had started making it. It will not be repeated " +
+  "with this key. Check the records with a reading tool before deciding whether to make it again with a new key.";
+
 /**
  * Runs work at most once per key within the company. A later call with the
  * same key and fingerprint gets the stored answer; with another fingerprint it
- * is refused. A thrown error leaves nothing stored, so the call can be retried.
+ * is refused.
+ *
+ * work receives begin(), which it calls immediately before the first step
+ * that can change anything. A failure before begin() changed nothing, so the
+ * claim is released and the call may be retried. A failure after begin() has
+ * an unknown outcome: an owning service may have saved its record and then
+ * failed on its audit entry or a later step, outside any transaction. That
+ * claim is kept as "unknown" and every retry with the key is told so; it is
+ * never run again (master documentation section 44: an unknown outcome is
+ * reconciled, never repeated). Neither an unknown nor an unfinished claim is
+ * freed when its retention ends; only a finished answer expires.
  */
 async function onceOnly(
   user: AuthedUser,
   phase: WriteOutcome["phase"],
   key: string,
   fingerprint: string,
-  work: () => Promise<WriteOutcome>,
+  work: (begin: () => void) => Promise<WriteOutcome>,
   mismatch: () => WriteOutcome,
 ): Promise<WriteOutcome> {
   const expiresAt = new Date(Date.now() + MCP_IDEMPOTENCY_HOURS * 60 * 60 * 1000);
@@ -556,11 +605,14 @@ async function onceOnly(
       if (!isUniqueViolation(error)) throw error;
       const existing = await prisma.idempotencyRecord.findUnique({ where: { companyId_key: { companyId: user.companyId, key } } });
       if (!existing) continue;
-      if (existing.expiresAt <= new Date()) {
-        await prisma.idempotencyRecord.deleteMany({ where: { id: existing.id, expiresAt: { lte: new Date() } } });
+      if (existing.status === "completed" && existing.expiresAt <= new Date()) {
+        await prisma.idempotencyRecord.deleteMany({ where: { id: existing.id, status: "completed", expiresAt: { lte: new Date() } } });
         continue;
       }
       if (existing.fingerprint !== fingerprint) return mismatch();
+      if (existing.status === "unknown") {
+        return { ok: false, phase, replayed: true, payload: { ok: false, error: "OUTCOME_UNKNOWN", message: OUTCOME_UNKNOWN_MESSAGE } };
+      }
       if (existing.status !== "completed") {
         return {
           ok: false, phase,
@@ -572,12 +624,22 @@ async function onceOnly(
       if (!outcome) return { ok: false, phase, payload: { ok: false, error: "IDEMPOTENCY_RECORD_UNREADABLE" } };
       return { ...outcome, replayed: true };
     }
+    let started = false;
     let outcome: WriteOutcome;
     try {
-      outcome = await work();
+      outcome = await work(() => { started = true; });
     } catch (error) {
-      await prisma.idempotencyRecord.deleteMany({ where: { companyId: user.companyId, key, status: "in_progress" } });
-      throw error;
+      if (!started) {
+        await prisma.idempotencyRecord.deleteMany({ where: { companyId: user.companyId, key, status: "in_progress" } });
+        throw error;
+      }
+      console.error(`MCP write ${phase} failed after it started; its outcome is unknown and kept as such.`, error);
+      const unknown: WriteOutcome = { ok: false, phase, payload: { ok: false, error: "OUTCOME_UNKNOWN", message: OUTCOME_UNKNOWN_MESSAGE } };
+      await prisma.idempotencyRecord.updateMany({
+        where: { companyId: user.companyId, key },
+        data: { status: "unknown", responseStatus: 500, responseBody: { outcome: unknown } as unknown as Prisma.InputJsonValue },
+      });
+      return unknown;
     }
     const { contract: _contract, ...storable } = outcome;
     await prisma.idempotencyRecord.updateMany({
@@ -619,9 +681,10 @@ async function runDirect(caller: McpCaller, tool: WriteToolDefinition, args: Rec
     // Scoped to this person and this connection, so nobody else's key can block or answer theirs.
     `mcp:${caller.clientId}:${caller.user.id}:${key}`,
     fingerprint,
-    async () => {
+    async (begin) => {
       await assertNotInSafeMode(caller.user.companyId);
-      return asOutcome(await tool.run(caller.user, operation), "direct", tool.contract);
+      begin();
+      return { ...asOutcome(await tool.run(caller.user, operation), "direct", tool.contract) };
     },
     () => ({
       ok: false, phase: "direct", contract: tool.contract,
@@ -676,7 +739,7 @@ async function confirm(caller: McpCaller, confirmationId: string): Promise<Write
   const fingerprint = sha256(canonical({ user: caller.user.id, client: caller.clientId, confirmationId }));
   // Keyed by connection and person as well: an attempt from anyone else is
   // stored under its own key and can neither block nor answer the real yes.
-  return onceOnly(caller.user, "confirm", `mcp-confirm:${caller.clientId}:${caller.user.id}:${confirmationId}`, fingerprint, async () => {
+  return onceOnly(caller.user, "confirm", `mcp-confirm:${caller.clientId}:${caller.user.id}:${confirmationId}`, fingerprint, async (begin) => {
     const review = await ownReview(caller, confirmationId);
     if (review.state === "missing") return { ...notFound("confirm"), confirmationId };
     if (review.state === "resolved") {
@@ -701,12 +764,20 @@ async function confirm(caller: McpCaller, confirmationId: string): Promise<Write
     }
     // Everything is decided again at the moment of the yes: the permission and
     // switch may have changed, and the record may have moved since the preview.
-    const permitted = await allowed(caller.user, tool.contract);
-    if (!permitted.ok) {
-      await claimed.complete(false);
-      return { ...asOutcome(permitted, "confirm", tool.contract), confirmationId };
+    // A failure here, before the change starts, still resolves the claim, so a
+    // review never stays "executing" for a change that was never attempted.
+    let now: ServiceResult<unknown>;
+    try {
+      const permitted = await allowed(caller.user, tool.contract);
+      if (!permitted.ok) {
+        await claimed.complete(false);
+        return { ...asOutcome(permitted, "confirm", tool.contract), confirmationId };
+      }
+      now = await tool.preview!(caller.user, claimed.payload.arguments);
+    } catch (error) {
+      await claimed.complete(false).catch(() => undefined);
+      throw error;
     }
-    const now = await tool.preview!(caller.user, claimed.payload.arguments);
     if (!now.ok || sha256(canonical(now.data)) !== claimed.payload.previewDigest) {
       await claimed.complete(false);
       return {
@@ -718,7 +789,8 @@ async function confirm(caller: McpCaller, confirmationId: string): Promise<Write
         },
       };
     }
-    const result = await tool.run(caller.user, claimed.payload.arguments);
+    begin();
+    const result = await tool.run(caller.user, claimed.payload.arguments, now.data);
     await claimed.complete(result.ok);
     return { ...asOutcome(result, "confirm", tool.contract), confirmationId };
   }, () => ({ ...notFound("confirm"), confirmationId }));
