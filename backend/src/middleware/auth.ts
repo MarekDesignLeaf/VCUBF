@@ -29,6 +29,12 @@ declare global {
       rawBody?: Buffer;
       /** The company's emergency stop, read with the user (see lib/safeMode.ts). */
       safeModeSince?: Date | null;
+      /**
+       * Set only for a request made with an OAuth access token on the MCP
+       * gateway: which registered client it was issued to and the scopes the
+       * person approved. Absent for the owner's own Secretary token.
+       */
+      mcpAccess?: { clientId: string; scopes: string[] };
     }
   }
 }
@@ -128,8 +134,9 @@ export interface McpAccessClaims {
 }
 
 /**
- * An OAuth access token for the read-only MCP gateway: purpose-restricted, so
+ * An OAuth access token for the MCP gateway: purpose-restricted, so
  * requireAuth refuses it everywhere else, and bound to one resource (aud).
+ * scope is the space-separated list the person approved.
  */
 export function signMcpAccessToken(claims: McpAccessClaims, audience: string, expiresInSeconds: number): string {
   return jwt.sign({ ...claims, purpose: MCP_ACCESS_PURPOSE }, JWT_SECRET, { audience, expiresIn: expiresInSeconds });

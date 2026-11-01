@@ -30,6 +30,9 @@ const updateSchema = z.object({
   (d) => !d.items || moneyLinesFit(d.items.map((i) => ({ quantity: i.quantity, unitAmount: i.unit_price }))),
   { message: "invoice total exceeds the supported money range", path: ["items"] },
 ).refine((d) => Object.keys(d).length > 0, "At least one field is required");
+/** The draft invoice as created and as corrected; exported so other entry points (the MCP gateway) validate with exactly these. */
+export const createInvoiceSchema = createSchema;
+export const updateInvoiceSchema = updateSchema;
 const include = { client: { select: { id: true, displayName: true } }, items: { orderBy: { sortOrder: "asc" as const } }, payments: { orderBy: { paidAt: "asc" as const } } };
 type MoneyValue=number|{toNumber():number};const n=(v:MoneyValue)=>typeof v==="number"?v:v.toNumber();
 const moneyRound=(v:number)=>Math.round((v+Number.EPSILON)*100)/100;

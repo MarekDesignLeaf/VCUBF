@@ -422,6 +422,36 @@ async function resolveReviewedAction(id: string, status: string): Promise<void> 
   });
 }
 
+/**
+ * One review of this user and type, by the id that was handed out for it
+ * (the MCP gateway gives its client a confirmation id): its status and, while
+ * it waits, its payload. Another user's or another queue's review is never
+ * found. Read only; a yes still goes through claimReviewedAction.
+ */
+export async function reviewedActionById(
+  user: ActingUser,
+  actionType: string,
+  id: string,
+  now = new Date(),
+): Promise<{ status: string; payload: unknown } | undefined> {
+  await expireReviewedActions(user, actionType, now);
+  const review = await prisma.voicePendingAction.findFirst({
+    where: { ...scope(user, actionType), id },
+    select: { status: true, payload: true },
+  });
+  return review ?? undefined;
+}
+
+/** Cancel exactly this review if it is still waiting. True when it was. */
+export async function cancelReviewedActionById(user: ActingUser, actionType: string, id: string, now = new Date()): Promise<boolean> {
+  const cancelled = await prisma.voicePendingAction.updateMany({
+    where: { ...scope(user, actionType), id, status: "pending" },
+    data: { status: "cancelled", payload: Prisma.DbNull, resolvedAt: now },
+  });
+  if (cancelled.count > 0) approvalBinding.getStore()?.resolvedIds.add(id);
+  return cancelled.count > 0;
+}
+
 /** Cancel whatever review of this type is waiting. True when one was. */
 export async function cancelReviewedAction(user: ActingUser, actionType: string, now = new Date()): Promise<boolean> {
   await expireReviewedActions(user, actionType, now);

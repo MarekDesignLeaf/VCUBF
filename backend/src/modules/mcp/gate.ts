@@ -6,6 +6,16 @@ export function mcpGatewayEnabled(): boolean {
 }
 
 /**
+ * Writing through the gateway is a second, separate switch, off by default.
+ * Only with both on does the authorization server offer secretary.write and
+ * the gateway list or run a write tool. Switching it off again stops every
+ * write at once, whatever tokens were issued meanwhile; reading carries on.
+ */
+export function mcpWriteEnabled(): boolean {
+  return mcpGatewayEnabled() && process.env.MCP_WRITE_ENABLED === "true";
+}
+
+/**
  * The public origin of this backend: MCP_PUBLIC_URL when set, otherwise the
  * origin of the request (Railway's one trusted proxy hop gives the real
  * scheme). It is the OAuth issuer, and the MCP resource lives under it.
