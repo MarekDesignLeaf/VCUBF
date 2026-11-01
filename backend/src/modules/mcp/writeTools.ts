@@ -335,7 +335,13 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     fields: { lead_id: id("lead_id") },
     preview: convertLeadPreview,
     // Converted only as the revision the person approved, under the lead's row lock.
-    run: (user, a, verified) => leadService.convertLead(user, a.lead_id, verified?.revision ? { expectedRevision: verified.revision } : {}),
+    // The outcome is bound as well: the same existing client, or a new one.
+    run: (user, a, verified) => leadService.convertLead(user, a.lead_id, verified
+      ? {
+          expectedRevision: verified.revision,
+          expectedClient: verified.outcome === "link_existing_client" ? { id: verified.client.id, displayName: verified.client.displayName } : null,
+        }
+      : {}),
   },
   {
     name: "create_job",

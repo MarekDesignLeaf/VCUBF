@@ -639,6 +639,30 @@ describe("MCP gateway write access", () => {
     assert.equal(await prisma.client.count({ where: { emailPrimary: "someone-else@test.local" } }), 0, "no client was created");
   });
 
+  it("converts a lead only to the client outcome that was approved", async () => {
+    const user = (await prisma.user.findUniqueOrThrow({ where: { email: "admin@test.local" } })) as unknown as AuthedUser;
+    const client = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Existing Match Ltd", emailPrimary: "match@test.local" } });
+    const lead = await prisma.lead.create({ data: { companyId: TEST_COMPANY_ID, name: "Matching Lead", email: "match@test.local" } });
+    const prepared = result(await call(writeToken, "convert_lead", { lead_id: lead.id }));
+    assert.equal(prepared.body.preview.outcome, "link_existing_client");
+    assert.equal(prepared.body.preview.client.id, client.id);
+
+    // The client's e-mail changes; the lead does not.
+    await prisma.client.update({ where: { id: client.id }, data: { emailPrimary: "moved@test.local" } });
+    const direct = await convertLead(user, lead.id, { expectedRevision: lead.updatedAt.toISOString(), expectedClient: { id: client.id, displayName: client.displayName } });
+    assert.equal(!direct.ok && direct.error, "CONVERSION_CHANGED");
+    const confirmed = result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: prepared.body.confirmation_id }));
+    assert.equal(confirmed.body.error, "PREVIEW_CHANGED");
+    assert.equal((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).leadStatus, "new");
+    assert.equal(await prisma.client.count({ where: { displayName: "Matching Lead" } }), 0, "no new client was created instead");
+
+    // Approved as a new client, refused once a matching client appears.
+    const newLead = await prisma.lead.create({ data: { companyId: TEST_COMPANY_ID, name: "Fresh Lead", email: "fresh@test.local" } });
+    await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Fresh Match Ltd", emailPrimary: "fresh@test.local" } });
+    const appeared = await convertLead(user, newLead.id, { expectedRevision: newLead.updatedAt.toISOString(), expectedClient: null });
+    assert.equal(!appeared.ok && appeared.error, "CONVERSION_CHANGED");
+  });
+
   it("refuses a preview too large to show whole, and leaves nothing to confirm", async () => {
     const client = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Large Invoice Ltd" } });
     const invoice = await prisma.invoice.create({
