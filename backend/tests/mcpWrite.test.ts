@@ -611,6 +611,41 @@ describe("MCP gateway write access", () => {
     assert.equal(issued.ok, true);
   });
 
+  it("refuses a preview too large to show whole, and leaves nothing to confirm", async () => {
+    const client = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Large Invoice Ltd" } });
+    const invoice = await prisma.invoice.create({
+      data: {
+        companyId: TEST_COMPANY_ID, clientId: client.id, invoiceNumber: "MCP-LARGE-1", title: "Large", notes: "Terms. ".repeat(9_000),
+        items: { create: [{ companyId: TEST_COMPANY_ID, description: "Work", quantity: 1, unitPrice: 10, sortOrder: 0 }] },
+      },
+    });
+    const before = await prisma.voicePendingAction.count({ where: { actionType: MCP_REVIEW.actionType, status: "pending" } });
+    const res = await call(writeToken, "change_invoice_status", { invoice_id: invoice.id, invoice_status: "issued" });
+    const refused = result(res);
+    assert.equal(refused.isError, true);
+    assert.equal(refused.body.error, "PREVIEW_TOO_LARGE");
+    assert.equal(refused.body.confirmation_id, undefined);
+    assert.ok(!res.body.result.content[0].text.endsWith("[truncated]"));
+    assert.equal(await prisma.voicePendingAction.count({ where: { actionType: MCP_REVIEW.actionType, status: "pending" } }), before);
+    assert.equal((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).invoiceStatus, "draft");
+  });
+
+  it("hands every accepted preview back whole, as valid JSON", async () => {
+    const client = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Long Invoice Ltd" } });
+    const invoice = await prisma.invoice.create({
+      data: {
+        companyId: TEST_COMPANY_ID, clientId: client.id, invoiceNumber: "MCP-LONG-1", title: "Long", notes: "Terms. ".repeat(5_000),
+        items: { create: Array.from({ length: 40 }, (_, index) => ({ companyId: TEST_COMPANY_ID, description: `Line ${index}`, quantity: 1, unitPrice: 1, sortOrder: index })) },
+      },
+    });
+    const res = await call(writeToken, "change_invoice_status", { invoice_id: invoice.id, invoice_status: "issued" });
+    const prepared = result(res);
+    assert.equal(prepared.isError, false, JSON.stringify(prepared.body).slice(0, 300));
+    assert.equal(prepared.body.preview.items.length, 40);
+    assert.equal(prepared.body.preview.totals.total, 40);
+    result(await call(writeToken, MCP_CANCEL_TOOL, { confirmation_id: prepared.body.confirmation_id }));
+  });
+
   // ------------------------------------------------------------------------
   // The registry itself.
 

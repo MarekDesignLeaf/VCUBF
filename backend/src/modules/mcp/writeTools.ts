@@ -75,6 +75,7 @@ import {
 import { assertNotInSafeMode } from "../../lib/safeMode.js";
 import { evaluateEmmaCapabilities } from "../../services/emmaPolicyService.js";
 import { fail, ok, type ServiceResult } from "../../services/result.js";
+import { MCP_RESULT_CHARS } from "./gate.js";
 import * as clientService from "../../services/clientService.js";
 import * as contactService from "../../services/contactService.js";
 import * as invoiceService from "../../services/invoiceService.js";
@@ -693,10 +694,43 @@ async function runDirect(caller: McpCaller, tool: WriteToolDefinition, args: Rec
   );
 }
 
+function preparedPayload(tool: WriteToolDefinition, preview: unknown, confirmationId: string, expiresAt: Date) {
+  return {
+    ok: true,
+    status: "confirmation_required",
+    confirmation_id: confirmationId,
+    expires_at: expiresAt.toISOString(),
+    action: tool.name,
+    reason: tool.reviewReason,
+    preview,
+    instruction: "Nothing has changed yet. Show this preview to the user exactly as given and call confirm_action with this confirmation_id only after the user explicitly agrees. Otherwise call cancel_action.",
+  };
+}
+
 async function prepare(caller: McpCaller, tool: WriteToolDefinition, args: Record<string, any>): Promise<WriteOutcome> {
   await assertNotInSafeMode(caller.user.companyId);
   const preview = await tool.preview!(caller.user, args);
   if (!preview.ok) return asOutcome(preview, "prepare", tool.contract);
+  // The person approves what they were shown, so the preview must reach them
+  // whole. A result longer than the gateway hands back would be cut, and the
+  // cut-off part (later lines, totals, terms) would still be carried out on
+  // confirmation. Such a change is refused before any review exists: it has
+  // no confirmation_id, and it is made in Secretary itself.
+  const measured = JSON.stringify(preparedPayload(tool, preview.data, "00000000-0000-0000-0000-000000000000", new Date()));
+  if (measured.length > MCP_RESULT_CHARS) {
+    return {
+      ok: false,
+      phase: "prepare",
+      contract: tool.contract,
+      payload: {
+        ok: false,
+        error: "PREVIEW_TOO_LARGE",
+        message: "The record is too large to show in full here, so it cannot be approved through this connection. Nothing was changed and nothing waits for confirmation. Make this change in Secretary.",
+        previewCharacters: measured.length,
+        limit: MCP_RESULT_CHARS,
+      },
+    };
+  }
   const review = await prepareReviewedAction(caller.user, MCP_REVIEW, {
     tool: tool.name,
     arguments: args,
@@ -708,16 +742,7 @@ async function prepare(caller: McpCaller, tool: WriteToolDefinition, args: Recor
     phase: "prepare",
     contract: tool.contract,
     confirmationId: review.id,
-    payload: {
-      ok: true,
-      status: "confirmation_required",
-      confirmation_id: review.id,
-      expires_at: review.expiresAt.toISOString(),
-      action: tool.name,
-      reason: tool.reviewReason,
-      preview: preview.data,
-      instruction: "Nothing has changed yet. Show this preview to the user exactly as given and call confirm_action with this confirmation_id only after the user explicitly agrees. Otherwise call cancel_action.",
-    },
+    payload: preparedPayload(tool, preview.data, review.id, review.expiresAt),
   };
 }
 

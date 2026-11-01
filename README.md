@@ -921,7 +921,8 @@ saved its record): `create_client`, `update_client`, `create_contact`,
 `confirmation_id` (same user, same OAuth connection, ten minutes, newest preview only,
 once, and only if the preview computed again at that moment is identical; an invoice
 preview is the whole document, every line, dates, notes, payments, totals and revision, and
-the status change is made under a row lock only for that revision):
+the status change is made under a row lock only for that revision; a preview too large
+to hand back whole is refused as `PREVIEW_TOO_LARGE` before any confirmation exists):
 `archive_client`, `archive_contact` (destructive), `convert_lead` (irreversible),
 `change_invoice_status` to issued or void (financial); `cancel_action` withdraws one. The
 preview queue is its own (`mcp_write_review`), so Alfonzo's spoken yes cannot confirm it.

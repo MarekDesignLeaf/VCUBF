@@ -36,7 +36,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { AuthedUser } from "../../middleware/auth.js";
-import { mcpGatewayEnabled, mcpWriteEnabled } from "./gate.js";
+import { MCP_RESULT_CHARS, mcpGatewayEnabled, mcpWriteEnabled } from "./gate.js";
 import { insufficientScope, MCP_WRITE_SCOPE, requireMcpAuth } from "./oauth.js";
 import { isWriteToolName, runWriteTool, writeToolListings, type McpWriteToolListing } from "./writeTools.js";
 import { AGENT_TOOL_CATALOGUE, TOOL_CATALOGUE_VERSION } from "../../agents/toolCatalogue.js";
@@ -58,8 +58,7 @@ import { executeEmmaAction } from "../../services/emmaExecutableActionService.js
 export const MCP_SERVER_NAME = "vcubf-secretary";
 export const MCP_SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"] as const;
 export const MCP_READ_COMMAND_TOOL = "run_read_command";
-/** Longest tool result handed back to the client, in characters. */
-export const MCP_RESULT_CHARS = 50_000;
+export { MCP_RESULT_CHARS };
 
 export { mcpGatewayEnabled };
 

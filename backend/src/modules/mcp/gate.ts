@@ -1,5 +1,11 @@
 import type { Request } from "express";
 
+/**
+ * Longest tool result handed back to an MCP client, in characters. A longer
+ * read is cut; a preview awaiting approval never is (writeTools.ts refuses it).
+ */
+export const MCP_RESULT_CHARS = 50_000;
+
 /** The MCP gateway and its OAuth endpoints exist only when this is "true". */
 export function mcpGatewayEnabled(): boolean {
   return process.env.MCP_GATEWAY_ENABLED === "true";
