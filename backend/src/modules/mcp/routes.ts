@@ -13,14 +13,14 @@
  *   and that need no confirmation, plus one bridge that runs a canonical
  *   parser command only when the parser classifies it as a read. Nothing that
  *   writes, sends, deletes or prepares a review is reachable from here.
- * - The same doors as everywhere else: the caller's identity (requireAuth),
- *   the company's emergency stop (requireAuth's safe-mode gate refuses the
+ * - The same doors as everywhere else: the caller's identity (requireMcpAuth:
+ *   an OAuth access token from ./oauth.ts, or the owner's own token through
+ *   requireAuth), the company's emergency stop (the safe-mode gate refuses the
  *   POST), the user's permissions and the administrator's capability switches
  *   (evaluateEmmaCommand), and the owning service for the read itself.
  * - Off by default. Production is untouched until MCP_GATEWAY_ENABLED=true is
  *   set; without it the route answers 404 as if it did not exist.
- * - Bearer token only. External clients need OAuth 2.1 to connect; that is the
- *   next step (P2b) and is not part of this one.
+ * - ChatGPT and Claude connect through OAuth 2.1 (./oauth.ts, step P2b).
  *
  * Every tool call is audited (mcp_read_tool) with the tool name, the result
  * and a keyed fingerprint of the arguments — never the arguments or the data.
@@ -28,7 +28,9 @@
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { requireAuth, type AuthedUser } from "../../middleware/auth.js";
+import type { AuthedUser } from "../../middleware/auth.js";
+import { mcpGatewayEnabled } from "./gate.js";
+import { requireMcpAuth } from "./oauth.js";
 import { AGENT_TOOL_CATALOGUE, TOOL_CATALOGUE_VERSION } from "../../agents/toolCatalogue.js";
 import { isReadCommand } from "../../agents/agentProposal.js";
 import { argumentsFingerprint } from "../../agents/shadowAgent.js";
@@ -51,9 +53,7 @@ export const MCP_READ_COMMAND_TOOL = "run_read_command";
 /** Longest tool result handed back to the client, in characters. */
 export const MCP_RESULT_CHARS = 50_000;
 
-export function mcpGatewayEnabled(): boolean {
-  return process.env.MCP_GATEWAY_ENABLED === "true";
-}
+export { mcpGatewayEnabled };
 
 const INSTRUCTIONS =
   "Secretary (VCUBF) read-only gateway. Every answer comes from the company's own records; quote it and do not " +
@@ -271,7 +271,7 @@ mcpRouter.use((_req, res, next) => {
   return next();
 });
 
-mcpRouter.post("/", requireAuth, async (req: Request, res: Response) => {
+mcpRouter.post("/", requireMcpAuth, async (req: Request, res: Response) => {
   if (Array.isArray(req.body)) {
     return res.status(400).json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Batched requests are not supported." } });
   }

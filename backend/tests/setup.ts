@@ -39,6 +39,8 @@ export async function resetDb() {
   await prisma.voiceConversation.deleteMany({});
   await prisma.voicePendingAction.deleteMany({});
   await prisma.devicePairing.deleteMany({});
+  await prisma.mcpOAuthGrant.deleteMany({});
+  await prisma.mcpOAuthClient.deleteMany({});
   await prisma.connectorOAuthState.deleteMany({});
   await prisma.connectorCredential.deleteMany({});
   await prisma.notificationAcknowledgement.deleteMany({});

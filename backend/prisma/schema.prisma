@@ -78,6 +78,8 @@ model Company {
   voiceConversationMessages    VoiceConversationMessage[]
   voicePendingActions          VoicePendingAction[]
   agentRuns                    AgentRun[]
+  mcpOAuthClients              McpOAuthClient[]
+  mcpOAuthGrants               McpOAuthGrant[]
   assistantMemories            AssistantMemory[]
   passwordResetTokens          PasswordResetToken[]
   voiceMacros                  VoiceMacro[]
@@ -222,6 +224,7 @@ model User {
   assistantMemories AssistantMemory[] @relation("AssistantMemoryOwner")
   assignedTasks Task[]     @relation("AssignedTasks")
   devicePairings DevicePairing[]
+  mcpOAuthGrants McpOAuthGrant[]
   passwordResetTokens PasswordResetToken[]
 
   @@map("users")
@@ -419,6 +422,53 @@ model AssistantMemory {
   @@index([companyId, scope, status])
   @@index([companyId, ownerUserId, status])
   @@map("assistant_memories")
+}
+
+/// An external AI client (ChatGPT, Claude) registered through OAuth Dynamic
+/// Client Registration for the read-only MCP gateway. Registration is public,
+/// so the company is null until the first approval binds the client to the
+/// approving user's company; a user of another company can never approve it.
+model McpOAuthClient {
+  id           String   @id @default(uuid())
+  clientId     String   @unique @map("client_id")
+  companyId    String?  @map("company_id")
+  clientName   String   @map("client_name")
+  redirectUris String[] @map("redirect_uris")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  company Company?        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  grants  McpOAuthGrant[]
+
+  @@index([companyId])
+  @@map("mcp_oauth_clients")
+}
+
+/// One authorization code or refresh token issued to an MCP client for one
+/// user. Only a SHA-256 hash of the secret is stored. A code is single use;
+/// a refresh token is rotated on every use and a reused one revokes the chain.
+model McpOAuthGrant {
+  id            String    @id @default(uuid())
+  tokenHash     String    @unique @map("token_hash")
+  kind          String
+  clientId      String    @map("client_id")
+  companyId     String    @map("company_id")
+  userId        String    @map("user_id")
+  authVersion   Int       @map("auth_version")
+  scope         String
+  redirectUri   String?   @map("redirect_uri")
+  codeChallenge String?   @map("code_challenge")
+  expiresAt     DateTime  @map("expires_at")
+  usedAt        DateTime? @map("used_at")
+  revokedAt     DateTime? @map("revoked_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  client  McpOAuthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, userId])
+  @@index([expiresAt])
+  @@map("mcp_oauth_grants")
 }
 
 model DevicePairing {

@@ -229,6 +229,17 @@ export const SET_COMPANY_AGENT_MODE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
 };
 
+export const AUTHORIZE_MCP_CLIENT_ACTION: ActionContract = {
+  actionName: "authorize_mcp_client",
+  purpose:
+    "Let an external AI client (ChatGPT, Claude) read the company's records through the read-only MCP gateway. The person approves on the OAuth consent page with their Secretary e-mail and password; the only scope is secretary.read. Refused for an inactive account, a temporary password or during an emergency stop. Changing the password ends every such connection.",
+  requiredPermission: "authenticated",
+  riskLevel: 2,
+  confirmationRequired: true,
+  dataSources: ["user_input", "auth.users", "mcp_oauth_clients", "mcp_oauth_grants"],
+  possibleErrors: ["INVALID_CREDENTIALS", "MUST_CHANGE_PASSWORD", "SAFE_MODE_ACTIVE", "INVALID_REQUEST"],
+};
+
 export const MCP_READ_TOOL_ACTION: ActionContract = {
   actionName: "mcp_read_tool",
   purpose:
