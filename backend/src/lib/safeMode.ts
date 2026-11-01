@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
-import { prisma } from "../db.js";
+import { prisma, runInAmbientTransaction } from "../db.js";
 
 /**
  * Emergency stop — masterplan layer H, project description §49.
@@ -62,18 +62,19 @@ export async function assertNotInSafeModeLocked(tx: Prisma.TransactionClient, co
 }
 
 /**
- * Runs work while holding the company row FOR SHARE in a transaction of its
- * own, after refusing if the stop is on. For owning services that write
- * through their own connections rather than one transaction (the MCP
- * gateway's direct writes): the switch's FOR UPDATE waits until work has
- * finished, so nothing work saves can commit after the stop did, and a stop
- * committed first is refused before work starts. Work must not lock the
- * company row for update itself.
+ * Runs work inside one transaction that first takes the company row FOR SHARE
+ * and refuses if the stop is on. Every query work makes through `prisma` runs
+ * in that same transaction (db.ts, ambient transaction), so whatever work
+ * saves commits together with the check, while the lock is held, or not at
+ * all. The switch's FOR UPDATE waits for it: nothing can commit after a stop
+ * did. If the transaction ends early (its time limit, a failure), every write
+ * of work is rolled back with it. Work must not lock the company row for
+ * update itself.
  */
 export async function whileNotInSafeMode<T>(companyId: string, work: () => Promise<T>, timeoutMs = 60_000): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await assertNotInSafeModeLocked(tx, companyId);
-    return work();
+    return runInAmbientTransaction(tx, work);
   }, { timeout: timeoutMs, maxWait: 10_000 });
 }
 

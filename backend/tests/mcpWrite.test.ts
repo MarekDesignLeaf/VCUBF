@@ -510,34 +510,31 @@ describe("MCP gateway write access", () => {
     }
   }
 
-  it("keeps a direct write whose outcome is unknown, and a retry with its key creates no duplicate", async () => {
+  it("makes a direct write in one transaction: a failure after the insert saves nothing, and a retry with its key saves it once", async () => {
     const marker = "Trigger Fault Lead";
+    const args = { idempotency_key: key(), lead: { name: marker, email: "fault-lead@test.local" } };
+    const taskArgs = { idempotency_key: key(), task: { title: "Trigger Fault Task" } };
     await failAuditAfterWrite(`NEW.action_name IN ('create_lead', 'create_task') AND NEW.input_payload::text LIKE '%Trigger Fault%'`, async () => {
-      const args = { idempotency_key: key(), lead: { name: marker, email: "fault-lead@test.local" } };
+      // The lead is inserted, then its audit entry fails: the whole write rolls back.
       const first = result(await call(writeToken, "create_lead", args));
       assert.equal(first.isError, true);
-      assert.equal(first.body.error, "OUTCOME_UNKNOWN");
-      assert.equal(await prisma.lead.count({ where: { name: marker } }), 1, "the lead was saved before the failure");
-
-      for (let retry = 0; retry < 2; retry += 1) {
-        const again = result(await call(writeToken, "create_lead", args));
-        assert.equal(again.body.error, "OUTCOME_UNKNOWN");
-        assert.equal(again.body.replayed, true);
-      }
-      assert.equal(await prisma.lead.count({ where: { name: marker } }), 1, "a retry with the same key creates no duplicate");
-
-      const taskArgs = { idempotency_key: key(), task: { title: "Trigger Fault Task" } };
-      assert.equal(result(await call(writeToken, "create_task", taskArgs)).body.error, "OUTCOME_UNKNOWN");
-      assert.equal(result(await call(writeToken, "create_task", taskArgs)).body.error, "OUTCOME_UNKNOWN");
-      assert.equal(await prisma.task.count({ where: { title: "Trigger Fault Task" } }), 1);
+      assert.equal(first.body.error, "WRITE_FAILED");
+      assert.equal(await prisma.lead.count({ where: { name: marker } }), 0, "nothing was saved");
+      assert.equal(result(await call(writeToken, "create_task", taskArgs)).body.error, "WRITE_FAILED");
+      assert.equal(await prisma.task.count({ where: { title: "Trigger Fault Task" } }), 0);
     });
-    // Even with the fault gone and past its retention, the key never runs again.
-    await prisma.idempotencyRecord.updateMany({ where: { status: "unknown" }, data: { expiresAt: new Date(Date.now() - 1000) } });
-    const later = result(await call(writeToken, "create_lead", { idempotency_key: (await prisma.idempotencyRecord.findFirstOrThrow({ where: { status: "unknown", key: { contains: ":k-" } }, orderBy: { createdAt: "asc" } })).key.split(":").pop(), lead: { name: "Trigger Fault Lead", email: "fault-lead@test.local" } }));
-    assert.equal(later.body.error, "OUTCOME_UNKNOWN");
-    assert.equal(await prisma.lead.count({ where: { name: "Trigger Fault Lead" } }), 1);
-    const audit = await prisma.auditLog.findFirst({ where: { actionName: "mcp_write_tool", interpretedIntent: "create_lead" }, orderBy: { createdAt: "desc" } });
-    assert.equal(audit?.errorMessage, "OUTCOME_UNKNOWN");
+    // The fault is gone: the same key runs once, and every later retry gets that answer.
+    const saved = result(await call(writeToken, "create_lead", args));
+    assert.equal(saved.isError, false, JSON.stringify(saved.body));
+    const again = result(await call(writeToken, "create_lead", args));
+    assert.equal(again.body.replayed, true);
+    assert.equal(again.body.data.id, saved.body.data.id);
+    assert.equal(await prisma.lead.count({ where: { name: marker } }), 1, "exactly one lead");
+    assert.equal(result(await call(writeToken, "create_task", taskArgs)).isError, false);
+    assert.equal(result(await call(writeToken, "create_task", taskArgs)).body.replayed, true);
+    assert.equal(await prisma.task.count({ where: { title: "Trigger Fault Task" } }), 1, "exactly one task");
+    // The owning service's audit entry was saved with the write it describes, once.
+    assert.equal(await prisma.auditLog.count({ where: { actionName: "create_lead", result: "success", inputPayload: { path: ["name"], equals: marker } } }), 1);
   });
 
   it("keeps a confirmed change whose outcome is unknown, and a repeated yes does nothing again", async () => {
@@ -815,6 +812,18 @@ describe("MCP gateway write access", () => {
     await prisma.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: null } });
   });
 
+  /** Waits until some database session is blocked on a lock (the write under test reached it). */
+  async function untilBlockedOnLock() {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const rows = await prisma.$queryRawUnsafe<Array<{ waiting: bigint }>>(
+        `SELECT count(*) AS waiting FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+      );
+      if (Number(rows[0].waiting) > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.fail("the write never reached the lock");
+  }
+
   it("serialises a direct write with the emergency-stop switch", async () => {
     let release!: () => void;
     let locked!: () => void;
@@ -826,9 +835,10 @@ describe("MCP gateway write access", () => {
       await new Promise<void>((resolve) => { release = resolve; });
     }, { timeout: 15_000 });
     await lockHeld;
-    // Sent while the switch is in flight: the gateway still reads no stop, so the write reaches the service layer.
-    const writing = call(writeToken, "create_client", { idempotency_key: key(), client: { display_name: "In Flight Ltd" } });
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    // Sent while the switch is in flight: the gateway still reads no stop, so
+    // the write gets past it and waits on the company row the switch holds.
+    const writing = call(writeToken, "create_client", { idempotency_key: key(), client: { display_name: "In Flight Ltd" } }).then((response) => response);
+    await untilBlockedOnLock();
     release();
     await switching;
     const res = await writing;
@@ -842,22 +852,61 @@ describe("MCP gateway write access", () => {
     assert.equal(created.isError, false);
   });
 
+  it("lets no direct write commit after a stop, even when the write outlives its time limit", async () => {
+    process.env.MCP_WRITE_TRANSACTION_MS = "1000";
+    const client = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Blocked Row Ltd" } });
+    // Another transaction holds the client's row, so the update waits past the gateway's time limit.
+    let releaseRow!: () => void;
+    let rowLocked!: () => void;
+    const rowHeld = new Promise<void>((resolve) => { rowLocked = resolve; });
+    const holder = prisma.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(`SELECT id FROM clients WHERE id = '${client.id}' FOR UPDATE`);
+      rowLocked();
+      await new Promise<void>((resolve) => { releaseRow = resolve; });
+    }, { timeout: 20_000 });
+    await rowHeld;
+    const writing = call(writeToken, "update_client", { idempotency_key: key(), client_id: client.id, changes: { display_name: "Late Write Ltd" } }).then((response) => response);
+    await untilBlockedOnLock();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // The administrator switches the stop on after the time limit has passed.
+    const switching = prisma.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(`SELECT "safe_mode_since" FROM "companies" WHERE "id" = '${TEST_COMPANY_ID}' FOR UPDATE`);
+      await tx.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: new Date() } });
+    }, { timeout: 20_000 });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    releaseRow();
+    await holder;
+    await switching;
+    const res = await writing;
+    delete process.env.MCP_WRITE_TRANSACTION_MS;
+    const after = await prisma.client.findUniqueOrThrow({ where: { id: client.id } });
+    const stoppedAt = (await prisma.company.findUniqueOrThrow({ where: { id: TEST_COMPANY_ID } })).safeModeSince!;
+    // The write's transaction ran out of time, so everything it did was rolled back with its lock.
+    assert.equal(after.displayName, "Blocked Row Ltd", "nothing committed after the stop");
+    assert.ok(stoppedAt, "the stop went through");
+    assert.equal(result(res).body.error, "WRITE_FAILED");
+    assert.equal(await prisma.auditLog.count({ where: { actionName: "update_client", result: "success", dataAfter: { path: ["displayName"], equals: "Late Write Ltd" } } }), 0);
+    await prisma.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: null } });
+  });
+
   it("keeps the gateway's idempotency records out of reach of Idempotency-Key headers", async () => {
-    const marker = "Namespace Lead";
-    await failAuditAfterWrite(`NEW.action_name = 'create_lead' AND NEW.input_payload::text LIKE '%Namespace Lead%'`, async () => {
-      const args = { idempotency_key: key(), lead: { name: marker, email: "namespace@test.local" } };
-      assert.equal(result(await call(writeToken, "create_lead", args)).body.error, "OUTCOME_UNKNOWN");
+    // An unknown outcome: the archive commits in its own transaction, then its audit entry fails.
+    const client = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Namespace Archive Ltd" } });
+    const prepared = result(await call(writeToken, "archive_client", { client_id: client.id }));
+    await failAuditAfterWrite(`NEW.action_name = 'archive_client' AND NEW.result = 'success' AND NEW.input_payload->>'id' = '${client.id}'`, async () => {
+      assert.equal(result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: prepared.body.confirmation_id })).body.error, "OUTCOME_UNKNOWN");
     });
-    const record = await prisma.idempotencyRecord.findFirstOrThrow({ where: { status: "unknown", key: { startsWith: "mcp:direct:" } }, orderBy: { createdAt: "desc" } });
+    const record = await prisma.idempotencyRecord.findFirstOrThrow({ where: { status: "unknown", key: { endsWith: prepared.body.confirmation_id } } });
+    assert.ok(record.key.startsWith("mcp:confirm:"));
     // Past its retention, which the HTTP guard would treat as free.
     await prisma.idempotencyRecord.update({ where: { id: record.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
 
+    const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
     for (const header of [record.key, record.key.toUpperCase(), "mcp:anything", "Mcp:direct:x"]) {
       const ping = await request(app).post("/mcp").set("Authorization", `Bearer ${writeToken}`).set("Idempotency-Key", header)
         .send({ jsonrpc: "2.0", id: 9, method: "ping" });
       assert.equal(ping.status, 400, header);
       assert.equal(ping.body.error, "IDEMPOTENCY_KEY_RESERVED");
-      const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
       const viaRest = await request(app).post("/crm/leads").set("Authorization", `Bearer ${login.body.token}`).set("Idempotency-Key", header).send({ name: "Via Rest" });
       assert.equal(viaRest.status, 400, header);
     }
@@ -865,10 +914,10 @@ describe("MCP gateway write access", () => {
     assert.equal(kept.status, "unknown", "the unknown claim survives");
     assert.equal(await prisma.lead.count({ where: { name: "Via Rest" } }), 0);
 
-    // And the original retry still refuses to run again.
-    const retry = result(await call(writeToken, "create_lead", { idempotency_key: record.key.split(":").pop(), lead: { name: marker, email: "namespace@test.local" } }));
+    // And the original confirmation still refuses to run again.
+    const retry = result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: prepared.body.confirmation_id }));
     assert.equal(retry.body.error, "OUTCOME_UNKNOWN");
-    assert.equal(await prisma.lead.count({ where: { name: marker } }), 1, "no duplicate");
+    assert.equal(await prisma.auditLog.count({ where: { actionName: "mcp_write_tool", interpretedIntent: MCP_CONFIRM_TOOL, confirmed: true, inputPayload: { path: ["confirmationId"], equals: prepared.body.confirmation_id } } }), 0);
   });
 
   // ------------------------------------------------------------------------

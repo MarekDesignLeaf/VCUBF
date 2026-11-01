@@ -91,6 +91,11 @@ export const MCP_CANCEL_TOOL = "cancel_action";
 export const MCP_REVIEW_LIFETIME_MS = 10 * 60 * 1000;
 /** How long an idempotency key keeps the first answer. */
 export const MCP_IDEMPOTENCY_HOURS = 24;
+/** Longest a direct write's transaction may stay open (MCP_WRITE_TRANSACTION_MS overrides). */
+export function mcpWriteTransactionMs(): number {
+  const configured = Number(process.env.MCP_WRITE_TRANSACTION_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 60_000;
+}
 
 /** Who is calling: the person, and the OAuth client the person approved. */
 export interface McpCaller {
@@ -590,9 +595,9 @@ function isUniqueViolation(error: unknown) {
 
 /**
  * Thrown by work after begin() when it is certain that nothing was changed:
- * the owning service refused inside its own transaction, which rolled back
- * (the emergency stop checked under lock). The claim is released as if the
- * change had never started, and the original error is passed on.
+ * the change ran in one transaction that rolled back (a direct write's
+ * ambient transaction, or a reviewed service refusing under its emergency-stop
+ * lock). The claim is released as if the change had never started.
  */
 class NothingChanged extends Error {
   constructor(readonly original: unknown) {
@@ -664,7 +669,14 @@ async function onceOnly(
     } catch (error) {
       if (!started || error instanceof NothingChanged) {
         await prisma.idempotencyRecord.deleteMany({ where: { companyId: user.companyId, key, status: "in_progress" } });
-        throw error instanceof NothingChanged ? error.original : error;
+        const original = error instanceof NothingChanged ? error.original : error;
+        // A failure that rolled everything back is answered, not thrown: the
+        // caller learns that nothing was saved and that retrying is safe.
+        if (error instanceof NothingChanged && !(original instanceof SafeModeActiveError)) {
+          console.error(`MCP write ${phase} failed and was rolled back; nothing was saved.`, original);
+          return { ok: false, phase, payload: { ok: false, error: "WRITE_FAILED", message: "The change failed and nothing was saved. The same call may be retried with the same idempotency_key." } };
+        }
+        throw original;
       }
       console.error(`MCP write ${phase} failed after it started; its outcome is unknown and kept as such.`, error);
       const unknown: WriteOutcome = { ok: false, phase, payload: { ok: false, error: "OUTCOME_UNKNOWN", message: OUTCOME_UNKNOWN_MESSAGE } };
@@ -717,15 +729,26 @@ async function runDirect(caller: McpCaller, tool: WriteToolDefinition, args: Rec
     fingerprint,
     async (begin) => {
       await assertNotInSafeMode(caller.user.companyId);
-      // Serialised with the emergency-stop switch for the whole change: the
-      // owning services save through their own connections, so the company
-      // row is held FOR SHARE until they are done. A stop committed first is
-      // refused here, before anything starts; a stop requested meanwhile
-      // commits only after this change, never before it.
-      return whileNotInSafeMode(caller.user.companyId, async () => {
-        begin();
-        return asOutcome(await tool.run(caller.user, operation), "direct", tool.contract);
-      });
+      // One transaction for the whole change, holding the company row FOR
+      // SHARE: the owning service's writes and its audit entry commit with
+      // the emergency-stop check, or not at all. A stop committed first is
+      // refused before anything starts; a stop requested meanwhile commits
+      // only after this change. A failure inside rolls everything back, so
+      // nothing was saved and the same key may be tried again.
+      let rolledBack = false;
+      try {
+        return await whileNotInSafeMode(caller.user.companyId, async () => {
+          begin();
+          try {
+            return asOutcome(await tool.run(caller.user, operation), "direct", tool.contract);
+          } catch (error) {
+            rolledBack = true;
+            throw error;
+          }
+        }, mcpWriteTransactionMs());
+      } catch (error) {
+        throw rolledBack ? new NothingChanged(error) : error;
+      }
     },
     () => ({
       ok: false, phase: "direct", contract: tool.contract,
