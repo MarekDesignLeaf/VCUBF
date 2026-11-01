@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 37 mounted route groups, 55 Prisma models, 152 Action Contracts,
+- **Backend**: 37 mounted route groups, 55 Prisma models, 153 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,
@@ -109,7 +109,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 105 test files, including database integration tests and checks that only
+- **Tests**: 106 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -916,8 +916,21 @@ refresh tokens rotated on every use. Codes and refresh tokens are stored as hash
 bound to the `/mcp` resource that every other route refuses. A replayed code or refresh
 token revokes the chain; a password change ends every connection. The issuer is
 `MCP_PUBLIC_URL`, or the request origin when unset. The owner's own Bearer token still
-works on `/mcp`. Covered by `tests/mcpGateway.test.ts` and `tests/mcpOAuth.test.ts`; no live
-ChatGPT or Claude connection has been accepted.
+works on `/mcp`. Covered by `tests/mcpGateway.test.ts` and `tests/mcpOAuth.test.ts`.
+
+Acting (owner decision of 1 November 2026) is switched on separately with
+`MCP_WRITE_ENABLED=true` and is offered only to a connection approved with the
+`secretary.act` scope (or the owner's own token). It exposes the write and external
+catalogue tools the agent may propose, never administration, connector settings,
+playbooks or the assistant's own settings. They run exactly as Secretary's voice runs
+them: an action without a preview is carried out at once; a previewing action (sending
+email or WhatsApp, calendar changes, merges, sending quotes and invoices) returns
+`awaiting_confirmation` with its preview and a `review_id`, the assistant reads it out,
+and `confirm_action` carries out exactly that review once the user approves it in the
+conversation (`cancel_action` drops it). Audited as `mcp_write_tool`; the owning service
+audits the change itself. Covered by `tests/mcpAct.test.ts`. Secretary cannot verify that
+the approval came from the person rather than the model; the client's own confirmation
+is relied on. No live ChatGPT or Claude connection has been accepted.
 
 ## What's deliberately NOT here yet
 

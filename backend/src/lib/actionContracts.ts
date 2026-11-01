@@ -229,6 +229,17 @@ export const SET_COMPANY_AGENT_MODE_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
 };
 
+export const MCP_WRITE_TOOL_ACTION: ActionContract = {
+  actionName: "mcp_write_tool",
+  purpose:
+    "Answer one tool call that changes something, from an external AI client the owner connected with the secretary.act scope while MCP_WRITE_ENABLED is on: a write or external catalogue tool the agent may also propose (never administration, connector settings, playbooks or the assistant's own settings), or confirm_action / cancel_action for a preview it put up. The owning service runs it exactly as for Secretary's own voice: a previewing action changes nothing until confirm_action names its review. Audited with the tool name, the result, the review and a keyed fingerprint of the arguments; the owning service audits the change itself.",
+  requiredPermission: "authenticated",
+  riskLevel: 3,
+  confirmationRequired: false,
+  dataSources: ["user_input", "company_records", "voice_pending_actions"],
+  possibleErrors: ["MISSING_PERMISSION", "NOT_ALLOWED", "VALIDATION_FAILED", "NO_PENDING_ACTION", "PENDING_ACTION_ALREADY_RESOLVED", "SAFE_MODE_ACTIVE"],
+};
+
 export const AUTHORIZE_MCP_CLIENT_ACTION: ActionContract = {
   actionName: "authorize_mcp_client",
   purpose:

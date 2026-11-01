@@ -39,9 +39,18 @@ import {
   signMcpAccessToken,
   verifyMcpAccessToken,
 } from "../../middleware/auth.js";
-import { mcpGatewayEnabled, mcpPublicBase, mcpResource, protectedResourceMetadataUrl } from "./gate.js";
+import {
+  MCP_ACT_SCOPE,
+  MCP_READ_SCOPE,
+  mcpGatewayEnabled,
+  mcpPublicBase,
+  mcpResource,
+  mcpSupportedScopes,
+  protectedResourceMetadataUrl,
+} from "./gate.js";
 
-export const MCP_SCOPE = "secretary.read";
+/** The reading scope every connection has; secretary.act is added only while acting is switched on. */
+export const MCP_SCOPE = MCP_READ_SCOPE;
 export const MCP_ACCESS_TOKEN_SECONDS = 60 * 60;
 export const MCP_REFRESH_TOKEN_SECONDS = 30 * 24 * 60 * 60;
 export const MCP_CODE_SECONDS = 5 * 60;
@@ -109,7 +118,8 @@ export async function requireMcpAuth(req: Request, res: Response, next: NextFunc
   };
   if (!decoded || decoded.purpose !== MCP_ACCESS_PURPOSE) return refuse();
   const claims = verifyMcpAccessToken(token, mcpResource(req));
-  if (!claims || claims.scope !== MCP_SCOPE) return refuse();
+  const scopes = claims ? claims.scope.split(" ") : [];
+  if (!claims || !scopes.includes(MCP_READ_SCOPE) || scopes.some((scope) => scope !== MCP_READ_SCOPE && scope !== MCP_ACT_SCOPE)) return refuse();
   const [user, client] = await Promise.all([
     prisma.user.findUnique({ where: { id: claims.sub }, include: { company: { select: { safeModeSince: true } } } }),
     prisma.mcpOAuthClient.findUnique({ where: { clientId: claims.cid }, select: { companyId: true } }),
@@ -117,6 +127,8 @@ export async function requireMcpAuth(req: Request, res: Response, next: NextFunc
   if (!user || !user.isActive || user.authVersion !== claims.authVersion || !client || client.companyId !== user.companyId) return refuse();
   req.safeModeSince = user.company.safeModeSince;
   req.user = authedUserFromRecord(user);
+  // What this connection was approved for; the MCP route offers tools by it.
+  res.locals.mcpScopes = scopes;
   return idempotencyGuard(req, res, () => safeModeGate(req, res, next));
 }
 
@@ -130,7 +142,7 @@ function protectedResource(req: Request, res: Response) {
   res.json({
     resource: mcpResource(req),
     authorization_servers: [mcpPublicBase(req)],
-    scopes_supported: [MCP_SCOPE],
+    scopes_supported: mcpSupportedScopes(),
     bearer_methods_supported: ["header"],
     resource_name: "Secretary (VCUBF)",
   });
@@ -150,7 +162,7 @@ mcpWellKnownRouter.get("/oauth-authorization-server", (req, res) => {
     grant_types_supported: ["authorization_code", "refresh_token"],
     token_endpoint_auth_methods_supported: ["none"],
     code_challenge_methods_supported: ["S256"],
-    scopes_supported: [MCP_SCOPE],
+    scopes_supported: mcpSupportedScopes(),
   });
 });
 
@@ -238,10 +250,13 @@ async function authorizationRequest(req: Request, source: Record<string, unknown
   if (text("code_challenge_method") !== "S256" || !/^[A-Za-z0-9_-]{43,128}$/.test(text("code_challenge"))) return "A PKCE S256 code challenge is required.";
   const resource = text("resource");
   if (resource && resource !== mcpResource(req)) return "This authorization server does not issue tokens for that resource.";
-  const scope = text("scope") || MCP_SCOPE;
-  if (scope.split(/\s+/).some((entry) => entry !== MCP_SCOPE)) return `Only the ${MCP_SCOPE} scope exists.`;
+  const supported = mcpSupportedScopes();
+  const requested = (text("scope") || supported.join(" ")).split(/\s+/).filter(Boolean);
+  if (requested.some((entry) => !supported.includes(entry))) return `Supported scopes: ${supported.join(", ")}.`;
+  // Reading is part of every connection; acting only when asked for and switched on.
+  const scope = supported.filter((entry) => entry === MCP_READ_SCOPE || requested.includes(entry)).join(" ");
   if (text("state").length > 500) return "The state parameter is too long.";
-  return { clientId: client.clientId, clientName: client.clientName, redirectUri, codeChallenge: text("code_challenge"), state: text("state"), scope: MCP_SCOPE };
+  return { clientId: client.clientId, clientName: client.clientName, redirectUri, codeChallenge: text("code_challenge"), state: text("state"), scope };
 }
 
 const escapeHtml = (value: string) =>
@@ -266,8 +281,12 @@ button.secondary{background:#e5e5e5;color:#222}.error{color:#a00}</style></head>
 function consentPage(res: Response, request: AuthorizationRequest, status = 200, error?: string) {
   const hidden = (name: string, value: string) => `<input type="hidden" name="${name}" value="${escapeHtml(value)}">`;
   return page(res, status, `<h1>Connect to Secretary</h1>
-<p><strong>${escapeHtml(request.clientName)}</strong> asks to <strong>read</strong> your company's records in Secretary.
-It cannot write, send or delete anything.</p>
+${request.scope.split(" ").includes(MCP_ACT_SCOPE)
+    ? `<p><strong>${escapeHtml(request.clientName)}</strong> asks to <strong>read and act</strong> in Secretary on your instructions:
+read your records, prepare messages and send them when you approve them in the conversation, and change records the way
+Secretary's own voice control does. It cannot change permissions, connectors or settings.</p>`
+    : `<p><strong>${escapeHtml(request.clientName)}</strong> asks to <strong>read</strong> your company's records in Secretary.
+It cannot write, send or delete anything.</p>`}
 <p>Approve only a connection you started yourself.</p>
 ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 <form method="post" action="/oauth/authorize">
@@ -275,7 +294,7 @@ ${hidden("client_id", request.clientId)}${hidden("redirect_uri", request.redirec
 ${hidden("code_challenge", request.codeChallenge)}${hidden("code_challenge_method", "S256")}${hidden("state", request.state)}${hidden("scope", request.scope)}
 <label>E-mail<input type="email" name="email" autocomplete="username" required></label>
 <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
-<button type="submit" name="decision" value="approve">Approve read access</button>
+<button type="submit" name="decision" value="approve">${request.scope.split(" ").includes(MCP_ACT_SCOPE) ? "Approve" : "Approve read access"}</button>
 <button type="submit" name="decision" value="deny" class="secondary" formnovalidate>Deny</button>
 </form>`, request.redirectUri);
 }

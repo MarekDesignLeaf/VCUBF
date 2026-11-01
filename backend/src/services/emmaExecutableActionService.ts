@@ -934,7 +934,7 @@ const reviewedRequestSchema = z.object({ action: z.string() }).passthrough().tra
   return { ...request, parameters: validated.data } as unknown as EmmaExecutableActionRequest;
 });
 
-const EXECUTABLE_ACTION_REVIEW: ReviewedActionDefinition<EmmaExecutableActionRequest> = {
+export const EXECUTABLE_ACTION_REVIEW: ReviewedActionDefinition<EmmaExecutableActionRequest> = {
   actionType: "emma_universal_action",
   lifetimeMs: 10 * 60 * 1000,
   payloadSchema: reviewedRequestSchema,
