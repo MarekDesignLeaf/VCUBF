@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
-import { prisma } from "../db.js";
+import { Prisma } from "@prisma/client";
+import { prisma, runInAmbientTransaction } from "../db.js";
 
 /**
  * Emergency stop — masterplan layer H, project description §49.
@@ -43,6 +44,38 @@ export async function safeModeSince(companyId: string): Promise<Date | null> {
 
 export async function assertNotInSafeMode(companyId: string): Promise<void> {
   if (await safeModeSince(companyId)) throw new SafeModeActiveError();
+}
+
+/**
+ * The same refusal from inside a transaction, serialised with the switch: the
+ * company row is read FOR SHARE, which the switch's own FOR UPDATE waits for.
+ * A stop committed before this read is seen here; a stop requested after it
+ * takes effect only once this transaction has ended. So a change made under
+ * this check can never commit after the stop did. Throws SafeModeActiveError,
+ * which rolls the transaction back.
+ */
+export async function assertNotInSafeModeLocked(tx: Prisma.TransactionClient, companyId: string): Promise<void> {
+  const rows = await tx.$queryRaw<Array<{ safe_mode_since: Date | null }>>(
+    Prisma.sql`SELECT "safe_mode_since" FROM "companies" WHERE "id" = ${companyId} FOR SHARE`,
+  );
+  if (rows[0]?.safe_mode_since) throw new SafeModeActiveError();
+}
+
+/**
+ * Runs work inside one transaction that first takes the company row FOR SHARE
+ * and refuses if the stop is on. Every query work makes through `prisma` runs
+ * in that same transaction (db.ts, ambient transaction), so whatever work
+ * saves commits together with the check, while the lock is held, or not at
+ * all. The switch's FOR UPDATE waits for it: nothing can commit after a stop
+ * did. If the transaction ends early (its time limit, a failure), every write
+ * of work is rolled back with it. Work must not lock the company row for
+ * update itself.
+ */
+export async function whileNotInSafeMode<T>(companyId: string, work: () => Promise<T>, timeoutMs = 60_000): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await assertNotInSafeModeLocked(tx, companyId);
+    return runInAmbientTransaction(tx, work);
+  }, { timeout: timeoutMs, maxWait: 10_000 });
 }
 
 export function safeModeMessage(language: string | undefined): string {

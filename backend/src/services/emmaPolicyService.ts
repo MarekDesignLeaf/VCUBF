@@ -116,7 +116,16 @@ export async function updateEmmaPolicy(user: AuthedUser, disabledCapabilities: s
 export async function evaluateEmmaCommand(user: AuthedUser, command: ParsedCommand | ParsedCommand["intent"]) {
   const intent = typeof command === "string" ? command : command.intent;
   if (intent === "unrecognized" || SAFE_CANCELLATION_INTENTS.has(intent)) return { allowed: true as const };
-  const capabilityIds = capabilityIdsForCommand(command);
+  return evaluateEmmaCapabilities(user, capabilityIdsForCommand(command));
+}
+
+/**
+ * The same decision for callers that already know which capabilities an
+ * operation needs (the MCP write gateway names the Action Contract of each
+ * tool): the user's permission for every one of them, then the administrator's
+ * switches. An unknown capability is refused, never assumed allowed.
+ */
+export async function evaluateEmmaCapabilities(user: AuthedUser, capabilityIds: string[]) {
   if (!capabilityIds.length || capabilityIds.some((capabilityId) => !CAPABILITY_IDS.has(capabilityId))) {
     return { allowed: false as const, capabilityId: "unclassified", message: "This {assistant} action has not been assigned an administrator policy yet." };
   }

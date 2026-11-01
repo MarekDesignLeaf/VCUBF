@@ -1,6 +1,6 @@
 /**
- * OAuth 2.1 for the read-only MCP gateway (voice assistant master document
- * 1.1a, step P2b).
+ * OAuth 2.1 for the MCP gateway (voice assistant master document 1.1a, step
+ * P2b; write scope step P2c).
  *
  * What ChatGPT and Claude need to connect a remote MCP server:
  *
@@ -11,8 +11,13 @@
  *   bound into every token, and refresh tokens rotated on every use.
  *
  * The person approves on a page served here with their Secretary e-mail and
- * password, exactly the credentials /auth/login checks. Only one scope exists,
- * secretary.read, because the gateway only reads. Codes and refresh tokens are
+ * password, exactly the credentials /auth/login checks. Two scopes exist:
+ * secretary.read, always granted, and secretary.write, offered only while
+ * MCP_WRITE_ENABLED is "true" and granted only when the person ticks a separate
+ * box and presses the read-and-write button. A client may ask for write; the
+ * person may still approve read only, and the token response says which was
+ * granted. A refresh can never widen a grant, so a connection approved for
+ * reading must be approved again before it can write. Codes and refresh tokens are
  * stored as SHA-256 hashes; access tokens are short, purpose-restricted JWTs
  * that requireAuth refuses on every other route. Changing the password (the
  * account's authVersion) ends every connection at once.
@@ -39,9 +44,13 @@ import {
   signMcpAccessToken,
   verifyMcpAccessToken,
 } from "../../middleware/auth.js";
-import { mcpGatewayEnabled, mcpPublicBase, mcpResource, protectedResourceMetadataUrl } from "./gate.js";
+import { mcpGatewayEnabled, mcpPublicBase, mcpResource, mcpWriteEnabled, protectedResourceMetadataUrl } from "./gate.js";
 
-export const MCP_SCOPE = "secretary.read";
+export const MCP_READ_SCOPE = "secretary.read";
+export const MCP_WRITE_SCOPE = "secretary.write";
+/** The read scope, under the name the read-only gateway used for it. */
+export const MCP_SCOPE = MCP_READ_SCOPE;
+const KNOWN_SCOPES = [MCP_READ_SCOPE, MCP_WRITE_SCOPE] as const;
 export const MCP_ACCESS_TOKEN_SECONDS = 60 * 60;
 export const MCP_REFRESH_TOKEN_SECONDS = 30 * 24 * 60 * 60;
 export const MCP_CODE_SECONDS = 5 * 60;
@@ -50,6 +59,22 @@ export const MCP_MAX_REGISTERED_CLIENTS = 500;
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const secret = () => randomBytes(32).toString("base64url");
+
+/** The scopes this server will issue right now: write only while its switch is on. */
+export function supportedScopes(): string[] {
+  return mcpWriteEnabled() ? [MCP_READ_SCOPE, MCP_WRITE_SCOPE] : [MCP_READ_SCOPE];
+}
+
+/** A space-separated scope string as a list, each scope once. */
+export function parseScopes(value: string): string[] {
+  return [...new Set(value.split(/\s+/).filter(Boolean))];
+}
+
+/** The canonical form stored and issued: read first, then write. */
+export function scopeString(scopes: Iterable<string>): string {
+  const set = new Set(scopes);
+  return KNOWN_SCOPES.filter((scope) => set.has(scope)).join(" ");
+}
 
 function pkceMatches(verifier: string, challenge: string): boolean {
   return createHash("sha256").update(verifier).digest("base64url") === challenge;
@@ -109,7 +134,10 @@ export async function requireMcpAuth(req: Request, res: Response, next: NextFunc
   };
   if (!decoded || decoded.purpose !== MCP_ACCESS_PURPOSE) return refuse();
   const claims = verifyMcpAccessToken(token, mcpResource(req));
-  if (!claims || claims.scope !== MCP_SCOPE) return refuse();
+  if (!claims) return refuse();
+  // Every token carries the read scope; anything unknown means it was not ours.
+  const scopes = parseScopes(claims.scope);
+  if (!scopes.includes(MCP_READ_SCOPE) || scopes.some((scope) => !(KNOWN_SCOPES as readonly string[]).includes(scope))) return refuse();
   const [user, client] = await Promise.all([
     prisma.user.findUnique({ where: { id: claims.sub }, include: { company: { select: { safeModeSince: true } } } }),
     prisma.mcpOAuthClient.findUnique({ where: { clientId: claims.cid }, select: { companyId: true } }),
@@ -117,7 +145,21 @@ export async function requireMcpAuth(req: Request, res: Response, next: NextFunc
   if (!user || !user.isActive || user.authVersion !== claims.authVersion || !client || client.companyId !== user.companyId) return refuse();
   req.safeModeSince = user.company.safeModeSince;
   req.user = authedUserFromRecord(user);
+  req.mcpAccess = { clientId: claims.cid, scopes };
   return idempotencyGuard(req, res, () => safeModeGate(req, res, next));
+}
+
+/**
+ * The answer to a token that lacks a scope the call needs (RFC 6750 §3.1, MCP
+ * authorization "scope challenge"): 403 with the scopes that would satisfy it,
+ * so a client that supports step-up can ask the person to approve them.
+ */
+export function insufficientScope(req: Request, res: Response, description: string) {
+  res.set(
+    "WWW-Authenticate",
+    `Bearer error="insufficient_scope", scope="${MCP_READ_SCOPE} ${MCP_WRITE_SCOPE}", resource_metadata="${protectedResourceMetadataUrl(req)}", error_description="${description.replace(/["\\]/g, "")}"`,
+  );
+  return res.status(403).json({ error: "INSUFFICIENT_SCOPE", message: description, required_scope: `${MCP_READ_SCOPE} ${MCP_WRITE_SCOPE}` });
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +172,7 @@ function protectedResource(req: Request, res: Response) {
   res.json({
     resource: mcpResource(req),
     authorization_servers: [mcpPublicBase(req)],
-    scopes_supported: [MCP_SCOPE],
+    scopes_supported: supportedScopes(),
     bearer_methods_supported: ["header"],
     resource_name: "Secretary (VCUBF)",
   });
@@ -150,7 +192,7 @@ mcpWellKnownRouter.get("/oauth-authorization-server", (req, res) => {
     grant_types_supported: ["authorization_code", "refresh_token"],
     token_endpoint_auth_methods_supported: ["none"],
     code_challenge_methods_supported: ["S256"],
-    scopes_supported: [MCP_SCOPE],
+    scopes_supported: supportedScopes(),
   });
 });
 
@@ -220,6 +262,7 @@ interface AuthorizationRequest {
   redirectUri: string;
   codeChallenge: string;
   state: string;
+  /** What the client asked for, canonical; the person may approve less. */
   scope: string;
 }
 
@@ -238,10 +281,13 @@ async function authorizationRequest(req: Request, source: Record<string, unknown
   if (text("code_challenge_method") !== "S256" || !/^[A-Za-z0-9_-]{43,128}$/.test(text("code_challenge"))) return "A PKCE S256 code challenge is required.";
   const resource = text("resource");
   if (resource && resource !== mcpResource(req)) return "This authorization server does not issue tokens for that resource.";
-  const scope = text("scope") || MCP_SCOPE;
-  if (scope.split(/\s+/).some((entry) => entry !== MCP_SCOPE)) return `Only the ${MCP_SCOPE} scope exists.`;
+  const requested = parseScopes(text("scope") || MCP_READ_SCOPE);
+  const offered = supportedScopes();
+  if (requested.some((entry) => !offered.includes(entry))) return `Only these scopes can be requested: ${offered.join(", ")}.`;
   if (text("state").length > 500) return "The state parameter is too long.";
-  return { clientId: client.clientId, clientName: client.clientName, redirectUri, codeChallenge: text("code_challenge"), state: text("state"), scope: MCP_SCOPE };
+  // Reading comes with every connection, so asking for write alone asks for both.
+  const scope = scopeString([MCP_READ_SCOPE, ...requested]);
+  return { clientId: client.clientId, clientName: client.clientName, redirectUri, codeChallenge: text("code_challenge"), state: text("state"), scope };
 }
 
 const escapeHtml = (value: string) =>
@@ -260,22 +306,39 @@ function page(res: Response, status: number, body: string, formTarget?: string) 
 <style>body{font:16px system-ui,sans-serif;max-width:520px;margin:40px auto;padding:0 20px}
 input,button{box-sizing:border-box;width:100%;padding:12px;margin-top:8px;font:inherit}
 button{border:0;border-radius:8px;background:#1f5f3f;color:#fff;margin-top:16px}
-button.secondary{background:#e5e5e5;color:#222}.error{color:#a00}</style></head><body>${body}</body></html>`);
+button.secondary{background:#e5e5e5;color:#222}.error{color:#a00}
+label.check{display:flex;gap:8px;align-items:flex-start;margin-top:16px}label.check input{width:auto;margin-top:4px}</style></head><body>${body}</body></html>`);
 }
+
+export const WRITE_CONSENT_FIELD = "allow_write";
 
 function consentPage(res: Response, request: AuthorizationRequest, status = 200, error?: string) {
   const hidden = (name: string, value: string) => `<input type="hidden" name="${name}" value="${escapeHtml(value)}">`;
+  const asksWrite = parseScopes(request.scope).includes(MCP_WRITE_SCOPE);
+  const returnOrigin = new URL(request.redirectUri).host;
+  const purpose = asksWrite
+    ? `<p><strong>${escapeHtml(request.clientName)}</strong> asks to <strong>read</strong> your company's records in Secretary
+and to <strong>create and change</strong> clients, contacts, leads, jobs, tasks, quotes and draft invoices on your behalf.</p>
+<p>Every change runs under your own account, your permissions and the administrator's switches, and is recorded in the audit log.
+Archiving, converting a lead and changing an invoice's status are shown to you first and need a separate yes in the conversation.
+Nothing is e-mailed, messaged, published or deleted.</p>`
+    : `<p><strong>${escapeHtml(request.clientName)}</strong> asks to <strong>read</strong> your company's records in Secretary.
+It cannot write, send or delete anything.</p>`;
+  const writeChoice = asksWrite
+    ? `<label class="check"><input type="checkbox" name="${WRITE_CONSENT_FIELD}" value="yes"> I allow ${escapeHtml(request.clientName)} to create and change records in Secretary.</label>
+<button type="submit" name="decision" value="approve_write">Approve read and write access</button>
+<button type="submit" name="decision" value="approve" class="secondary">Approve read access only</button>`
+    : `<button type="submit" name="decision" value="approve">Approve read access</button>`;
   return page(res, status, `<h1>Connect to Secretary</h1>
-<p><strong>${escapeHtml(request.clientName)}</strong> asks to <strong>read</strong> your company's records in Secretary.
-It cannot write, send or delete anything.</p>
-<p>Approve only a connection you started yourself.</p>
+${purpose}
+<p>Approve only a connection you started yourself. It returns to <strong>${escapeHtml(returnOrigin)}</strong>.</p>
 ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 <form method="post" action="/oauth/authorize">
 ${hidden("client_id", request.clientId)}${hidden("redirect_uri", request.redirectUri)}${hidden("response_type", "code")}
 ${hidden("code_challenge", request.codeChallenge)}${hidden("code_challenge_method", "S256")}${hidden("state", request.state)}${hidden("scope", request.scope)}
 <label>E-mail<input type="email" name="email" autocomplete="username" required></label>
 <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
-<button type="submit" name="decision" value="approve">Approve read access</button>
+${writeChoice}
 <button type="submit" name="decision" value="deny" class="secondary" formnovalidate>Deny</button>
 </form>`, request.redirectUri);
 }
@@ -298,7 +361,19 @@ mcpOAuthRouter.post("/authorize", approveLimiter, async (req, res) => {
   const request = await authorizationRequest(req, body);
   if (typeof request === "string") return page(res, 400, `<h1>Authorization request refused</h1><p class="error">${escapeHtml(request)}</p>`);
   const issuer = mcpPublicBase(req);
-  if (body.decision !== "approve") return redirectTo(res, request.redirectUri, { error: "access_denied", state: request.state, iss: issuer });
+  if (body.decision !== "approve" && body.decision !== "approve_write") {
+    return redirectTo(res, request.redirectUri, { error: "access_denied", state: request.state, iss: issuer });
+  }
+  // Writing is granted only by its own button, with its own box ticked, and
+  // only while it was asked for and is switched on. Anything less is read only.
+  const grantsWrite = body.decision === "approve_write";
+  if (grantsWrite && !parseScopes(request.scope).includes(MCP_WRITE_SCOPE)) {
+    return consentPage(res, request, 400, "Write access was not requested by this application.");
+  }
+  if (grantsWrite && body[WRITE_CONSENT_FIELD] !== "yes") {
+    return consentPage(res, request, 400, "Tick the box to allow creating and changing records, or approve read access only.");
+  }
+  const grantedScope = grantsWrite ? scopeString([MCP_READ_SCOPE, MCP_WRITE_SCOPE]) : MCP_READ_SCOPE;
 
   const email = typeof body.email === "string" ? body.email.trim() : "";
   const password = typeof body.password === "string" ? body.password : "";
@@ -319,7 +394,7 @@ mcpOAuthRouter.post("/authorize", approveLimiter, async (req, res) => {
   await prisma.mcpOAuthGrant.create({
     data: {
       tokenHash: sha256(code), kind: "code", clientId: request.clientId, companyId: user.companyId, userId: user.id,
-      authVersion: user.authVersion, scope: request.scope, redirectUri: request.redirectUri, codeChallenge: request.codeChallenge,
+      authVersion: user.authVersion, scope: grantedScope, redirectUri: request.redirectUri, codeChallenge: request.codeChallenge,
       expiresAt: new Date(Date.now() + MCP_CODE_SECONDS * 1000),
     },
   });
@@ -328,7 +403,10 @@ mcpOAuthRouter.post("/authorize", approveLimiter, async (req, res) => {
     userId: user.id,
     actionName: AUTHORIZE_MCP_CLIENT_ACTION.actionName,
     interpretedIntent: "authorize_mcp_client",
-    inputPayload: { clientId: request.clientId, clientName: request.clientName, scope: request.scope, redirectOrigin: new URL(request.redirectUri).origin },
+    inputPayload: {
+      clientId: request.clientId, clientName: request.clientName, requestedScope: request.scope, scope: grantedScope,
+      redirectOrigin: new URL(request.redirectUri).origin,
+    },
     riskLevel: AUTHORIZE_MCP_CLIENT_ACTION.riskLevel,
     confirmationRequired: AUTHORIZE_MCP_CLIENT_ACTION.confirmationRequired,
     confirmed: true,
@@ -343,6 +421,13 @@ async function revokeChain(clientId: string, userId: string) {
 }
 
 async function issueTokens(req: Request, res: Response, grant: { clientId: string; companyId: string; userId: string; authVersion: number; scope: string }) {
+  // Never more than was approved, and never a scope this server does not issue
+  // right now: with writing switched off a connection continues read only, and
+  // must be approved again for writing once it is switched back on.
+  const offered = supportedScopes();
+  const scope = scopeString(parseScopes(grant.scope).filter((entry) => offered.includes(entry)));
+  if (!parseScopes(scope).includes(MCP_READ_SCOPE)) return oauthError(res, 400, "invalid_scope");
+  grant = { ...grant, scope };
   const refreshToken = secret();
   await prisma.mcpOAuthGrant.create({
     data: {
@@ -410,9 +495,14 @@ mcpOAuthRouter.post("/token", tokenLimiter, async (req, res) => {
       await revokeChain(grant.clientId, grant.userId);
       return oauthError(res, 400, "invalid_grant");
     }
+    // A refresh may narrow the grant, never widen it (RFC 6749 §6): a
+    // connection approved for reading cannot turn itself into a writer.
+    const asked = text("scope") ? parseScopes(text("scope")) : undefined;
+    const held = parseScopes(grant.scope);
+    if (asked && asked.some((entry) => !held.includes(entry))) return oauthError(res, 400, "invalid_scope", "A refresh cannot add scopes. Approve the connection again.");
     if (!(await consume(grant.id))) return oauthError(res, 400, "invalid_grant");
     if (!(await userStillMatches(grant.userId, grant.authVersion))) return oauthError(res, 400, "invalid_grant");
-    return issueTokens(req, res, grant);
+    return issueTokens(req, res, asked ? { ...grant, scope: scopeString([MCP_READ_SCOPE, ...asked]) } : grant);
   }
 
   return oauthError(res, 400, "unsupported_grant_type");

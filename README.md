@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 37 mounted route groups, 55 Prisma models, 152 Action Contracts,
+- **Backend**: 37 mounted route groups, 55 Prisma models, 153 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,
@@ -109,7 +109,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 105 test files, including database integration tests and checks that only
+- **Tests**: 106 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -895,29 +895,69 @@ Frontend: `npm run lint` and `npm run build` verified working with no warnings. 
 provider, context state and `useAuth` hook live in separate modules so Fast Refresh can
 identify the component-only provider module correctly.
 
-### MCP gateway, read only (`POST /mcp`, off by default)
+### MCP gateway (`POST /mcp`, off by default; writing behind its own switch)
 
 One Model Context Protocol endpoint for external AI clients (ChatGPT first, Claude second),
 stateless Streamable HTTP with JSON answers (`initialize`, `ping`, `tools/list`, `tools/call`).
-It exposes only the catalogue tools whose mode is read and that need no confirmation, plus
-`run_read_command`, which runs a canonical parser command only when the parser classifies
-it as a read. Every call goes through `requireAuth` (identity, emergency stop), the user's
-permissions and the administrator's capability switches, and is audited as `mcp_read_tool`
-with the tool name, the result and a keyed fingerprint of the arguments. Nothing can be
-written, sent or deleted through it. The path answers 404 unless `MCP_GATEWAY_ENABLED=true`.
+Every connection reads: the catalogue tools whose mode is read and that need no
+confirmation, plus `run_read_command`, which runs a canonical parser command only when the
+parser classifies it as a read. Every call goes through the caller's identity, the
+emergency stop, the user's permissions and the administrator's capability switches, and is
+audited as `mcp_read_tool` with the tool name, the result and a keyed fingerprint of the
+arguments. The path answers 404 unless `MCP_GATEWAY_ENABLED=true`.
+
+Writing (step P2c, `backend/src/modules/mcp/writeTools.ts`) is a second switch,
+`MCP_WRITE_ENABLED=true`, off by default, and needs an access token the person approved for
+`secretary.write`. The write tools are named, one per Action Contract, and call the owning
+service with its own schema; records are named by id only. Direct, each with a required
+`idempotency_key` (the first call runs, a repeat gets the first answer, the same key with
+other arguments is refused; a call that fails after the change has started is kept as
+`OUTCOME_UNKNOWN` and never run again with that key, because a service may already have
+saved its record; these keys live in a reserved `mcp:` namespace that no `Idempotency-Key`
+header may use, so the HTTP guard can never claim, expire or delete them; each direct write
+runs in one transaction that holds the company row FOR SHARE, and every query of the owning
+service joins it (an ambient transaction in `backend/src/db.ts`), so the write and its
+audit entry commit before any emergency stop can, or are rolled back, including when the
+transaction outlives its time limit): `create_client`, `update_client`, `create_contact`,
+`update_contact`, `create_lead`, `update_lead` (including its status), `create_job`,
+`change_job_status`, `assign_job`, `create_task`, `update_task` (including its status),
+`create_quote`, `update_quote`, `change_quote_status`, `create_invoice_draft`,
+`update_invoice_draft`. Previewed first and run only by `confirm_action` with the returned
+`confirmation_id` (same user, same OAuth connection, ten minutes, newest preview only,
+once, and only if the preview computed again at that moment is identical; an invoice
+preview is the whole document, every line, dates, notes, payments, totals and revision, and
+the status change is made under a row lock only for that revision; a preview too large
+to hand back whole is refused as `PREVIEW_TOO_LARGE` before any confirmation exists;
+archiving runs only for the approved revision, name and client link, compared under the
+row lock of the archive; the emergency stop is checked again just before the change and
+inside the owning service's transaction, serialised with the switch, and a stop closes
+the review):
+`archive_client`, `archive_contact` (destructive), `convert_lead` (irreversible),
+`change_invoice_status` to issued or void (financial); `cancel_action` withdraws one. The
+preview queue is its own (`mcp_write_review`), so Alfonzo's spoken yes cannot confirm it.
+Nothing is e-mailed, messaged, published or deleted through the gateway; recording payments
+and sending quotes or invoices are not exposed. A read token calling a write tool gets
+HTTP 403 with `WWW-Authenticate: Bearer error="insufficient_scope"`; the owner's own Bearer
+token stays read only. Each write is audited as `mcp_write_tool` (tool, phase, OAuth
+client, fingerprint, never the record) and by the owning service under its own contract.
+
 ChatGPT and Claude connect through OAuth 2.1 (`backend/src/modules/mcp/oauth.ts`):
 discovery at `/.well-known/oauth-protected-resource[/mcp]` and
 `/.well-known/oauth-authorization-server`, Dynamic Client Registration at
 `/oauth/register` (public clients only), authorization code with PKCE S256 at
-`/oauth/authorize` (the person approves with their Secretary e-mail and password; the only
-scope is `secretary.read`; audited as `authorize_mcp_client`) and `/oauth/token` with
-refresh tokens rotated on every use. Codes and refresh tokens are stored as hashes
+`/oauth/authorize` and `/oauth/token` with refresh tokens rotated on every use. The person
+approves with their Secretary e-mail and password; `secretary.read` is always granted, and
+`secretary.write` is offered only while writing is switched on and granted only with its
+own ticked box and button (audited as `authorize_mcp_client` with the requested and granted
+scopes). A refresh can narrow a grant but never widen it, so a connection approved for
+reading must be approved again to write, and a connection refreshed while writing is
+switched off continues read only. Codes and refresh tokens are stored as hashes
 (`McpOAuthClient`, `McpOAuthGrant`); access tokens are one-hour, purpose-restricted JWTs
 bound to the `/mcp` resource that every other route refuses. A replayed code or refresh
 token revokes the chain; a password change ends every connection. The issuer is
-`MCP_PUBLIC_URL`, or the request origin when unset. The owner's own Bearer token still
-works on `/mcp`. Covered by `tests/mcpGateway.test.ts` and `tests/mcpOAuth.test.ts`; no live
-ChatGPT or Claude connection has been accepted.
+`MCP_PUBLIC_URL`, or the request origin when unset. Covered by `tests/mcpGateway.test.ts`,
+`tests/mcpOAuth.test.ts` and `tests/mcpWrite.test.ts`; no live ChatGPT or Claude
+connection has been accepted, for reading or writing.
 
 ## What's deliberately NOT here yet
 

@@ -243,6 +243,7 @@ export const EMMA_NON_DIRECT_ACTIONS = {
   execute_text_command: { executionClass: "system", note: "Audit wrapper around every {assistant} command, not a separate user operation." },
   authorize_mcp_client: { executionClass: "interactive", note: "Approved on the OAuth consent page with the account password; never spoken and never a chat action." },
   mcp_read_tool: { executionClass: "system", note: "Audit wrapper around one read-only tool call from an external AI client through the MCP gateway; not a separate user operation." },
+  mcp_write_tool: { executionClass: "system", note: "Audit wrapper around one write tool call from an external AI client through the MCP gateway; the change itself is made and audited by the owning service under its own contract." },
   prepare_voice_email_deletion: { executionClass: "superseded", note: "Handled by the generic delete_gmail_message reviewed action." },
   confirm_voice_email_deletion: { executionClass: "superseded", note: "Handled by confirm action for delete_gmail_message." },
   cancel_voice_email_deletion: { executionClass: "superseded", note: "Handled by cancel action for delete_gmail_message." },

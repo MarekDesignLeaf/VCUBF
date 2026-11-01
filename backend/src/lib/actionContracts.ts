@@ -232,7 +232,7 @@ export const SET_COMPANY_AGENT_MODE_ACTION: ActionContract = {
 export const AUTHORIZE_MCP_CLIENT_ACTION: ActionContract = {
   actionName: "authorize_mcp_client",
   purpose:
-    "Let an external AI client (ChatGPT, Claude) read the company's records through the read-only MCP gateway. The person approves on the OAuth consent page with their Secretary e-mail and password; the only scope is secretary.read. Refused for an inactive account, a temporary password or during an emergency stop. Changing the password ends every such connection.",
+    "Let an external AI client (ChatGPT, Claude) use the MCP gateway. The person approves on the OAuth consent page with their Secretary e-mail and password. secretary.read is always granted; secretary.write is offered only while MCP_WRITE_ENABLED is on and granted only with its own ticked box and button, never by a refresh. Refused for an inactive account, a temporary password or during an emergency stop. Changing the password ends every such connection.",
   requiredPermission: "authenticated",
   riskLevel: 2,
   confirmationRequired: true,
@@ -249,6 +249,26 @@ export const MCP_READ_TOOL_ACTION: ActionContract = {
   confirmationRequired: false,
   dataSources: ["user_input", "company_records"],
   possibleErrors: ["MISSING_PERMISSION", "NOT_ALLOWED", "READ_ONLY_GATEWAY", "UNRECOGNIZED_COMMAND", "VALIDATION_FAILED", "SAFE_MODE_ACTIVE"],
+};
+
+// The write half of the MCP gateway (step P2c). A wrapper, like
+// mcp_read_tool: every change is made by the owning service under its own
+// Action Contract (create_client, update_task, prepare_quote, ...), which
+// keeps its own permission, validation and detailed audit entry. This entry
+// records that the change came from an external AI client, which client, the
+// tool, the phase (direct, prepare, confirm, cancel) and the outcome.
+export const MCP_WRITE_TOOL_ACTION: ActionContract = {
+  actionName: "mcp_write_tool",
+  purpose:
+    "Carry out one write tool call from an external AI client (ChatGPT, Claude) through the MCP gateway, only with an access token the person approved for secretary.write and only while MCP_WRITE_ENABLED is on. Internal record changes run once per idempotency key; archiving, lead conversion and invoice status changes are first returned as an exact preview and run only on an explicit confirmation bound to that preview, that user and that client, once. Runs under the caller's identity, permissions and the administrator's capability switches; refused during an emergency stop. Nothing is e-mailed, messaged, published or deleted. Audited with the tool, the phase, the result and a keyed fingerprint of the arguments.",
+  requiredPermission: "authenticated",
+  riskLevel: 3,
+  confirmationRequired: false,
+  dataSources: ["user_input", "company_records", "voice.pending_actions", "idempotency_records"],
+  possibleErrors: [
+    "INSUFFICIENT_SCOPE", "WRITE_DISABLED", "NOT_ALLOWED", "MISSING_PERMISSION", "VALIDATION_FAILED", "IDEMPOTENCY_KEY_REUSED",
+    "IDEMPOTENCY_IN_PROGRESS", "CONFIRMATION_NOT_FOUND", "CONFIRMATION_ALREADY_USED", "SAFE_MODE_ACTIVE",
+  ],
 };
 
 export const EXECUTE_AGENT_PROPOSAL_ACTION: ActionContract = {

@@ -34,6 +34,18 @@ import { SAFE_MODE_ACTIVE } from "../lib/safeMode.js";
  */
 
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * Keys beginning with this belong to the MCP gateway's write tools
+ * (modules/mcp/writeTools.ts), which share the table but keep different rules:
+ * their unknown outcomes are never freed. A header key may not start with it,
+ * so no HTTP request can claim, replay, expire or delete one of them.
+ */
+export const RESERVED_IDEMPOTENCY_PREFIX = "mcp:";
+
+function reservedKey(key: string) {
+  return key.toLowerCase().startsWith(RESERVED_IDEMPOTENCY_PREFIX);
+}
 const RETENTION_HOURS = 24;
 const MAX_KEY_LENGTH = 200;
 
@@ -60,6 +72,9 @@ export async function idempotencyGuard(req: Request, res: Response, next: NextFu
   if (key.length > MAX_KEY_LENGTH) {
     return res.status(400).json({ error: "IDEMPOTENCY_KEY_TOO_LONG", message: `An Idempotency-Key may be at most ${MAX_KEY_LENGTH} characters.` });
   }
+  if (reservedKey(key)) {
+    return res.status(400).json({ error: "IDEMPOTENCY_KEY_RESERVED", message: `An Idempotency-Key may not begin with ${RESERVED_IDEMPOTENCY_PREFIX}.` });
+  }
 
   const companyId = req.user.companyId;
   const current = fingerprint(req);
@@ -75,6 +90,10 @@ export async function idempotencyGuard(req: Request, res: Response, next: NextFu
     } catch {
       const existing = await prisma.idempotencyRecord.findUnique({ where: { companyId_key: { companyId, key } } });
       if (!existing) continue; // It was removed between the failed insert and this read.
+      // Never another owner's record, whatever its state (belt to the refusal above).
+      if (reservedKey(existing.key)) {
+        return res.status(400).json({ error: "IDEMPOTENCY_KEY_RESERVED", message: `An Idempotency-Key may not begin with ${RESERVED_IDEMPOTENCY_PREFIX}.` });
+      }
       if (existing.expiresAt <= new Date()) {
         // Past its retention: the first attempt is no longer replayable, so the
         // key is free again rather than blocked for ever.

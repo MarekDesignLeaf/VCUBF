@@ -13,6 +13,7 @@ import {
 } from "../lib/executionEngine.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
+import { assertNotInSafeModeLocked } from "../lib/safeMode.js";
 
 type FailureResult = Extract<ServiceResult<never>, { ok: false }>;
 
@@ -57,7 +58,18 @@ export const updateClientSchema = z.object({
   notes: optionalText(10_000),
 }).refine((data) => Object.keys(data).length > 0, "At least one client field is required");
 
-const archiveClientSchema = z.object({ confirmed: z.boolean().optional() });
+/**
+ * expected_revision and expected_display_name (optional): the client as the
+ * caller showed it for approval. With them, a confirmed archive happens only
+ * if the client is still that revision under that name, compared under the
+ * row lock of the archive itself; otherwise CLIENT_CHANGED.
+ */
+const archiveClientSchema = z.object({
+  confirmed: z.boolean().optional(),
+  expected_revision: z.string().datetime().optional(),
+  expected_display_name: z.string().optional(),
+});
+class ClientChanged extends Error {}
 const pendingArchivePayloadSchema = z.object({ clientId: z.string().uuid(), displayName: z.string().min(1) });
 const pendingCreatePayloadSchema = createClientSchema.extend({
   email_primary: z.string().email(),
@@ -396,7 +408,12 @@ export async function updateClient(user: AuthedUser, id: string, rawInput: unkno
   return ok(200, updated);
 }
 
-export async function archiveClient(user: AuthedUser, id: string, rawInput: unknown): Promise<ServiceResult<unknown>> {
+export async function archiveClient(
+  user: AuthedUser,
+  id: string,
+  rawInput: unknown,
+  options: { safeModeLocked?: boolean } = {},
+): Promise<ServiceResult<unknown>> {
   if (!canManageClients(user)) {
     await auditFailure(user, ARCHIVE_CLIENT_ACTION, { id, input: rawInput }, "MISSING_PERMISSION");
     return fail(403, "MISSING_PERMISSION", "CRM management permission is required to archive clients.");
@@ -415,13 +432,31 @@ export async function archiveClient(user: AuthedUser, id: string, rawInput: unkn
     return fail(404, "CLIENT_NOT_FOUND", "The active client was not found.");
   }
 
-  const preview = { clientId: existing.id, displayName: existing.displayName, preservedRecords: existing._count };
+  const preview = {
+    clientId: existing.id, displayName: existing.displayName, preservedRecords: existing._count, revision: existing.updatedAt.toISOString(),
+  };
   if (!parsed.data.confirmed) {
     await auditFailure(user, ARCHIVE_CLIENT_ACTION, { id }, "CONFIRMATION_REQUIRED", "rejected");
     return fail(409, "CONFIRMATION_REQUIRED", "Confirm archiving this client. Related records will be preserved.", { preview });
   }
 
-  const archived = await prisma.client.update({ where: { id: existing.id }, data: { isActive: false } });
+  const { expected_revision: expectedRevision, expected_display_name: expectedName } = parsed.data;
+  let archived;
+  try {
+    archived = await prisma.$transaction(async (tx) => {
+      if (options.safeModeLocked) await assertNotInSafeModeLocked(tx, user.companyId);
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM clients WHERE id = ${existing.id} AND company_id = ${user.companyId} FOR UPDATE`);
+      const current = await tx.client.findFirst({ where: { id: existing.id, companyId: user.companyId, isActive: true } });
+      if (!current) throw new ClientChanged();
+      if (expectedRevision !== undefined && current.updatedAt.toISOString() !== expectedRevision) throw new ClientChanged();
+      if (expectedName !== undefined && current.displayName !== expectedName) throw new ClientChanged();
+      return tx.client.update({ where: { id: existing.id }, data: { isActive: false } });
+    });
+  } catch (error) {
+    if (!(error instanceof ClientChanged)) throw error;
+    await auditFailure(user, ARCHIVE_CLIENT_ACTION, { id }, "CLIENT_CHANGED", "rejected");
+    return fail(409, "CLIENT_CHANGED", "The client changed after it was shown. Review it again.");
+  }
   await recordAudit({
     companyId: user.companyId,
     userId: user.id,
