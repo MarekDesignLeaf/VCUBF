@@ -72,7 +72,8 @@ import {
   runWithApprovalBinding,
   type ReviewedActionDefinition,
 } from "../../lib/executionEngine.js";
-import { assertNotInSafeMode } from "../../lib/safeMode.js";
+import { assertNotInSafeMode, SafeModeActiveError } from "../../lib/safeMode.js";
+import { RESERVED_IDEMPOTENCY_PREFIX } from "../../middleware/idempotency.js";
 import { evaluateEmmaCapabilities } from "../../services/emmaPolicyService.js";
 import { fail, ok, type ServiceResult } from "../../services/result.js";
 import { MCP_RESULT_CHARS } from "./gate.js";
@@ -272,7 +273,12 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     reviewReason: "destructive",
     fields: { client_id: id("client_id") },
     preview: (user, a) => servicePreview(clientService.archiveClient(user, a.client_id, {})),
-    run: (user, a) => clientService.archiveClient(user, a.client_id, { confirmed: true }),
+    // Archived only as the client that was approved, compared under the row
+    // lock of the archive, and never once the emergency stop has committed.
+    run: (user, a, verified) => clientService.archiveClient(user, a.client_id, {
+      confirmed: true,
+      ...(verified ? { expected_revision: verified.revision, expected_display_name: verified.displayName } : {}),
+    }, { safeModeLocked: true }),
   },
   {
     name: "create_contact",
@@ -303,7 +309,12 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     reviewReason: "destructive",
     fields: { contact_id: id("contact_id") },
     preview: (user, a) => servicePreview(contactService.archiveContact(user, a.contact_id, {})),
-    run: (user, a) => contactService.archiveContact(user, a.contact_id, { confirmed: true }),
+    // Archived only as the contact that was approved (name, client link,
+    // revision), compared under the row lock of the archive.
+    run: (user, a, verified) => contactService.archiveContact(user, a.contact_id, {
+      confirmed: true,
+      ...(verified ? { expected_revision: verified.revision, expected_display_name: verified.displayName, expected_client_id: verified.client?.id ?? null } : {}),
+    }, { safeModeLocked: true }),
   },
   {
     name: "create_lead",
@@ -340,8 +351,9 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
       ? {
           expectedRevision: verified.revision,
           expectedClient: verified.outcome === "link_existing_client" ? { id: verified.client.id, displayName: verified.client.displayName } : null,
+          safeModeLocked: true,
         }
-      : {}),
+      : { safeModeLocked: true }),
   },
   {
     name: "create_job",
@@ -458,7 +470,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     run: (user, a, verified) => invoiceService.changeInvoiceStatus(user, a.invoice_id, {
       invoice_status: a.invoice_status,
       ...(verified?.revision ? { expected_revision: verified.revision } : {}),
-    }),
+    }, { safeModeLocked: true }),
   },
 ];
 
@@ -576,6 +588,18 @@ function isUniqueViolation(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
+/**
+ * Thrown by work after begin() when it is certain that nothing was changed:
+ * the owning service refused inside its own transaction, which rolled back
+ * (the emergency stop checked under lock). The claim is released as if the
+ * change had never started, and the original error is passed on.
+ */
+class NothingChanged extends Error {
+  constructor(readonly original: unknown) {
+    super("nothing changed");
+  }
+}
+
 /** The answer kept for a key whose change may or may not have been made. */
 const OUTCOME_UNKNOWN_MESSAGE =
   "The change may or may not have been saved: it failed after Secretary had started making it. It will not be repeated " +
@@ -638,9 +662,9 @@ async function onceOnly(
     try {
       outcome = await work(() => { started = true; });
     } catch (error) {
-      if (!started) {
+      if (!started || error instanceof NothingChanged) {
         await prisma.idempotencyRecord.deleteMany({ where: { companyId: user.companyId, key, status: "in_progress" } });
-        throw error;
+        throw error instanceof NothingChanged ? error.original : error;
       }
       console.error(`MCP write ${phase} failed after it started; its outcome is unknown and kept as such.`, error);
       const unknown: WriteOutcome = { ok: false, phase, payload: { ok: false, error: "OUTCOME_UNKNOWN", message: OUTCOME_UNKNOWN_MESSAGE } };
@@ -688,7 +712,8 @@ async function runDirect(caller: McpCaller, tool: WriteToolDefinition, args: Rec
     caller.user,
     "direct",
     // Scoped to this person and this connection, so nobody else's key can block or answer theirs.
-    `mcp:${caller.clientId}:${caller.user.id}:${key}`,
+    // In the gateway's own namespace, which no Idempotency-Key header can reach.
+    `${RESERVED_IDEMPOTENCY_PREFIX}direct:${caller.clientId}:${caller.user.id}:${key}`,
     fingerprint,
     async (begin) => {
       await assertNotInSafeMode(caller.user.companyId);
@@ -772,7 +797,7 @@ async function confirm(caller: McpCaller, confirmationId: string): Promise<Write
   const fingerprint = sha256(canonical({ user: caller.user.id, client: caller.clientId, confirmationId }));
   // Keyed by connection and person as well: an attempt from anyone else is
   // stored under its own key and can neither block nor answer the real yes.
-  return onceOnly(caller.user, "confirm", `mcp-confirm:${caller.clientId}:${caller.user.id}:${confirmationId}`, fingerprint, async (begin) => {
+  return onceOnly(caller.user, "confirm", `${RESERVED_IDEMPOTENCY_PREFIX}confirm:${caller.clientId}:${caller.user.id}:${confirmationId}`, fingerprint, async (begin) => {
     const review = await ownReview(caller, confirmationId);
     if (review.state === "missing") return { ...notFound("confirm"), confirmationId };
     if (review.state === "resolved") {
@@ -822,8 +847,28 @@ async function confirm(caller: McpCaller, confirmationId: string): Promise<Write
         },
       };
     }
+    // The emergency stop may have been switched on while the permission and
+    // the preview were checked. Checked once more here, and again inside the
+    // owning service's transaction, serialised with the switch. A refusal
+    // closes this review: it is never left waiting or executing, and the
+    // change has to be prepared and approved again after the stop.
+    try {
+      await assertNotInSafeMode(caller.user.companyId);
+    } catch (error) {
+      await claimed.complete(false).catch(() => undefined);
+      throw error;
+    }
     begin();
-    const result = await tool.run(caller.user, claimed.payload.arguments, now.data);
+    let result: ServiceResult<unknown>;
+    try {
+      result = await tool.run(caller.user, claimed.payload.arguments, now.data);
+    } catch (error) {
+      if (error instanceof SafeModeActiveError) {
+        await claimed.complete(false).catch(() => undefined);
+        throw new NothingChanged(error);
+      }
+      throw error;
+    }
     await claimed.complete(result.ok);
     return { ...asOutcome(result, "confirm", tool.contract), confirmationId };
   }, () => ({ ...notFound("confirm"), confirmationId }));

@@ -913,7 +913,8 @@ service with its own schema; records are named by id only. Direct, each with a r
 `idempotency_key` (the first call runs, a repeat gets the first answer, the same key with
 other arguments is refused; a call that fails after the change has started is kept as
 `OUTCOME_UNKNOWN` and never run again with that key, because a service may already have
-saved its record): `create_client`, `update_client`, `create_contact`,
+saved its record; these keys live in a reserved `mcp:` namespace that no `Idempotency-Key`
+header may use, so the HTTP guard can never claim, expire or delete them): `create_client`, `update_client`, `create_contact`,
 `update_contact`, `create_lead`, `update_lead` (including its status), `create_job`,
 `change_job_status`, `assign_job`, `create_task`, `update_task` (including its status),
 `create_quote`, `update_quote`, `change_quote_status`, `create_invoice_draft`,
@@ -922,7 +923,11 @@ saved its record): `create_client`, `update_client`, `create_contact`,
 once, and only if the preview computed again at that moment is identical; an invoice
 preview is the whole document, every line, dates, notes, payments, totals and revision, and
 the status change is made under a row lock only for that revision; a preview too large
-to hand back whole is refused as `PREVIEW_TOO_LARGE` before any confirmation exists):
+to hand back whole is refused as `PREVIEW_TOO_LARGE` before any confirmation exists;
+archiving runs only for the approved revision, name and client link, compared under the
+row lock of the archive; the emergency stop is checked again just before the change and
+inside the owning service's transaction, serialised with the switch, and a stop closes
+the review):
 `archive_client`, `archive_contact` (destructive), `convert_lead` (irreversible),
 `change_invoice_status` to issued or void (financial); `cancel_action` withdraws one. The
 preview queue is its own (`mcp_write_review`), so Alfonzo's spoken yes cannot confirm it.

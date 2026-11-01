@@ -12,6 +12,8 @@ import { MCP_CANCEL_TOOL, MCP_CONFIRM_TOOL, MCP_REVIEW, MCP_WRITE_TOOLS } from "
 import { confirmPendingEmmaAction } from "../src/services/emmaExecutableActionService.js";
 import { addPayment, changeInvoiceStatus } from "../src/services/invoiceService.js";
 import { convertLead } from "../src/services/leadService.js";
+import { archiveContact } from "../src/services/contactService.js";
+import { SafeModeActiveError } from "../src/lib/safeMode.js";
 import { resetDb, seedCompanyAndAdmin, TEST_COMPANY_ID } from "./setup.js";
 
 // MCP gateway write access — voice assistant master document 1.1a, step P2c.
@@ -696,6 +698,150 @@ describe("MCP gateway write access", () => {
     assert.equal(prepared.body.preview.items.length, 40);
     assert.equal(prepared.body.preview.totals.total, 40);
     result(await call(writeToken, MCP_CANCEL_TOOL, { confirmation_id: prepared.body.confirmation_id }));
+  });
+
+  // ------------------------------------------------------------------------
+  // Races between the verified preview and the change (review round 3).
+
+  /**
+   * Runs a statement from inside the confirmation itself: when the owning
+   * service records the unconfirmed preview it recomputes (an audit entry
+   * written after it has read the record), the trigger makes a concurrent
+   * change commit at exactly that point, between the verified preview and
+   * the change. Created after the first preview, so only the confirmation
+   * fires it.
+   */
+  async function duringReverification(condition: string, statement: string, work: () => Promise<void>) {
+    await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION mcp_test_concurrent() RETURNS trigger AS $$
+      BEGIN IF ${condition} THEN ${statement}; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`);
+    await prisma.$executeRawUnsafe(`CREATE TRIGGER mcp_test_concurrent AFTER INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION mcp_test_concurrent()`);
+    try {
+      await work();
+    } finally {
+      await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS mcp_test_concurrent ON audit_log`);
+      await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS mcp_test_concurrent()`);
+    }
+  }
+
+  it("does not archive a client renamed between the verified preview and the archive", async () => {
+    const client = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Approved Name Ltd" } });
+    const prepared = result(await call(writeToken, "archive_client", { client_id: client.id }));
+    assert.equal(prepared.body.preview.displayName, "Approved Name Ltd");
+    // Renamed by raw SQL, so even the revision column does not move: the name itself is compared.
+    await duringReverification(
+      `NEW.action_name = 'archive_client' AND NEW.error_message = 'CONFIRMATION_REQUIRED' AND NEW.input_payload->>'id' = '${client.id}'`,
+      `UPDATE clients SET display_name = 'Someone Else Ltd' WHERE id = '${client.id}'`,
+      async () => {
+        const confirmed = result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: prepared.body.confirmation_id }));
+        assert.equal(confirmed.body.error, "CLIENT_CHANGED");
+      },
+    );
+    const after = await prisma.client.findUniqueOrThrow({ where: { id: client.id } });
+    assert.equal(after.isActive, true, "the renamed client was not archived");
+    assert.equal(after.displayName, "Someone Else Ltd");
+    assert.equal(result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: prepared.body.confirmation_id })).body.error, "CLIENT_CHANGED", "a repeated yes gets the first answer");
+    assert.equal(await prisma.auditLog.count({ where: { actionName: "archive_client", result: "success", inputPayload: { path: ["id"], equals: client.id } } }), 0);
+  });
+
+  it("does not archive a contact relinked to another client between the verified preview and the archive", async () => {
+    const first = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Contact Owner A" } });
+    const second = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Contact Owner B" } });
+    const contact = await prisma.contact.create({ data: { companyId: TEST_COMPANY_ID, clientId: first.id, displayName: "Linked Person", email: "linked@test.local" } });
+    const prepared = result(await call(writeToken, "archive_contact", { contact_id: contact.id }));
+    assert.equal(prepared.body.preview.client.id, first.id);
+    await duringReverification(
+      `NEW.action_name = 'archive_contact' AND NEW.error_message = 'CONFIRMATION_REQUIRED' AND NEW.input_payload->>'id' = '${contact.id}'`,
+      `UPDATE contacts SET client_id = '${second.id}' WHERE id = '${contact.id}'`,
+      async () => {
+        const confirmed = result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: prepared.body.confirmation_id }));
+        assert.equal(confirmed.body.error, "CONTACT_CHANGED");
+      },
+    );
+    const after = await prisma.contact.findUniqueOrThrow({ where: { id: contact.id } });
+    assert.equal(after.isActive, true);
+    assert.equal(after.clientId, second.id);
+
+    // The service compares the approved link by itself as well.
+    const user = (await prisma.user.findUniqueOrThrow({ where: { email: "admin@test.local" } })) as unknown as AuthedUser;
+    const stale = await archiveContact(user, contact.id, { confirmed: true, expected_client_id: first.id });
+    assert.equal(!stale.ok && stale.error, "CONTACT_CHANGED");
+    assert.equal((await prisma.contact.findUniqueOrThrow({ where: { id: contact.id } })).isActive, true);
+  });
+
+  it("does not run a confirmation when the emergency stop is switched on while it is being verified, and closes the review", async () => {
+    const client = await prisma.client.create({ data: { companyId: TEST_COMPANY_ID, displayName: "Stopped Mid Confirm Ltd" } });
+    const prepared = result(await call(writeToken, "archive_client", { client_id: client.id }));
+    await duringReverification(
+      `NEW.action_name = 'archive_client' AND NEW.error_message = 'CONFIRMATION_REQUIRED' AND NEW.input_payload->>'id' = '${client.id}'`,
+      `UPDATE companies SET safe_mode_since = now() WHERE id = '${TEST_COMPANY_ID}'`,
+      async () => {
+        const res = await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: prepared.body.confirmation_id });
+        assert.equal(res.status, 423);
+        assert.equal(res.body.error, "SAFE_MODE_ACTIVE");
+      },
+    );
+    assert.equal((await prisma.client.findUniqueOrThrow({ where: { id: client.id } })).isActive, true, "nothing ran");
+    assert.equal((await prisma.voicePendingAction.findUniqueOrThrow({ where: { id: prepared.body.confirmation_id } })).status, "failed", "the review is closed, not left executing");
+    assert.equal(await prisma.idempotencyRecord.count({ where: { key: { endsWith: prepared.body.confirmation_id } } }), 0, "no unknown outcome is kept: nothing started");
+
+    await prisma.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: null } });
+    const later = result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: prepared.body.confirmation_id }));
+    assert.equal(later.body.error, "CONFIRMATION_ALREADY_USED", "after the stop the change must be prepared again");
+    assert.equal((await prisma.client.findUniqueOrThrow({ where: { id: client.id } })).isActive, true);
+  });
+
+  it("serialises the owning service's stop check with the switch itself", async () => {
+    const invoice = await draftInvoice("MCP-STOP-1", [{ description: "Fencing", unit_price: 300 }]);
+    const user = (await prisma.user.findUniqueOrThrow({ where: { email: "admin@test.local" } })) as unknown as AuthedUser;
+    // The administrator's switch, exactly as company/routes.ts takes it: the
+    // company row FOR UPDATE, then the stop, committed a moment later.
+    let release!: () => void;
+    let locked!: () => void;
+    const lockHeld = new Promise<void>((resolve) => { locked = resolve; });
+    const switching = prisma.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(`SELECT "safe_mode_since" FROM "companies" WHERE "id" = '${TEST_COMPANY_ID}' FOR UPDATE`);
+      await tx.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: new Date() } });
+      locked();
+      await new Promise<void>((resolve) => { release = resolve; });
+    }, { timeout: 15_000 });
+    await lockHeld;
+    // Issued while the switch is in flight: it waits for the switch and then sees the stop.
+    const issuing = changeInvoiceStatus(user, invoice.id, { invoice_status: "issued" }, { safeModeLocked: true });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    release();
+    await switching;
+    await assert.rejects(issuing, (error) => error instanceof SafeModeActiveError);
+    assert.equal((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).invoiceStatus, "draft");
+    await prisma.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: null } });
+  });
+
+  it("keeps the gateway's idempotency records out of reach of Idempotency-Key headers", async () => {
+    const marker = "Namespace Lead";
+    await failAuditAfterWrite(`NEW.action_name = 'create_lead' AND NEW.input_payload::text LIKE '%Namespace Lead%'`, async () => {
+      const args = { idempotency_key: key(), lead: { name: marker, email: "namespace@test.local" } };
+      assert.equal(result(await call(writeToken, "create_lead", args)).body.error, "OUTCOME_UNKNOWN");
+    });
+    const record = await prisma.idempotencyRecord.findFirstOrThrow({ where: { status: "unknown", key: { startsWith: "mcp:direct:" } }, orderBy: { createdAt: "desc" } });
+    // Past its retention, which the HTTP guard would treat as free.
+    await prisma.idempotencyRecord.update({ where: { id: record.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+
+    for (const header of [record.key, record.key.toUpperCase(), "mcp:anything", "Mcp:direct:x"]) {
+      const ping = await request(app).post("/mcp").set("Authorization", `Bearer ${writeToken}`).set("Idempotency-Key", header)
+        .send({ jsonrpc: "2.0", id: 9, method: "ping" });
+      assert.equal(ping.status, 400, header);
+      assert.equal(ping.body.error, "IDEMPOTENCY_KEY_RESERVED");
+      const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
+      const viaRest = await request(app).post("/crm/leads").set("Authorization", `Bearer ${login.body.token}`).set("Idempotency-Key", header).send({ name: "Via Rest" });
+      assert.equal(viaRest.status, 400, header);
+    }
+    const kept = await prisma.idempotencyRecord.findUniqueOrThrow({ where: { id: record.id } });
+    assert.equal(kept.status, "unknown", "the unknown claim survives");
+    assert.equal(await prisma.lead.count({ where: { name: "Via Rest" } }), 0);
+
+    // And the original retry still refuses to run again.
+    const retry = result(await call(writeToken, "create_lead", { idempotency_key: record.key.split(":").pop(), lead: { name: marker, email: "namespace@test.local" } }));
+    assert.equal(retry.body.error, "OUTCOME_UNKNOWN");
+    assert.equal(await prisma.lead.count({ where: { name: marker } }), 1, "no duplicate");
   });
 
   // ------------------------------------------------------------------------

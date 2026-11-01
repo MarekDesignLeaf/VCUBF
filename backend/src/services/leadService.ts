@@ -6,6 +6,7 @@ import { CONVERT_LEAD_ACTION, CREATE_LEAD_ACTION, UPDATE_LEAD_ACTION } from "../
 import { phoneNumberSchema } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
+import { assertNotInSafeModeLocked } from "../lib/safeMode.js";
 
 export const createLeadSchema = z.object({
   name: z.string().min(1, "name is required"),
@@ -211,9 +212,10 @@ export async function updateLead(user: AuthedUser, leadId: string, rawInput: unk
 export async function convertLead(
   user: AuthedUser,
   leadId: string,
-  options: { expectedRevision?: string; expectedClient?: { id: string; displayName: string } | null } = {},
+  options: { expectedRevision?: string; expectedClient?: { id: string; displayName: string } | null; safeModeLocked?: boolean } = {},
 ): Promise<ServiceResult<unknown>> {
   const outcome = await prisma.$transaction(async (tx) => {
+    if (options.safeModeLocked) await assertNotInSafeModeLocked(tx, user.companyId);
     await tx.$queryRaw(Prisma.sql`SELECT id FROM leads WHERE id = ${leadId} AND company_id = ${user.companyId} FOR UPDATE`);
     const lead = await tx.lead.findFirst({ where: { id: leadId, companyId: user.companyId } });
     if (!lead) return { error: "LEAD_NOT_FOUND" as const };

@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 
 /**
@@ -43,6 +44,21 @@ export async function safeModeSince(companyId: string): Promise<Date | null> {
 
 export async function assertNotInSafeMode(companyId: string): Promise<void> {
   if (await safeModeSince(companyId)) throw new SafeModeActiveError();
+}
+
+/**
+ * The same refusal from inside a transaction, serialised with the switch: the
+ * company row is read FOR SHARE, which the switch's own FOR UPDATE waits for.
+ * A stop committed before this read is seen here; a stop requested after it
+ * takes effect only once this transaction has ended. So a change made under
+ * this check can never commit after the stop did. Throws SafeModeActiveError,
+ * which rolls the transaction back.
+ */
+export async function assertNotInSafeModeLocked(tx: Prisma.TransactionClient, companyId: string): Promise<void> {
+  const rows = await tx.$queryRaw<Array<{ safe_mode_since: Date | null }>>(
+    Prisma.sql`SELECT "safe_mode_since" FROM "companies" WHERE "id" = ${companyId} FOR SHARE`,
+  );
+  if (rows[0]?.safe_mode_since) throw new SafeModeActiveError();
 }
 
 export function safeModeMessage(language: string | undefined): string {
