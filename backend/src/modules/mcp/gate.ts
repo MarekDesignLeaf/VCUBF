@@ -24,3 +24,20 @@ export function mcpResource(req: Request): string {
 export function protectedResourceMetadataUrl(req: Request): string {
   return `${mcpPublicBase(req)}/.well-known/oauth-protected-resource/mcp`;
 }
+
+/**
+ * Acting through the gateway (step P3a): the tools that change something are
+ * offered only when this is "true" as well, and only to a connection approved
+ * with the secretary.act scope.
+ */
+export function mcpWriteEnabled(): boolean {
+  return mcpGatewayEnabled() && process.env.MCP_WRITE_ENABLED === "true";
+}
+
+export const MCP_READ_SCOPE = "secretary.read";
+export const MCP_ACT_SCOPE = "secretary.act";
+
+/** The scopes a new connection may ask for right now. */
+export function mcpSupportedScopes(): string[] {
+  return mcpWriteEnabled() ? [MCP_READ_SCOPE, MCP_ACT_SCOPE] : [MCP_READ_SCOPE];
+}
