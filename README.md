@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 37 mounted route groups, 55 Prisma models, 153 Action Contracts,
+- **Backend**: 37 mounted route groups, 55 Prisma models, 156 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,
@@ -58,6 +58,22 @@ docs/               User guide, connector engine, production architecture, voice
   do not. No figure is estimated or forecast, and no currency is spoken because the
   company record does not hold one. CRM read permission and company capability policy
   apply. The backend supplies every spoken figure.
+- **Archive vs permanent deletion**: archiving a client or contact (the existing
+  `DELETE /crm/clients/:id` and `DELETE /crm/contacts/:id`, voice and MCP `archive_*`)
+  stays the reversible soft-delete. Permanent deletion is a separate UI-only action
+  (`GET|POST /crm/{clients|contacts}/:id/permanent-deletion`): an exact preview with
+  dependency counts and a digest, the record's name typed back, a re-check under the row
+  lock and the emergency-stop lock, and one audit entry committed with the delete. A client
+  with any job, quote, invoice, payment, communication, task, photo, document, contact,
+  converted lead or merge history is refused; nothing cascades. Voice and MCP clients
+  cannot delete permanently.
+- **WhatsApp sender review**: inbound WhatsApp messages are always kept, but a sender no
+  longer becomes a CRM contact by itself. Senders wait on the Connectors page, with their
+  messages and a work-related signal that is only an inference from message text; a person
+  approves a real customer (contact, optionally client, after a preview and confirmation)
+  or rejects them as personal, employee, subcontractor, supplier or other. Rejected senders
+  and senders whose contact was deleted permanently are never imported again unless a
+  person reopens them. Existing CRM contacts are not changed by this.
 - **WhatsApp replies**: “Odpověz Honzovi na WhatsApp, že přijedeme v pondělí” answers
   that sender's latest received message (or “last” for the newest from anyone). The
   recipient is always the message's sender, never a spoken number; the reply quotes the
@@ -109,7 +125,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 106 test files, including database integration tests and checks that only
+- **Tests**: 107 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.

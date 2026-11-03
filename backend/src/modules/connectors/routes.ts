@@ -11,6 +11,7 @@ import {
   SET_DEFAULT_GMAIL_SENDER_ACTION,
   SYNC_GMAIL_MESSAGES_ACTION,
   IMPORT_GOOGLE_CONTACT_ACTION,
+  REVIEW_WHATSAPP_SENDER_ACTION,
   REGISTER_GOOGLE_DRIVE_PHOTO_ACTION,
   REGISTER_GOOGLE_PHOTOS_PHOTO_ACTION,
   REPLY_GMAIL_MESSAGE_ACTION,
@@ -31,6 +32,7 @@ import * as googleCalendarWriteService from "../../services/googleCalendarWriteS
 import * as googleDriveConnectorService from "../../services/googleDriveConnectorService.js";
 import * as googlePhotosConnectorService from "../../services/googlePhotosConnectorService.js";
 import * as whatsappBusinessConnectorService from "../../services/whatsappBusinessConnectorService.js";
+import * as whatsappSenderReviewService from "../../services/whatsappSenderReviewService.js";
 import * as connectorSetupService from "../../services/connectorSetupService.js";
 
 export const connectorsRouter = Router();
@@ -163,7 +165,7 @@ connectorsRouter.post(
   async (req, res) => {
     const source = await connectorService.getConnectorSource(req.user!, req.params.id);
     if (source?.connectorKey === "whatsapp_business") {
-      return res.status(409).json({ error: "SYNC_NOT_SUPPORTED", message: "WhatsApp messages and sender contacts arrive automatically through the signed webhook." });
+      return res.status(409).json({ error: "SYNC_NOT_SUPPORTED", message: "WhatsApp messages arrive automatically through the signed webhook; senders wait in the sender review." });
     }
     if (source?.connectorKey === "google_drive" || source?.connectorKey === "google_photos") {
       return res.status(409).json({ error: "SYNC_NOT_SUPPORTED", message: "Select images directly through the applicable Google picker." });
@@ -346,6 +348,29 @@ connectorsRouter.get(
   }
 );
 
+// WhatsApp sender review: staged senders with their messages, and the
+// person's decision about each (customer, not a customer, later).
+connectorsRouter.get(
+  "/sources/:id/whatsapp/senders",
+  requirePermission("connectors.read"),
+  requirePermission("crm.read"),
+  async (req, res) => {
+    const result = await whatsappSenderReviewService.listWhatsAppSenders(req.user!, req.params.id, req.query);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
+connectorsRouter.post(
+  "/sources/:id/whatsapp/senders/:senderId/review",
+  requirePermission(REVIEW_WHATSAPP_SENDER_ACTION.requiredPermission),
+  async (req, res) => {
+    const result = await whatsappSenderReviewService.reviewWhatsAppSender(req.user!, req.params.id, req.params.senderId, req.body);
+    if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+    res.status(result.httpStatus).json(result.data);
+  }
+);
+
 connectorsRouter.post(
   "/sources/:id/external-contacts/:externalContactId/import",
   requirePermission("connectors.manage"),
@@ -355,7 +380,7 @@ connectorsRouter.post(
     if (source?.connectorKey === "whatsapp_business") {
       return res.status(409).json({
         error: "CONTACT_IMPORT_NOT_SUPPORTED",
-        message: "WhatsApp sender contacts are synchronised automatically. Resolve only possible duplicate matches in CRM.",
+        message: "WhatsApp senders are added to CRM only through the sender review, after they are classified as customers.",
       });
     }
     const result = await googleContactsConnectorService.importGoogleContact(

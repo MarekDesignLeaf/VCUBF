@@ -629,9 +629,19 @@ model Contact {
 }
 
 // Connector contacts are staged here with provider provenance. Google Contacts
-// needs a human-confirmed import; signed WhatsApp sender contacts can be
-// linked or created automatically under the connector's duplicate safeguards.
-// Provider updates never delete or modify an already-confirmed CRM Contact.
+// needs a human-confirmed import. Signed WhatsApp senders are only staged: a
+// sender becomes a CRM Contact (and optionally a Client) only after a person
+// classifies it as a real customer in the sender review
+// (whatsappSenderReviewService). Provider updates never delete or modify an
+// already-confirmed CRM Contact, and never change a review decision.
+//
+// reviewStatus: pending (never reviewed) | review_needed (a person looked and
+// could not decide) | approved (classified as a customer and in CRM) |
+// rejected (not a customer: personal, employee, subcontractor, supplier,
+// other) | deleted_from_crm (its CRM contact was permanently deleted). A
+// rejected or deleted sender is never imported again unless a person reopens
+// it first. reviewClassification records why (customer, personal, employee,
+// subcontractor, supplier, other).
 model ExternalContact {
   id                   String   @id @default(uuid())
   companyId            String   @map("company_id")
@@ -646,6 +656,11 @@ model ExternalContact {
   department           String?
   isDeleted            Boolean  @default(false) @map("is_deleted")
   importedContactId    String?  @map("imported_contact_id")
+  reviewStatus         String    @default("pending") @map("review_status")
+  reviewClassification String?   @map("review_classification")
+  reviewNote           String?   @map("review_note")
+  reviewedBy           String?   @map("reviewed_by")
+  reviewedAt           DateTime? @map("reviewed_at")
   syncedAt             DateTime @default(now()) @map("synced_at")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
@@ -657,6 +672,7 @@ model ExternalContact {
   @@unique([companyId, connectorSourceId, externalResourceName])
   @@index([companyId, isDeleted])
   @@index([companyId, importedContactId])
+  @@index([companyId, connectorSourceId, reviewStatus])
   @@map("external_contacts")
 }
 

@@ -10,6 +10,7 @@ import {
   type ContactChannel,
   type ContactLanguage,
 } from "../api/client";
+import { PermanentDeletePanel } from "../components/PermanentDeletePanel";
 import { pickedRowId, usePickedRow } from "../components/pickedRow";
 
 export function Contacts() {
@@ -20,6 +21,8 @@ export function Contacts() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Contact | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<Contact | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   function load() {
     api.contacts.list({ search: search || undefined, activeOnly }).then(setContacts).catch(() => setError("Could not load contacts."));
@@ -34,7 +37,7 @@ export function Contacts() {
         setError(err instanceof ApiError ? err.message : "Could not archive contact.");
         return;
       }
-      if (!window.confirm(`Archive contact ${contact.displayName}? The source and client relationship will be preserved.`)) return;
+      if (!window.confirm(`Archive contact ${contact.displayName}? It is hidden from active lists but not deleted. The source and client relationship will be preserved.`)) return;
       try {
         await api.contacts.archive(contact.id, true);
       } catch (confirmError) {
@@ -50,6 +53,14 @@ export function Contacts() {
     <p className="hint">Independent people directory with explicit source and optional client relationship. Duplicate email or phone evidence is blocked for review.</p>
     {showForm ? <ContactForm onCreated={() => { setShowForm(false); load(); }} /> : null}
     {error ? <div className="error-banner">{error}</div> : null}
+    {notice ? <div className="success-banner">{notice}</div> : null}
+    {deleting ? <PermanentDeletePanel
+      key={deleting.id}
+      load={() => api.contacts.permanentDeletionPreview(deleting.id)}
+      remove={(confirmation, key) => api.contacts.deletePermanently(deleting.id, confirmation, key)}
+      onDeleted={(message) => { setDeleting(null); setNotice(message); load(); }}
+      onClose={() => setDeleting(null)}
+    /> : null}
     <div className="inline-form" style={{ marginTop: 16 }}>
       <input placeholder="Search name, email or phone" value={search} onChange={(event) => setSearch(event.target.value)} />
       <label><input type="checkbox" checked={activeOnly} onChange={(event) => setActiveOnly(event.target.checked)} /> Active only</label>
@@ -69,6 +80,7 @@ export function Contacts() {
         <td>
           <button className="secondary" data-action="contact-edit" onClick={() => setEditing(contact)}>Edit</button>
           {contact.isActive ? <button className="secondary" data-action="contact-archive" onClick={() => archive(contact)}>Archive</button> : null}
+          <button className="danger-button" data-action="contact-permanent-delete" onClick={() => setDeleting(contact)}>Delete permanently…</button>
         </td>
       </tr>)}</tbody></table>}
   </div>;

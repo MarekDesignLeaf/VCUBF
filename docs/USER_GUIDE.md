@@ -94,6 +94,13 @@ Use **Clients** for client accounts. Use **Contacts** for individual people:
 - matching normalised email or phone evidence is blocked as a possible duplicate;
 - archive obsolete contacts instead of deleting history.
 
+**Archive** and **Delete permanently** are two different actions for both clients and contacts:
+
+- **Archive** hides the record from active lists and keeps it and everything linked to it. Use it whenever the record has any history.
+- **Delete permanently** removes the record itself and cannot be undone. It first shows exactly which record it is (name, e-mail, phone, source, status) and how many jobs, quotes, invoices, payments, communications, tasks, photos, documents, contacts, converted leads and merge records point at it. A client with any of these cannot be deleted — archive it instead. A contact can be deleted on its own: its client, its WhatsApp or Google source record and its messages stay. To confirm, type the record's exact name. If the record changed after the preview, nothing is deleted and the new preview is shown. Archived clients are listed under **Show archived** on the Clients page. Permanent deletion is not available by voice.
+
+WhatsApp senders do not become contacts by themselves. On **Connectors**, open **Review WhatsApp senders**: each sender is shown with recent messages. Choose **Customer** to add them to CRM (as a contact, or a contact and a client), or **Not a customer** with the reason (personal, employee, subcontractor, supplier, other). The *work-related* hint only says which landscaping, gardening or quote words appear in the messages; it is a guess from the text, never a decision. Rejected senders keep their messages but are not added to CRM again unless you reopen them.
+
 ## 4. Services and industries
 
 Use **Services** to record the actual service catalogue: description, price range, duration and required skills. Missing prices, costs or duration remain unknown.
