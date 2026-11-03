@@ -80,9 +80,10 @@ import {
 } from "../../lib/executionEngine.js";
 import { assertNotInSafeMode, SafeModeActiveError, whileNotInSafeMode } from "../../lib/safeMode.js";
 import { RESERVED_IDEMPOTENCY_PREFIX } from "../../middleware/idempotency.js";
-import { evaluateEmmaCapabilities } from "../../services/emmaPolicyService.js";
+import { EMMA_CAPABILITIES, evaluateEmmaCapabilities } from "../../services/emmaPolicyService.js";
 import { fail, ok, type ServiceResult } from "../../services/result.js";
 import { MCP_RESULT_CHARS } from "./gate.js";
+import { availability, schemaFields, type McpAvailabilityReason, type McpCapability, type McpCatalogueEntry } from "./capabilities.js";
 import * as clientService from "../../services/clientService.js";
 import * as contactService from "../../services/contactService.js";
 import * as permanentDeletion from "../../services/crmPermanentDeletionService.js";
@@ -154,6 +155,11 @@ interface WriteToolDefinition {
   title: string;
   description: string;
   contract: ActionContract;
+  /**
+   * What a successful call changes, for describe_capabilities. Required: a
+   * new tool cannot compile without saying what it does to Secretary.
+   */
+  sideEffects: string;
   kind: Kind;
   /** Why a reviewed tool waits for a yes. */
   reviewReason?: ReviewReason;
@@ -336,6 +342,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Create a client",
     description: "Create a new client in Secretary from details the user gave. Use only real details; never invent an e-mail, phone or address. A likely duplicate is refused with the matching client.",
     contract: CREATE_CLIENT_ACTION,
+    sideEffects: "Creates one active client record in the caller's company.",
     kind: "direct",
     fields: {},
     body: record("client", clientService.createClientSchema, "The client as the user described it."),
@@ -346,6 +353,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Update a client",
     description: "Change details of an existing active client. Send only the fields that change.",
     contract: UPDATE_CLIENT_ACTION,
+    sideEffects: "Changes the named fields of one active client.",
     kind: "direct",
     fields: { client_id: id("client_id") },
     body: record("changes", clientService.updateClientSchema, "Only the fields to change."),
@@ -356,6 +364,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Archive a client (preview first)",
     description: "Prepare archiving a client. Returns a preview and a confirmation_id; nothing changes until confirm_action is called after the user explicitly agrees. Jobs, quotes, invoices and history are kept.",
     contract: ARCHIVE_CLIENT_ACTION,
+    sideEffects: "After confirmation, marks one client archived (inactive); its jobs, quotes, invoices and history are kept and it can be restored in Secretary.",
     kind: "reviewed",
     reviewReason: "destructive",
     fields: { client_id: id("client_id") },
@@ -372,6 +381,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Create a contact",
     description: "Record a person with an e-mail or phone, optionally linked to a client by client_id.",
     contract: CREATE_CONTACT_ACTION,
+    sideEffects: "Creates one CRM contact, optionally linked to an existing client.",
     kind: "direct",
     fields: {},
     body: record("contact", contactService.createContactSchema, "The contact as the user described it."),
@@ -382,6 +392,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Update a contact",
     description: "Change details of an existing contact, or relink it to another client. Send only the fields that change.",
     contract: UPDATE_CONTACT_ACTION,
+    sideEffects: "Changes the named fields of one contact or its client link.",
     kind: "direct",
     fields: { contact_id: id("contact_id") },
     body: record("changes", contactService.updateContactSchema, "Only the fields to change."),
@@ -392,6 +403,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Archive a contact (preview first)",
     description: "Prepare archiving a contact. Returns a preview and a confirmation_id; nothing changes until confirm_action is called after the user explicitly agrees.",
     contract: ARCHIVE_CONTACT_ACTION,
+    sideEffects: "After confirmation, marks one contact archived (inactive); it can be restored in Secretary.",
     kind: "reviewed",
     reviewReason: "destructive",
     fields: { contact_id: id("contact_id") },
@@ -408,6 +420,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Create a lead",
     description: "Record a new enquiry (lead) with the details the user gave.",
     contract: CREATE_LEAD_ACTION,
+    sideEffects: "Creates one lead (enquiry) record.",
     kind: "direct",
     fields: {},
     body: record("lead", leadService.createLeadSchema, "The lead as the user described it."),
@@ -418,6 +431,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Update a lead or its status",
     description: "Correct a lead's details or set its status (new, contacted, qualified, lost). Converting is a separate tool.",
     contract: UPDATE_LEAD_ACTION,
+    sideEffects: "Changes one lead's details or status.",
     kind: "direct",
     fields: { lead_id: id("lead_id") },
     body: record("changes", leadService.updateLeadSchema, "Only the fields to change."),
@@ -428,6 +442,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Convert a lead to a client (preview first)",
     description: "Prepare converting a lead into a client. Returns a preview (new client, or the existing client with the same e-mail) and a confirmation_id; nothing changes until confirm_action is called after the user explicitly agrees.",
     contract: CONVERT_LEAD_ACTION,
+    sideEffects: "After confirmation, marks the lead converted and creates a new client or links the existing client with the same e-mail. Cannot be undone.",
     kind: "reviewed",
     reviewReason: "irreversible",
     fields: { lead_id: id("lead_id") },
@@ -447,6 +462,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Create a job",
     description: "Create a job (zakázka) for an existing client, named by client_id.",
     contract: CREATE_JOB_ACTION,
+    sideEffects: "Creates one job for an existing client.",
     kind: "direct",
     fields: {},
     body: record("job", jobService.createJobSchema, "The job as the user described it."),
@@ -457,6 +473,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Change a job's status",
     description: "Set a job's lifecycle status.",
     contract: CHANGE_JOB_STATUS_ACTION,
+    sideEffects: "Changes one job's lifecycle status.",
     kind: "direct",
     fields: { job_id: id("job_id") },
     body: record("change", jobService.changeStatusSchema, "The new status."),
@@ -467,6 +484,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Assign a job to an employee",
     description: "Assign a job to an employee by user id. The answer reports real workload against capacity, skill gaps and overload.",
     contract: ASSIGN_JOB_ACTION,
+    sideEffects: "Assigns one job to an employee; reports workload against capacity.",
     kind: "direct",
     fields: { job_id: id("job_id") },
     body: record("assignment", jobService.assignJobSchema, "Who the job goes to."),
@@ -477,6 +495,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Create a task",
     description: "Create a task, optionally linked to a client, job or employee by id, with a due date.",
     contract: CREATE_TASK_ACTION,
+    sideEffects: "Creates one task, optionally linked to a client, job or employee, with a due date.",
     kind: "direct",
     fields: {},
     body: record("task", taskService.createTaskSchema, "The task as the user described it."),
@@ -487,6 +506,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Update a task or its status",
     description: "Change a task's content, assignment, due date, priority or status. Send only the fields that change.",
     contract: UPDATE_TASK_ACTION,
+    sideEffects: "Changes one task's content, assignment, due date, priority or status.",
     kind: "direct",
     fields: { task_id: id("task_id") },
     body: record("changes", taskService.updateTaskSchema, "Only the fields to change."),
@@ -497,6 +517,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Create a draft quote",
     description: "Create a draft quote for a client from line items with prices the user gave. Never invent a price. Nothing is sent.",
     contract: CREATE_QUOTE_ACTION,
+    sideEffects: "Creates one draft quote with the line items and prices given. Nothing is sent.",
     kind: "direct",
     fields: {},
     body: record("quote", quoteService.createQuoteSchema, "The quote as the user described it."),
@@ -507,6 +528,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Update a quote",
     description: "Change a quote's title, notes, validity or line items (items replace the whole list).",
     contract: UPDATE_QUOTE_ACTION,
+    sideEffects: "Changes one quote's title, notes, validity or its whole list of line items.",
     kind: "direct",
     fields: { quote_id: id("quote_id") },
     body: record("changes", quoteService.updateQuoteSchema, "Only the fields to change."),
@@ -517,6 +539,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Change a quote's status",
     description: "Record a quote's status (draft, sent, accepted, rejected, expired). This only records it; nothing is sent to anyone.",
     contract: CHANGE_QUOTE_STATUS_ACTION,
+    sideEffects: "Records a quote's status; nothing is sent to anyone.",
     kind: "direct",
     fields: { quote_id: id("quote_id") },
     body: record("change", quoteService.changeQuoteStatusSchema, "The new status."),
@@ -527,6 +550,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Create a draft invoice",
     description: "Create a draft invoice for a client from line items and an invoice number the user gave. It stays a draft; issuing is a separate, confirmed step. Nothing is sent.",
     contract: CREATE_INVOICE_ACTION,
+    sideEffects: "Creates one draft invoice with the number and line items given. Nothing is sent.",
     kind: "direct",
     fields: {},
     body: record("invoice", invoiceService.createInvoiceSchema, "The invoice as the user described it."),
@@ -537,6 +561,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Update a draft invoice",
     description: "Change a draft invoice's number, title, dates, notes or line items (items replace the whole list). An issued invoice cannot be edited.",
     contract: UPDATE_INVOICE_ACTION,
+    sideEffects: "Changes one draft invoice's number, title, dates, notes or its whole list of line items.",
     kind: "direct",
     fields: { invoice_id: id("invoice_id") },
     body: record("changes", invoiceService.updateInvoiceSchema, "Only the fields to change."),
@@ -547,6 +572,7 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
     title: "Issue or void an invoice (preview first)",
     description: "Prepare issuing a draft invoice or voiding an invoice. Returns a preview and a confirmation_id; nothing changes until confirm_action is called after the user explicitly agrees. Nothing is sent to the client.",
     contract: CHANGE_INVOICE_STATUS_ACTION,
+    sideEffects: "After confirmation, issues a draft invoice (it can then only be voided) or voids an invoice for good. Nothing is sent to the client.",
     kind: "reviewed",
     reviewReason: "financial",
     fields: { invoice_id: id("invoice_id"), invoice_status: z.enum(["issued", "void"]).describe("issued: a draft becomes a final invoice. void: an invoice is cancelled for good.") },
@@ -567,6 +593,7 @@ WRITE_TOOLS.push(
     title: "Approve a WhatsApp sender as a customer (preview first)",
     description: "Prepare classifying a WhatsApp sender (from list_whatsapp_senders) as a real customer. Returns a preview of exactly which CRM contact (and optionally client) would be created or linked, and a confirmation_id; nothing changes until confirm_action is called after the user explicitly agrees. Only approve a sender the user has identified as a customer; never decide from the work signal alone. WhatsApp messages are kept unchanged and nothing is sent.",
     contract: REVIEW_WHATSAPP_SENDER_ACTION,
+    sideEffects: "After confirmation, classifies the WhatsApp sender as a customer and creates or links the CRM contact (and client, if asked) shown in the preview. Existing CRM data and WhatsApp messages are not changed; nothing is sent.",
     kind: "reviewed",
     reviewReason: "classification",
     fields: {
@@ -594,6 +621,7 @@ WRITE_TOOLS.push(
     title: "Mark a WhatsApp sender as not a customer (preview first)",
     description: "Prepare classifying a WhatsApp sender as not a customer: personal, employee, subcontractor, supplier or other, as the user said. Returns a preview and a confirmation_id; nothing changes until confirm_action is called after the user explicitly agrees. Their messages are kept; they will not be added to CRM unless reopened. An existing CRM contact is kept (archive or delete it separately).",
     contract: REVIEW_WHATSAPP_SENDER_ACTION,
+    sideEffects: "After confirmation, classifies the sender as not a customer with the given classification. Messages and any existing CRM contact are kept; nothing is sent.",
     kind: "reviewed",
     reviewReason: "classification",
     fields: {
@@ -609,6 +637,7 @@ WRITE_TOOLS.push(
     title: "Reopen a WhatsApp sender's review (preview first)",
     description: "Prepare putting a sender that was rejected (or whose CRM contact was deleted permanently, or left for later) back into the review queue as pending, when the user says the earlier classification was wrong. Returns a preview and a confirmation_id; nothing changes until confirm_action is called after the user explicitly agrees. Nothing is added to CRM.",
     contract: REVIEW_WHATSAPP_SENDER_ACTION,
+    sideEffects: "After confirmation, puts the sender back into the review queue as pending. Nothing is added to CRM.",
     kind: "reviewed",
     reviewReason: "classification",
     fields: { sender_id: id("sender_id"), note: z.string().trim().max(1000).optional().describe("A short reason the user gave.") },
@@ -620,6 +649,7 @@ WRITE_TOOLS.push(
     title: "Leave a WhatsApp sender for later review (preview first)",
     description: "Prepare marking a pending sender as looked at but not decidable yet. Returns a preview and a confirmation_id; nothing changes until confirm_action is called after the user agrees. Nothing is added to CRM.",
     contract: REVIEW_WHATSAPP_SENDER_ACTION,
+    sideEffects: "After confirmation, marks a pending sender as needing review later. Nothing is added to CRM.",
     kind: "reviewed",
     reviewReason: "classification",
     fields: { sender_id: id("sender_id"), note: z.string().trim().max(1000).optional().describe("A short reason the user gave.") },
@@ -631,6 +661,7 @@ WRITE_TOOLS.push(
     title: "Delete a CRM contact permanently (preview, yes and typed name)",
     description: "Prepare removing a CRM contact for good. Use only when the user explicitly asks for permanent deletion, not archiving; archive_contact is the reversible default. Returns the exact contact, its client and connector links, what is kept, and a confirmation_id. Nothing changes until confirm_action is called with that confirmation_id and confirm_display_name set to the contact's exact name as the user typed it, after the user explicitly agrees. Never infer this from conversation alone.",
     contract: DELETE_CONTACT_PERMANENTLY_ACTION,
+    sideEffects: "After confirmation with the typed name, deletes one CRM contact for good. Its client, staged connector records, messages and audit history are kept.",
     kind: "reviewed",
     reviewReason: "permanent",
     fields: { contact_id: id("contact_id") },
@@ -684,10 +715,150 @@ export interface McpWriteToolListing {
   annotations: { readOnlyHint: false; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: false };
 }
 
-/** The write tools this person may use: only those whose permission the account has. */
-export function writeToolListings(user: AuthedUser): McpWriteToolListing[] {
-  const offered = WRITE_TOOLS.filter((tool) => user.permissions.includes(tool.contract.requiredPermission));
-  const listings: McpWriteToolListing[] = offered.map((tool) => ({
+/** What the connection allows, decided by routes.ts from the server switch and the token's scopes. */
+export interface McpWriteAccess {
+  writeEnabled: boolean;
+  writeScope: boolean;
+}
+
+/** The risk flags of a write tool, from its contract and its review reason. */
+function classification(tool: WriteToolDefinition) {
+  const reason = tool.reviewReason;
+  const permanent = reason === "permanent";
+  const financial = reason === "financial" || /invoice|quote/.test(tool.contract.actionName);
+  const irreversible = reason === "irreversible" || reason === "financial" || permanent;
+  // The tools/list destructiveHint, unchanged: anything a client should treat with care.
+  const destructive = reason === "destructive" || irreversible;
+  return { permanent, financial, irreversible, destructive };
+}
+
+const WRITE_LIMITATIONS = [
+  "Records are named by id only, inside the caller's company; read the record first to get its id.",
+  "Refused during the company's emergency stop, without the account permission, or when the administrator has switched the capability off.",
+  "Nothing is e-mailed, messaged or published.",
+];
+
+/**
+ * The administrator's switch for a contract, only if the assistant policy page
+ * can actually turn it off; a capability marked not available to the assistant
+ * (the WhatsApp sender review, permanent deletion) has none.
+ */
+function administratorSwitch(contract: ActionContract): string | null {
+  const id = `action.${contract.actionName}`;
+  const governed = EMMA_CAPABILITIES.find((capability) => capability.id === id);
+  return governed && governed.availableToEmma !== false ? id : null;
+}
+
+function writeCapability(tool: WriteToolDefinition, listing: McpWriteToolListing): McpCapability {
+  const flags = classification(tool);
+  const typed = Boolean(tool.typedConfirmation);
+  const capabilitySwitch = administratorSwitch(tool.contract);
+  return {
+    name: tool.name,
+    title: tool.title,
+    purpose: tool.description,
+    access: "write",
+    readOnly: false,
+    oauthScope: "secretary.write",
+    requiredPermission: tool.contract.requiredPermission,
+    capabilitySwitch,
+    actionContract: tool.contract.actionName,
+    riskLevel: tool.contract.riskLevel,
+    riskClass: tool.kind === "direct" ? "routine_write" : tool.reviewReason!,
+    ...flags,
+    confirmation: tool.kind === "direct" ? "none" : typed ? "preview_confirm_and_typed_name" : "preview_then_confirm",
+    idempotency: tool.kind === "direct" ? "idempotency_key_required" : "once_per_confirmation_id",
+    readsCompanyRecords: true,
+    sideEffects: tool.sideEffects,
+    limitations: [
+      ...WRITE_LIMITATIONS,
+      ...(capabilitySwitch ? [] : [
+        `No separate administrator switch: governed by the server's write switch, this connection's secretary.write approval and the ${tool.contract.requiredPermission} permission.`,
+      ]),
+      ...(tool.kind === "direct"
+        ? ["Needs a new idempotency_key for each distinct change; the same key repeats only the first answer."]
+        : [
+            `The first call changes nothing: it returns a preview and a confirmation_id that ${MCP_CONFIRM_TOOL} accepts once, within ten minutes, from the same user and connection.`,
+            "Refused at confirmation if the record changed after the preview was shown (PREVIEW_CHANGED).",
+            ...(typed ? [`${MCP_CONFIRM_TOOL} must carry confirm_display_name, the exact name typed by the user; a wrong name consumes nothing.`] : []),
+          ]),
+    ],
+    audit: "mcp_write_tool",
+    ...schemaFields(listing.inputSchema),
+  };
+}
+
+function hasPermission(user: AuthedUser | undefined, permission: string) {
+  return Boolean(user) && (permission === "authenticated" || user!.permissions.includes(permission));
+}
+
+/** Why this connection may or may not use a tool needing this permission. */
+function writeReason(user: AuthedUser | undefined, access: McpWriteAccess, permission: string): McpAvailabilityReason {
+  if (!access.writeEnabled) return "write_disabled_on_server";
+  if (!access.writeScope) return "requires_write_scope";
+  if (!hasPermission(user, permission)) return "missing_permission";
+  return "available";
+}
+
+function confirmListings(): McpWriteToolListing[] {
+  return [
+    {
+      name: MCP_CONFIRM_TOOL,
+      title: "Confirm a previewed change",
+      description:
+        "Carry out a change that was previewed (archive, lead conversion, invoice issue or void, WhatsApp sender approval or rejection, permanent contact deletion). Call this only after showing the preview to the user and receiving their explicit yes in this conversation. A permanent deletion also needs confirm_display_name: the exact name, typed by the user. Each confirmation_id works once, for ten minutes, and only for the newest preview.",
+      inputSchema: jsonSchema(confirmArguments),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: MCP_CANCEL_TOOL,
+      title: "Cancel a previewed change",
+      description: "Withdraw a previewed change the user does not want. Nothing is changed.",
+      inputSchema: jsonSchema(confirmationArguments),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+  ];
+}
+
+function answerCapability(listing: McpWriteToolListing): McpCapability {
+  const confirming = listing.name === MCP_CONFIRM_TOOL;
+  return {
+    name: listing.name,
+    title: listing.title,
+    purpose: listing.description,
+    access: "write",
+    readOnly: false,
+    oauthScope: "secretary.write",
+    requiredPermission: "authenticated",
+    // The previewed tool's own permission and switch are decided again at the moment of the yes.
+    capabilitySwitch: null,
+    actionContract: null,
+    riskLevel: null,
+    riskClass: "confirmation",
+    destructive: confirming,
+    irreversible: false,
+    financial: false,
+    permanent: false,
+    confirmation: confirming ? "confirms_preview" : "withdraws_preview",
+    idempotency: "once_per_confirmation_id",
+    readsCompanyRecords: true,
+    sideEffects: confirming
+      ? "Carries out exactly the previewed change named by confirmation_id, with that tool's own side effects."
+      : "Withdraws the previewed change; nothing in Secretary changes.",
+    limitations: confirming
+      ? [
+          "Only a confirmation_id from this user and this connection, within ten minutes, once, and only the newest preview.",
+          "The previewed tool's permission, administrator switch and emergency stop are checked again, and the preview is recomputed; any difference refuses it.",
+          "Never call it without the user's explicit yes to the preview shown word for word.",
+        ]
+      : ["Only a confirmation_id from this user and this connection that is still waiting."],
+    audit: "mcp_write_tool",
+    ...schemaFields(listing.inputSchema),
+  };
+}
+
+function toolListing(tool: WriteToolDefinition): McpWriteToolListing {
+  return {
     name: tool.name,
     title: tool.title,
     description:
@@ -696,33 +867,35 @@ export function writeToolListings(user: AuthedUser): McpWriteToolListing[] {
         ? " Requires an idempotency_key."
         : " Show the returned preview to the user word for word and call confirm_action only after the user explicitly says yes."),
     inputSchema: jsonSchema(envelopeSchema(tool, true)),
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: tool.reviewReason === "destructive" || tool.reviewReason === "irreversible" || tool.reviewReason === "financial" || tool.reviewReason === "permanent",
-      idempotentHint: true,
-      openWorldHint: false,
-    },
+    annotations: { readOnlyHint: false, destructiveHint: classification(tool).destructive, idempotentHint: true, openWorldHint: false },
+  };
+}
+
+/**
+ * Every write tool the gateway has, with its tools/list entry, its capability
+ * metadata and whether this connection may use it. The single source for both
+ * tools/list (the entries whose availability is listed) and
+ * describe_capabilities (all of them): one cannot name a tool the other lacks.
+ */
+export function writeToolCatalogue(user: AuthedUser | undefined, access: McpWriteAccess): Array<McpCatalogueEntry & { listing: McpWriteToolListing }> {
+  const entries = WRITE_TOOLS.map((tool) => {
+    const listing = toolListing(tool);
+    const reason = writeReason(user, access, tool.contract.requiredPermission);
+    return { listing, capability: writeCapability(tool, listing), availability: availability(reason, reason === "available"), reviewed: tool.kind === "reviewed" };
+  });
+  const anyReviewed = entries.some((entry) => entry.reviewed && entry.availability.listed);
+  const answerReason: McpAvailabilityReason = anyReviewed ? "available" : writeReason(user, access, "authenticated") === "available" ? "no_previewed_tool_available" : writeReason(user, access, "authenticated");
+  const answers = confirmListings().map((listing) => ({
+    listing, capability: answerCapability(listing), availability: availability(answerReason, answerReason === "available"),
   }));
-  if (offered.some((tool) => tool.kind === "reviewed")) {
-    listings.push(
-      {
-        name: MCP_CONFIRM_TOOL,
-        title: "Confirm a previewed change",
-        description:
-          "Carry out a change that was previewed (archive, lead conversion, invoice issue or void, WhatsApp sender approval or rejection, permanent contact deletion). Call this only after showing the preview to the user and receiving their explicit yes in this conversation. A permanent deletion also needs confirm_display_name: the exact name, typed by the user. Each confirmation_id works once, for ten minutes, and only for the newest preview.",
-        inputSchema: jsonSchema(confirmArguments),
-        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-      },
-      {
-        name: MCP_CANCEL_TOOL,
-        title: "Cancel a previewed change",
-        description: "Withdraw a previewed change the user does not want. Nothing is changed.",
-        inputSchema: jsonSchema(confirmationArguments),
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      },
-    );
-  }
-  return listings;
+  return [...entries.map(({ reviewed: _reviewed, ...entry }) => entry), ...answers];
+}
+
+/** The write tools this person may use: only those whose permission the account has. */
+export function writeToolListings(user: AuthedUser): McpWriteToolListing[] {
+  return writeToolCatalogue(user, { writeEnabled: true, writeScope: true })
+    .filter((entry) => entry.availability.listed)
+    .map((entry) => entry.listing);
 }
 
 // ---------------------------------------------------------------------------

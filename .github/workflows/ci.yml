@@ -34,6 +34,16 @@ jobs:
           else
             echo "No catalogue on master yet; nothing to compare."
           fi
+      # The MCP toolset ledger likewise: a shipped toolset revision always
+      # names the same tools and capability metadata.
+      - name: MCP toolset ledger is append-only
+        run: |
+          git fetch --no-tags --depth=1 origin master
+          if git show origin/master:backend/src/modules/mcp/routes.ts > /tmp/mcp-ledger-base.ts 2>/dev/null; then
+            node scripts/check-ledger-append-only.mjs /tmp/mcp-ledger-base.ts src/modules/mcp/routes.ts MCP_TOOLSET_FINGERPRINTS
+          else
+            echo "No MCP gateway on master yet; nothing to compare."
+          fi
       - run: npm run prisma:generate
       - run: npm run build
       - run: npm run test:embedded
