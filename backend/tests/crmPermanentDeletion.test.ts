@@ -313,9 +313,14 @@ describe("Permanent deletion of CRM clients and contacts (separate from archive)
     }
   });
 
-  it("is not offered as a voice or MCP action: no generic or permanent delete tool exists", () => {
+  it("is not offered by voice; MCP offers only the guarded contact deletion, never client or generic delete", () => {
     const names = MCP_WRITE_TOOLS.map((tool) => tool.name);
-    assert.ok(!names.some((name) => /delete/.test(name)), names.join(", "));
+    // Issue #74: the only MCP deletion is delete_contact_permanently, previewed,
+    // confirmed and with the exact name typed back (tests/mcpSenderReview.test.ts).
+    assert.deepEqual(names.filter((name) => /delete/.test(name)), ["delete_contact_permanently"]);
+    const tool = MCP_WRITE_TOOLS.find((entry) => entry.name === "delete_contact_permanently")!;
+    assert.equal(tool.kind, "reviewed");
+    assert.ok(tool.typedConfirmation);
     assert.ok(names.includes("archive_client") && names.includes("archive_contact"));
   });
 });

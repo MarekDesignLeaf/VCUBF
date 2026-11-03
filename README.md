@@ -65,15 +65,22 @@ docs/               User guide, connector engine, production architecture, voice
   dependency counts and a digest, the record's name typed back, a re-check under the row
   lock and the emergency-stop lock, and one audit entry committed with the delete. A client
   with any job, quote, invoice, payment, communication, task, photo, document, contact,
-  converted lead or merge history is refused; nothing cascades. Voice and MCP clients
-  cannot delete permanently.
+  converted lead or merge history is refused; nothing cascades. Voice cannot delete
+  permanently. An MCP client approved for `secretary.write` can delete a **contact**
+  permanently with `delete_contact_permanently` (preview, the user's explicit yes, and the
+  exact name typed by the user passed to `confirm_action`; issue #74); client deletion stays
+  in the web UI.
 - **WhatsApp sender review**: inbound WhatsApp messages are always kept, but a sender no
   longer becomes a CRM contact by itself. Senders wait on the Connectors page, with their
   messages and a work-related signal that is only an inference from message text; a person
   approves a real customer (contact, optionally client, after a preview and confirmation)
   or rejects them as personal, employee, subcontractor, supplier or other. Rejected senders
   and senders whose contact was deleted permanently are never imported again unless a
-  person reopens them. Existing CRM contacts are not changed by this.
+  person reopens them. Existing CRM contacts are not changed by this. The same review is
+  available through the MCP gateway without a web session (issue #74):
+  `list_whatsapp_senders`, `get_whatsapp_sender`, and with `secretary.write` and
+  `crm.manage` the previewed `approve_whatsapp_sender`, `reject_whatsapp_sender`,
+  `reopen_whatsapp_sender` and `defer_whatsapp_sender`.
 - **WhatsApp replies**: “Odpověz Honzovi na WhatsApp, že přijedeme v pondělí” answers
   that sender's latest received message (or “last” for the newest from anyone). The
   recipient is always the message's sender, never a spoken number; the reply quotes the
@@ -125,7 +132,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 107 test files, including database integration tests and checks that only
+- **Tests**: 108 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -949,10 +956,23 @@ row lock of the archive; the emergency stop is checked again just before the cha
 inside the owning service's transaction, serialised with the switch, and a stop closes
 the review):
 `archive_client`, `archive_contact` (destructive), `convert_lead` (irreversible),
-`change_invoice_status` to issued or void (financial); `cancel_action` withdraws one. The
+`change_invoice_status` to issued or void (financial), `approve_whatsapp_sender`,
+`reject_whatsapp_sender`, `reopen_whatsapp_sender` and `defer_whatsapp_sender`
+(classification; the sender's revision is bound and re-checked by
+the owning service), `delete_contact_permanently` (permanent; `confirm_action` must also
+carry `confirm_display_name`, the contact's exact name typed by the user; a missing or wrong
+name consumes nothing; the service then re-checks the preview digest under the contact's
+row lock and the emergency-stop lock); `cancel_action` withdraws one. The
 preview queue is its own (`mcp_write_review`), so Alfonzo's spoken yes cannot confirm it.
-Nothing is e-mailed, messaged, published or deleted through the gateway; recording payments
-and sending quotes or invoices are not exposed. A read token calling a write tool gets
+Nothing is e-mailed, messaged or published through the gateway, and the only deletion is
+`delete_contact_permanently`; recording payments, deleting clients and sending quotes or
+invoices are not exposed. WhatsApp sender review reads (`list_whatsapp_senders`,
+`get_whatsapp_sender`) are open to every connection with `crm.read` and the
+administrator's switch for reading WhatsApp messages. `initialize` reports
+`serverInfo.version` as `<catalogue version>+<MCP_TOOLSET_REVISION>`, so a client can see
+that its stored tool list is stale; ChatGPT must refresh (or disconnect and reconnect) the
+connector to see new tools, and a connection approved read-only must be approved again
+with writing to see any write tool. See `docs/MCP_SENDER_REVIEW_ACCEPTANCE.md`. A read token calling a write tool gets
 HTTP 403 with `WWW-Authenticate: Bearer error="insufficient_scope"`; the owner's own Bearer
 token stays read only. Each write is audited as `mcp_write_tool` (tool, phase, OAuth
 client, fingerprint, never the record) and by the owning service under its own contract.
@@ -972,8 +992,8 @@ switched off continues read only. Codes and refresh tokens are stored as hashes
 bound to the `/mcp` resource that every other route refuses. A replayed code or refresh
 token revokes the chain; a password change ends every connection. The issuer is
 `MCP_PUBLIC_URL`, or the request origin when unset. Covered by `tests/mcpGateway.test.ts`,
-`tests/mcpOAuth.test.ts` and `tests/mcpWrite.test.ts`; no live ChatGPT or Claude
-connection has been accepted, for reading or writing.
+`tests/mcpOAuth.test.ts`, `tests/mcpWrite.test.ts` and `tests/mcpSenderReview.test.ts`; no
+live ChatGPT or Claude connection has been accepted, for reading or writing.
 
 ## What's deliberately NOT here yet
 

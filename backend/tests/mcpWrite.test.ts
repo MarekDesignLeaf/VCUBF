@@ -934,10 +934,21 @@ describe("MCP gateway write access", () => {
     assert.equal(MCP_REVIEW.actionType, "mcp_write_review");
   });
 
-  it("offers no tool that sends, publishes or deletes, and no name twice", () => {
+  it("offers no tool that sends, publishes or deletes (but the guarded contact deletion), and no name twice", () => {
     const readNames = mcpTools().map((tool) => tool.name);
     const writeNames = MCP_WRITE_TOOLS.map((tool) => tool.name);
     assert.equal(new Set([...readNames, ...writeNames, MCP_CONFIRM_TOOL, MCP_CANCEL_TOOL]).size, readNames.length + writeNames.length + 2);
-    for (const name of writeNames) assert.doesNotMatch(name, /send|publish|delete|email|whatsapp|payment/, name);
+    // Issue #74: the WhatsApp sender review only classifies staged senders
+    // (nothing is messaged), and the only deletion is the previewed,
+    // name-typed delete_contact_permanently. Nothing sends, publishes, e-mails
+    // or records a payment.
+    const reviewed = new Set(["approve_whatsapp_sender", "reject_whatsapp_sender", "reopen_whatsapp_sender", "defer_whatsapp_sender", "delete_contact_permanently"]);
+    for (const name of writeNames) {
+      assert.doesNotMatch(name, /(^|_)send(_|$)|publish|email|payment/, name);
+      if (!reviewed.has(name)) assert.doesNotMatch(name, /delete|whatsapp/, name);
+    }
+    const deletion = MCP_WRITE_TOOLS.find((tool) => tool.name === "delete_contact_permanently");
+    assert.equal(deletion?.kind, "reviewed");
+    assert.ok(deletion?.typedConfirmation, "permanent deletion needs the typed name");
   });
 });

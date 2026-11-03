@@ -6,10 +6,12 @@
  *
  *   - Archive keeps the row (isActive=false) and every record linked to it.
  *     It stays the default and is what voice and MCP clients can do.
- *   - Permanent deletion removes the row itself. It is offered only in the
- *     UI, only with crm.manage, only inside the caller's company, and only
- *     when nothing of business value would be lost or left pointing at a
- *     record that no longer exists.
+ *   - Permanent deletion removes the row itself. It is offered in the UI
+ *     and, for contacts only, through the MCP gateway (writeTools.ts
+ *     delete_contact_permanently: preview, explicit yes and typed name, then
+ *     this same execute), only with crm.manage, only inside the caller's
+ *     company, and only when nothing of business value would be lost or left
+ *     pointing at a record that no longer exists. Never by voice.
  *
  * The flow, for both kinds of record:
  *
