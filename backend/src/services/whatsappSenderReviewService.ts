@@ -58,10 +58,29 @@ export const reviewSenderSchema = z.discriminatedUnion("decision", [
     /** The sender's revision from the preview; required to confirm. */
     expected_revision: z.string().datetime().optional(),
   }).strict(),
-  z.object({ decision: z.literal("reject"), classification: z.enum(NOT_CUSTOMER_CLASSIFICATIONS), note }).strict(),
-  z.object({ decision: z.literal("mark_review_needed"), note }).strict(),
-  z.object({ decision: z.literal("reopen"), note }).strict(),
+  // expected_revision (optional): the sender's revision a person was shown.
+  // When given, the decision is made only if the sender is still exactly that
+  // revision; the MCP gateway always sends it with a confirmed rejection.
+  z.object({ decision: z.literal("reject"), classification: z.enum(NOT_CUSTOMER_CLASSIFICATIONS), note, expected_revision: z.string().datetime().optional() }).strict(),
+  z.object({ decision: z.literal("mark_review_needed"), note, expected_revision: z.string().datetime().optional() }).strict(),
+  z.object({ decision: z.literal("reopen"), note, expected_revision: z.string().datetime().optional() }).strict(),
 ]);
+type DecisionInput = Exclude<z.infer<typeof reviewSenderSchema>, { decision: "approve_customer" }>;
+
+/** From which review statuses each decision without import may be taken. */
+const ALLOWED_FROM: Record<DecisionInput["decision"], readonly SenderReviewStatus[]> = {
+  reject: ["pending", "review_needed", "approved"],
+  mark_review_needed: ["pending", "review_needed"],
+  reopen: ["rejected", "deleted_from_crm", "review_needed"],
+};
+
+function decisionOutcome(input: DecisionInput) {
+  return input.decision === "reject"
+    ? { reviewStatus: "rejected", reviewClassification: input.classification as string | null }
+    : input.decision === "mark_review_needed"
+      ? { reviewStatus: "review_needed", reviewClassification: null as string | null }
+      : { reviewStatus: "pending", reviewClassification: null as string | null };
+}
 type ApproveInput = Extract<z.infer<typeof reviewSenderSchema>, { decision: "approve_customer" }>;
 
 const SIGNAL_RANK: Record<WorkSignal["level"], number> = { work_related_candidate: 0, weak_signal: 1, no_work_terms: 2, no_messages: 3 };
@@ -408,34 +427,38 @@ export async function reviewWhatsAppSender(
 async function decideWithoutImport(
   user: AuthedUser,
   sender: Sender,
-  input: Exclude<z.infer<typeof reviewSenderSchema>, { decision: "approve_customer" }>,
+  input: DecisionInput,
   auditInput: unknown,
 ): Promise<ServiceResult<unknown>> {
-  const allowedFrom: Record<typeof input.decision, string[]> = {
-    reject: ["pending", "review_needed", "approved"],
-    mark_review_needed: ["pending", "review_needed"],
-    reopen: ["rejected", "deleted_from_crm", "review_needed"],
-  };
-  if (!allowedFrom[input.decision].includes(sender.reviewStatus)) {
+  if (!(ALLOWED_FROM[input.decision] as readonly string[]).includes(sender.reviewStatus)) {
     await auditReview(user, auditInput, "rejected", { errorMessage: "INVALID_REVIEW_TRANSITION" });
     return fail(409, "INVALID_REVIEW_TRANSITION", `A sender that is ${sender.reviewStatus.replaceAll("_", " ")} cannot be changed with ${input.decision.replaceAll("_", " ")}.`);
   }
-  const next = input.decision === "reject"
-    ? { reviewStatus: "rejected", reviewClassification: input.classification }
-    : input.decision === "mark_review_needed"
-      ? { reviewStatus: "review_needed", reviewClassification: null }
-      : { reviewStatus: "pending", reviewClassification: null };
-  // Conditional on the status just read, so two people deciding at once do
-  // not silently overwrite each other.
-  const updated = await prisma.externalContact.updateMany({
-    where: { id: sender.id, companyId: user.companyId, reviewStatus: sender.reviewStatus },
-    data: { ...next, reviewNote: input.note ?? null, reviewedBy: user.id, reviewedAt: new Date() },
+  if (input.expected_revision && sender.updatedAt.toISOString() !== input.expected_revision) {
+    await auditReview(user, auditInput, "rejected", { errorMessage: "WHATSAPP_SENDER_CHANGED" });
+    return fail(409, "WHATSAPP_SENDER_CHANGED", "This sender changed after it was shown (a new message or another decision). Review it again.");
+  }
+  const next = decisionOutcome(input);
+  // Conditional on the status (and, when given, the exact revision) just
+  // read, so two people deciding at once do not silently overwrite each
+  // other. The change and its audit entry commit together, with the
+  // emergency-stop lock held.
+  const changed = await whileNotInSafeMode(user.companyId, async () => {
+    const updated = await prisma.externalContact.updateMany({
+      where: {
+        id: sender.id, companyId: user.companyId, reviewStatus: sender.reviewStatus,
+        ...(input.expected_revision ? { updatedAt: new Date(input.expected_revision) } : {}),
+      },
+      data: { ...next, reviewNote: input.note ?? null, reviewedBy: user.id, reviewedAt: new Date() },
+    });
+    if (updated.count !== 1) return false;
+    await auditReview(user, auditInput, "success", { dataBefore: senderSnapshot(sender), dataAfter: next });
+    return true;
   });
-  if (updated.count !== 1) {
+  if (!changed) {
     await auditReview(user, auditInput, "rejected", { errorMessage: "WHATSAPP_SENDER_CHANGED" });
     return fail(409, "WHATSAPP_SENDER_CHANGED", "Someone else changed this sender's review. Reload and try again.");
   }
-  await auditReview(user, auditInput, "success", { dataBefore: senderSnapshot(sender), dataAfter: next });
   // Rejecting decides about the sender only. A CRM contact that already
   // exists for them (for example one created automatically before this
   // review existed) is kept; archiving or deleting it is a separate action.
@@ -453,5 +476,140 @@ async function decideWithoutImport(
       : input.decision === "mark_review_needed"
         ? "Left for later review."
         : "Reopened for review.",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Lookups and previews for callers that name a sender by id only (the MCP
+// gateway). Every lookup is scoped to the caller's company.
+
+/**
+ * The WhatsApp source to list: the one named, or the company's only active
+ * WhatsApp Business source. With several and none named, the caller must
+ * choose; the sources are listed so it can.
+ */
+export async function resolveWhatsAppSource(user: AuthedUser, sourceId?: string): Promise<ServiceResult<{ id: string; displayName: string }>> {
+  if (sourceId) {
+    const source = await whatsappSource(user, sourceId);
+    return source ? ok(200, source) : fail(404, "CONNECTOR_SOURCE_NOT_FOUND", "That WhatsApp source was not found in this company.");
+  }
+  const sources = await prisma.connectorSource.findMany({
+    where: { companyId: user.companyId, connectorKey: "whatsapp_business", isActive: true },
+    select: { id: true, displayName: true },
+    orderBy: { createdAt: "asc" },
+  });
+  if (sources.length === 1) return ok(200, sources[0]);
+  if (!sources.length) return fail(404, "CONNECTOR_SOURCE_NOT_FOUND", "This company has no active WhatsApp Business source.");
+  return fail(409, "SOURCE_AMBIGUOUS", "This company has more than one WhatsApp Business source. Name one by source_id.", { sources });
+}
+
+/** The sender with this id in the caller's company, with its WhatsApp source. */
+export async function findWhatsAppSender(user: AuthedUser, senderId: string) {
+  const sender = await prisma.externalContact.findFirst({
+    where: { id: senderId, companyId: user.companyId, connectorSource: { connectorKey: "whatsapp_business", isActive: true } },
+    include: { connectorSource: { select: { id: true, displayName: true } } },
+  });
+  return sender;
+}
+
+const DETAIL_MESSAGES = 30;
+const DETAIL_MESSAGE_CHARS = 2000;
+
+/**
+ * One sender in full: identity, review state, the linked CRM contact if any,
+ * the work-related signal and the most recent messages. Reading only.
+ */
+export async function getWhatsAppSender(user: AuthedUser, senderId: string): Promise<ServiceResult<unknown>> {
+  if (!user.permissions.includes("crm.read")) return fail(403, "MISSING_PERMISSION", "CRM read permission is required to review WhatsApp senders.");
+  const sender = await findWhatsAppSender(user, senderId);
+  if (!sender) return fail(404, "WHATSAPP_SENDER_NOT_FOUND", "That WhatsApp sender was not found.");
+  const phone = normalizePhone(sender.phone);
+  const [messages, messageCount, linked] = await Promise.all([
+    phone
+      ? prisma.communicationIntake.findMany({
+          where: { companyId: user.companyId, connectorSourceId: sender.connectorSourceId, channel: "whatsapp", senderPhone: phone },
+          select: { id: true, messageText: true, receivedAt: true, intakeStatus: true },
+          orderBy: { receivedAt: "desc" },
+          take: DETAIL_MESSAGES,
+        })
+      : Promise.resolve([]),
+    phone
+      ? prisma.communicationIntake.count({ where: { companyId: user.companyId, connectorSourceId: sender.connectorSourceId, channel: "whatsapp", senderPhone: phone } })
+      : Promise.resolve(0),
+    sender.importedContactId
+      ? prisma.contact.findFirst({
+          where: { id: sender.importedContactId, companyId: user.companyId },
+          select: { id: true, displayName: true, isActive: true, source: true, client: { select: { id: true, displayName: true } } },
+        })
+      : Promise.resolve(null),
+  ]);
+  return ok(200, {
+    id: sender.id,
+    source: sender.connectorSource,
+    displayName: sender.displayName,
+    phone: sender.phone,
+    phoneValid: Boolean(phone) && isValidPhoneNumberFormat(sender.phone ?? ""),
+    externalResourceName: sender.externalResourceName,
+    reviewStatus: sender.reviewStatus,
+    reviewClassification: sender.reviewClassification,
+    reviewNote: sender.reviewNote,
+    reviewedAt: sender.reviewedAt,
+    revision: sender.updatedAt.toISOString(),
+    linkedContact: linked,
+    messageCount,
+    messagesShown: messages.length,
+    messages: messages.map((message) => ({
+      id: message.id,
+      receivedAt: message.receivedAt,
+      intakeStatus: message.intakeStatus,
+      text: message.messageText.length > DETAIL_MESSAGE_CHARS ? message.messageText.slice(0, DETAIL_MESSAGE_CHARS) + "…" : message.messageText,
+    })),
+    signal: workSignal(messages.map((message) => message.messageText)),
+    signalNote: "The signal is an inference from message text only; it never decides who is a customer.",
+    allowedDecisions: [
+      ...(!(SUPPRESSED_SENDER_STATUSES as readonly string[]).includes(sender.reviewStatus) ? ["approve_customer"] : []),
+      ...(Object.keys(ALLOWED_FROM) as DecisionInput["decision"][]).filter((decision) => (ALLOWED_FROM[decision] as readonly string[]).includes(sender.reviewStatus)),
+    ],
+  });
+}
+
+/**
+ * Exactly what a decision without import (reject, mark_review_needed,
+ * reopen) would change, without changing anything. Refuses a decision the
+ * sender's current status does not allow, as the decision itself would.
+ */
+export async function previewWhatsAppSenderDecision(user: AuthedUser, senderId: string, rawInput: unknown): Promise<ServiceResult<unknown>> {
+  if (!user.permissions.includes(REVIEW_WHATSAPP_SENDER_ACTION.requiredPermission)) {
+    return fail(403, "MISSING_PERMISSION", "CRM management permission is required to review WhatsApp senders.");
+  }
+  const parsed = reviewSenderSchema.safeParse(rawInput ?? {});
+  if (!parsed.success) return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  const input = parsed.data;
+  if (input.decision === "approve_customer") return fail(400, "VALIDATION_FAILED", "Approval has its own preview.");
+  const sender = await findWhatsAppSender(user, senderId);
+  if (!sender) return fail(404, "WHATSAPP_SENDER_NOT_FOUND", "That WhatsApp sender was not found.");
+  if (!(ALLOWED_FROM[input.decision] as readonly string[]).includes(sender.reviewStatus)) {
+    return fail(409, "INVALID_REVIEW_TRANSITION", `A sender that is ${sender.reviewStatus.replaceAll("_", " ")} cannot be changed with ${input.decision.replaceAll("_", " ")}.`);
+  }
+  const linked = sender.importedContactId
+    ? await prisma.contact.findFirst({ where: { id: sender.importedContactId, companyId: user.companyId }, select: { id: true, displayName: true, isActive: true } })
+    : null;
+  const next = decisionOutcome(input);
+  return ok(200, {
+    sender: { id: sender.id, displayName: sender.displayName, phone: sender.phone, source: sender.connectorSource },
+    decision: input.decision,
+    statusBefore: sender.reviewStatus,
+    classificationBefore: sender.reviewClassification,
+    statusAfter: next.reviewStatus,
+    classificationAfter: next.reviewClassification,
+    note: input.note ?? null,
+    linkedContact: linked,
+    revision: sender.updatedAt.toISOString(),
+    effect: input.decision === "reject"
+      ? "The sender is marked as not a customer. Their WhatsApp messages are kept unchanged, and they will not be added to CRM unless the review is reopened." +
+        (linked?.isActive ? ` The existing CRM contact ${linked.displayName} is kept; archiving or deleting it is a separate action.` : "")
+      : input.decision === "reopen"
+        ? "The sender goes back to the review queue as pending. Nothing is added to CRM until a person approves them."
+        : "The sender is left for later review. Nothing is added to CRM.",
   });
 }

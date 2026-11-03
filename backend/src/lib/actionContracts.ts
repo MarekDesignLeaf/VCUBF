@@ -112,9 +112,10 @@ export const ARCHIVE_CLIENT_ACTION: ActionContract = {
 // removes the client row itself and is refused while anything of business
 // value still points at it (jobs, quotes, invoices, payments, communication,
 // tasks, photos, documents, contacts, converted leads, merge history). It is
-// an interactive UI action only: a fresh preview with dependency counts, the
+// an interactive action only: a fresh preview with dependency counts, the
 // exact name typed back and the preview's digest, all compared again under
-// the row lock of the delete. Not offered to voice or to MCP clients.
+// the row lock of the delete. Not offered to voice or to MCP clients (the
+// contact counterpart below is offered to MCP, with the same guards).
 export const DELETE_CLIENT_PERMANENTLY_ACTION: ActionContract = {
   actionName: "delete_client_permanently",
   purpose: "Permanently remove a client that has no jobs, quotes, invoices, payments, communication, tasks, photos, documents, contacts or other dependent history, after a fresh dependency preview and an explicit typed confirmation.",
@@ -278,14 +279,14 @@ export const MCP_READ_TOOL_ACTION: ActionContract = {
 export const MCP_WRITE_TOOL_ACTION: ActionContract = {
   actionName: "mcp_write_tool",
   purpose:
-    "Carry out one write tool call from an external AI client (ChatGPT, Claude) through the MCP gateway, only with an access token the person approved for secretary.write and only while MCP_WRITE_ENABLED is on. Internal record changes run once per idempotency key; archiving, lead conversion and invoice status changes are first returned as an exact preview and run only on an explicit confirmation bound to that preview, that user and that client, once. Runs under the caller's identity, permissions and the administrator's capability switches; refused during an emergency stop. Nothing is e-mailed, messaged, published or deleted. Audited with the tool, the phase, the result and a keyed fingerprint of the arguments.",
+    "Carry out one write tool call from an external AI client (ChatGPT, Claude) through the MCP gateway, only with an access token the person approved for secretary.write and only while MCP_WRITE_ENABLED is on. Internal record changes run once per idempotency key; archiving, lead conversion, invoice status changes, WhatsApp sender approval and rejection, and permanent contact deletion are first returned as an exact preview and run only on an explicit confirmation bound to that preview, that user and that client, once (permanent deletion also needs the contact's exact name typed by the person). Runs under the caller's identity, permissions and the administrator's capability switches; refused during an emergency stop. Nothing is e-mailed, messaged or published. Audited with the tool, the phase, the result and a keyed fingerprint of the arguments.",
   requiredPermission: "authenticated",
   riskLevel: 3,
   confirmationRequired: false,
   dataSources: ["user_input", "company_records", "voice.pending_actions", "idempotency_records"],
   possibleErrors: [
     "INSUFFICIENT_SCOPE", "WRITE_DISABLED", "NOT_ALLOWED", "MISSING_PERMISSION", "VALIDATION_FAILED", "IDEMPOTENCY_KEY_REUSED",
-    "IDEMPOTENCY_IN_PROGRESS", "CONFIRMATION_NOT_FOUND", "CONFIRMATION_ALREADY_USED", "SAFE_MODE_ACTIVE",
+    "IDEMPOTENCY_IN_PROGRESS", "CONFIRMATION_NOT_FOUND", "CONFIRMATION_ALREADY_USED", "CONFIRMATION_TEXT_MISMATCH", "SAFE_MODE_ACTIVE",
   ],
 };
 

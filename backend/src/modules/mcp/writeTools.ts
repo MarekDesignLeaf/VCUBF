@@ -25,12 +25,16 @@
  *   runs, every later call with the same key and arguments gets the first
  *   answer back, and the same key with different arguments is refused. A
  *   confirmation runs once; repeating it gets the first answer back.
- * - Review. Destructive (archiving), irreversible (lead conversion) and
- *   financial (invoice issue or void) tools never act on the first call: it
- *   returns the exact preview and a confirmation_id. Only confirm_action with
- *   that id, from the same user and the same OAuth client, within ten minutes,
- *   runs it, and only if the preview computed again at that moment is still
- *   identical. Nothing here sends, publishes or deletes.
+ * - Review. Destructive (archiving), irreversible (lead conversion),
+ *   financial (invoice issue or void), classification (approving, rejecting,
+ *   reopening or deferring a WhatsApp sender) and permanent (deleting a contact) tools never act on
+ *   the first call: it returns the exact preview and a confirmation_id. Only
+ *   confirm_action with that id, from the same user and the same OAuth client,
+ *   within ten minutes, runs it, and only if the preview computed again at that
+ *   moment is still identical. Permanent deletion also needs the record's exact
+ *   name, typed by the user, passed to confirm_action; a wrong name consumes
+ *   nothing. Nothing here sends or publishes, and the only deletion is the
+ *   guarded delete_contact_permanently.
  * - Emergency stop. The gateway refuses every POST during a stop; the engine
  *   refuses to claim a review; and every write here checks it once more.
  */
@@ -56,6 +60,8 @@ import {
   CREATE_LEAD_ACTION,
   CREATE_QUOTE_ACTION,
   CREATE_TASK_ACTION,
+  DELETE_CONTACT_PERMANENTLY_ACTION,
+  REVIEW_WHATSAPP_SENDER_ACTION,
   UPDATE_CLIENT_ACTION,
   UPDATE_CONTACT_ACTION,
   UPDATE_INVOICE_ACTION,
@@ -79,6 +85,8 @@ import { fail, ok, type ServiceResult } from "../../services/result.js";
 import { MCP_RESULT_CHARS } from "./gate.js";
 import * as clientService from "../../services/clientService.js";
 import * as contactService from "../../services/contactService.js";
+import * as permanentDeletion from "../../services/crmPermanentDeletionService.js";
+import * as senderReview from "../../services/whatsappSenderReviewService.js";
 import * as invoiceService from "../../services/invoiceService.js";
 import * as jobService from "../../services/jobService.js";
 import * as leadService from "../../services/leadService.js";
@@ -139,6 +147,7 @@ interface Body {
 }
 
 type Kind = "direct" | "reviewed";
+type ReviewReason = "destructive" | "irreversible" | "financial" | "classification" | "permanent";
 
 interface WriteToolDefinition {
   name: string;
@@ -147,7 +156,7 @@ interface WriteToolDefinition {
   contract: ActionContract;
   kind: Kind;
   /** Why a reviewed tool waits for a yes. */
-  reviewReason?: "destructive" | "irreversible" | "financial";
+  reviewReason?: ReviewReason;
   /** Ids and other envelope fields, checked here. */
   fields: Record<string, z.ZodTypeAny>;
   /** The record itself, checked by the owning service. */
@@ -159,6 +168,11 @@ interface WriteToolDefinition {
   run: (user: AuthedUser, args: Record<string, any>, verifiedPreview?: any) => Promise<ServiceResult<unknown>>;
   /** Reviewed only: exactly what the change will do, without doing any of it. */
   preview?: (user: AuthedUser, args: Record<string, any>) => Promise<ServiceResult<unknown>>;
+  /**
+   * Reviewed only: text the user must type back, taken from the preview (the
+   * record's exact name). confirm_action must carry it as confirm_display_name.
+   */
+  typedConfirmation?: (preview: any) => string;
 }
 
 const record = (key: string, schema: z.ZodTypeAny, description: string): Body => ({ key, schema, description });
@@ -242,6 +256,74 @@ async function invoiceStatusPreview(user: AuthedUser, args: Record<string, any>)
     note: args.invoice_status === "void"
       ? "A void invoice cannot be issued or edited again."
       : "An issued invoice can no longer be edited; it can only be voided. Nothing is sent to the client.",
+  });
+}
+
+// WhatsApp sender review (PR #73 workflow). The sender is named by id; its
+// source is the one it was staged from, inside the caller's company.
+
+async function senderSourceId(user: AuthedUser, senderId: string): Promise<ServiceResult<string>> {
+  const sender = await senderReview.findWhatsAppSender(user, senderId);
+  return sender ? ok(200, sender.connectorSourceId) : fail(404, "WHATSAPP_SENDER_NOT_FOUND", "That WhatsApp sender was not found.");
+}
+
+function approvalInput(args: Record<string, any>) {
+  return {
+    decision: "approve_customer" as const,
+    ...(args.import_as ? { import_as: args.import_as } : {}),
+    ...(args.client_id ? { client_id: args.client_id } : {}),
+    ...(args.display_name ? { display_name: args.display_name } : {}),
+    ...(args.note ? { note: args.note } : {}),
+  };
+}
+
+async function approveSenderPreview(user: AuthedUser, args: Record<string, any>): Promise<ServiceResult<unknown>> {
+  const sourceId = await senderSourceId(user, args.sender_id);
+  if (!sourceId.ok) return sourceId;
+  const answer = await senderReview.reviewWhatsAppSender(user, sourceId.data, args.sender_id, approvalInput(args));
+  // Already approved with a live contact: the service answers without changing anything.
+  if (answer.ok) return fail(409, "ALREADY_APPROVED", "This sender is already in CRM as a customer contact.", { result: answer.data });
+  if (answer.error !== "CONFIRMATION_REQUIRED") return answer;
+  const plan = answer.extra?.preview as Record<string, unknown>;
+  return ok(200, {
+    ...plan,
+    importAs: args.import_as ?? "contact",
+    note: args.note ?? null,
+    effect: "The sender is classified as a customer and the CRM contact (and client, if shown) above is created or linked. Existing CRM data is never overwritten. WhatsApp messages are kept unchanged and nothing is sent.",
+  });
+}
+
+async function senderDecisionPreview(user: AuthedUser, args: Record<string, any>, decision: "reject" | "reopen" | "mark_review_needed") {
+  return senderReview.previewWhatsAppSenderDecision(user, args.sender_id, {
+    decision,
+    ...(decision === "reject" ? { classification: args.classification } : {}),
+    ...(args.note ? { note: args.note } : {}),
+  });
+}
+
+async function runSenderDecision(user: AuthedUser, args: Record<string, any>, decision: "reject" | "reopen" | "mark_review_needed", expectedRevision?: string) {
+  const sourceId = await senderSourceId(user, args.sender_id);
+  if (!sourceId.ok) return sourceId;
+  return senderReview.reviewWhatsAppSender(user, sourceId.data, args.sender_id, {
+    decision,
+    ...(decision === "reject" ? { classification: args.classification } : {}),
+    ...(args.note ? { note: args.note } : {}),
+    ...(expectedRevision ? { expected_revision: expectedRevision } : {}),
+  });
+}
+
+/**
+ * The permanent-deletion preview of crmPermanentDeletionService, whole: the
+ * exact identity, client and connector links, what is kept, and its digest.
+ */
+async function deleteContactPreview(user: AuthedUser, args: Record<string, any>): Promise<ServiceResult<unknown>> {
+  const preview = await permanentDeletion.previewContactPermanentDeletion(user, args.contact_id);
+  if (!preview.ok) return preview;
+  const data = preview.data as { canDelete: boolean; displayName: string };
+  if (!data.canDelete) return fail(409, "DELETION_BLOCKED", `${data.displayName} cannot be deleted permanently because other records depend on it. Archive it instead.`, { preview: data });
+  return ok(200, {
+    ...data,
+    warning: "Permanent deletion cannot be undone. archive_contact is the reversible alternative. The contact's client, staged connector records, WhatsApp and other messages and the audit history are kept.",
   });
 }
 
@@ -479,6 +561,89 @@ const WRITE_TOOLS: WriteToolDefinition[] = [
   },
 ];
 
+WRITE_TOOLS.push(
+  {
+    name: "approve_whatsapp_sender",
+    title: "Approve a WhatsApp sender as a customer (preview first)",
+    description: "Prepare classifying a WhatsApp sender (from list_whatsapp_senders) as a real customer. Returns a preview of exactly which CRM contact (and optionally client) would be created or linked, and a confirmation_id; nothing changes until confirm_action is called after the user explicitly agrees. Only approve a sender the user has identified as a customer; never decide from the work signal alone. WhatsApp messages are kept unchanged and nothing is sent.",
+    contract: REVIEW_WHATSAPP_SENDER_ACTION,
+    kind: "reviewed",
+    reviewReason: "classification",
+    fields: {
+      sender_id: id("sender_id"),
+      import_as: z.enum(["contact", "contact_and_client"]).optional().describe("contact (default): a CRM contact only. contact_and_client: also create a client, unless client_id names an existing one."),
+      client_id: id("client_id").optional().describe("Link the contact to this existing active client instead of creating one."),
+      display_name: z.string().trim().min(1).max(200).optional().describe("The name to use in CRM, only if the user gave one; the WhatsApp profile name otherwise."),
+      note: z.string().trim().max(1000).optional().describe("A short reason the user gave."),
+    },
+    preview: approveSenderPreview,
+    // Approved only for the sender revision the person saw, re-planned under
+    // the sender's row lock and the emergency-stop lock by the service.
+    run: async (user, a, verified) => {
+      const sourceId = await senderSourceId(user, a.sender_id);
+      if (!sourceId.ok) return sourceId;
+      return senderReview.reviewWhatsAppSender(user, sourceId.data, a.sender_id, {
+        ...approvalInput(a),
+        confirmed: true,
+        ...(verified?.revision ? { expected_revision: verified.revision } : {}),
+      });
+    },
+  },
+  {
+    name: "reject_whatsapp_sender",
+    title: "Mark a WhatsApp sender as not a customer (preview first)",
+    description: "Prepare classifying a WhatsApp sender as not a customer: personal, employee, subcontractor, supplier or other, as the user said. Returns a preview and a confirmation_id; nothing changes until confirm_action is called after the user explicitly agrees. Their messages are kept; they will not be added to CRM unless reopened. An existing CRM contact is kept (archive or delete it separately).",
+    contract: REVIEW_WHATSAPP_SENDER_ACTION,
+    kind: "reviewed",
+    reviewReason: "classification",
+    fields: {
+      sender_id: id("sender_id"),
+      classification: z.enum(senderReview.NOT_CUSTOMER_CLASSIFICATIONS).describe("Why the sender is not a customer, as the user said."),
+      note: z.string().trim().max(1000).optional().describe("A short reason the user gave."),
+    },
+    preview: (user, a) => senderDecisionPreview(user, a, "reject"),
+    run: (user, a, verified) => runSenderDecision(user, a, "reject", verified?.revision),
+  },
+  {
+    name: "reopen_whatsapp_sender",
+    title: "Reopen a WhatsApp sender's review (preview first)",
+    description: "Prepare putting a sender that was rejected (or whose CRM contact was deleted permanently, or left for later) back into the review queue as pending, when the user says the earlier classification was wrong. Returns a preview and a confirmation_id; nothing changes until confirm_action is called after the user explicitly agrees. Nothing is added to CRM.",
+    contract: REVIEW_WHATSAPP_SENDER_ACTION,
+    kind: "reviewed",
+    reviewReason: "classification",
+    fields: { sender_id: id("sender_id"), note: z.string().trim().max(1000).optional().describe("A short reason the user gave.") },
+    preview: (user, a) => senderDecisionPreview(user, a, "reopen"),
+    run: (user, a, verified) => runSenderDecision(user, a, "reopen", verified?.revision),
+  },
+  {
+    name: "defer_whatsapp_sender",
+    title: "Leave a WhatsApp sender for later review (preview first)",
+    description: "Prepare marking a pending sender as looked at but not decidable yet. Returns a preview and a confirmation_id; nothing changes until confirm_action is called after the user agrees. Nothing is added to CRM.",
+    contract: REVIEW_WHATSAPP_SENDER_ACTION,
+    kind: "reviewed",
+    reviewReason: "classification",
+    fields: { sender_id: id("sender_id"), note: z.string().trim().max(1000).optional().describe("A short reason the user gave.") },
+    preview: (user, a) => senderDecisionPreview(user, a, "mark_review_needed"),
+    run: (user, a, verified) => runSenderDecision(user, a, "mark_review_needed", verified?.revision),
+  },
+  {
+    name: "delete_contact_permanently",
+    title: "Delete a CRM contact permanently (preview, yes and typed name)",
+    description: "Prepare removing a CRM contact for good. Use only when the user explicitly asks for permanent deletion, not archiving; archive_contact is the reversible default. Returns the exact contact, its client and connector links, what is kept, and a confirmation_id. Nothing changes until confirm_action is called with that confirmation_id and confirm_display_name set to the contact's exact name as the user typed it, after the user explicitly agrees. Never infer this from conversation alone.",
+    contract: DELETE_CONTACT_PERMANENTLY_ACTION,
+    kind: "reviewed",
+    reviewReason: "permanent",
+    fields: { contact_id: id("contact_id") },
+    preview: deleteContactPreview,
+    typedConfirmation: (preview) => String(preview.displayName),
+    // The service computes the preview again under the contact's row lock and
+    // the emergency-stop lock; any difference from the approved digest refuses.
+    run: (user, a, verified) => permanentDeletion.deleteContactPermanently(user, a.contact_id, verified
+      ? { confirmed: true, preview_digest: verified.digest, confirm_display_name: verified.displayName }
+      : {}),
+  },
+);
+
 export const MCP_WRITE_TOOLS: readonly WriteToolDefinition[] = WRITE_TOOLS;
 const toolsByName = new Map(WRITE_TOOLS.map((tool) => [tool.name, tool]));
 
@@ -498,6 +663,12 @@ function envelopeSchema(tool: WriteToolDefinition, forDocumentation: boolean) {
 
 const confirmationArguments = z.object({
   confirmation_id: z.string().uuid().describe("The confirmation_id returned with the preview."),
+}).strict();
+
+const confirmArguments = confirmationArguments.extend({
+  confirm_display_name: z.string().max(200).optional().describe(
+    "Only for a permanent deletion: the record's exact name exactly as the user typed it. Never fill it in yourself.",
+  ),
 }).strict();
 
 function jsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
@@ -527,7 +698,7 @@ export function writeToolListings(user: AuthedUser): McpWriteToolListing[] {
     inputSchema: jsonSchema(envelopeSchema(tool, true)),
     annotations: {
       readOnlyHint: false,
-      destructiveHint: tool.reviewReason === "destructive" || tool.reviewReason === "irreversible" || tool.reviewReason === "financial",
+      destructiveHint: tool.reviewReason === "destructive" || tool.reviewReason === "irreversible" || tool.reviewReason === "financial" || tool.reviewReason === "permanent",
       idempotentHint: true,
       openWorldHint: false,
     },
@@ -538,8 +709,8 @@ export function writeToolListings(user: AuthedUser): McpWriteToolListing[] {
         name: MCP_CONFIRM_TOOL,
         title: "Confirm a previewed change",
         description:
-          "Carry out a change that was previewed (archive, lead conversion, invoice issue or void). Call this only after showing the preview to the user and receiving their explicit yes in this conversation. Each confirmation_id works once, for ten minutes, and only for the newest preview.",
-        inputSchema: jsonSchema(confirmationArguments),
+          "Carry out a change that was previewed (archive, lead conversion, invoice issue or void, WhatsApp sender approval or rejection, permanent contact deletion). Call this only after showing the preview to the user and receiving their explicit yes in this conversation. A permanent deletion also needs confirm_display_name: the exact name, typed by the user. Each confirmation_id works once, for ten minutes, and only for the newest preview.",
+        inputSchema: jsonSchema(confirmArguments),
         annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
       },
       {
@@ -703,6 +874,8 @@ const reviewPayloadSchema = z.object({
   arguments: z.record(z.unknown()),
   clientId: z.string(),
   previewDigest: z.string(),
+  /** The text the user must type back to confirm, when the tool asks for one. */
+  typedConfirmation: z.string().optional(),
 });
 type ReviewPayload = z.infer<typeof reviewPayloadSchema>;
 
@@ -758,6 +931,7 @@ async function runDirect(caller: McpCaller, tool: WriteToolDefinition, args: Rec
 }
 
 function preparedPayload(tool: WriteToolDefinition, preview: unknown, confirmationId: string, expiresAt: Date) {
+  const typed = tool.typedConfirmation?.(preview);
   return {
     ok: true,
     status: "confirmation_required",
@@ -766,7 +940,10 @@ function preparedPayload(tool: WriteToolDefinition, preview: unknown, confirmati
     action: tool.name,
     reason: tool.reviewReason,
     preview,
-    instruction: "Nothing has changed yet. Show this preview to the user exactly as given and call confirm_action with this confirmation_id only after the user explicitly agrees. Otherwise call cancel_action.",
+    ...(typed !== undefined ? { confirm_display_name_required: typed } : {}),
+    instruction: typed !== undefined
+      ? "Nothing has changed yet. This cannot be undone. Show this preview to the user exactly as given, ask whether they want it deleted permanently, and ask them to type the exact name shown in confirm_display_name_required. Call confirm_action with this confirmation_id and confirm_display_name set to what the user typed only after their explicit yes. Otherwise call cancel_action."
+      : "Nothing has changed yet. Show this preview to the user exactly as given and call confirm_action with this confirmation_id only after the user explicitly agrees. Otherwise call cancel_action.",
   };
 }
 
@@ -799,6 +976,7 @@ async function prepare(caller: McpCaller, tool: WriteToolDefinition, args: Recor
     arguments: args,
     clientId: caller.clientId,
     previewDigest: sha256(canonical(preview.data)),
+    ...(tool.typedConfirmation ? { typedConfirmation: tool.typedConfirmation(preview.data) } : {}),
   });
   return {
     ok: true,
@@ -823,7 +1001,21 @@ const notFound = (phase: WriteOutcome["phase"]): WriteOutcome => ({
   ok: false, phase, payload: { ok: false, error: "CONFIRMATION_NOT_FOUND", message: "There is no previewed change with this confirmation_id for this connection." },
 });
 
-async function confirm(caller: McpCaller, confirmationId: string): Promise<WriteOutcome> {
+async function confirm(caller: McpCaller, confirmationId: string, typedText?: string): Promise<WriteOutcome> {
+  // A tool that needs the name typed back checks it before anything else, and
+  // a wrong or missing name consumes nothing: the review keeps waiting, and no
+  // answer is stored under the confirmation's key.
+  const waiting = await ownReview(caller, confirmationId);
+  if (waiting.state === "pending" && waiting.payload.typedConfirmation !== undefined
+    && (typedText ?? "").trim() !== waiting.payload.typedConfirmation.trim()) {
+    return {
+      ok: false, phase: "confirm", confirmationId, contract: toolsByName.get(waiting.payload.tool)?.contract,
+      payload: {
+        ok: false, error: "CONFIRMATION_TEXT_MISMATCH",
+        message: `Nothing was changed. Ask the user to type the exact name "${waiting.payload.typedConfirmation}" and pass it as confirm_display_name.`,
+      },
+    };
+  }
   const fingerprint = sha256(canonical({ user: caller.user.id, client: caller.clientId, confirmationId }));
   // Keyed by connection and person as well: an attempt from anyone else is
   // stored under its own key and can neither block nor answer the real yes.
@@ -917,9 +1109,14 @@ async function cancel(caller: McpCaller, confirmationId: string): Promise<WriteO
 export async function runWriteTool(caller: McpCaller, name: string, rawArgs: unknown): Promise<WriteOutcome> {
   if (name === MCP_CONFIRM_TOOL || name === MCP_CANCEL_TOOL) {
     const phase = name === MCP_CONFIRM_TOOL ? "confirm" : "cancel";
+    if (phase === "confirm") {
+      const parsed = confirmArguments.safeParse(rawArgs ?? {});
+      if (!parsed.success) return validationFailure(`${name} takes a confirmation_id and, for a permanent deletion, confirm_display_name.`, phase);
+      return confirm(caller, parsed.data.confirmation_id, parsed.data.confirm_display_name);
+    }
     const parsed = confirmationArguments.safeParse(rawArgs ?? {});
     if (!parsed.success) return validationFailure(`${name} takes exactly one confirmation_id.`, phase);
-    return phase === "confirm" ? confirm(caller, parsed.data.confirmation_id) : cancel(caller, parsed.data.confirmation_id);
+    return cancel(caller, parsed.data.confirmation_id);
   }
   const tool = toolsByName.get(name);
   if (!tool) return validationFailure(`Unknown write tool: ${name}`, "direct");

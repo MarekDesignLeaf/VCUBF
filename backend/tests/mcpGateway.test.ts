@@ -79,7 +79,9 @@ describe("MCP gateway (read only)", () => {
     const tools = res.body.result.tools as Array<{ name: string; inputSchema: { type: string }; annotations: Record<string, boolean> }>;
     const expected = AGENT_TOOL_CATALOGUE.filter((tool) => tool.kind === "read" && EMMA_EXECUTABLE_ACTIONS[tool.name].confirmation === "none");
     assert.ok(expected.length > 0);
-    assert.deepEqual(tools.map((tool) => tool.name).sort(), [MCP_READ_COMMAND_TOOL, ...expected.map((tool) => tool.name)].sort());
+    // Plus the gateway's own reading tools for the WhatsApp sender review (issue #74).
+    const gatewayReads = ["list_whatsapp_senders", "get_whatsapp_sender"];
+    assert.deepEqual(tools.map((tool) => tool.name).sort(), [MCP_READ_COMMAND_TOOL, ...gatewayReads, ...expected.map((tool) => tool.name)].sort());
     for (const tool of tools) {
       assert.equal(tool.inputSchema.type, "object", tool.name);
       assert.equal(tool.annotations.readOnlyHint, true, tool.name);
