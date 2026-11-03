@@ -194,9 +194,9 @@ async function findIdentityConflict(
     : null;
 }
 
-export async function listClients(user: AuthedUser) {
+export async function listClients(user: AuthedUser, status: "active" | "archived" = "active") {
   return prisma.client.findMany({
-    where: { companyId: user.companyId, isActive: true },
+    where: { companyId: user.companyId, isActive: status === "active" },
     orderBy: { createdAt: "desc" },
   });
 }

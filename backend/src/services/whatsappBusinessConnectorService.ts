@@ -49,32 +49,44 @@ const externalContactQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 }).strict();
 
-type WhatsAppContactSyncOutcome = "created" | "linked" | "already_synced" | "needs_review" | "invalid";
+// Staging outcomes of one inbound sender. No outcome creates, links or
+// changes CRM data: a sender becomes a CRM contact only through the sender
+// review (whatsappSenderReviewService), after a person has classified it as a
+// customer and confirmed.
+type WhatsAppContactSyncOutcome = "staged_for_review" | "already_in_crm" | "suppressed" | "invalid";
 type WhatsAppContactSource = { id: string; companyId: string; createdBy: string | null };
 interface WhatsAppContactSyncCounts {
-  createdCount: number;
-  linkedCount: number;
-  alreadySyncedCount: number;
-  awaitingReviewCount: number;
+  /** New or still undecided senders waiting for a person's review. */
+  stagedForReviewCount: number;
+  /** Senders a person already approved; their CRM contact exists. */
+  alreadyInCrmCount: number;
+  /** Senders a person rejected, or whose CRM contact was deleted: never imported again by themselves. */
+  suppressedCount: number;
   skippedInvalidCount: number;
 }
 
 function emptyContactSyncCounts(): WhatsAppContactSyncCounts {
-  return { createdCount: 0, linkedCount: 0, alreadySyncedCount: 0, awaitingReviewCount: 0, skippedInvalidCount: 0 };
+  return { stagedForReviewCount: 0, alreadyInCrmCount: 0, suppressedCount: 0, skippedInvalidCount: 0 };
 }
 
 function addContactSyncOutcome(counts: WhatsAppContactSyncCounts, outcome: WhatsAppContactSyncOutcome) {
-  if (outcome === "created") counts.createdCount += 1;
-  else if (outcome === "linked") counts.linkedCount += 1;
-  else if (outcome === "already_synced") counts.alreadySyncedCount += 1;
-  else if (outcome === "needs_review") counts.awaitingReviewCount += 1;
+  if (outcome === "staged_for_review") counts.stagedForReviewCount += 1;
+  else if (outcome === "already_in_crm") counts.alreadyInCrmCount += 1;
+  else if (outcome === "suppressed") counts.suppressedCount += 1;
   else counts.skippedInvalidCount += 1;
 }
 
-function whatsappExternalResourceName(from: string) {
+export function whatsappExternalResourceName(from: string) {
   const waId = from.replace(/\D/g, "");
   return waId.length > 0 && waId.length <= 40 ? "wa_id:" + waId : null;
 }
+
+/** The sourceReference a CRM contact imported from this sender carries. */
+export function whatsappContactSourceReference(sourceId: string, externalResourceName: string) {
+  return "whatsapp:" + sourceId + ":" + externalResourceName;
+}
+
+export const SUPPRESSED_SENDER_STATUSES = ["rejected", "deleted_from_crm"] as const;
 
 async function syncInboundWhatsAppContact(
   source: WhatsAppContactSource,
@@ -84,94 +96,48 @@ async function syncInboundWhatsAppContact(
   if (!externalResourceName) return "invalid";
 
   const senderPhone = normalizePhone(message.from);
-  const sourceReference = "whatsapp:" + source.id + ":" + externalResourceName;
   const syncedAt = new Date();
   let lastError: unknown;
 
-  // The CRM has no global phone uniqueness constraint because legitimate
-  // shared office numbers exist. Serializable retries keep concurrent webhook
-  // deliveries from creating duplicate contacts for the same new sender.
+  // Two deliveries for the same new sender may race on the unique key; the
+  // loser retries and finds the row. The review fields are never written
+  // here, so a provider update can never undo a person's decision.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      return await prisma.$transaction(async (tx) => {
-        const external = await tx.externalContact.upsert({
-          where: {
-            companyId_connectorSourceId_externalResourceName: {
-              companyId: source.companyId,
-              connectorSourceId: source.id,
-              externalResourceName,
-            },
-          },
-          update: {
-            sourceEtag: message.id,
-            ...(message.senderName ? { displayName: message.senderName } : {}),
-            ...(senderPhone ? { phone: senderPhone } : {}),
-            isDeleted: false,
-            syncedAt,
-          },
-          create: {
+      const external = await prisma.externalContact.upsert({
+        where: {
+          companyId_connectorSourceId_externalResourceName: {
             companyId: source.companyId,
             connectorSourceId: source.id,
             externalResourceName,
-            sourceEtag: message.id,
-            displayName: message.senderName,
-            phone: senderPhone ?? message.from,
-            syncedAt,
           },
-        });
-
-        // Preserve the source evidence even if Meta's sender number cannot be
-        // validated as a real phone number. Such a record never becomes CRM data.
-        if (!senderPhone) return "invalid";
-
-        if (external.importedContactId) {
-          const linkedContact = await tx.contact.findFirst({
-            where: { id: external.importedContactId, companyId: source.companyId, isActive: true },
-            select: { id: true },
-          });
-          if (linkedContact) return "already_synced";
-          await tx.externalContact.update({ where: { id: external.id }, data: { importedContactId: null } });
-        }
-
-        const candidates = await tx.contact.findMany({
-          where: {
-            companyId: source.companyId,
-            isActive: true,
-            OR: [{ sourceReference }, { phone: { not: null } }],
-          },
-          select: { id: true, phone: true, sourceReference: true },
-        });
-        const matches = candidates.filter((contact) =>
-          contact.sourceReference === sourceReference || normalizePhone(contact.phone) === senderPhone
-        );
-
-        // Linking exactly one existing contact is safe. More than one match is
-        // deliberately left for a human to resolve; existing CRM data is never
-        // overwritten with provider profile data.
-        if (matches.length === 1) {
-          await tx.externalContact.update({ where: { id: external.id }, data: { importedContactId: matches[0].id } });
-          return "linked";
-        }
-        if (matches.length > 1) return "needs_review";
-
-        const created = await tx.contact.create({
-          data: {
-            companyId: source.companyId,
-            displayName: message.senderName ?? "WhatsApp " + senderPhone,
-            phone: senderPhone,
-            preferredChannel: "whatsapp",
-            source: "whatsapp_business",
-            sourceReference,
-            createdBy: source.createdBy,
-          },
-        });
-        await tx.externalContact.update({ where: { id: external.id }, data: { importedContactId: created.id } });
-        return "created";
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        },
+        update: {
+          sourceEtag: message.id,
+          ...(message.senderName ? { displayName: message.senderName } : {}),
+          ...(senderPhone ? { phone: senderPhone } : {}),
+          isDeleted: false,
+          syncedAt,
+        },
+        create: {
+          companyId: source.companyId,
+          connectorSourceId: source.id,
+          externalResourceName,
+          sourceEtag: message.id,
+          displayName: message.senderName,
+          phone: senderPhone ?? message.from,
+          syncedAt,
+        },
+      });
+      // The source evidence is kept even if Meta's sender number cannot be
+      // validated as a real phone number. Such a sender can never be imported.
+      if (!senderPhone) return "invalid";
+      if ((SUPPRESSED_SENDER_STATUSES as readonly string[]).includes(external.reviewStatus)) return "suppressed";
+      if (external.reviewStatus === "approved" && external.importedContactId) return "already_in_crm";
+      return "staged_for_review";
     } catch (error) {
       lastError = error;
-      const retryable = error instanceof Prisma.PrismaClientKnownRequestError
-        && (error.code === "P2034" || error.code === "P2002");
+      const retryable = error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
       if (!retryable || attempt === 2) throw error;
     }
   }

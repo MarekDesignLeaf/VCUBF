@@ -107,6 +107,24 @@ export const ARCHIVE_CLIENT_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "CLIENT_NOT_FOUND", "CONFIRMATION_REQUIRED", "VALIDATION_FAILED"],
 };
 
+// Permanent deletion is a different action from archiving, never a stronger
+// form of it. Archive (above) hides a client and keeps every record; this
+// removes the client row itself and is refused while anything of business
+// value still points at it (jobs, quotes, invoices, payments, communication,
+// tasks, photos, documents, contacts, converted leads, merge history). It is
+// an interactive UI action only: a fresh preview with dependency counts, the
+// exact name typed back and the preview's digest, all compared again under
+// the row lock of the delete. Not offered to voice or to MCP clients.
+export const DELETE_CLIENT_PERMANENTLY_ACTION: ActionContract = {
+  actionName: "delete_client_permanently",
+  purpose: "Permanently remove a client that has no jobs, quotes, invoices, payments, communication, tasks, photos, documents, contacts or other dependent history, after a fresh dependency preview and an explicit typed confirmation.",
+  requiredPermission: "crm.manage",
+  riskLevel: 5,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.clients", "crm.jobs", "crm.quotes", "crm.invoices", "crm.payments", "crm.communications", "crm.communication_intakes", "crm.tasks", "crm.portfolio_photos", "crm.document_records", "crm.contacts", "crm.leads", "crm.client_merge_records"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CLIENT_NOT_FOUND", "CONFIRMATION_REQUIRED", "CONFIRMATION_TEXT_MISMATCH", "PREVIEW_STALE", "DELETION_BLOCKED", "SAFE_MODE_ACTIVE"],
+};
+
 // Canonical job statuses — must stay in sync with prisma/schema.prisma and the
 // VCUBF master documentation section 25 (Calendar and Scheduling Intelligence
 // Module statuses). Technical ASCII codes; Czech/English display labels belong
@@ -671,12 +689,27 @@ export const RECEIVE_WHATSAPP_MESSAGE_ACTION: ActionContract = {
 
 export const SYNC_WHATSAPP_CONTACTS_ACTION: ActionContract = {
   actionName: "sync_whatsapp_sender_contacts",
-  purpose: "Stage sender metadata from signed inbound WhatsApp Business webhooks, create a CRM contact only for a new valid number, or link exactly one existing contact without modifying existing CRM data.",
+  purpose: "Stage sender metadata from signed inbound WhatsApp Business webhooks for the sender review. Never creates, links or changes a CRM contact or client and never changes a review decision.",
   requiredPermission: "connectors.manage",
   riskLevel: 2,
   confirmationRequired: false,
-  dataSources: ["meta.whatsapp_webhook", "connector_sources", "external_contacts", "crm.contacts"],
+  dataSources: ["meta.whatsapp_webhook", "connector_sources", "external_contacts"],
   possibleErrors: ["CONNECTOR_CONFIGURATION_MISSING", "WEBHOOK_SIGNATURE_INVALID", "PROVIDER_RESPONSE_INVALID", "CONNECTOR_SOURCE_NOT_FOUND"],
+};
+
+// A person decides which WhatsApp senders are customers. Approving creates
+// (or links) the CRM contact and, if asked, a client, after a preview and an
+// explicit confirmation. Rejecting records why (personal, employee,
+// subcontractor, supplier, other) and keeps the sender out of CRM for good,
+// until a person reopens it. Message text only ever suggests; it never decides.
+export const REVIEW_WHATSAPP_SENDER_ACTION: ActionContract = {
+  actionName: "review_whatsapp_sender",
+  purpose: "Classify a staged WhatsApp sender as a customer (then create or link its CRM contact and optionally a client, after confirmation) or as not a customer, or mark it for later review; inbound messages are kept either way.",
+  requiredPermission: "crm.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "external_contacts", "crm.communication_intakes", "crm.contacts", "crm.clients"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONNECTOR_SOURCE_NOT_FOUND", "WHATSAPP_SENDER_NOT_FOUND", "WHATSAPP_SENDER_INVALID_NUMBER", "WHATSAPP_SENDER_SUPPRESSED", "WHATSAPP_SENDER_CHANGED", "CLIENT_NOT_FOUND", "DUPLICATE_CONTACT_AMBIGUOUS", "DUPLICATE_CLIENT_POSSIBLE", "CONFIRMATION_REQUIRED"],
 };
 
 export const SEND_WHATSAPP_MESSAGE_ACTION: ActionContract = {
@@ -1288,6 +1321,21 @@ export const ARCHIVE_CONTACT_ACTION: ActionContract = {
   confirmationRequired: true,
   dataSources: ["user_input", "crm.contacts", "crm.clients"],
   possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONTACT_NOT_FOUND", "CONFIRMATION_REQUIRED"],
+};
+
+// The contact counterpart of delete_client_permanently. A contact owns no
+// business records, so only the contact row goes: its client is kept, staged
+// connector records (Google or WhatsApp) are kept and unlinked and marked
+// deleted_from_crm so the sender is not imported again by itself, and
+// communication history is kept untouched.
+export const DELETE_CONTACT_PERMANENTLY_ACTION: ActionContract = {
+  actionName: "delete_contact_permanently",
+  purpose: "Permanently remove a contact after a fresh preview of its identity, client link and connector links and an explicit typed confirmation; its client, staged connector data and communication history are kept.",
+  requiredPermission: "crm.manage",
+  riskLevel: 5,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.contacts", "crm.clients", "external_contacts", "crm.communication_intakes"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONTACT_NOT_FOUND", "CONFIRMATION_REQUIRED", "CONFIRMATION_TEXT_MISMATCH", "PREVIEW_STALE", "DELETION_BLOCKED", "SAFE_MODE_ACTIVE"],
 };
 
 // Document Registry — metadata only until an authorised file-storage
