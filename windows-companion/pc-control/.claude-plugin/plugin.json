@@ -1,6 +1,6 @@
 {
   "name": "pc-control",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Fast, audited Windows and browser control for AI assistants: browser automation through text snapshots with element refs and batched actions (Playwright over CDP), Windows apps through UI Automation, web pages as Markdown, files, apps and terminal — no screenshots needed.",
   "author": {
     "name": "Marek"

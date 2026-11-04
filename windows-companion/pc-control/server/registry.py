@@ -67,7 +67,8 @@ def _blocked(tool: str, params: dict[str, Any], level: sec.ActionLevel) -> dict[
 
 def pc_tool(mcp, *, category: str, level: sec.ActionLevel, use_when: str, title: str | None = None,
             level_for: Callable[[dict[str, Any]], sec.ActionLevel] | None = None,
-            redact: Callable[[dict[str, Any]], dict[str, Any]] | None = None, audited: bool = True):
+            redact: Callable[[dict[str, Any]], dict[str, Any]] | None = None, audited: bool = True,
+            read_only: bool | None = None, destructive: bool | None = None):
     """Register fn as an audited MCP tool with its capability entry."""
     if category not in CATEGORIES:
         raise ValueError(f"unknown category {category}")
@@ -130,11 +131,15 @@ def pc_tool(mcp, *, category: str, level: sec.ActionLevel, use_when: str, title:
                 except Exception as exc:
                     return failure(params, exc, lvl)
 
-        read_only = level == sec.ActionLevel.SAFE and level_for is None
-        REGISTRY[name] = ToolSpec(name, category, level, _summary(fn), use_when.strip(), read_only)
+        # Declared effects win (the shared engine's catalogue states them per tool);
+        # otherwise only an unconditional safe tool reads only, and only a
+        # destructive one is flagged destructive.
+        is_read_only = read_only if read_only is not None else (level == sec.ActionLevel.SAFE and level_for is None)
+        is_destructive = destructive if destructive is not None else level == sec.ActionLevel.DESTRUCTIVE
+        REGISTRY[name] = ToolSpec(name, category, level, _summary(fn), use_when.strip(), is_read_only)
         annotations = {
-            "readOnlyHint": read_only,
-            "destructiveHint": level == sec.ActionLevel.DESTRUCTIVE,
+            "readOnlyHint": is_read_only,
+            "destructiveHint": is_destructive,
             "openWorldHint": category in ("browser", "web"),
         }
         description = (inspect.getdoc(fn) or "") + f"\n\nSafety level: {level.value}. Use when: {use_when.strip()}"

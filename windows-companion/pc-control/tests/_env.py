@@ -20,6 +20,8 @@ os.environ["PC_CONTROL_BROWSER_PROFILE"] = str(TMP / "profile")
 os.environ["PC_CONTROL_BROWSER_MODE"] = "launch"
 os.environ["PC_CONTROL_BROWSER_HEADLESS"] = "true"
 os.environ["PC_CONTROL_BROWSER_CHANNEL"] = "chromium"
+# The fixtures are served from 127.0.0.1: an explicit opt-in, off by default in config.yaml.
+os.environ["PC_CONTROL_BROWSER_ALLOW_PRIVATE_NETWORK"] = "true"
 
 # A pre-installed Chromium (cloud sessions) when Playwright's own is not downloaded.
 if not os.environ.get("PC_CONTROL_BROWSER_EXECUTABLE_PATH"):

@@ -44,6 +44,7 @@ class Catalogue(unittest.TestCase):
                 self.assertEqual(len({p.name for p in spec.params}), len(spec.params))
         self.assertEqual(pc_engine.tool_level("browser_tabs", {"action": "list"}), "safe")
         self.assertEqual(pc_engine.tool_level("browser_tabs", {"action": "close"}), "sensitive")
+        self.assertEqual(pc_engine.tool_level("browser_open", {"url": "https://example.org/"}), "sensitive")
 
     def test_the_claude_plugin_exposes_every_engine_tool_with_the_catalogue_parameters(self):
         import main
@@ -55,6 +56,22 @@ class Catalogue(unittest.TestCase):
                 self.assertEqual(list(schema.get("properties", {})), [p.name for p in spec.params])
                 self.assertEqual(sorted(schema.get("required", [])), sorted(p.name for p in spec.params if p.required))
                 self.assertIn(spec.use_when, listed[spec.name].description)
+
+    def test_declared_effects_are_conservative(self):
+        for spec in pc_engine.TOOLS.values():
+            with self.subTest(tool=spec.name):
+                if spec.level == "sensitive":
+                    self.assertFalse(spec.read_only, "a sensitive tool is never declared read-only")
+                if spec.read_only:
+                    self.assertFalse(spec.destructive)
+                    self.assertEqual(spec.level, "safe")
+        # Navigation is a change, and every tool that can submit, delete or navigate is declared destructive.
+        self.assertEqual(pc_engine.TOOLS["browser_open"].level, "sensitive")
+        for name in ("browser_open", "browser_act", "browser_tabs", "browser_eval", "ui_act"):
+            self.assertTrue(pc_engine.TOOLS[name].destructive, name)
+        self.assertEqual(pc_engine.tool_level("browser_tabs", {}), "safe")
+        for action in ("new", "switch", "close"):
+            self.assertEqual(pc_engine.tool_level("browser_tabs", {"action": action}), "sensitive", action)
 
     def test_arguments_are_checked_before_anything_runs(self):
         engine = pc_engine.Engine()
@@ -82,13 +99,11 @@ class Catalogue(unittest.TestCase):
 
 
 class HostSettings(unittest.TestCase):
-    def test_url_guard_refuses_before_any_request(self):
-        def public_https_only(url):
-            if not url.startswith("https://"):
-                raise pc_engine.EngineError("only public HTTPS")
-        engine = pc_engine.Engine(pc_engine.EngineSettings(url_guard=public_https_only))
-        with self.assertRaises(pc_engine.EngineError):
-            engine.call("web_fetch", {"url": "http://127.0.0.1:1/"})
+    def test_default_policy_refuses_before_any_request(self):
+        engine = pc_engine.Engine(pc_engine.EngineSettings())
+        for url in ("http://127.0.0.1:1/", "http://169.254.169.254/latest/", "http://localhost/"):
+            with self.subTest(url=url), self.assertRaises(pc_engine.EngineError):
+                engine.call("web_fetch", {"url": url})
         engine.shutdown()
 
     def test_blocked_domain_guard(self):

@@ -1,4 +1,4 @@
-# pc-control plugin 0.3.0
+# pc-control plugin 0.3.1
 
 Fast, audited control of the owner's Windows PC and browser for AI assistants
 (Claude, and any other MCP client). Part of the VCUBF Windows companion; the
@@ -44,6 +44,39 @@ exposes the same tools as `pc_<name>` (`pc_browser_open`, `pc_browser_act`,
 - To change the engine: edit it here, bump `ENGINE_VERSION`, regenerate the
   release file (the test prints the hash), then copy both files to
   `pc-control-plus/remote/` with its `scripts/sync_pc_engine.py`.
+
+## Where the engine may go (security boundary)
+
+`pc_engine.UrlPolicy` decides before any request is sent:
+
+- `web_fetch` resolves the host once, requires every address to be allowed,
+  and connects to exactly that address (no second DNS lookup); it follows
+  redirects itself, checking each `Location` first, and never goes from
+  HTTPS to HTTP. System proxy settings are not used.
+- In the browser, every top-level navigation and every redirect hop of the
+  pages the engine drives passes a route handler that fetches it without
+  following redirects and checks each hop before the browser may request it.
+  Refused navigations are aborted; the tab goes back to where it was.
+  New windows opened by an engine action are checked too, and closed again
+  if refused. The guard stays on for the engine's pages between calls (late
+  navigations a page starts itself are refused and reported with the next
+  call); in the user's own browser it applies only to the tab the engine
+  works in, never to their other tabs, and `browser_close` releases it.
+- Sub-resources on refused literal addresses or local names are not loaded
+  (no DNS lookup per sub-resource).
+- A page outside the policy is not read or acted on.
+- Defaults: public `http(s)` only; loopback and private networks only with
+  `browser.allow_private_network: true`; link-local (169.254.x.x, cloud
+  metadata) always refused; `require_https` for HTTPS only.
+
+Remaining limits: Playwright's driver resolves the host again for a browser
+navigation it fetches (a DNS rebinding between the check and that fetch is
+not excluded there; `web_fetch` is pinned); a sub-resource whose public name
+resolves to a private address is not checked by DNS.
+
+`browser_open` is a change, not a read (it navigates the current tab and a GET
+can have effects), and every tool that can submit, delete or navigate is
+declared `destructiveHint: true`.
 
 ## Why it is fast
 
@@ -138,7 +171,7 @@ Other settings: `channel` (`msedge`, `chrome`, `chromium`), `headless`,
 
 ```bash
 cd tests
-python -m unittest -v test_steps test_desktop_ui test_registry test_status test_engine test_browser
+python -m unittest -v test_steps test_desktop_ui test_registry test_status test_engine test_browser test_security
 ```
 
 - `test_steps` — the browser step language and snapshot format.
@@ -151,6 +184,12 @@ python -m unittest -v test_steps test_desktop_ui test_registry test_status test_
 - `test_engine` — the shared engine: release record, standard-library import,
   catalogue and the Claude tools generated from it, argument checks, audit
   redaction, URL guards.
+- `test_security` — requests to refused addresses are never sent: a recording
+  "forbidden" server on 127.0.0.2 must receive nothing from `web_fetch`
+  (redirects, DNS-pinned connections, no HTTPS→HTTP downgrade) or from the
+  browser (open, click → redirect, popup, a page's own late navigation,
+  sub-resources), in the engine's own browser and attached over CDP to a
+  stand-in user browser whose tabs are never closed, cleared or filtered.
 - `test_browser` — the browser tools through the MCP server on a real headless
   Chromium and local pages (forms, select, checkbox, off-screen, shadow DOM,
   iframe, new tab, extraction, password refusal, audit redaction, blocked

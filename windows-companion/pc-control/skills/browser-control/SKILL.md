@@ -92,6 +92,13 @@ browser_extract(links=True, link_filter="faktura")
 
 ## Rules
 
+- `browser_open` navigates the current tab away from what it shows: it is a
+  change (the user is asked), not a read. To read the page already open, use
+  `browser_snapshot`, `browser_read` or `browser_extract`.
+- The engine goes only where its URL policy allows (public addresses unless
+  the private network is switched on). A refused navigation or redirect is
+  stopped before anything is sent; say so to the user instead of retrying.
+
 - Never type passwords; password fields are refused. Ask the user to sign in in
   the browser window once; the profile keeps the session for later.
 - Before a step that sends, orders, pays, books, publishes or deletes

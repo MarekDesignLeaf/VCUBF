@@ -2,7 +2,7 @@
 
 server:
   name: pc-control
-  version: "0.3.0"
+  version: "0.3.1"
 
 # Security settings
 security:
@@ -110,6 +110,13 @@ browser:
   allow_eval: false
   # Domains the browser and web_fetch must never open, e.g. [example.com]
   blocked_domains: []
+  # Where the engine may go, checked before every request and every redirect hop:
+  # public addresses only unless allow_private_network is true (loopback and
+  # private networks: dev servers, router, intranet). Link-local addresses
+  # (169.254.x.x, cloud metadata) are always refused.
+  allow_private_network: false
+  # true: https only (no http at all).
+  require_https: false
 
 # GUI control (coordinate fallback tools)
 gui:

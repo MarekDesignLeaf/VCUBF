@@ -1,6 +1,6 @@
 {
   "engine": "pc_engine.py",
-  "version": "1.0.0",
-  "sha256": "22571c5c4a9d76a0bc7b45c640028c620b3b3c7a5da75bf33de5fbf189cd39e9",
+  "version": "1.1.0",
+  "sha256": "4783aa3c837ee01906e90fcd1e99fdaeebae617995924a379d117838abc93c90",
   "canonical": "MarekDesignLeaf/VCUBF windows-companion/pc-control/server/pc_engine.py"
 }

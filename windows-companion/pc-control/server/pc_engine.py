@@ -28,19 +28,24 @@ user's own browser) comes in through EngineSettings.
 from __future__ import annotations
 
 import fnmatch
+import http.client
+import ipaddress
 import re
+import socket
+import ssl
 import sys
 import time
-import urllib.error
-import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+import queue
+import threading
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol
 from urllib.parse import urljoin, urlparse
 
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "1.1.0"
 
 
 class EngineError(RuntimeError):
@@ -1346,28 +1351,64 @@ def html_to_markdown(html: str, base_url: str = "") -> dict[str, Any]:
 
 
 def web_fetch(url: str, settings: "EngineSettings", max_chars: int = 20000, include_links: bool = False) -> dict[str, Any]:
+    """GET a page without a browser. Every hop is checked by the URL policy BEFORE
+    any connection: the host is resolved once, every address must be allowed,
+    and the connection goes to exactly that checked address (no second DNS
+    lookup that could be rebound). Redirects are followed by hand, each Location
+    checked before it is requested, never from HTTPS down to HTTP. System proxy
+    settings are not used, so the policy decides where the request goes."""
     if not re.match(r"^https?://", url or ""):
         raise EngineError("url must start with http:// or https://")
-    settings.check_url(url)
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Language": "cs,en;q=0.8"})
-    try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            status, final_url = response.status, response.geturl()
-            content_type = response.headers.get("content-type", "")
+    chain: list[str] = []
+    current = url
+    for _hop in range(MAX_FETCH_REDIRECTS + 1):
+        addresses = settings.check_url(current)  # raises before any connection
+        settings.check_extra(current)
+        parsed = urlparse(current)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        connection_class = _PinnedHTTPSConnection if parsed.scheme == "https" else _PinnedHTTPConnection
+        connection = connection_class(parsed.hostname, port, addresses[0], timeout=15)
+        target = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
+        try:
+            connection.request("GET", target, headers={
+                "Host": parsed.netloc.rsplit("@", 1)[-1], "User-Agent": USER_AGENT,
+                "Accept-Language": "cs,en;q=0.8", "Accept-Encoding": "identity", "Connection": "close",
+            })
+            response = connection.getresponse()
+            status = response.status
+            if status in (301, 302, 303, 307, 308):
+                location = response.getheader("Location")
+                response.read(65536)
+                if not location:
+                    return {"success": False, "status": status, "error": "redirect without a Location header"}
+                following = urljoin(current, location.strip())
+                if parsed.scheme == "https" and urlparse(following).scheme != "https":
+                    raise EngineError(f"refused redirect from HTTPS to {urlparse(following).scheme or 'another scheme'}: {following}")
+                chain.append(current)
+                current = following
+                continue
+            content_type = response.getheader("Content-Type", "") or ""
             raw = response.read(8_000_000)
-            charset = response.headers.get_content_charset() or "utf-8"
-    except urllib.error.HTTPError as exc:
-        return {"success": False, "status": exc.code, "error": f"HTTP {exc.code}"}
-    settings.check_url(final_url)
-    text = raw.decode(charset, errors="replace")
+            charset = (re.search(r"charset=([\w.-]+)", content_type) or [None, "utf-8"])[1]
+        finally:
+            connection.close()
+        break
+    else:
+        raise EngineError(f"more than {MAX_FETCH_REDIRECTS} redirects")
+    if not 200 <= status < 300:
+        return {"success": False, "status": status, "url": current, "redirects": chain, "error": f"HTTP {status}"}
+    try:
+        text = raw.decode(charset, errors="replace")
+    except LookupError:
+        text = raw.decode("utf-8", errors="replace")
     if "html" not in content_type and "xml" not in content_type:
         if not (content_type.startswith("text/") or "json" in content_type):
             return {"success": False, "status": status, "error": f"not a text page ({content_type}); use browser_open"}
-        return {"success": True, "status": status, "url": final_url, "content_type": content_type,
+        return {"success": True, "status": status, "url": current, "redirects": chain, "content_type": content_type,
                 "markdown": text[:max_chars], "truncated": len(text) > max_chars}
-    page = html_to_markdown(text, final_url)
+    page = html_to_markdown(text, current)
     markdown = page["markdown"]
-    result: dict[str, Any] = {"success": 200 <= status < 300, "status": status, "url": final_url, "title": page["title"],
+    result: dict[str, Any] = {"success": True, "status": status, "url": current, "redirects": chain, "title": page["title"],
                               "markdown": markdown[:max_chars], "truncated": len(markdown) > max_chars}
     if len(markdown) < 200:
         result["hint"] = "Little text came back: the page probably needs JavaScript. Use browser_open or browser_read."
@@ -1376,19 +1417,147 @@ def web_fetch(url: str, settings: "EngineSettings", max_chars: int = 20000, incl
     return result
 
 
-# ═══ Settings each host supplies ═════════════════════════════════════════════
+MAX_FETCH_REDIRECTS = 5
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """HTTP to one already-checked IP address; the Host header keeps the name."""
+
+    def __init__(self, host: str, port: int, address: str, timeout: float) -> None:
+        super().__init__(host, port, timeout=timeout)
+        self._address = address
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection((self._address, self.port), self.timeout)
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS to one already-checked IP address; certificate and SNI use the name."""
+
+    def __init__(self, host: str, port: int, address: str, timeout: float) -> None:
+        super().__init__(host, port, timeout=timeout, context=ssl.create_default_context())
+        self._address = address
+
+    def connect(self) -> None:
+        sock = socket.create_connection((self._address, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+# ═══ Where the engine may go: the URL policy ═════════════════════════════════
+
+_LOCAL_SUFFIXES = (".localhost", ".local", ".internal", ".home.arpa", ".lan", ".intranet", ".corp")
+
+
+def _system_resolver(host: str, port: int) -> list[str]:
+    return list(dict.fromkeys(item[4][0] for item in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)))
+
+
+class UrlPolicy:
+    """Decides, before any request, whether the engine may contact a URL.
+
+    - Scheme: https only (require_https) or http/https. Never javascript:, data:, file: and the like.
+    - No user:password@ in the URL.
+    - Blocked domains and their subdomains (fnmatch patterns allowed).
+    - Without allow_private_network: no localhost or local-only names, and every
+      address the host resolves to must be globally routable (no loopback,
+      private, link-local incl. cloud metadata 169.254.169.254, CGNAT,
+      multicast, reserved; IPv4-mapped IPv6 is unwrapped first). A name that
+      does not resolve is refused (fail closed).
+    - With allow_private_network (the owner's own Claude plugin, opt-in):
+      loopback and private addresses are allowed; link-local, multicast and
+      unspecified addresses still are not.
+
+    check() returns the checked addresses, so a caller can connect to exactly
+    those. resolver and address_allowed can be replaced (tests).
+    """
+
+    def __init__(self, require_https: bool = False, allow_private_network: bool = False,
+                 blocked_domains: Iterable[str] = (), resolver: Callable[[str, int], list[str]] | None = None,
+                 address_allowed: Callable[[Any], bool] | None = None) -> None:
+        self.require_https = require_https
+        self.allow_private_network = allow_private_network
+        self.blocked_domains = tuple(str(domain).lower() for domain in blocked_domains or ())
+        self.resolver = resolver or _system_resolver
+        self._address_allowed = address_allowed
+
+    def describe(self) -> str:
+        return ("only public HTTPS addresses" if self.require_https and not self.allow_private_network
+                else "public http(s) addresses" if not self.allow_private_network else "http(s) addresses, private network allowed")
+
+    def address_allowed(self, raw: Any) -> bool:
+        address = ipaddress.ip_address(raw) if not isinstance(raw, (ipaddress.IPv4Address, ipaddress.IPv6Address)) else raw
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+            address = address.ipv4_mapped
+        if self._address_allowed is not None:
+            return bool(self._address_allowed(address))
+        if address.is_multicast or address.is_unspecified or address.is_link_local:
+            return False
+        if self.allow_private_network:
+            return True
+        return address.is_global
+
+    def _literal(self, host: str):
+        try:
+            return ipaddress.ip_address(host.strip("[]"))
+        except ValueError:
+            return None
+
+    def check(self, url: str, resolve: bool = True) -> list[str]:
+        parsed = urlparse(url or "")
+        allowed_schemes = ("https",) if self.require_https else ("http", "https")
+        if parsed.scheme not in allowed_schemes:
+            raise EngineError(f"refused {parsed.scheme or 'a'} URL: {self.describe()} are allowed")
+        if parsed.username or parsed.password:
+            raise EngineError("refused URL with a user name or password in it")
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if not host:
+            raise EngineError("refused URL without a host")
+        for pattern in self.blocked_domains:
+            if host == pattern or host.endswith("." + pattern) or fnmatch.fnmatch(host, pattern):
+                raise EngineError(f"{host} is on the blocked domain list")
+        literal = self._literal(host)
+        if literal is None and not self.allow_private_network and (host == "localhost" or host.endswith(_LOCAL_SUFFIXES)):
+            raise EngineError(f"refused {host}: {self.describe()} are allowed")
+        if literal is not None:
+            if not self.address_allowed(literal):
+                raise EngineError(f"refused {host}: {self.describe()} are allowed")
+            return [str(literal)]
+        if not resolve:
+            return []
+        try:
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            addresses = self.resolver(host, port)
+        except (OSError, ValueError) as exc:
+            raise EngineError(f"refused {host}: it does not resolve ({type(exc).__name__})") from exc
+        if not addresses:
+            raise EngineError(f"refused {host}: it does not resolve")
+        bad = [address for address in addresses if not self.address_allowed(address)]
+        if bad:
+            raise EngineError(f"refused {host}: it resolves to a non-public address ({bad[0]}); {self.describe()} are allowed")
+        return addresses
+
+    def literal_refused(self, url: str) -> bool:
+        """Cheap check for sub-resources, without DNS: a refused scheme-less host, literal address or local name."""
+        parsed = urlparse(url or "")
+        if parsed.scheme not in ("http", "https", "ws", "wss"):
+            return False
+        host = (parsed.hostname or "").lower().rstrip(".")
+        literal = self._literal(host)
+        if literal is not None:
+            return not self.address_allowed(literal)
+        return not self.allow_private_network and (host == "localhost" or host.endswith(_LOCAL_SUFFIXES))
+
 
 def blocked_domain_guard(domains: Iterable[str]) -> Callable[[str], None]:
-    """A url_guard refusing the given domains and their subdomains (fnmatch patterns allowed)."""
-    patterns = [str(domain).lower() for domain in domains or []]
+    """An extra url_guard refusing the given domains (kept for hosts that combine guards)."""
+    policy = UrlPolicy(allow_private_network=True, blocked_domains=domains)
 
     def guard(url: str) -> None:
-        host = (urlparse(url).hostname or "").lower()
-        for pattern in patterns:
-            if host == pattern or host.endswith("." + pattern) or fnmatch.fnmatch(host, pattern):
-                raise EngineError(f"{host} is on the blocked domain list.")
+        policy.check(url, resolve=False)
     return guard
 
+
+# ═══ Settings each host supplies ═════════════════════════════════════════════
 
 @dataclass
 class EngineSettings:
@@ -1409,18 +1578,37 @@ class EngineSettings:
     allow_eval: bool = False
     # When attached to the user's own browser: may the engine open and close tabs?
     manage_tabs_when_attached: bool = True
-    # Called with every URL before it is opened and after every navigation; raise EngineError to refuse.
+    # Where the engine may go. Checked before every request it makes and every
+    # top-level navigation and redirect of the pages it drives (see BrowserSession._guard).
+    policy: UrlPolicy = field(default_factory=UrlPolicy)
+    # An optional extra check after the policy; raise EngineError to refuse.
     url_guard: Callable[[str], None] | None = None
 
-    def check_url(self, url: str) -> None:
-        if self.url_guard and url and not url.startswith(("about:", "data:", "chrome-error:")):
+    def check_url(self, url: str) -> list[str]:
+        """Policy check of a URL the engine is about to contact; returns the checked addresses."""
+        return self.policy.check(url)
+
+    def check_extra(self, url: str) -> None:
+        if self.url_guard:
             self.url_guard(url)
+
+    def check_page(self, url: str) -> None:
+        """A page the engine is about to read or act on (about:blank and error pages pass)."""
+        if not url or url == "about:blank" or url.startswith("chrome-error:"):
+            return
+        self.check_url(url)
+        self.check_extra(url)
 
     def endpoint(self) -> str:
         return self.cdp_endpoint() if callable(self.cdp_endpoint) else self.cdp_endpoint
 
 
 # ═══ The browser (Playwright, synchronous, confined to the engine thread) ═════
+
+def _without_query(url: str) -> str:
+    parsed = urlparse(url or "")
+    return parsed._replace(query="", fragment="").geturl() if parsed.scheme in ("http", "https") else url
+
 
 class BrowserSession:
     def __init__(self, settings: EngineSettings) -> None:
@@ -1431,6 +1619,16 @@ class BrowserSession:
         self.page = None
         self.mode: str | None = None
         self._frame_ids: dict[Any, int] = {}
+        # Pages this engine drives: the one it attached to or opened, and popups
+        # opened from them. Only these are guarded; the user's other tabs never are.
+        self._owned: list[Any] = []
+        self._blocked: list[str] | None = None
+        self._late_blocked: list[str] = []
+        self._refused_subresources: list[str] = []
+        self._guard_pages_at_start: list[Any] = []
+        self._guarded_pages: list[Any] = []
+        self._context_guarded = False
+        self._inflight = 0
 
     # lifecycle
 
@@ -1441,10 +1639,12 @@ class BrowserSession:
             pages = [page for page in self.context.pages if not page.is_closed()]
             if pages:
                 self.page = pages[-1]
+                self._own(self.page)
                 return self.page
             if self.mode == "cdp" and not self.settings.manage_tabs_when_attached:
                 raise EngineError("No open tab in the attached browser; open one yourself, then try again.")
             self.page = self.context.new_page()
+            self._own(self.page)
             return self.page
         try:
             from playwright.sync_api import sync_playwright
@@ -1484,14 +1684,219 @@ class BrowserSession:
             raise
         return self.ensure()
 
+    def _own(self, page) -> None:
+        self._owned = [known for known in self._owned if not known.is_closed()]
+        if page not in self._owned:
+            self._owned.append(page)
+        self._guard_page(page)
+
+    def _release(self, page) -> None:
+        """The user's tab the engine stops working in: no guard and no ownership left on it."""
+        if page in self._guarded_pages:
+            try:
+                if not page.is_closed():
+                    page.unroute("**/*", self._route)
+            except Exception:
+                pass
+            self._guarded_pages.remove(page)
+        if page in self._owned:
+            self._owned.remove(page)
+
+    def _guard_page(self, page) -> None:
+        """Permanent guard: in the engine's own browser on the whole context; in the
+        user's browser only on the pages the engine drives, never on their other tabs."""
+        if self.context is None:
+            return
+        if self.mode == "launch":
+            if not self._context_guarded:
+                self.context.route("**/*", self._route)
+                self._context_guarded = True
+            return
+        self._guarded_pages = [known for known in self._guarded_pages if not known.is_closed()]
+        if page not in self._guarded_pages and not page.is_closed():
+            page.route("**/*", self._route)
+            self._guarded_pages.append(page)
+
     def _on_page(self, page) -> None:
-        # A popup opened from the page being worked on becomes the current page;
+        # A popup opened from a page the engine drives becomes the current page;
         # a tab the user opens by hand in their own browser does not.
         try:
-            if page.opener() is self.page:
+            if page.opener() in self._owned:
+                self._own(page)
                 self.page = page
         except Exception:
             pass
+
+    # ─── the navigation guard ─────────────────────────────────────────────
+    #
+    # While the engine works (goto, act, a new tab), every top-level navigation
+    # of the pages it drives, and every redirect hop of it, is checked by the
+    # URL policy BEFORE it is sent: the handler fetches the navigation itself
+    # without following redirects, checks each Location, and hands the browser
+    # only an allowed response, so the browser requests the next hop again
+    # through the handler. A refused navigation is aborted and recorded.
+    # Sub-resources of those pages are refused when their host is a refused
+    # literal address or local name (no DNS per sub-resource). The first request
+    # of a new window has no page yet; it is treated as the engine's.
+    # Between engine calls nothing is intercepted, and the user's other tabs
+    # are passed through untouched even while the engine works.
+
+    def _request_page(self, request):
+        try:
+            return request.frame.page
+        except Exception:
+            return None  # a new window's first request, issued before its frame exists
+
+    def _refuse(self, route, url: str, reason: str) -> None:
+        record = f"{url[:200]} — {reason}"
+        # Outside an engine call (a page's own late navigation) the refusal is reported with the next call.
+        (self._blocked if self._blocked is not None else self._late_blocked).append(record)
+        try:
+            route.abort("blockedbyclient")
+        except Exception:
+            pass
+
+    def _route(self, route, request) -> None:
+        self._inflight += 1
+        try:
+            self._route_checked(route, request)
+        finally:
+            self._inflight -= 1
+
+    def _route_checked(self, route, request) -> None:
+        page = self._request_page(request)
+        if page is not None and page not in self._owned:
+            return route.fallback()
+        if not request.is_navigation_request():
+            if self.settings.policy.literal_refused(request.url):
+                # Not a navigation: the page keeps loading without it; reported, not a failure.
+                if len(self._refused_subresources) < 50:
+                    self._refused_subresources.append(request.url[:200])
+                try:
+                    route.abort("blockedbyclient")
+                except Exception:
+                    pass
+                return
+            return route.fallback()
+        url = request.url
+        if url == "about:blank" or url.startswith(("chrome-error:", "about:srcdoc")):
+            return route.fallback()
+        try:
+            self.settings.check_url(url)
+            self.settings.check_extra(url)
+        except EngineError as exc:
+            return self._refuse(route, url, str(exc))
+        try:
+            response = route.fetch(max_redirects=0)
+        except Exception as exc:
+            return self._refuse(route, url, f"could not be fetched ({str(exc).splitlines()[0][:120]})")
+        location = response.headers.get("location")
+        if 300 <= response.status < 400 and location:
+            following = urljoin(url, location)
+            try:
+                if urlparse(url).scheme == "https" and urlparse(following).scheme != "https":
+                    raise EngineError("refused redirect from HTTPS to a non-HTTPS address")
+                self.settings.check_url(following)
+                self.settings.check_extra(following)
+            except EngineError as exc:
+                return self._refuse(route, following, f"redirect target refused: {exc}")
+        route.fulfill(response=response)
+
+    @contextmanager
+    def _guard(self):
+        """One engine operation: records refusals, and in the user's browser also
+        guards new windows (popups) the operation opens, which have no page route yet."""
+        if self._blocked is not None:  # already guarded (goto inside act): one guard, one record
+            yield self._blocked
+            return
+        self._blocked = []
+        self._guard_pages_at_start = list(self.context.pages)
+        temporary = self.mode == "cdp"
+        if temporary:
+            self.context.route("**/*", self._route)
+        try:
+            yield self._blocked
+        finally:
+            if temporary:
+                # Let requests already inside the handler finish before it is removed.
+                deadline = time.monotonic() + 5
+                while self._inflight and time.monotonic() < deadline and self.page is not None and not self.page.is_closed():
+                    self.page.wait_for_timeout(20)
+                try:
+                    self.context.unroute("**/*", self._route)
+                except Exception:
+                    pass
+            self._blocked = None
+
+    def _settle(self, budget_s: float = 3.0) -> None:
+        """After a navigation: let checked requests that are still in the guard finish,
+        and give child frames a bounded moment to load, so the snapshot sees them."""
+        page = self.page
+        if page is None or page.is_closed():
+            return
+        deadline = time.monotonic() + budget_s
+        while self._inflight and time.monotonic() < deadline:
+            page.wait_for_timeout(20)
+        for frame in page.frames[1:]:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                frame.wait_for_load_state("domcontentloaded", timeout=max(100, int(remaining * 1000)))
+            except Exception:
+                pass
+
+    def pump(self) -> None:
+        """Let Playwright handle pending browser events (only on the engine thread)."""
+        page = self.page
+        if self._pw is not None and page is not None and not page.is_closed():
+            page.wait_for_timeout(1)
+
+    def take_late_refusals(self) -> list[str]:
+        late, self._late_blocked = self._late_blocked, []
+        return late
+
+    def take_refused_subresources(self) -> list[str]:
+        refused, self._refused_subresources = self._refused_subresources, []
+        return refused
+
+    def recover(self) -> None:
+        """Before a call: a page left on the blocked-page notice by a refused late
+        navigation of its own goes back to where it was."""
+        page = self.page
+        if page is None or page.is_closed() or not self._late_blocked or self.mode != "cdp":
+            return
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=2000)
+        except Exception:
+            pass
+        if page.url.startswith("chrome-error:"):
+            try:
+                page.go_back(wait_until="domcontentloaded")
+            except Exception:
+                pass
+
+    def _after_refusal(self) -> str:
+        """Leave no error page behind: the user's own tab goes back to where it was."""
+        notes = []
+        # A window the engine's own action opened, whose navigation was refused, is closed again.
+        for page in list(self.context.pages):
+            if page not in self._guard_pages_at_start and not page.is_closed() and page.url.startswith(("chrome-error:", "about:blank")):
+                try:
+                    page.close()
+                    notes.append("the window it opened was closed again")
+                except Exception:
+                    pass
+        if self.page is None or self.page.is_closed():
+            remaining = [page for page in self._owned if not page.is_closed()]
+            self.page = remaining[-1] if remaining else None
+        if self.page is not None and self.page.url.startswith("chrome-error:"):
+            try:
+                self.page.go_back(wait_until="domcontentloaded")
+                notes.append("the tab is back on " + self.page.url)
+            except Exception:
+                notes.append("the tab shows the blocked-page notice; nothing was loaded")
+        return "; ".join(notes)
 
     def _stop(self) -> None:
         try:
@@ -1502,6 +1907,9 @@ class BrowserSession:
             self.context = self.page = self._browser = None
             self.mode = None
             self._frame_ids.clear()
+            self._owned = []
+            self._guarded_pages = []
+            self._context_guarded = False
 
     def close(self) -> dict[str, Any]:
         mode = self.mode
@@ -1510,8 +1918,15 @@ class BrowserSession:
         try:
             if mode == "launch" and self.context is not None:
                 self.context.close()
-            # Attached to the user's own browser: stop Playwright only, which
-            # disconnects without closing their browser, windows or tabs.
+            # Attached to the user's own browser: release the guard on its tabs,
+            # then stop Playwright only, which disconnects without closing their
+            # browser, windows or tabs.
+            for page in self._guarded_pages:
+                try:
+                    if not page.is_closed():
+                        page.unroute("**/*", self._route)
+                except Exception:
+                    pass
         finally:
             self._stop()
         return {"success": True, "closed": mode == "launch", "disconnected": mode == "cdp"}
@@ -1531,6 +1946,8 @@ class BrowserSession:
 
     def snapshot_data(self, query: str = "", mode: str = "interactive", limit: int | None = None, max_text: int = 6000) -> list[dict[str, Any]]:
         page = self.ensure()
+        # A page outside the policy (an intranet or local page in the user's tab) is not read out.
+        self.settings.check_page(page.url)
         limit = limit or self.settings.max_snapshot_elements
         frames = []
         for frame in page.frames:
@@ -1539,10 +1956,18 @@ class BrowserSession:
             options = {"mode": mode, "query": query, "limit": limit, "maxText": max_text, "prefix": self._frame_prefix(frame)}
             try:
                 data = frame.evaluate(SNAPSHOT_JS, options)
-            except Exception:
-                if frame == page.main_frame:
+            except Exception as exc:
+                if frame != page.main_frame:
+                    continue
+                if "context was destroyed" not in str(exc):
                     raise
-                continue
+                # The page navigated while it was being read: read the new document once.
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=3000)
+                except Exception:
+                    pass
+                self.settings.check_page(page.url)
+                data = page.main_frame.evaluate(SNAPSHOT_JS, options)
             frames.append(data)
             if frame == page.main_frame:
                 limit = max(0, limit - len(data.get("elements", [])))
@@ -1552,38 +1977,74 @@ class BrowserSession:
         return format_snapshot(self.snapshot_data(query, mode, limit, max_text), query)
 
     def extract(self, options: dict[str, Any]) -> dict[str, Any]:
-        return self.ensure().evaluate(EXTRACT_JS, options)
+        page = self.ensure()
+        self.settings.check_page(page.url)
+        return page.evaluate(EXTRACT_JS, options)
 
     def evaluate(self, expression: str) -> Any:
         if not self.settings.allow_eval:
             raise EngineError("browser_eval is switched off by the host settings (allow_eval).")
-        return self.ensure().evaluate(expression)
+        page = self.ensure()
+        self.settings.check_page(page.url)
+        return page.evaluate(expression)
 
     # navigation and tabs
 
     def goto(self, url: str, new_tab: bool = False) -> None:
+        # Refused before anything is opened or sent; then every hop is guarded.
         self.settings.check_url(url)
+        self.settings.check_extra(url)
         page = self.ensure()
         if new_tab:
             self._may_manage_tabs()
-            page = self.context.new_page()
-            self.page = page
-        page.goto(url, wait_until="domcontentloaded")
-        self.settings.check_url(page.url)
+        nested = self._blocked is not None  # inside act: act reports and recovers
+        with self._guard() as blocked:
+            refused_before = len(blocked)
+            if new_tab:
+                page = self.context.new_page()
+                self._own(page)
+                self.page = page
+            try:
+                try:
+                    page.goto(url, wait_until="domcontentloaded")
+                except Exception as exc:
+                    # A refused navigation the page started itself was still committing its notice.
+                    if "interrupted by another navigation" not in str(exc) or len(blocked) > refused_before:
+                        raise
+                    page.wait_for_load_state("domcontentloaded", timeout=3000)
+                    page.goto(url, wait_until="domcontentloaded")
+            except Exception:
+                if len(blocked) == refused_before:
+                    raise
+            if len(blocked) > refused_before:
+                if nested:
+                    raise EngineError("navigation refused before it was sent")
+                note = self._after_refusal()
+                raise EngineError("navigation refused before it was sent: " + "; ".join(blocked[refused_before:]) + (f" ({note})" if note else ""))
+            if not nested:
+                self._settle()
 
     def tabs(self, action: str = "list", index: int | None = None, url: str = "") -> dict[str, Any]:
         self.ensure()
         pages = [page for page in self.context.pages if not page.is_closed()]
         if action == "new":
             self._may_manage_tabs()
+            if url:
+                self.settings.check_url(url)
+                self.settings.check_extra(url)
             self.page = self.context.new_page()
+            self._own(self.page)
             if url:
                 self.goto(url)
         elif action in ("switch", "close"):
             if index is None or not 0 <= index < len(pages):
                 raise EngineError(f"tab index must be 0–{len(pages) - 1}")
             if action == "switch":
+                previous = self.page
                 self.page = pages[index]
+                if self.mode == "cdp" and previous is not None and previous is not self.page:
+                    self._release(previous)
+                self._own(self.page)
                 self.page.bring_to_front()
             else:
                 self._may_manage_tabs()
@@ -1593,7 +2054,8 @@ class BrowserSession:
         elif action != "list":
             raise EngineError("action is list, new, switch or close")
         pages = [page for page in self.context.pages if not page.is_closed()]
-        return {"success": True, "tabs": [{"index": i, "title": page.title(), "url": page.url, "current": page is self.page}
+        # Query strings and fragments (tokens, search terms) are not reported.
+        return {"success": True, "tabs": [{"index": i, "title": page.title(), "url": _without_query(page.url), "current": page is self.page}
                                           for i, page in enumerate(pages)]}
 
     # acting
@@ -1686,10 +2148,17 @@ class BrowserSession:
                 **kw,
             )
             if opens:
+                if self.mode == "cdp" and not self.settings.manage_tabs_when_attached:
+                    raise StepError("this link opens a new tab, and no tabs are opened in the user's own browser. "
+                                    "Read its address from the snapshot and open it with browser_open instead.")
                 with self.context.expect_page(timeout=self.settings.navigation_timeout_ms) as info:
                     locator.click(**kw)
                 new_page = info.value
-                new_page.wait_for_load_state("domcontentloaded")
+                self._own(new_page)
+                try:
+                    new_page.wait_for_load_state("domcontentloaded")
+                except Exception:
+                    pass
                 self.page = new_page
                 return f"click {step.target.describe()} → new tab {new_page.url}"
             locator.click(**kw)
@@ -1718,39 +2187,54 @@ class BrowserSession:
 
     def act(self, raw_steps: Any, snapshot: str = "auto", query: str = "") -> dict[str, Any]:
         steps = parse_steps(raw_steps)
-        self.ensure()
+        page = self.ensure()
+        # Never act on a page outside the policy (an intranet or local page in the user's tab).
+        self.settings.check_page(page.url)
         done: list[str] = []
         failure: dict[str, Any] | None = None
-        for index, step in enumerate(steps):
+        with self._guard() as blocked:
+            for index, step in enumerate(steps):
+                refused_before = len(blocked)
+                try:
+                    done.append(self._run_step(step))
+                except (StepError, EngineError) as exc:
+                    failure = {"step": index + 1, "action": step.describe(), "error": str(exc)}
+                except Exception as exc:  # Playwright timeouts and errors, shortened for the AI
+                    failure = {"step": index + 1, "action": step.describe(), "error": str(exc).split("\n")[0][:300],
+                               "hint": "Take browser_snapshot(query=...) to find the right ref, or wait_for the element first."}
+                if len(blocked) > refused_before:
+                    # The guard refused a navigation of this step before it was sent.
+                    note = self._after_refusal()
+                    failure = {"step": index + 1, "action": step.describe(),
+                               "error": "navigation refused before it was sent: " + "; ".join(blocked[refused_before:]),
+                               **({"recovered": note} if note else {})}
+                    if done and done[-1].startswith(step.op):
+                        done.pop()
+                if failure:
+                    break
+                try:
+                    self.settings.check_page(self.page.url)
+                except EngineError as exc:  # defence in depth; the guard should have refused first
+                    if self.mode == "cdp":
+                        failure = {"step": index + 1, "action": step.describe(), "error": f"{exc} The batch stopped; the tab was left as it is."}
+                    else:
+                        self.page.goto("about:blank")
+                        failure = {"step": index + 1, "action": step.describe(), "error": f"{exc} The page was cleared."}
+                    break
             try:
-                done.append(self._run_step(step))
-            except (StepError, EngineError) as exc:
-                failure = {"step": index + 1, "action": step.describe(), "error": str(exc)}
-                break
-            except Exception as exc:  # Playwright timeouts and errors, shortened for the AI
-                failure = {"step": index + 1, "action": step.describe(), "error": str(exc).split("\n")[0][:300],
-                           "hint": "Take browser_snapshot(query=...) to find the right ref, or wait_for the element first."}
-                break
-            try:
-                self.settings.check_url(self.page.url)
-            except EngineError as exc:
-                if self.mode == "cdp":
-                    # The user's own tab: never cleared or navigated away by the engine.
-                    failure = {"step": index + 1, "action": step.describe(), "error": f"{exc} The batch stopped; the tab was left as it is."}
-                else:
-                    self.page.goto("about:blank")
-                    failure = {"step": index + 1, "action": step.describe(), "error": f"{exc} The page was cleared."}
-                break
-        try:
-            self.page.wait_for_load_state("domcontentloaded", timeout=3000)
-        except Exception:
-            pass
-        result: dict[str, Any] = {"success": failure is None, "done": done, "url": self.page.url, "title": self.page.title()}
+                self.page.wait_for_load_state("domcontentloaded", timeout=3000)
+            except Exception:
+                pass
+            self._settle()
+        result: dict[str, Any] = {"success": failure is None, "done": done, "url": _without_query(self.page.url), "title": self.page.title()}
         if failure:
             result["failed"] = failure
             result["skipped"] = len(steps) - len(done) - 1
         if snapshot != "none":
-            result["snapshot"] = self.snapshot(query=query)
+            try:
+                result["snapshot"] = self.snapshot(query=query)
+            except EngineError as exc:
+                result["snapshot"] = f"(not read: {exc})"
         return result
 
 
@@ -1777,6 +2261,11 @@ class ToolSpec:
     summary: str
     use_when: str
     params: tuple[Param, ...] = ()
+    # Changes nothing outside the engine (MCP readOnlyHint). Only reading tools are.
+    read_only: bool = False
+    # May delete, submit, send, buy or otherwise change data in ways that cannot
+    # be ruled out (MCP destructiveHint). True whenever that cannot be guaranteed.
+    destructive: bool = False
 
     def description(self, prefix: str = "") -> str:
         text = self.summary.replace("{p}", prefix)
@@ -1785,7 +2274,7 @@ class ToolSpec:
     def as_dict(self, prefix: str = "") -> dict[str, Any]:
         return {"name": prefix + self.name, "group": self.group, "level": self.level,
                 "summary": self.summary.replace("{p}", prefix).split("\n\n")[0],
-                "use_when": self.use_when.replace("{p}", prefix),
+                "use_when": self.use_when.replace("{p}", prefix), "read_only": self.read_only, "destructive": self.destructive,
                 "params": [{"name": p.name, "type": p.kind, "required": p.required, "default": p.default, "description": p.description} for p in self.params]}
 
 
@@ -1793,18 +2282,21 @@ _TARGET_DOC = ('TARGET is a ref like "e12" from the snapshot, or a locator {"rol
                '{"label":"E-mail"} | {"placeholder":"Search"} | {"css":"..."} | {"test_id":"..."} (optional "exact": true, "nth": 0).')
 
 TOOLS: dict[str, ToolSpec] = {spec.name: spec for spec in (
-    ToolSpec("browser_open", "browser", "safe",
+    ToolSpec("browser_open", "browser", "sensitive",
              "Open a URL in the browser session and return its snapshot: title, URL, headings and every control as one line "
              'with a ref, e.g. [e12] button "Send". query keeps only controls containing all given words (instead of scrolling); '
              "include_text adds the readable page text. Refs work in {p}browser_act until the page is replaced.",
-             "Open a web page to read or operate it (JavaScript pages, logged-in sites). First call for any browser task.",
+             "Open a web page to read or operate it (JavaScript pages, logged-in sites). It navigates the current tab away "
+             "from what it shows, and a GET can have effects on the site, so it is a change, not a read; to read the page "
+             "already open, use {p}browser_snapshot.",
              (Param("url", "str", required=True, description="http(s) URL"), Param("query", "str", ""), Param("new_tab", "bool", False),
-              Param("include_text", "bool", False))),
+              Param("include_text", "bool", False)), read_only=False, destructive=True),
     ToolSpec("browser_snapshot", "browser", "safe",
              'Return the current page\'s controls as lines with refs ([e12] link "Pricing" → /pricing), headings and optionally text. '
              "Off-screen controls, open shadow DOM and iframes (f1:e3) are included; no scrolling is needed.",
-             "Find a control on the current page (with query), or re-read it after the user changed something themselves.",
-             (Param("query", "str", ""), Param("limit", "int", 120), Param("include_text", "bool", False))),
+             "Find a control on the current page (with query), or re-read it after the user changed something themselves. "
+             "Reads only (it marks controls with data-pcref attributes, which sends nothing and changes no page state).",
+             (Param("query", "str", ""), Param("limit", "int", 120), Param("include_text", "bool", False)), read_only=True),
     ToolSpec("browser_act", "browser", "sensitive",
              "Run a list of browser steps in one call, stop at the first failure, and return what was done plus a fresh snapshot. "
              + _TARGET_DOC + " Steps: {\"click\": T} {\"dblclick\": T} {\"hover\": T} {\"fill\": T, \"value\": \"text\"} "
@@ -1814,11 +2306,12 @@ TOOLS: dict[str, ToolSpec] = {spec.name: spec for spec in (
              "{\"wait_for\": {\"text\"|\"gone\"|\"url\"|\"target\"|\"state\"|\"ms\": ...}}; any step may add \"timeout_ms\". "
              "snapshot=\"none\" skips the snapshot; query narrows it. Password fields are refused.",
              "Click, fill, select, press keys, wait or navigate on the current page; batch every step you already know into one call.",
-             (Param("steps", "list", required=True, description="list of step objects"), Param("snapshot", "str", "auto"), Param("query", "str", ""))),
+             (Param("steps", "list", required=True, description="list of step objects"), Param("snapshot", "str", "auto"), Param("query", "str", "")),
+             read_only=False, destructive=True),
     ToolSpec("browser_read", "browser", "safe",
              "Return the readable text of the current page (main content, headings, lists, table rows) as light Markdown, without controls.",
              "Read the text of the current page (article, results, order summary).",
-             (Param("max_chars", "int", 8000),)),
+             (Param("max_chars", "int", 8000),), read_only=True),
     ToolSpec("browser_extract", "browser", "safe",
              "Extract data from the current page straight from the DOM in one call. items: CSS selector of repeated containers; "
              'fields: {"name": "h2", "price": ".price", "url": "a@href"} read inside each container (or once from the page without items); '
@@ -1826,31 +2319,32 @@ TOOLS: dict[str, ToolSpec] = {spec.name: spec for spec in (
              "links=true returns links, filtered by link_filter.",
              "Pull structured data from the current page: repeated items (products, results, rows), tables or links.",
              (Param("items", "str", ""), Param("fields", "dict", None), Param("tables", "bool", False), Param("links", "bool", False),
-              Param("link_filter", "str", ""), Param("limit", "int", 100))),
-    ToolSpec("browser_tabs", "browser", "safe",
-             'List tabs, or action="new" (optional url), "switch" or "close" by index. The current tab is marked.',
-             "List, open, switch or close browser tabs (new and close are sensitive).",
-             (Param("action", "str", "list"), Param("index", "int", None), Param("url", "str", ""))),
+              Param("link_filter", "str", ""), Param("limit", "int", 100)), read_only=True),
+    ToolSpec("browser_tabs", "browser", "sensitive",
+             'List tabs (addresses without query strings), or action="new" (optional url), "switch" or "close" by index. '
+             "The current tab is marked.",
+             "List, open, switch or close browser tabs. Listing is a read; new, switch and close change the browser.",
+             (Param("action", "str", "list"), Param("index", "int", None), Param("url", "str", "")), read_only=False, destructive=True),
     ToolSpec("browser_eval", "browser", "sensitive",
              "Evaluate a JavaScript expression or function in the current page and return its JSON result. Off unless the host allows it.",
              "Only when no other browser tool can read a value.",
-             (Param("expression", "str", required=True),)),
+             (Param("expression", "str", required=True),), read_only=False, destructive=True),
     ToolSpec("browser_close", "browser", "safe",
              "Close a browser the engine launched, or disconnect from the user's own browser without closing it.",
              "End of a browser task, or to restart a stuck browser session.", ()),
     ToolSpec("web_fetch", "web", "safe",
              "Fetch a URL over HTTP and return it as Markdown (title, text, optional links) without starting a browser.",
              "Read a public page quickly when nothing has to be clicked and no login is needed.",
-             (Param("url", "str", required=True), Param("max_chars", "int", 20000), Param("include_links", "bool", False))),
+             (Param("url", "str", required=True), Param("max_chars", "int", 20000), Param("include_links", "bool", False)), read_only=True),
     ToolSpec("ui_windows", "desktop", "safe",
              "List top-level windows as Windows UI Automation sees them: title, process, pid and hwnd.",
-             "Find which application windows are open before {p}ui_snapshot.", ()),
+             "Find which application windows are open before {p}ui_snapshot.", (), read_only=True),
     ToolSpec("ui_snapshot", "desktop", "safe",
              'Return one window\'s controls as lines with refs, e.g. [u12] Button "Save" id=SaveBtn, [u5] Edit "File name" value="". '
              'window: "foreground", a title substring, "exe:notepad.exe" or an hwnd. query keeps only matching controls. '
              "Visible text is listed after the controls. No screenshot is taken.",
              "Read a Windows app's controls before acting; with query to find one control in a big window.",
-             (Param("window", "str", "foreground"), Param("query", "str", ""), Param("limit", "int", 150))),
+             (Param("window", "str", "foreground"), Param("query", "str", ""), Param("limit", "int", 150)), read_only=True),
     ToolSpec("ui_act", "desktop", "sensitive",
              "Run UI Automation steps on one window in one call and return what was done plus a fresh snapshot. "
              'TARGET is a ref from the snapshot ("u12") or a locator {"name": "Save", "role": "Button", "id": "...", "exact": true, "nth": 0}. '
@@ -1859,14 +2353,15 @@ TOOLS: dict[str, ToolSpec] = {spec.name: spec for spec in (
              '{"check": T} {"uncheck": T} {"toggle": T} {"select": T, "item": "Item name"} {"expand": T} {"collapse": T} {"focus": T} '
              '{"keys": "ctrl+s"} {"wait_for": {"name": "Saved"}, "timeout_ms": 5000}',
              "Operate a Windows app: press buttons, fill fields, tick boxes, choose items, send shortcuts; batch the steps.",
-             (Param("steps", "list", required=True), Param("window", "str", "foreground"), Param("snapshot", "str", "auto"), Param("query", "str", ""))),
+             (Param("steps", "list", required=True), Param("window", "str", "foreground"), Param("snapshot", "str", "auto"), Param("query", "str", "")),
+             read_only=False, destructive=True),
 )}
 
 
 def tool_level(name: str, args: dict[str, Any] | None = None) -> str:
-    """The safety level of one call: browser_tabs is sensitive only for new and close."""
+    """The safety level of one call. Only listing tabs is a read; every other browser_tabs action changes the browser."""
     if name == "browser_tabs":
-        return "sensitive" if (args or {}).get("action", "list") in ("new", "close") else "safe"
+        return "safe" if (args or {}).get("action", "list") in ("list", None) else "sensitive"
     return TOOLS[name].level
 
 
@@ -1936,6 +2431,55 @@ def _engine_thread_init() -> None:
             pass  # ui_* tools then report the missing package themselves
 
 
+class _EngineThread:
+    """The one thread that owns Playwright and UI Automation.
+
+    Playwright's sync API handles browser events (route handlers, popups,
+    dialogs) only while this thread is inside a Playwright call. Between calls
+    it therefore lets Playwright run for a moment about every 50 ms, so a
+    request held by the navigation guard is decided at once instead of
+    waiting for the next tool call."""
+
+    IDLE_PUMP_S = 0.05
+
+    def __init__(self, pump: Callable[[], None]) -> None:
+        self._jobs: "queue.Queue[tuple[Callable[..., Any], tuple, dict, Future] | None]" = queue.Queue()
+        self._pump = pump
+        self._thread = threading.Thread(target=self._loop, name="pc-engine", daemon=True)
+        self._thread.start()
+
+    def _loop(self) -> None:
+        _engine_thread_init()
+        while True:
+            try:
+                job = self._jobs.get(timeout=self.IDLE_PUMP_S)
+            except queue.Empty:
+                try:
+                    self._pump()
+                except Exception:
+                    pass
+                continue
+            if job is None:
+                return
+            fn, args, kwargs, future = job
+            if not future.set_running_or_notify_cancel():
+                continue
+            try:
+                future.set_result(fn(*args, **kwargs))
+            except BaseException as exc:
+                future.set_exception(exc)
+
+    def submit(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Future:
+        future: Future = Future()
+        self._jobs.put((fn, args, kwargs, future))
+        return future
+
+    def shutdown(self, wait: bool = False) -> None:
+        self._jobs.put(None)
+        if wait:
+            self._thread.join(30)
+
+
 class Engine:
     """The engine every host calls. Thread safe: all work runs on one engine thread,
     because Playwright's sync API and UI Automation's COM objects belong to the
@@ -1947,7 +2491,7 @@ class Engine:
         self._ui_factory = ui_backend_factory
         self._ui_backend: UiBackend | None = None
         self.ui_session = UiSession()
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pc-engine", initializer=_engine_thread_init)
+        self._executor = _EngineThread(self.browser.pump)
 
     def call(self, name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         """Run one engine tool and return its JSON-able result. Raises EngineError for refused calls."""
@@ -1955,7 +2499,21 @@ class Engine:
         if spec is None:
             raise EngineError(f"unknown engine tool {name}")
         params = _coerce(spec, args)
-        return self._executor.submit(getattr(self, "_" + name), **params).result()
+        return self._executor.submit(self._run, name, params).result()
+
+    def _run(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
+        if name.startswith("browser_") and name != "browser_close":
+            self.browser.recover()
+        result = getattr(self, "_" + name)(**params)
+        if name.startswith("browser_") and isinstance(result, dict):
+            late = self.browser.take_late_refusals()
+            if late:
+                # Navigations a page started by itself between calls, refused before they were sent.
+                result["refused_navigations_since_last_call"] = late
+            refused = self.browser.take_refused_subresources()
+            if refused:
+                result["refused_subresources"] = refused
+        return result
 
     def shutdown(self) -> None:
         try:

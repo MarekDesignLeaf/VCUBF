@@ -6,6 +6,7 @@ import unittest
 import _env  # noqa: F401
 
 import main
+import pc_engine
 import security as sec
 from registry import CATEGORIES, REGISTRY
 
@@ -33,7 +34,13 @@ class Registry(unittest.TestCase):
                 self.assertIn("Use when:", tool.description)
                 self.assertEqual(sec.classify_tool(tool.name), spec.level)
                 self.assertEqual(bool(tool.annotations.read_only_hint), spec.read_only)
-                self.assertEqual(bool(tool.annotations.destructive_hint), spec.level == sec.ActionLevel.DESTRUCTIVE)
+                engine_spec = pc_engine.TOOLS.get(tool.name)
+                if engine_spec is not None:
+                    # Shared engine tools: the catalogue states the real effects.
+                    self.assertEqual(bool(tool.annotations.destructive_hint), engine_spec.destructive)
+                    self.assertEqual(spec.read_only, engine_spec.read_only)
+                else:
+                    self.assertEqual(bool(tool.annotations.destructive_hint), spec.level == sec.ActionLevel.DESTRUCTIVE)
 
     def test_instructions_name_every_tool_and_the_fast_path(self):
         text = main.mcp.instructions
@@ -59,7 +66,10 @@ class Registry(unittest.TestCase):
         self.assertEqual(REGISTRY["browser_act"].level, sec.ActionLevel.SENSITIVE)
         self.assertEqual(REGISTRY["ui_act"].level, sec.ActionLevel.SENSITIVE)
         self.assertEqual(REGISTRY["browser_eval"].level, sec.ActionLevel.SENSITIVE)
-        for name in ("browser_open", "browser_snapshot", "browser_read", "browser_extract", "web_fetch", "ui_snapshot", "ui_windows"):
+        # Opening a URL navigates the current tab away and a GET can change things: not a read.
+        self.assertEqual(REGISTRY["browser_open"].level, sec.ActionLevel.SENSITIVE)
+        self.assertFalse(REGISTRY["browser_open"].read_only)
+        for name in ("browser_snapshot", "browser_read", "browser_extract", "web_fetch", "ui_snapshot", "ui_windows"):
             self.assertEqual(REGISTRY[name].level, sec.ActionLevel.SAFE, name)
         self.assertEqual(REGISTRY["delete_file"].level, sec.ActionLevel.DESTRUCTIVE)
 

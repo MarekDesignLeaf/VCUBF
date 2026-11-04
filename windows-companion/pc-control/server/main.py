@@ -122,7 +122,12 @@ ENGINE = pc_engine.Engine(pc_engine.EngineSettings(
     block_resources=tuple(cfg.get("browser", "block_resources", []) or ()),
     allow_password_fill=bool(cfg.get("browser", "allow_password_fill", False)),
     allow_eval=bool(cfg.get("browser", "allow_eval", False)),
-    url_guard=pc_engine.blocked_domain_guard(cfg.get("browser", "blocked_domains", []) or []),
+    policy=pc_engine.UrlPolicy(
+        require_https=bool(cfg.get("browser", "require_https", False)),
+        # The owner's own local pages (dev servers, router, intranet) only when switched on.
+        allow_private_network=_browser_setting("allow_private_network", False),
+        blocked_domains=cfg.get("browser", "blocked_domains", []) or [],
+    ),
 ))
 
 _KINDS = {"str": str, "int": int, "bool": bool, "list": list[dict], "dict": dict}
@@ -150,6 +155,7 @@ def _engine_tool(spec: pc_engine.ToolSpec):
         mcp, category=spec.group, level=_LEVELS[spec.level], use_when=spec.use_when,
         level_for=(lambda params, name=spec.name: _LEVELS[pc_engine.tool_level(name, params)]) if spec.name == "browser_tabs" else None,
         redact=lambda params, name=spec.name: pc_engine.audit_args(name, params),
+        read_only=spec.read_only, destructive=spec.destructive,
     )(tool)
 
 
