@@ -1,0 +1,22 @@
+# MCP server framework
+fastmcp>=2.0.0
+
+# System information
+psutil>=5.9.0
+
+# GUI automation
+pyautogui>=0.9.54
+pywinauto>=0.6.8
+
+# Screenshots
+mss>=9.0.1
+Pillow>=10.0.0
+
+# Configuration
+PyYAML>=6.0
+
+# Windows-specific
+pywin32>=306
+
+# Utilities
+pathlib2>=2.3.7

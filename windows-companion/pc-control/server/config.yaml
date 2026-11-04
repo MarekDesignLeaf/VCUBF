@@ -1,0 +1,97 @@
+# pc-control plugin configuration
+
+server:
+  name: pc-control
+  version: "0.1.0"
+
+# Security settings
+security:
+  # Global mode: "readonly" (only safe reads) or "active" (full control)
+  mode: active
+
+  # Dry-run: log actions but never execute them
+  dry_run: false
+
+  # Action levels that auto-execute without asking
+  auto_approve:
+    - safe
+
+  # Action levels that require brief confirmation
+  require_confirm:
+    - sensitive
+
+  # Action levels that require explicit confirmation with impact description
+  require_explicit_confirm:
+    - destructive
+
+# Audit log
+audit:
+  enabled: true
+  log_dir: logs
+  log_file: audit.jsonl
+  max_size_mb: 50
+  rotate_count: 5
+
+# File operations
+files:
+  # Create a .bak backup before any write/modify operation
+  auto_backup: true
+  backup_suffix: ".bak"
+
+  # Paths that are always blocked (never touch these)
+  blocked_paths:
+    - "C:/Windows/System32"
+    - "C:/Windows/SysWOW64"
+    - "C:/Program Files/Windows Defender"
+
+  # Max file size (MB) that read_file will return inline
+  max_inline_read_mb: 5
+
+# Terminal
+terminal:
+  # Shell to use for run_command
+  default_shell: powershell
+
+  # Commands that are always classified as destructive regardless of flags
+  destructive_patterns:
+    - "rm "
+    - "del "
+    - "rmdir"
+    - "format "
+    - "reg delete"
+    - "reg add"
+    - "net user"
+    - "net localgroup"
+    - "diskpart"
+    - "bcdedit"
+    - "sfc"
+    - "takeown"
+    - "icacls"
+    - "attrib"
+    - "cipher /w"
+    - "git reset --hard"
+    - "git clean"
+    - "git push --force"
+    - "npm uninstall"
+    - "pip uninstall"
+    - "wmic"
+    - "taskkill /f"
+    - "Stop-Process -Force"
+    - "Remove-Item"
+    - "Clear-Content"
+    - "Clear-History"
+
+  # Max execution time (seconds)
+  timeout_seconds: 60
+
+# GUI control
+gui:
+  # Screenshot quality (1-100)
+  screenshot_quality: 85
+  screenshot_format: png
+
+  # Pause between pyautogui actions (seconds) – safety delay
+  action_pause: 0.1
+
+  # Failsafe: move mouse to top-left corner to abort
+  failsafe: true

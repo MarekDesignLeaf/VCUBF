@@ -1,0 +1,4 @@
+server/logs/
+__pycache__/
+*.pyc
+browser-profile/

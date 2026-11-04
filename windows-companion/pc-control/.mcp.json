@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "pc-control": {
+      "command": "python",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/main.py"],
+      "env": {
+        "PC_CONTROL_CONFIG": "${CLAUDE_PLUGIN_ROOT}/server/config.yaml",
+        "PC_CONTROL_LOG_DIR": "${CLAUDE_PLUGIN_ROOT}/server/logs"
+      }
+    }
+  }
+}

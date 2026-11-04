@@ -1,0 +1,9 @@
+{
+  "name": "pc-control",
+  "version": "0.1.0",
+  "description": "Secure, audited Windows computer control — system status, file management, app launching, GUI automation, and terminal commands with safety classification and full audit logging.",
+  "author": {
+    "name": "Marek"
+  },
+  "keywords": ["windows", "automation", "computer-control", "gui", "files", "terminal"]
+}
