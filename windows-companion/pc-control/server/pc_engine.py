@@ -1734,8 +1734,12 @@ class BrowserSession:
             try:
                 self.settings.check_url(self.page.url)
             except EngineError as exc:
-                self.page.goto("about:blank")
-                failure = {"step": index + 1, "action": step.describe(), "error": f"{exc} The page was cleared."}
+                if self.mode == "cdp":
+                    # The user's own tab: never cleared or navigated away by the engine.
+                    failure = {"step": index + 1, "action": step.describe(), "error": f"{exc} The batch stopped; the tab was left as it is."}
+                else:
+                    self.page.goto("about:blank")
+                    failure = {"step": index + 1, "action": step.describe(), "error": f"{exc} The page was cleared."}
                 break
         try:
             self.page.wait_for_load_state("domcontentloaded", timeout=3000)
