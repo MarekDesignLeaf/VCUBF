@@ -1,4 +1,4 @@
-# pc-control plugin 0.2.1
+# pc-control plugin 0.3.0
 
 Fast, audited control of the owner's Windows PC and browser for AI assistants
 (Claude, and any other MCP client). Part of the VCUBF Windows companion; the
@@ -21,6 +21,29 @@ The plugin works from **text, not screenshots**:
 
 Screenshots are switched off by default. Coordinate tools remain as a fallback
 for controls UI Automation cannot see.
+
+## One engine for Claude and ChatGPT
+
+The browser, web and Windows-app tools come from `server/pc_engine.py`, the
+shared engine. PC Control Plus (the ChatGPT connector,
+`MarekDesignLeaf/pc-control-plus`) vendors the same file byte for byte and
+exposes the same tools as `pc_<name>` (`pc_browser_open`, `pc_browser_act`,
+`pc_ui_snapshot`, …) with the same parameters, levels and guidance.
+
+- `pc_engine.TOOLS` is the catalogue; the Claude plugin generates these MCP
+  tools from it, so nothing about them is written twice.
+- Standard library at import time; Playwright and uiautomation load on use.
+  Synchronous, with one engine thread for Playwright and UI Automation.
+- Host differences come through `EngineSettings`: browser mode and profile,
+  CDP endpoint (a resolver for Edge's `DevToolsActivePort` in PC Control
+  Plus), the URL guard (blocked domains here; public HTTPS only there) and
+  whether tabs may be opened in the user's own browser.
+- `pc_engine.release.json` records the engine version and SHA-256.
+  `tests/test_engine.py` fails when the file changes without a new
+  `ENGINE_VERSION`; PC Control Plus runs the same check on its copy.
+- To change the engine: edit it here, bump `ENGINE_VERSION`, regenerate the
+  release file (the test prints the hash), then copy both files to
+  `pc-control-plus/remote/` with its `scripts/sync_pc_engine.py`.
 
 ## Why it is fast
 
@@ -115,7 +138,7 @@ Other settings: `channel` (`msedge`, `chrome`, `chromium`), `headless`,
 
 ```bash
 cd tests
-python -m unittest -v test_steps test_desktop_ui test_registry test_status test_browser
+python -m unittest -v test_steps test_desktop_ui test_registry test_status test_engine test_browser
 ```
 
 - `test_steps` — the browser step language and snapshot format.
@@ -125,6 +148,9 @@ python -m unittest -v test_steps test_desktop_ui test_registry test_status test_
 - `test_status` — `pc_status`, and the launcher over real stdio: without the
   packages it serves only `pc_status` with the exact error; with them it starts
   the full server.
+- `test_engine` — the shared engine: release record, standard-library import,
+  catalogue and the Claude tools generated from it, argument checks, audit
+  redaction, URL guards.
 - `test_browser` — the browser tools through the MCP server on a real headless
   Chromium and local pages (forms, select, checkbox, off-screen, shadow DOM,
   iframe, new tab, extraction, password refusal, audit redaction, blocked
@@ -150,12 +176,8 @@ pc-control/
 │   ├── status.py                  # read-only health check (standard library only)
 │   ├── main.py                    # every tool, declared with registry.pc_tool
 │   ├── registry.py                # capability entries, audit wrapper, generated instructions
-│   ├── browser/engine.py          # persistent Playwright session, refs, batched steps
-│   ├── browser/steps.py           # step language, validation, snapshot format, redaction
-│   ├── browser/page_snapshot.js   # one DOM pass → controls with refs, headings, text
-│   ├── browser/page_extract.js    # structured extraction (items/fields, tables, links)
-│   ├── web_fetch.py               # HTTP → Markdown
-│   ├── desktop_ui.py              # Windows UI Automation
+│   ├── pc_engine.py               # shared engine: browser, web_fetch, UI Automation, catalogue
+│   ├── pc_engine.release.json     # engine version + SHA-256 (shared with PC Control Plus)
 │   ├── system_tools.py, file_tools.py, app_tools.py, gui_tools.py, terminal_tools.py
 │   ├── security.py, audit_log.py, config.py, config.yaml, requirements.txt
 ├── skills/                        # browser-control, desktop-ui-control, computer-control, …

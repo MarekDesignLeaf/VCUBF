@@ -3,13 +3,12 @@
 This proves the tree reading, refs, locators and the pattern-first actions; it
 is not an acceptance on a real Windows desktop.
 """
-import asyncio
 import unittest
 
 import _env  # noqa: F401
 
-from desktop_ui import (
-    DesktopUi, UiError, UiSession, activate, find_control, find_window, parse_ui_steps,
+from pc_engine import (
+    Engine, UiError, UiSession, activate, find_control, find_window, parse_ui_steps,
     redact_ui_steps, run_ui_steps, snapshot_window,
 )
 
@@ -106,8 +105,8 @@ class Snapshot(unittest.TestCase):
 
     def test_formatted_snapshot_through_the_service(self):
         backend = FakeBackend()
-        service = DesktopUi(lambda: backend)
-        result = asyncio.run(service.snapshot(window="Uložit jako"))
+        engine = Engine(ui_backend_factory=lambda: backend)
+        result = engine.call("ui_snapshot", {"window": "Uložit jako"})
         self.assertTrue(result["success"])
         self.assertIn('Window: Uložit jako  [notepad.exe pid=7 hwnd=42]', result["snapshot"])
         self.assertRegex(result["snapshot"], r'\[u\d+\] Edit "Název souboru:" id=1001 value=""')
@@ -191,8 +190,8 @@ class Acting(unittest.TestCase):
                          [{"set_value": "u1", "value": "<5 chars>"}, {"click": "u2"}])
 
     def test_act_through_the_service_returns_a_fresh_snapshot(self):
-        service = DesktopUi(lambda: self.backend)
-        result = asyncio.run(service.act(steps=[{"click": {"name": "Uložit", "exact": True}}], window="Uložit jako"))
+        engine = Engine(ui_backend_factory=lambda: self.backend)
+        result = engine.call("ui_act", {"steps": [{"click": {"name": "Uložit", "exact": True}}], "window": "Uložit jako"})
         self.assertTrue(result["success"], result)
         self.assertIn("Window: Uložit jako", result["snapshot"])
 

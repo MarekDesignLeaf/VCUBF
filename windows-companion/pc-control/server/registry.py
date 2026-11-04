@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 import audit_log
 import config as cfg
+import pc_engine
 import security as sec
 
 CATEGORIES = {
@@ -148,16 +149,7 @@ def instructions(version: str) -> str:
     lines = [
         f"pc-control {version}: audited control of this Windows PC and its browser for AI assistants.",
         "",
-        "Work fast, without screenshots:",
-        "1. Web page to read only: web_fetch(url) (one HTTP request). If it needs JavaScript or a login: browser_open(url).",
-        "2. Web page to operate: browser_open(url) returns every control as a line like [e12] button \"Send\". "
-        "Act with browser_act(steps=[...]) using those refs, several steps in ONE call, e.g. "
-        "[{\"fill\":\"e3\",\"value\":\"Praha\"},{\"click\":\"e7\"},{\"wait_for\":{\"text\":\"Results\"}}]. "
-        "It returns a fresh snapshot, so do not call browser_snapshot after it. Use browser_snapshot(query=\"word\") "
-        "to find a control instead of scrolling. Data: browser_extract (CSS fields, tables, links) or browser_read (text).",
-        "3. Windows app: ui_snapshot(window=\"title\" | \"exe:notepad.exe\" | \"foreground\") returns controls as "
-        "[u12] Button \"Save\"; act with ui_act(steps=[{\"set_value\":\"u5\",\"value\":\"...\"},{\"click\":\"u12\"}]). "
-        "Refs from the snapshot are the fastest; locators {\"name\":\"Save\",\"role\":\"Button\"} work without one.",
+        *pc_engine.fast_path().split("\n"),
         "4. take_screenshot is off by default; click(x,y) and other coordinate tools are a last resort for controls "
         "that UI Automation cannot see.",
         "",

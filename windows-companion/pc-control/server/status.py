@@ -18,7 +18,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 SERVER_DIR = Path(__file__).parent
 PLUGIN_DIR = SERVER_DIR.parent
 
@@ -28,7 +28,6 @@ PACKAGES: dict[str, tuple[str, str, bool]] = {
     "yaml": ("PyYAML", "configuration (required to start)", False),
     "psutil": ("psutil", "system status and processes", False),
     "playwright": ("playwright", "browser_* tools", False),
-    "httpx": ("httpx", "web_fetch", False),
     "uiautomation": ("uiautomation", "ui_* tools (Windows UI Automation)", True),
     "pyautogui": ("pyautogui", "keys, typing and coordinate fallback", False),
     "pyperclip": ("pyperclip", "typing with diacritics through the clipboard", False),
@@ -132,7 +131,7 @@ def collect_status(server_running: bool) -> dict[str, Any]:
     groups = {
         "server": all(installed[module] for module in REQUIRED_TO_START),
         "browser": installed["playwright"] and (cdp["answers"] or channel == "chromium" or bool(executables.get(channel)) or not env["is_windows"]),
-        "web_fetch": installed["httpx"],
+        "web_fetch": True,  # standard library
         "desktop_ui": env["is_windows"] and installed["uiautomation"],
         "keyboard_and_typing": installed["pyautogui"] and installed["pyperclip"],
         "system": installed["psutil"],

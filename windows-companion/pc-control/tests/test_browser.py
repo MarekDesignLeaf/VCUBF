@@ -37,11 +37,9 @@ class BrowserTools(unittest.TestCase):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
         cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
-        cls.loop = asyncio.new_event_loop()
         try:
-            cls.loop.run_until_complete(main.BROWSER.ensure())
+            main.ENGINE.call("browser_snapshot")
         except Exception as exc:
-            cls.loop.close()
             cls.server.shutdown()
             cls.server.server_close()
             if os.environ.get("PC_CONTROL_REQUIRE_BROWSER"):
@@ -50,13 +48,12 @@ class BrowserTools(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.loop.run_until_complete(cls.main.BROWSER.close())
-        cls.loop.close()
+        cls.main.ENGINE.call("browser_close")
         cls.server.shutdown()
         cls.server.server_close()
 
     def call(self, name, args=None):
-        result = self.loop.run_until_complete(self.main.mcp.call_tool(name, args or {}))
+        result = asyncio.run(self.main.mcp.call_tool(name, args or {}))
         if result.structured_content is not None:
             return result.structured_content
         return json.loads(result.content[0].text)

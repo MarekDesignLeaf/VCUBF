@@ -3,7 +3,7 @@ import unittest
 
 import _env  # noqa: F401
 
-from browser.steps import StepError, format_element, format_snapshot, parse_steps, redact_steps
+from pc_engine import StepError, format_element, format_snapshot, parse_steps, redact_steps
 
 
 class ParseSteps(unittest.TestCase):

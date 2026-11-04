@@ -25,23 +25,16 @@ import file_tools as file_t
 import app_tools as app_t
 import gui_tools as gui_t
 import terminal_tools as term_t
-from browser import steps as browser_steps
-from browser.engine import SESSION as BROWSER, BrowserError
-from desktop_ui import DESKTOP, redact_ui_steps
+import asyncio
+import inspect
+import os
+
+import pc_engine
 from registry import REGISTRY, instructions, pc_tool
-from web_fetch import web_fetch as fetch_page
 from status import VERSION, collect_status
 SAFE, SENSITIVE, DESTRUCTIVE = sec.ActionLevel.SAFE, sec.ActionLevel.SENSITIVE, sec.ActionLevel.DESTRUCTIVE
 
 mcp = FastMCP(name="pc-control", instructions="pc-control", version=VERSION)
-
-
-def _redact_steps(params: dict[str, Any]) -> dict[str, Any]:
-    return {**params, "steps": browser_steps.redact_steps(params.get("steps"))}
-
-
-def _redact_ui(params: dict[str, Any]) -> dict[str, Any]:
-    return {**params, "steps": redact_ui_steps(params.get("steps"))}
 
 
 # ─── Meta ────────────────────────────────────────────────────────────────────
@@ -74,7 +67,8 @@ def pc_capabilities() -> dict:
             "destructive": "explicit yes from the user with the exact impact",
         },
         "tools": [spec.as_dict() for spec in REGISTRY.values()],
-        "browser_step_reference": browser_steps.__doc__,
+        "browser_step_reference": pc_engine.BROWSER_STEP_REFERENCE,
+        "engine_version": pc_engine.ENGINE_VERSION,
         "instructions": mcp.instructions,
     }
 
@@ -89,141 +83,78 @@ def pc_status() -> dict:
     return collect_status(server_running=True)
 
 
-# ─── Browser ─────────────────────────────────────────────────────────────────
+# ─── Browser, web and Windows apps: the shared engine ────────────────────────
+#
+# These tools are generated from pc_engine.TOOLS, the catalogue PC Control Plus
+# (the ChatGPT connector) exposes too: same names, parameters, levels and
+# guidance. Nothing about them is written here by hand.
 
-@pc_tool(mcp, category="browser", level=SAFE,
-         use_when="Open a web page to read or operate it (JavaScript pages, logged-in sites). First call for any browser task.")
-async def browser_open(url: str, query: str = "", new_tab: bool = False, include_text: bool = False) -> dict:
-    """Open a URL in the persistent browser and return its snapshot: title, URL, headings and every control as one line with a ref, e.g. [e12] button "Send".
-
-    query narrows the controls to those containing all given words (instead of scrolling). include_text adds the
-    page's readable text. Refs work in browser_act until the page is replaced.
-    """
-    await BROWSER.goto(url, new_tab=new_tab)
-    return {"success": True, "url": BROWSER.page.url,
-            "snapshot": await BROWSER.snapshot(query=query, mode="both" if include_text else "interactive")}
-
-
-@pc_tool(mcp, category="browser", level=SAFE,
-         use_when="Find a control on the current page (with query) or re-read it after the user changed something themselves.")
-async def browser_snapshot(query: str = "", limit: int = 120, include_text: bool = False) -> dict:
-    """Return the current page's controls as lines with refs ([e12] link "Pricing" → /pricing), headings and optionally text.
-
-    Off-screen controls are included; no scrolling is needed. query="add to cart" returns only matching controls.
-    """
-    page = await BROWSER.ensure()
-    return {"success": True, "url": page.url,
-            "snapshot": await BROWSER.snapshot(query=query, limit=limit, mode="both" if include_text else "interactive")}
+def _browser_setting(key: str, default: Any) -> Any:
+    env = os.environ.get(f"PC_CONTROL_BROWSER_{key.upper()}")
+    if env is not None:
+        if isinstance(default, bool):
+            return env.lower() in ("1", "true", "yes")
+        if isinstance(default, int):
+            return int(env)
+        return env
+    return cfg.get("browser", key, default)
 
 
-@pc_tool(mcp, category="browser", level=SENSITIVE, redact=_redact_steps,
-         use_when="Click, fill, select, press keys, wait or navigate on the current page; batch every step you already know into one call.")
-async def browser_act(steps: list[dict], snapshot: str = "auto", query: str = "") -> dict:
-    """Run a list of browser steps in one call, stop at the first failure, and return what was done plus a fresh snapshot.
-
-    Steps (one operation each; TARGET is a ref like "e12" or a locator {"role":"button","name":"Send"} |
-    {"text":"Sign in"} | {"label":"E-mail"} | {"placeholder":"Search"} | {"css":"..."} | {"test_id":"..."}):
-    {"click": T} {"dblclick": T} {"hover": T} {"fill": T, "value": "text"} {"type": T, "value": "text"} {"clear": T}
-    {"select": T, "value"|"label": "..."} {"check": T} {"uncheck": T} {"upload": T, "files": ["C:/..."]}
-    {"press": "Enter"} or {"press": "Control+A", "target": T} {"goto": "https://..."} {"back": true} {"reload": true}
-    {"scroll": T | "top" | "bottom"} {"wait_for": {"text"|"gone"|"url"|"target"|"state"|"ms": ...}}
-    snapshot="none" skips the snapshot; query narrows it. Password fields are refused unless allowed in config.
-    """
-    return await BROWSER.act(steps, snapshot=snapshot, query=query)
+def _default_profile() -> str:
+    override = os.environ.get("PC_CONTROL_BROWSER_PROFILE") or cfg.get("browser", "profile_dir", "")
+    if override:
+        return str(override)
+    if sys.platform == "win32" and os.environ.get("LOCALAPPDATA"):
+        return str(Path(os.environ["LOCALAPPDATA"]) / "VCUBF" / "Alfonzo" / "pc-control" / "browser-profile")
+    return str(Path.home() / ".cache" / "vcubf-alfonzo" / "pc-control" / "browser-profile")
 
 
-@pc_tool(mcp, category="browser", level=SAFE,
-         use_when="Read the text of the current page (article, results, order summary) as light Markdown.")
-async def browser_read(max_chars: int = 8000) -> dict:
-    """Return the readable text of the current page (main content, headings, lists, table rows) without controls."""
-    frames = await BROWSER.snapshot_data(mode="text", max_text=max_chars)
-    return {"success": True, "url": BROWSER.page.url, "title": frames[0].get("title") if frames else "",
-            "text": "\n".join(frame.get("text", "") for frame in frames if frame.get("text"))}
+ENGINE = pc_engine.Engine(pc_engine.EngineSettings(
+    mode=_browser_setting("mode", "auto"),
+    cdp_endpoint=_browser_setting("cdp_url", "http://127.0.0.1:9222"),
+    channel=_browser_setting("channel", "msedge"),
+    executable_path=_browser_setting("executable_path", ""),
+    profile_dir=_default_profile(),
+    headless=_browser_setting("headless", False),
+    default_timeout_ms=_browser_setting("default_timeout_ms", 5000),
+    navigation_timeout_ms=_browser_setting("navigation_timeout_ms", 20000),
+    max_snapshot_elements=_browser_setting("max_snapshot_elements", 120),
+    block_resources=tuple(cfg.get("browser", "block_resources", []) or ()),
+    allow_password_fill=bool(cfg.get("browser", "allow_password_fill", False)),
+    allow_eval=bool(cfg.get("browser", "allow_eval", False)),
+    url_guard=pc_engine.blocked_domain_guard(cfg.get("browser", "blocked_domains", []) or []),
+))
+
+_KINDS = {"str": str, "int": int, "bool": bool, "list": list[dict], "dict": dict}
+_LEVELS = {"safe": SAFE, "sensitive": SENSITIVE}
 
 
-@pc_tool(mcp, category="browser", level=SAFE,
-         use_when="Pull structured data from the current page: repeated items (products, results, rows), tables or links.")
-async def browser_extract(items: str = "", fields: dict | None = None, tables: bool = False, links: bool = False,
-                          link_filter: str = "", limit: int = 100) -> dict:
-    """Extract data from the current page straight from the DOM in one call.
+def _engine_tool(spec: pc_engine.ToolSpec):
+    """An async MCP tool whose signature is exactly the catalogue's parameters."""
+    async def tool(**kwargs):
+        return await asyncio.to_thread(ENGINE.call, spec.name, kwargs)
 
-    items: CSS selector of repeated containers; fields: {"name": "css", "price": ".price", "url": "a@href"} read inside
-    each container (or once from the page without items). "@attr" reads an attribute; URLs become absolute.
-    tables=True returns visible tables as headers and rows; links=True returns links (filtered by link_filter).
-    """
-    data = await BROWSER.extract({"items": items, "fields": fields or {}, "tables": tables, "links": links,
-                                  "linkFilter": link_filter, "limit": limit})
-    return {"success": True, **data}
-
-
-def _tabs_level(params: dict[str, Any]) -> sec.ActionLevel:
-    return SAFE if params.get("action", "list") in ("list", "switch", "new") else SENSITIVE
-
-
-@pc_tool(mcp, category="browser", level=SAFE, level_for=_tabs_level,
-         use_when="List, open, switch or close browser tabs.")
-async def browser_tabs(action: str = "list", index: int | None = None, url: str = "") -> dict:
-    """List tabs, or action="new" (optional url), "switch" or "close" by index. The current tab is marked."""
-    return await BROWSER.tabs(action=action, index=index, url=url)
+    parameters = []
+    for param in spec.params:
+        kind = _KINDS[param.kind]
+        if param.required:
+            parameters.append(inspect.Parameter(param.name, inspect.Parameter.KEYWORD_ONLY, annotation=kind))
+        else:
+            annotation = kind | None if param.default is None else kind
+            parameters.append(inspect.Parameter(param.name, inspect.Parameter.KEYWORD_ONLY, default=param.default, annotation=annotation))
+    tool.__name__ = tool.__qualname__ = spec.name
+    tool.__doc__ = spec.summary
+    tool.__signature__ = inspect.Signature(parameters, return_annotation=dict)
+    tool.__annotations__ = {param.name: param.annotation for param in parameters} | {"return": dict}
+    return pc_tool(
+        mcp, category=spec.group, level=_LEVELS[spec.level], use_when=spec.use_when,
+        level_for=(lambda params, name=spec.name: _LEVELS[pc_engine.tool_level(name, params)]) if spec.name == "browser_tabs" else None,
+        redact=lambda params, name=spec.name: pc_engine.audit_args(name, params),
+    )(tool)
 
 
-@pc_tool(mcp, category="browser", level=SENSITIVE,
-         use_when="Only when no other browser tool can read a value; switched off unless browser.allow_eval is true.")
-async def browser_eval(expression: str) -> dict:
-    """Evaluate a JavaScript expression or function in the current page and return its JSON result."""
-    return {"success": True, "result": await BROWSER.evaluate(expression)}
-
-
-@pc_tool(mcp, category="browser", level=SAFE,
-         use_when="End of a browser task, or to restart a stuck browser session.")
-async def browser_close() -> dict:
-    """Close the browser this plugin launched, or disconnect from the user's own browser without closing it."""
-    if BROWSER.context is None:
-        return {"success": True, "note": "no browser session was open"}
-    return await BROWSER.close()
-
-
-# ─── Web without a browser ───────────────────────────────────────────────────
-
-@pc_tool(mcp, category="web", level=SAFE,
-         use_when="Read a public page quickly when nothing has to be clicked and no login is needed.")
-async def web_fetch(url: str, max_chars: int = 20000, include_links: bool = False) -> dict:
-    """Fetch a URL over HTTP and return it as Markdown (title, text, optional links) without starting a browser."""
-    return await fetch_page(url, max_chars=max_chars, include_links=include_links)
-
-
-# ─── Windows apps through UI Automation ──────────────────────────────────────
-
-@pc_tool(mcp, category="desktop", level=SAFE,
-         use_when="Find which application windows are open before ui_snapshot.")
-async def ui_windows() -> dict:
-    """List top-level windows as UI Automation sees them: title, process, pid and hwnd."""
-    return await DESKTOP.windows()
-
-
-@pc_tool(mcp, category="desktop", level=SAFE,
-         use_when="Read a Windows app's controls before acting; with query to find one control in a big window.")
-async def ui_snapshot(window: str = "foreground", query: str = "", limit: int = 150) -> dict:
-    """Return one window's controls as lines with refs, e.g. [u12] Button "Save" id=SaveBtn, [u5] Edit "File name" value="".
-
-    window: "foreground", a title substring, "exe:notepad.exe" or an hwnd. query keeps only matching controls.
-    Visible text (labels, status bar) is listed after the controls. No screenshot is taken.
-    """
-    return await DESKTOP.snapshot(window=window, query=query, limit=limit)
-
-
-@pc_tool(mcp, category="desktop", level=SENSITIVE, redact=_redact_ui,
-         use_when="Operate a Windows app: press buttons, fill fields, tick boxes, choose items, send shortcuts; batch the steps.")
-async def ui_act(steps: list[dict], window: str = "foreground", snapshot: str = "auto", query: str = "") -> dict:
-    """Run UI Automation steps on one window in one call and return what was done plus a fresh snapshot.
-
-    TARGET is a ref from ui_snapshot ("u12") or a locator {"name": "Save", "role": "Button", "id": "...", "exact": true, "nth": 0}.
-    Steps: {"click": T} (Invoke/Select/Toggle pattern, physical click only as fallback) {"set_value": T, "value": "text"}
-    {"type": T, "value": "text"} or {"type": true, "value": "..."} into the focused control (clipboard, keeps diacritics)
-    {"check": T} {"uncheck": T} {"toggle": T} {"select": T, "item": "Item name"} {"expand": T} {"collapse": T}
-    {"focus": T} {"keys": "ctrl+s"} {"wait_for": {"name": "Saved"}, "timeout_ms": 5000}
-    """
-    return await DESKTOP.act(steps=steps, window=window, snapshot=snapshot, query=query)
+for _spec in pc_engine.TOOLS.values():
+    _engine_tool(_spec)
 
 
 # ─── System tools ────────────────────────────────────────────────────────────
