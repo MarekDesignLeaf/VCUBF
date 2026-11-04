@@ -75,11 +75,54 @@ Opens in VS Code by default; Android Studio for Android projects.
 
 ---
 
-## GUI Tools
+## Browser Tools (see the browser-control skill)
+
+### `browser_open(url, query="", new_tab=False, include_text=False)`
+Opens the URL in the persistent browser; returns the snapshot: title, URL, headings and each control as
+`[e12] role "name" value=… → href`. `query` keeps only matching controls; `include_text` adds the page text.
+
+### `browser_snapshot(query="", limit=120, include_text=False)`
+The current page's snapshot. Off-screen controls, open shadow DOM and iframes (`f1:e3`) are included.
+
+### `browser_act(steps, snapshot="auto", query="")`
+Runs a list of steps in one call, stops at the first failure, returns `done`, `failed`, `url`, `title`, `snapshot`.
+Steps: click, dblclick, hover, fill, type, clear, select (value|label), check, uncheck, upload, press, goto, back,
+forward, reload, scroll, wait_for (text|gone|url|target|state|ms). Targets: ref or locator
+(role+name, text, label, placeholder, css, test_id; exact, nth). Password fields are refused.
+
+### `browser_read(max_chars=8000)` — readable text of the page as light Markdown.
+### `browser_extract(items="", fields=None, tables=False, links=False, link_filter="", limit=100)`
+Fields are `"css"`, `"css@attr"` or `"@attr"`, read inside each `items` container; URLs become absolute.
+### `browser_tabs(action="list", index=None, url="")` — list, new, switch, close.
+### `browser_eval(expression)` — off unless `browser.allow_eval: true`.
+### `browser_close()` — closes the launched browser or disconnects from the user's own.
+
+### `web_fetch(url, max_chars=20000, include_links=False)`
+Plain HTTP fetch, page as Markdown. No browser, no JavaScript.
+
+---
+
+## Windows App Tools (UI Automation; see the desktop-ui-control skill)
+
+### `ui_windows()` — top-level windows: title, process, pid, hwnd.
+### `ui_snapshot(window="foreground", query="", limit=150)`
+`window`: "foreground", title substring, "exe:name.exe" or hwnd. Returns `[u12] Button "Save" id=…` lines and visible text.
+### `ui_act(steps, window="foreground", snapshot="auto", query="")`
+Steps: click, set_value, type, toggle, check, uncheck, select (item), expand, collapse, focus, keys, wait_for.
+Targets: ref or `{"name", "role", "id", "class", "exact", "nth"}`.
+
+---
+
+## Meta
+
+### `pc_capabilities()` — every tool's category, level, purpose and when to use it, plus current settings.
+
+---
+
+## Coordinate Fallback Tools
 
 ### `take_screenshot(region=None)`
-- `region`: `{"left": x, "top": y, "width": w, "height": h}` (optional)
-Returns base64-encoded PNG. Always call this before GUI interactions.
+Off by default (`gui.allow_screenshots: false`); answers with a pointer to `ui_snapshot` / `browser_snapshot`.
 
 ### `click(x, y, button="left", double=False)`
 - `button`: "left" | "right" | "middle"

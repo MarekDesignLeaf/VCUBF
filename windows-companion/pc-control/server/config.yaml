@@ -2,7 +2,7 @@
 
 server:
   name: pc-control
-  version: "0.1.0"
+  version: "0.2.0"
 
 # Security settings
 security:
@@ -84,8 +84,38 @@ terminal:
   # Max execution time (seconds)
   timeout_seconds: 60
 
-# GUI control
+# Browser control (browser_* tools)
+browser:
+  # auto: attach to a running Edge/Chrome at cdp_url if it answers (your own
+  # logged-in profile, started by Launch-PcControlBrowser.ps1), otherwise launch
+  # a dedicated persistent profile. cdp: attach only. launch: dedicated profile only.
+  mode: auto
+  cdp_url: http://127.0.0.1:9222
+  # msedge | chrome | chromium (Playwright's own), or set executable_path
+  channel: msedge
+  executable_path: ""
+  # Empty: %LOCALAPPDATA%\VCUBF\Alfonzo\pc-control\browser-profile
+  profile_dir: ""
+  headless: false
+  # Playwright waits for elements by itself; these are upper limits, not delays.
+  default_timeout_ms: 5000
+  navigation_timeout_ms: 20000
+  # Most controls an AI gets per snapshot (narrow with query=...).
+  max_snapshot_elements: 120
+  # Skip these resource types for speed, e.g. [image, media, font]. Empty = load everything.
+  block_resources: []
+  # Never type into password fields: the user signs in themselves; the profile keeps the session.
+  allow_password_fill: false
+  # browser_eval runs arbitrary JavaScript in logged-in pages; off by default.
+  allow_eval: false
+  # Domains the browser and web_fetch must never open, e.g. [example.com]
+  blocked_domains: []
+
+# GUI control (coordinate fallback tools)
 gui:
+  # Screenshots are off: use ui_snapshot / browser_snapshot (text with refs).
+  allow_screenshots: false
+
   # Screenshot quality (1-100)
   screenshot_quality: 85
   screenshot_format: png

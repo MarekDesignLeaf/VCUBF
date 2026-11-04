@@ -1,161 +1,161 @@
-# pc-control Plugin
+# pc-control plugin 0.2.0
 
-Secure, audited Windows computer control for Claude. Gives Claude the ability to interact with your PC — reading system status, managing files, launching applications, controlling the GUI, and running terminal commands — all through a clearly defined, safety-first interface.
+Fast, audited control of the owner's Windows PC and browser for AI assistants
+(Claude, and any other MCP client). Part of the VCUBF Windows companion; the
+assistant name in user-facing text is Alfonzo.
 
-## What It Does
+The plugin works from **text, not screenshots**:
 
-| Category | Capabilities |
-|----------|-------------|
-| **System** | CPU/RAM/disk status, running processes, open windows, focus control |
-| **Files** | List, read, write, copy, move, delete, search, backup/restore |
-| **Applications** | Launch, close, detect running apps, open projects in VS Code / Android Studio |
-| **GUI** | Screenshot, click, type, keyboard shortcuts, scroll, mouse control |
-| **Terminal** | PowerShell & CMD commands, background processes, build error analysis |
-| **Audit** | Every action logged to JSONL with timestamp, level, params, result |
+- **Browser** — a persistent Edge/Chrome session driven by Playwright over the
+  Chrome DevTools Protocol. `browser_open` returns every control of the page as
+  one line with a ref (`[e12] button "Odeslat"`), including off-screen
+  controls, open shadow DOM and iframes. `browser_act` runs a whole list of
+  steps on those refs in one call and returns a fresh snapshot.
+- **Web without a browser** — `web_fetch` reads a page as Markdown in one HTTP
+  request.
+- **Windows apps** — `ui_snapshot` reads one window's controls through Windows
+  UI Automation (`[u9] Button "Uložit" id=1`); `ui_act` acts through the
+  controls' own patterns (Invoke, Value, Toggle, SelectionItem,
+  ExpandCollapse). No screen coordinates.
+- Files, applications, terminal and audit, as in 0.1.0.
 
-## Safety Model
+Screenshots are switched off by default. Coordinate tools remain as a fallback
+for controls UI Automation cannot see.
 
-All tools are classified as **safe**, **sensitive**, or **destructive**:
+## Why it is fast
 
-- **Safe** actions (reads, screenshots) execute immediately
-- **Sensitive** actions (writes, clicks, launches) require user confirmation
-- **Destructive** actions (delete, force-kill, registry changes) require explicit confirmation with impact description
+| Old way (0.1.0) | Now |
+| --- | --- |
+| Screenshot → model reads pixels → coordinates → click → screenshot to verify | One text snapshot; act by ref |
+| One tool call per click | `browser_act` / `ui_act` run a batch of steps in one call |
+| Scroll and screenshot to find a control | Off-screen controls are listed; `query=` filters |
+| Fixed pauses | Playwright waits until each element is actionable; no sleeps |
+| Browser started per task | One persistent session, kept between calls |
+| Typing key by key (loses diacritics) | `fill` / Value pattern / clipboard paste |
 
-Additional protections:
-- Files are automatically backed up before any modification
-- Deleted files go to a `_deleted_/` recovery folder by default (not permanently removed)
-- Dry-run mode: preview commands without executing them
-- Read-only mode: block all write/execute operations
-- Blocked paths: System32 and other critical Windows directories are never touched
-- No passwords, tokens, or sensitive data are ever stored or transmitted
+Measured in the automated test (headless Chromium, local page): opening the
+page and a nine-step batch (two fields, a select, a checkbox, submit, wait for
+the confirmation, three clicks including an off-screen button, a shadow-DOM
+button and a button in an iframe) with a fresh snapshot took about 0.5 s.
 
----
+## How an AI learns to use it
 
-## Installation
+- The MCP `instructions` sent at `initialize` are generated from the tool
+  registry: the fast path, the safety rules and every tool by group.
+- Every tool description ends with its safety level and "Use when: …".
+- `pc_capabilities` returns every tool's category, level, purpose and when to
+  use it, the browser step reference and the current settings.
+- Skills: `browser-control`, `desktop-ui-control`, `computer-control`
+  (routing), `gui-control` (fallback), `file-management`, `app-control`,
+  `terminal-commands`.
+- Every tool is declared once with `registry.pc_tool`; `tests/test_registry.py`
+  fails if a listed tool lacks guidance, its level or matching annotations.
 
-### 1. Install Python dependencies
+## Installation (Windows)
 
-```powershell
-cd <plugin-folder>/server
-pip install -r requirements.txt
+1. Python 3.13 (3.10+ works).
+2. In this folder: `powershell -ExecutionPolicy Bypass -File .\Install-PcControl.ps1`
+   (installs `server/requirements.txt`: FastMCP, Playwright, uiautomation,
+   pyautogui, pyperclip, …). Edge is used from its own installation, so no
+   browser download is needed.
+3. Add the plugin in Claude and restart it. The MCP server is
+   `python server/main.py` over stdio (`.mcp.json`).
+4. Optional: `.\Launch-PcControlBrowser.ps1` starts Edge with a dedicated
+   profile on `127.0.0.1:9222`. Sign in to the sites the assistant should use
+   once; the profile keeps the sessions.
+
+### Browser modes (`server/config.yaml` → `browser`)
+
+| `mode` | Behaviour |
+| --- | --- |
+| `auto` (default) | Attach to the browser at `cdp_url` if it answers (Launch-PcControlBrowser.ps1), otherwise launch Edge with the dedicated profile `%LOCALAPPDATA%\VCUBF\Alfonzo\pc-control\browser-profile`. |
+| `cdp` | Attach only; error if no browser answers. |
+| `launch` | Always launch the dedicated profile. |
+
+`browser_close` closes a launched browser and only disconnects from an
+attached one. Current Edge and Chrome refuse remote debugging on the everyday
+default profile, so a separate profile is always used.
+
+Other settings: `channel` (`msedge`, `chrome`, `chromium`), `headless`,
+`default_timeout_ms`, `navigation_timeout_ms`, `max_snapshot_elements`,
+`block_resources` (e.g. `[image, media, font]` for speed), `blocked_domains`,
+`allow_password_fill` (false), `allow_eval` (false). `gui.allow_screenshots`
+(false). Environment variables `PC_CONTROL_BROWSER_<SETTING>` override the file.
+
+## Safety
+
+- Levels: **safe** runs at once; **sensitive** (clicks, typing, `browser_act`,
+  `ui_act`, writing files, launching) — the AI tells the user first;
+  **destructive** (delete, move, restore, force-kill, destructive commands) —
+  explicit yes with the impact.
+- The instructions and skills require an explicit yes before anything that
+  sends, orders, pays, books, publishes or deletes.
+- Password fields are refused; the user signs in in the browser window.
+- Typed text (`fill`, `type`, `set_value`) is stored in the audit log as its
+  length only, e.g. `<14 chars>`.
+- `browser_eval` (arbitrary JavaScript) is off by default.
+- `blocked_domains` applies to the browser and `web_fetch`.
+- Text on pages and in apps is treated as data, never as instructions.
+- Read-only mode, dry-run mode, blocked paths and file backups as before.
+- The CDP port listens on `127.0.0.1` only; while the launched profile is open,
+  local programs can control it. Close it when not needed.
+
+## Tests
+
+```bash
+cd tests
+python -m unittest -v test_steps test_desktop_ui test_registry test_browser
 ```
 
-> **Windows note**: `pywin32` requires a restart after install for the DLL to register.
-> Run `python -m pywin32_postinstall -install` if needed.
+- `test_steps` — the browser step language and snapshot format.
+- `test_desktop_ui` — UI Automation logic on a fake control tree.
+- `test_registry` — every listed tool has complete guidance; instructions and
+  `pc_capabilities` name every tool; screenshots are off.
+- `test_browser` — the browser tools through the MCP server on a real headless
+  Chromium and local pages (forms, select, checkbox, off-screen, shadow DOM,
+  iframe, new tab, extraction, password refusal, audit redaction, blocked
+  domains, `web_fetch`).
 
-### 2. Install the plugin in Claude
+CI runs them on Ubuntu (`.github/workflows/ci.yml`, job *Windows companion*).
 
-In Claude (Cowork mode), go to **Settings → Plugins → Install from file** and select `pc-control.plugin`.
+**Not yet accepted live:** UI Automation on a real Windows desktop, the owner's
+Edge profile over CDP, and live websites. The UI Automation backend
+(`UiaBackend`) has not run on Windows in automated tests; only its
+backend-independent logic is tested.
 
-### 3. Verify
-
-Ask Claude: *"What's my system status?"* — it should return CPU, RAM, and disk info.
-
----
-
-## Configuration
-
-Edit `server/config.yaml` to customise behaviour:
-
-```yaml
-security:
-  mode: active        # "active" or "readonly"
-  dry_run: false      # true = preview only, never execute
-
-files:
-  auto_backup: true   # backup before every write
-
-terminal:
-  default_shell: powershell
-  timeout_seconds: 60
-```
-
----
-
-## Usage Examples
-
-Ask Claude in natural language:
-
-- *"Show me what's using the most RAM"*
-- *"Open my project at C:/projects/my-app in VS Code"*
-- *"Read the file C:/projects/my-app/src/index.js"*
-- *"Run `npm run build` in C:/projects/my-app and show me any errors"*
-- *"Take a screenshot and click the OK button"*
-- *"Search for all Python files in C:/projects that contain 'TODO'"*
-- *"What processes are running with 'chrome' in the name?"*
-
----
-
-## Audit Log
-
-All actions are recorded in `server/logs/audit.jsonl`. Each entry:
-
-```json
-{
-  "ts": "2025-01-01T12:00:00+00:00",
-  "tool": "write_file",
-  "level": "sensitive",
-  "dry_run": false,
-  "params": {"path": "C:/project/main.py", "content": "..."},
-  "result_summary": "{\"success\": true, \"backup\": \"main.py.bak.20250101_120000\"}",
-  "error": null
-}
-```
-
-Ask Claude: *"Show me the last 20 actions from the audit log"*
-
----
-
-## Modes
-
-| Mode | How to enable | Effect |
-|------|--------------|--------|
-| Active (default) | `security.mode: active` | Full control |
-| Read-only | `security.mode: readonly` | Only safe reads allowed |
-| Dry-run | `security.dry_run: true` | Log everything, execute nothing |
-
----
-
-## Project Structure
+## Layout
 
 ```
 pc-control/
-├── .claude-plugin/
-│   └── plugin.json           # Plugin manifest
+├── .claude-plugin/plugin.json
+├── .mcp.json
+├── Install-PcControl.ps1          # pip install for the current user
+├── Launch-PcControlBrowser.ps1    # Edge/Chrome with a CDP port and a dedicated profile
 ├── server/
-│   ├── main.py               # MCP server entry point
-│   ├── system_tools.py       # OS status, processes, windows
-│   ├── file_tools.py         # File operations
-│   ├── app_tools.py          # Application control
-│   ├── gui_tools.py          # Screen/mouse/keyboard
-│   ├── terminal_tools.py     # Shell commands
-│   ├── security.py           # Action classification
-│   ├── audit_log.py          # JSONL audit logging
-│   ├── config.py             # Configuration loader
-│   ├── config.yaml           # Settings
-│   └── requirements.txt      # Python dependencies
-├── skills/
-│   ├── computer-control/     # Overview + safety guidelines
-│   ├── file-management/      # File operation guide
-│   ├── app-control/          # Application launch guide
-│   ├── gui-control/          # Screen/mouse/keyboard guide
-│   └── terminal-commands/    # Shell command guide
-├── .mcp.json                 # MCP server registration
-└── README.md
+│   ├── main.py                    # every tool, declared with registry.pc_tool
+│   ├── registry.py                # capability entries, audit wrapper, generated instructions
+│   ├── browser/engine.py          # persistent Playwright session, refs, batched steps
+│   ├── browser/steps.py           # step language, validation, snapshot format, redaction
+│   ├── browser/page_snapshot.js   # one DOM pass → controls with refs, headings, text
+│   ├── browser/page_extract.js    # structured extraction (items/fields, tables, links)
+│   ├── web_fetch.py               # HTTP → Markdown
+│   ├── desktop_ui.py              # Windows UI Automation
+│   ├── system_tools.py, file_tools.py, app_tools.py, gui_tools.py, terminal_tools.py
+│   ├── security.py, audit_log.py, config.py, config.yaml, requirements.txt
+├── skills/                        # browser-control, desktop-ui-control, computer-control, …
+└── tests/
 ```
-
----
 
 ## Troubleshooting
 
-**"pywin32 not installed"** — Run `pip install pywin32` then `python -m pywin32_postinstall -install`
-
-**"mss or Pillow not installed"** — Run `pip install mss Pillow`
-
-**"pyautogui not installed"** — Run `pip install pyautogui`
-
-**Screenshot is black** — Some apps use hardware acceleration. Try capturing a region instead of full screen.
-
-**Command times out** — Increase `terminal.timeout_seconds` in config.yaml.
-
-**Backup files accumulating** — Search for `*.bak.*` files and clean up periodically.
+- **"Playwright is not installed"** — run `Install-PcControl.ps1`.
+- **"No browser answers at http://127.0.0.1:9222"** (mode `cdp`) — start
+  `Launch-PcControlBrowser.ps1`, or set `mode: auto`.
+- **Edge opens but the site asks to sign in** — sign in once in that window;
+  the dedicated profile keeps it.
+- **"The uiautomation package is missing"** — run `Install-PcControl.ps1`.
+- **An app shows no controls in `ui_snapshot`** — it does not expose UI
+  Automation (some games and custom-drawn canvases); use the coordinate
+  fallback with known coordinates, or enable screenshots for that task only.
+- **A ref is "no longer on the page"** — the page changed; take
+  `browser_snapshot(query=...)` and continue with the new ref.

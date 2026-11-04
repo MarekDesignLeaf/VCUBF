@@ -53,4 +53,4 @@ Force-killing (`force=True`) is classified as DESTRUCTIVE — always confirm wit
 
 ## After Launch
 
-Always call `take_screenshot()` after launching an app to confirm the window appeared and is in the expected state before proceeding with GUI interactions.
+After launching an app, call `ui_snapshot(window="exe:<name>.exe")` to confirm the window appeared and read its controls as text; then act with `ui_act` (see the desktop-ui-control skill). Screenshots are off by default.

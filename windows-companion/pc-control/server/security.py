@@ -49,6 +49,14 @@ _TOOL_LEVELS: dict[str, ActionLevel] = {
 }
 
 
+def register_level(tool_name: str, level: ActionLevel) -> None:
+    """Called by registry.pc_tool: the declared level of every registered tool."""
+    known = _TOOL_LEVELS.get(tool_name)
+    if known is not None and known != level:
+        raise ValueError(f"{tool_name} is declared {level.value} but security.py says {known.value}")
+    _TOOL_LEVELS[tool_name] = level
+
+
 def classify_tool(tool_name: str, params: dict[str, Any] | None = None) -> ActionLevel:
     """
     Return the ActionLevel for a tool invocation.

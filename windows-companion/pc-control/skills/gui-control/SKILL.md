@@ -1,67 +1,49 @@
 ---
 name: gui-control
 description: >
-  This skill should be used when the user asks to "click on something",
-  "take a screenshot", "type text into an app", "press a keyboard shortcut",
-  "scroll down", "move the mouse", or any request involving visual interaction
-  with the screen, mouse, or keyboard on their Windows computer.
+  Fallback only. Use when a control cannot be reached by ui_act or
+  browser_act (custom-drawn canvases, games, apps without UI Automation), when
+  the user explicitly asks for a screenshot, or to move the mouse or press a
+  shortcut in the focused window. For normal app and web work use the
+  desktop-ui-control and browser-control skills.
 metadata:
-  version: "0.1.0"
+  version: "0.2.0"
 ---
 
-# GUI Control
+# GUI Control — coordinate fallback
 
-## The Screenshot-First Rule
+Use these tools only when `ui_snapshot` / `browser_snapshot` cannot see the
+control. They work on screen coordinates, which are slow to obtain and break
+when windows move.
 
-**Always take a screenshot before any click or keyboard action.**
-This ensures you know the current screen state and can identify correct coordinates.
+## Screenshots are off by default
 
-```
-take_screenshot()   → returns base64 PNG; examine it carefully
-```
+`take_screenshot` answers with an error unless `gui.allow_screenshots: true` is
+set in `server/config.yaml`. Read windows with `ui_snapshot` and pages with
+`browser_snapshot` instead: they return the controls as text with refs.
 
-For a specific region: `take_screenshot(region={"left": 0, "top": 0, "width": 800, "height": 600})`
-
-## Click Workflow
-
-```
-1. take_screenshot()             → identify target coordinates
-2. focus_window(title_contains=<app name>)
-3. take_screenshot()             → confirm window is active
-4. click(x=<x>, y=<y>)
-5. take_screenshot()             → verify the click had the expected effect
-```
-
-## Keyboard Shortcuts
+## Keyboard shortcuts
 
 ```
 press_keys("ctrl+c")             → copy
 press_keys("ctrl+v")             → paste
 press_keys("ctrl+z")             → undo
 press_keys("alt+f4")             → close window
-press_keys("win+d")              → show desktop
 press_keys("ctrl+a,ctrl+c")      → select all, then copy (sequential)
-press_keys("enter")              → press Enter
-press_keys("escape")             → press Escape
-press_keys("tab")                → Tab
-press_keys("ctrl+shift+p")       → VS Code command palette
+press_keys("enter") / ("escape") / ("tab")
 ```
 
-## Typing Text
+`ui_act(window=..., steps=[{"keys": "ctrl+s"}])` does the same for a named
+window without focusing it by hand.
 
-Short strings (under ~100 chars): `type_text(text="hello world")`
-Long strings or special characters: `type_text_fast(text="long content...")` (uses clipboard)
+## Typing text
 
-## Scrolling
+`ui_act` with `{"type": true, "value": "..."}` pastes into the focused control
+and keeps diacritics. `type_text` types ASCII key by key; `type_text_fast`
+pastes through the clipboard.
 
-```
-scroll(x=960, y=540, clicks=3, direction="down")   → scroll down in the middle of screen
-scroll(x=960, y=540, clicks=5, direction="up")     → scroll back up
-```
+## Coordinates
 
-## Safety Considerations
-
-- **Failsafe is enabled by default**: moving the mouse to the top-left corner aborts automation.
-- **Pause between actions**: the plugin inserts a 100ms pause between GUI calls to reduce race conditions.
-- **After every action**: take a screenshot to verify the result before proceeding.
-- **If something goes wrong**: press `press_keys("escape")` or `press_keys("ctrl+z")` to undo.
+`click(x, y)`, `scroll(x, y, …)`, `move_mouse(x, y)` need coordinates you
+already know (a fixed layout the user described). Failsafe is enabled: moving
+the mouse to the top-left corner aborts automation.

@@ -4,7 +4,7 @@
 
 ```
 1. open_project(project_path="C:/Users/marek/projects/my-app")
-2. take_screenshot()  — confirm VS Code opened with correct folder
+2. ui_snapshot(window="Visual Studio Code") — confirm the folder opened
 ```
 
 ## 2. Edit a source file
@@ -26,19 +26,37 @@
    → review structured errors
 ```
 
-## 4. GUI interaction workflow
+## 4. Fill a web form (browser)
 
 ```
-1. take_screenshot()                             — see current state
-2. focus_window(title_contains="Chrome")
-3. take_screenshot()                             — confirm window is active
-4. click(x=<url_bar_x>, y=<url_bar_y>)
-5. press_keys("ctrl+a")                          — select all
-6. type_text("https://example.com")
-7. press_keys("enter")
-8. take_screenshot()                             — confirm navigation
+1. browser_open(url="https://portal.example/order")       — controls as [eN] lines
+2. browser_act(steps=[
+     {"fill": "e3", "value": "<name the user gave>"},
+     {"select": "e5", "label": "<option the user chose>"},
+     {"check": "e6"}
+   ], snapshot="auto")                                      — filled, fresh snapshot back
+3. Tell the user what will be submitted; wait for an explicit yes.
+4. browser_act(steps=[{"click": "e7"}, {"wait_for": {"text": "<confirmation text>"}}])
 ```
 
+## 5. Save a document from a Windows app (UI Automation)
+
+```
+1. ui_act(window="exe:notepad.exe", steps=[{"keys": "ctrl+s"}], snapshot="none")
+2. ui_snapshot(window="Uložit jako")                        — [uN] Edit "Název souboru:" …
+3. ui_act(window="Uložit jako", steps=[
+     {"set_value": {"name": "Název souboru"}, "value": "nabidka.txt"},
+     {"click": {"name": "Uložit", "role": "Button", "exact": true}}
+   ])
+```
+
+## 6. Collect data from a website
+
+```
+1. web_fetch(url)                                           — enough for static pages
+2. Otherwise: browser_open(url), then
+   browser_extract(items=".result", fields={"title": "h3", "url": "a@href"})
+```
 ## 5. Kill a stuck process
 
 ```
