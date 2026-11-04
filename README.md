@@ -132,7 +132,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 108 test files, including database integration tests and checks that only
+- **Tests**: 109 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -968,7 +968,14 @@ Nothing is e-mailed, messaged or published through the gateway, and the only del
 `delete_contact_permanently`; recording payments, deleting clients and sending quotes or
 invoices are not exposed. WhatsApp sender review reads (`list_whatsapp_senders`,
 `get_whatsapp_sender`) are open to every connection with `crm.read` and the
-administrator's switch for reading WhatsApp messages. `initialize` reports
+administrator's switch for reading WhatsApp messages. Every connection also sees
+`describe_capabilities`, which reads no company records, writes nothing (not even an
+audit entry) and returns machine-readable metadata for every tool the server has, including
+those the connection cannot see and why (scope, permission, administrator switch,
+confirmation, risk class, side effects, limitations); the `initialize` instructions end
+with a summary generated from the same catalogue as `tools/list`, naming every tool. The
+catalogue is fingerprinted in the append-only `MCP_TOOLSET_FINGERPRINTS` ledger, so any tool
+change fails CI until a new revision is appended (`docs/MCP_CAPABILITY_METADATA.md`). `initialize` reports
 `serverInfo.version` as `<catalogue version>+<MCP_TOOLSET_REVISION>`, so a client can see
 that its stored tool list is stale; ChatGPT must refresh (or disconnect and reconnect) the
 connector to see new tools, and a connection approved read-only must be approved again
@@ -992,7 +999,8 @@ switched off continues read only. Codes and refresh tokens are stored as hashes
 bound to the `/mcp` resource that every other route refuses. A replayed code or refresh
 token revokes the chain; a password change ends every connection. The issuer is
 `MCP_PUBLIC_URL`, or the request origin when unset. Covered by `tests/mcpGateway.test.ts`,
-`tests/mcpOAuth.test.ts`, `tests/mcpWrite.test.ts` and `tests/mcpSenderReview.test.ts`; no
+`tests/mcpOAuth.test.ts`, `tests/mcpWrite.test.ts`, `tests/mcpSenderReview.test.ts` and
+`tests/mcpCapabilities.test.ts`; no
 live ChatGPT or Claude connection has been accepted, for reading or writing.
 
 ## What's deliberately NOT here yet

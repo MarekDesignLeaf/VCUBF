@@ -25,6 +25,15 @@ The panel deliberately has no microphone switch, and it starts nothing that belo
 
 Native Windows tray companion for VCUBF. It uses the locally installed Windows Speech Recognizer for the configurable wake word (`Alfonzo` by default), then starts a hands-free Realtime conversation or falls back to the audited text-assistant path. The editable review dialog remains available when hands-free mode is disabled.
 
+## PC and browser control plugin (`pc-control/`)
+
+The `pc-control` folder is the Claude plugin that lets an assistant operate
+this PC: the browser through text snapshots with element refs and batched
+actions (Playwright over CDP, Edge with a dedicated profile), Windows apps
+through UI Automation, web pages as Markdown, files, apps and the terminal —
+without screenshots. Install with `pc-control\Install-PcControl.ps1`; details,
+safety rules and tests in `pc-control/README.md`.
+
 ## Install
 
 Open Windows PowerShell in this directory and run:

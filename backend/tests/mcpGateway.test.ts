@@ -7,7 +7,7 @@ import { isReadCommand } from "../src/agents/agentProposal.js";
 import { AGENT_TOOL_CATALOGUE } from "../src/agents/toolCatalogue.js";
 import { CANONICAL_COMMAND, parseTextCommand } from "../src/lib/commandParser.js";
 import { EMMA_EXECUTABLE_ACTIONS } from "../src/lib/emmaExecutableActionCatalogue.js";
-import { MCP_READ_COMMAND_TOOL, mcpTools, readCommandForms } from "../src/modules/mcp/routes.js";
+import { MCP_DESCRIBE_TOOL, MCP_READ_COMMAND_TOOL, mcpTools, readCommandForms } from "../src/modules/mcp/routes.js";
 import { resetDb, seedCompanyAndAdmin, TEST_COMPANY_ID } from "./setup.js";
 
 // Read-only MCP gateway — voice assistant master document 1.1a, step P2a.
@@ -81,7 +81,8 @@ describe("MCP gateway (read only)", () => {
     assert.ok(expected.length > 0);
     // Plus the gateway's own reading tools for the WhatsApp sender review (issue #74).
     const gatewayReads = ["list_whatsapp_senders", "get_whatsapp_sender"];
-    assert.deepEqual(tools.map((tool) => tool.name).sort(), [MCP_READ_COMMAND_TOOL, ...gatewayReads, ...expected.map((tool) => tool.name)].sort());
+    // And the metadata tool every connection sees (capability metadata, 3 Nov 2026).
+    assert.deepEqual(tools.map((tool) => tool.name).sort(), [MCP_DESCRIBE_TOOL, MCP_READ_COMMAND_TOOL, ...gatewayReads, ...expected.map((tool) => tool.name)].sort());
     for (const tool of tools) {
       assert.equal(tool.inputSchema.type, "object", tool.name);
       assert.equal(tool.annotations.readOnlyHint, true, tool.name);

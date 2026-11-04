@@ -112,6 +112,10 @@ GitHub Actions CI exists and runs backend build, Prisma generation, embedded Pos
 
 Node 22 is the current validated CI runtime. Node 24 remains a target only until a real migration is completed and verified.
 
+## MCP capability metadata rule
+
+Every Secretary MCP tool must carry machine-readable capability metadata generated from its own definition (`backend/src/modules/mcp/capabilities.ts`, `routes.ts`, `writeTools.ts`). Never hand-write a separate tool list. When the MCP tool set changes in any way, append a new revision to `MCP_TOOLSET_FINGERPRINTS` (never edit a shipped one) and update `docs/MCP_CAPABILITY_METADATA.md`; `tests/mcpCapabilities.test.ts` fails until you do. See `docs/MCP_CAPABILITY_METADATA.md`.
+
 ## Testing expectations
 
 For backend work, run or update:

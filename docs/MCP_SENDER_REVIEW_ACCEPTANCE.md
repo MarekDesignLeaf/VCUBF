@@ -63,8 +63,10 @@ that. Nothing about the web login was changed or bypassed.
    on `backend` (they are already, if `create_contact` is offered today).
 3. In ChatGPT, open the Secretary connector settings and **refresh** the connector's
    actions; if the new tools do not appear, **disconnect and connect again**. The
-   `initialize` answer now reports `serverInfo.version` ending in
-   `+2026-11-03.whatsapp-sender-review`. When reconnecting, approve **reading and writing**
+   `initialize` answer reported `serverInfo.version` ending in
+   `+2026-11-03.whatsapp-sender-review` for this change; since the capability metadata
+   change it ends in the latest revision of `MCP_TOOLSET_FINGERPRINTS`
+   (`+2026-11-03.capability-metadata`, see `docs/MCP_CAPABILITY_METADATA.md`). When reconnecting, approve **reading and writing**
    (tick the writing box), otherwise only the two read tools appear.
 4. Claude: remove and re-add the custom connector the same way, if used.
 
@@ -74,7 +76,8 @@ Use only the owner's account. Do not decide about real senders or delete real co
 during acceptance unless the owner explicitly asks for that specific record.
 
 1. **Discovery** — ask the assistant to list Secretary tools. Expect the seven tools above
-   plus `confirm_action` and `cancel_action`. Record the tool names.
+   plus `confirm_action` and `cancel_action` (and `describe_capabilities`, which describes
+   them all). Record the tool names.
 2. **Read** — "List the WhatsApp senders waiting for review." Expect
    `list_whatsapp_senders` with the source name, counts by status and senders sorted with
    work-related candidates first. Expect no browser window and no Secretary password prompt.
