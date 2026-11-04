@@ -115,6 +115,7 @@ Targets: ref or `{"name", "role", "id", "class", "exact", "nth"}`.
 
 ## Meta
 
+### `pc_status()` — read-only health check: version, Python, OS, packages, config, audit log folder, browser and UI Automation availability, problems with fixes.
 ### `pc_capabilities()` — every tool's category, level, purpose and when to use it, plus current settings.
 
 ---

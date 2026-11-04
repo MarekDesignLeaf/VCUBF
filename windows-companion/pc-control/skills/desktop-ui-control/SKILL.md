@@ -10,7 +10,7 @@ description: >
   as text with refs and acts through the controls' own patterns: no
   screenshots, no coordinates.
 metadata:
-  version: "0.2.0"
+  version: "0.2.1"
 ---
 
 # Windows apps — UI Automation, no screenshots

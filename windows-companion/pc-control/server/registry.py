@@ -172,5 +172,7 @@ def instructions(version: str) -> str:
         if names:
             lines.append(f"{label}: {', '.join(names)}.")
     lines.append("")
-    lines.append("Call pc_capabilities for every tool's level, purpose and when to use it, and the current settings.")
+    lines.append("Call pc_capabilities for every tool's level, purpose and when to use it, and the current settings. "
+                 "If a tool fails or the browser or UI Automation seems unavailable, call pc_status (read-only health check) "
+                 "and tell the user the problems it lists.")
     return "\n".join(lines)

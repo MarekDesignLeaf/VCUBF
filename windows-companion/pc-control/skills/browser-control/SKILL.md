@@ -9,7 +9,7 @@ description: >
   persistent Edge/Chrome session of the pc-control plugin through text
   snapshots with element refs: no screenshots, no scrolling to look.
 metadata:
-  version: "0.2.0"
+  version: "0.2.1"
 ---
 
 # Browser control — fast, text only

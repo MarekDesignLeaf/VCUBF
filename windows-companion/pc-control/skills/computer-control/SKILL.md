@@ -8,7 +8,7 @@ description: >
   files, applications, or terminal. Also use when the user asks about what the
   plugin can do or how to use it safely.
 metadata:
-  version: "0.2.0"
+  version: "0.2.1"
 ---
 
 # PC Control — Overview and Safety Guidelines
@@ -46,7 +46,9 @@ Before calling any SENSITIVE or DESTRUCTIVE tool, tell the user what you are abo
 | Start / stop programs | `launch_app`, `close_app` | app-control |
 | Control UI Automation cannot see | `click(x, y)`, `press_keys` | gui-control (fallback) |
 
-Not sure? Call `pc_capabilities` — it lists every tool with its level, purpose
+Something fails or the connection looks broken? Call `pc_status` first: it says
+what is missing and how to fix it, and whether the server runs on the user's PC
+at all. Not sure which tool fits? Call `pc_capabilities` — it lists every tool with its level, purpose
 and when to use it, plus the current settings.
 
 ## Core Workflow
@@ -64,7 +66,7 @@ and when to use it, plus the current settings.
 
 ## Available Tool Groups
 
-- **Meta**: `pc_capabilities`
+- **Meta**: `pc_status`, `pc_capabilities`
 - **Browser**: `browser_open`, `browser_snapshot`, `browser_act`, `browser_read`, `browser_extract`, `browser_tabs`, `browser_eval` (off by default), `browser_close`
 - **Web without a browser**: `web_fetch`
 - **Windows apps (UI Automation)**: `ui_windows`, `ui_snapshot`, `ui_act`

@@ -1,4 +1,4 @@
-# pc-control plugin 0.2.0
+# pc-control plugin 0.2.1
 
 Fast, audited control of the owner's Windows PC and browser for AI assistants
 (Claude, and any other MCP client). Part of the VCUBF Windows companion; the
@@ -43,6 +43,14 @@ button and a button in an iframe) with a fresh snapshot took about 0.5 s.
 - The MCP `instructions` sent at `initialize` are generated from the tool
   registry: the fast path, the safety rules and every tool by group.
 - Every tool description ends with its safety level and "Use when: …".
+- `pc_status` is a read-only health check: version, Python, OS, installed
+  packages, config, audit log folder, browser (CDP port, Edge/Chrome found) and
+  UI Automation availability, with the exact problems and how to fix them.
+- The MCP server starts through `server/launch.py` (standard library only).
+  If the server's packages are missing or it fails to start, it does not
+  close the connection: it serves only `pc_status`, and its instructions say
+  what is wrong, so the AI can tell the user instead of seeing
+  "Connection closed".
 - `pc_capabilities` returns every tool's category, level, purpose and when to
   use it, the browser step reference and the current settings.
 - Skills: `browser-control`, `desktop-ui-control`, `computer-control`
@@ -59,7 +67,10 @@ button and a button in an iframe) with a fresh snapshot took about 0.5 s.
    pyautogui, pyperclip, …). Edge is used from its own installation, so no
    browser download is needed.
 3. Add the plugin in Claude and restart it. The MCP server is
-   `python server/main.py` over stdio (`.mcp.json`).
+   `python server/launch.py` over stdio (`.mcp.json`). Ask the assistant to
+   call `pc_status` to check the installation.
+   The server must run on the PC it controls: a cloud Claude session starts it
+   in its own container, where it cannot reach this PC (`pc_status` says so).
 4. Optional: `.\Launch-PcControlBrowser.ps1` starts Edge with a dedicated
    profile on `127.0.0.1:9222`. Sign in to the sites the assistant should use
    once; the profile keeps the sessions.
@@ -104,13 +115,16 @@ Other settings: `channel` (`msedge`, `chrome`, `chromium`), `headless`,
 
 ```bash
 cd tests
-python -m unittest -v test_steps test_desktop_ui test_registry test_browser
+python -m unittest -v test_steps test_desktop_ui test_registry test_status test_browser
 ```
 
 - `test_steps` — the browser step language and snapshot format.
 - `test_desktop_ui` — UI Automation logic on a fake control tree.
 - `test_registry` — every listed tool has complete guidance; instructions and
   `pc_capabilities` name every tool; screenshots are off.
+- `test_status` — `pc_status`, and the launcher over real stdio: without the
+  packages it serves only `pc_status` with the exact error; with them it starts
+  the full server.
 - `test_browser` — the browser tools through the MCP server on a real headless
   Chromium and local pages (forms, select, checkbox, off-screen, shadow DOM,
   iframe, new tab, extraction, password refusal, audit redaction, blocked
@@ -132,6 +146,8 @@ pc-control/
 ├── Install-PcControl.ps1          # pip install for the current user
 ├── Launch-PcControlBrowser.ps1    # Edge/Chrome with a CDP port and a dedicated profile
 ├── server/
+│   ├── launch.py                  # entry point; pc_status-only fallback if packages are missing
+│   ├── status.py                  # read-only health check (standard library only)
 │   ├── main.py                    # every tool, declared with registry.pc_tool
 │   ├── registry.py                # capability entries, audit wrapper, generated instructions
 │   ├── browser/engine.py          # persistent Playwright session, refs, batched steps
@@ -148,6 +164,10 @@ pc-control/
 
 ## Troubleshooting
 
+- **Start with `pc_status`** — it lists the problems and the fix commands.
+- **"Connection closed" in Claude** — with 0.2.1 this should no longer happen
+  for missing packages; if it does, Python itself was not found: install
+  Python 3.13 and make sure `python` starts it (not the Microsoft Store stub).
 - **"Playwright is not installed"** — run `Install-PcControl.ps1`.
 - **"No browser answers at http://127.0.0.1:9222"** (mode `cdp`) — start
   `Launch-PcControlBrowser.ps1`, or set `mode: auto`.

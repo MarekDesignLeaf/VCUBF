@@ -30,8 +30,7 @@ from browser.engine import SESSION as BROWSER, BrowserError
 from desktop_ui import DESKTOP, redact_ui_steps
 from registry import REGISTRY, instructions, pc_tool
 from web_fetch import web_fetch as fetch_page
-
-VERSION = "0.2.0"
+from status import VERSION, collect_status
 SAFE, SENSITIVE, DESTRUCTIVE = sec.ActionLevel.SAFE, sec.ActionLevel.SENSITIVE, sec.ActionLevel.DESTRUCTIVE
 
 mcp = FastMCP(name="pc-control", instructions="pc-control", version=VERSION)
@@ -78,6 +77,16 @@ def pc_capabilities() -> dict:
         "browser_step_reference": browser_steps.__doc__,
         "instructions": mcp.instructions,
     }
+
+
+@pc_tool(mcp, category="meta", level=SAFE, audited=False,
+         use_when="A tool fails, the connection seems broken, or before relying on the browser or UI Automation tools.")
+def pc_status() -> dict:
+    """Read-only health check: version, Python, operating system, installed packages, config, audit log folder, browser and UI Automation availability, and the exact problems with how to fix them.
+
+    Changes nothing: no install, no start, no write.
+    """
+    return collect_status(server_running=True)
 
 
 # ─── Browser ─────────────────────────────────────────────────────────────────

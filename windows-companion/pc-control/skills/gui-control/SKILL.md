@@ -7,7 +7,7 @@ description: >
   shortcut in the focused window. For normal app and web work use the
   desktop-ui-control and browser-control skills.
 metadata:
-  version: "0.2.0"
+  version: "0.2.1"
 ---
 
 # GUI Control — coordinate fallback
