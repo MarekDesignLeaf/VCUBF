@@ -938,7 +938,9 @@ other arguments is refused; a call that fails after the change has started is ke
 `OUTCOME_UNKNOWN` and never run again with that key, because a service may already have
 saved its record; these keys live in a reserved `mcp:` namespace that no `Idempotency-Key`
 header may use, so the HTTP guard can never claim, expire or delete them; each direct write
-runs in one transaction that holds the company row FOR SHARE, and every query of the owning
+runs in one transaction that holds the company's emergency-stop advisory lock shared (the
+switch takes it exclusive and, being queued fairly, cannot be held off by a stream of
+writes; a write may last at most 15 s), and every query of the owning
 service joins it (an ambient transaction in `backend/src/db.ts`), so the write and its
 audit entry commit before any emergency stop can, or are rolled back, including when the
 transaction outlives its time limit): `create_client`, `update_client`, `create_contact`,
