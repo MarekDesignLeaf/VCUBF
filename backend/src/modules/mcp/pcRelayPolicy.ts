@@ -27,13 +27,14 @@
 
 export type PcRelayDecision =
   | { kind: "read" }
-  | { kind: "reviewed"; reviewReason: "destructive" | "irreversible"; effect: string; omitParams?: string[] }
+  | { kind: "reviewed"; reviewReason: "destructive" | "irreversible"; effect: string; protections?: string }
   | { kind: "not_offered"; reason: string };
 
-const SHELL = "Runs a program or command line on the PC. Secretary offers no shell or command execution; it stays a local tool of PC Control Plus.";
-const PC_SAFETY = "Changes the PC's own safety settings. Only the owner changes them, on the PC itself.";
+const SHELL = "Owner-local, pending review: runs an arbitrary command line on the PC. Secretary offers no unreviewed shell; named scripts the owner approved run with pc_run_approved_script.";
+const PC_SAFETY = "Owner-local, pending review: changes the PC's own safety settings (profile, remembered approvals), which guard every other PC step. The owner changes them on the PC itself.";
+const BACKUP_PROFILE = "The PC first saves a backup copy of an existing file in its backups folder, refuses paths outside its profile, and asks its owner on the PC.";
+const BACKUP_WORKSPACE = "The PC first saves a backup copy in its backups folder, works only inside the PC Control Plus workspace, and asks its owner on the PC.";
 const IMAGES = "Captures an image of the screen or a camera. Secretary never controls the PC from images and does not take pictures of the owner's PC or room; read the screen as text with pc_browser_snapshot or pc_ui_snapshot.";
-const NO_DELETION = "Deletes a file on the PC. The Secretary MCP gateway offers no deletion other than the guarded contact deletion (issue #74); delete files on the PC itself.";
 const KEYS = "Sends keyboard input to the window in front on the PC; read it first with pc_ui_snapshot.";
 const COORDINATES = "Acts at screen coordinates, the way screenshot-driven control does. PC control through Secretary works only from text state: use pc_ui_act (UI Automation refs) or pc_browser_act (page refs).";
 
@@ -59,8 +60,15 @@ export const PC_RELAY_POLICY: Record<string, PcRelayDecision> = {
   open_url: { kind: "reviewed", reviewReason: "irreversible", effect: "Opens the address in the PC's default browser." },
   write_workspace_text: { kind: "reviewed", reviewReason: "destructive", effect: "Writes (or overwrites) a text file in the PC Control Plus workspace." },
   write_file: {
-    kind: "reviewed", reviewReason: "irreversible", omitParams: ["content_base64"],
-    effect: "Writes (or overwrites) a text file on the PC where its profile allows it. Binary content is not offered through Secretary.",
+    kind: "reviewed", reviewReason: "irreversible", protections: BACKUP_PROFILE,
+    effect: "Writes (or overwrites) a file on the PC where its profile allows it, from text or base64 content (at most 2 MB).",
+  },
+  delete_file: { kind: "reviewed", reviewReason: "irreversible", protections: BACKUP_PROFILE, effect: "Deletes one regular file on the PC where its profile allows it." },
+  delete_workspace_file: { kind: "reviewed", reviewReason: "irreversible", protections: BACKUP_WORKSPACE, effect: "Deletes one file in the PC Control Plus workspace." },
+  run_approved_script: {
+    kind: "reviewed", reviewReason: "irreversible",
+    protections: "Only a script the owner placed in the PC's approved-scripts folder, named like name.ps1 or name.py; it runs without a shell, for at most 12 seconds, after the owner's approval on the PC.",
+    effect: "Runs one of the owner's approved scripts on the PC and returns its exit code and output.",
   },
   make_directory: { kind: "reviewed", reviewReason: "destructive", effect: "Creates a folder on the PC." },
   move_file: { kind: "reviewed", reviewReason: "irreversible", effect: "Moves or renames a file or folder on the PC." },
@@ -83,15 +91,12 @@ export const PC_RELAY_POLICY: Record<string, PcRelayDecision> = {
 
   // Never through Secretary.
   run_command: { kind: "not_offered", reason: SHELL },
+  permission_set: { kind: "not_offered", reason: PC_SAFETY },
+  approvals_reset: { kind: "not_offered", reason: PC_SAFETY },
   desktop_click: { kind: "not_offered", reason: COORDINATES },
   desktop_drag: { kind: "not_offered", reason: COORDINATES },
   desktop_scroll: { kind: "not_offered", reason: COORDINATES },
   desktop_batch: { kind: "not_offered", reason: COORDINATES },
-  run_approved_script: { kind: "not_offered", reason: SHELL },
-  delete_file: { kind: "not_offered", reason: NO_DELETION },
-  delete_workspace_file: { kind: "not_offered", reason: NO_DELETION },
-  permission_set: { kind: "not_offered", reason: PC_SAFETY },
-  approvals_reset: { kind: "not_offered", reason: PC_SAFETY },
   screenshot: { kind: "not_offered", reason: IMAGES },
   web_screenshot: { kind: "not_offered", reason: IMAGES },
   camera_list: { kind: "not_offered", reason: IMAGES },

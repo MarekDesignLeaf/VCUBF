@@ -65,6 +65,47 @@ jobs:
       - run: npm run lint
       - run: npm run build
 
+  # Secretary's PC Control Plus relay catalogue (pcpRelayCatalogue.generated.ts)
+  # is imported from one pinned, signed PC Control Plus release
+  # (windows-companion/pc-control/pcp-upstream.json). This checks out exactly
+  # that commit, verifies the release manifest's Ed25519 signature with the
+  # key pinned in VCUBF and every signed file hash, and fails when the committed
+  # catalogue is not what that release produces. pc-control-plus is private:
+  # the repository secret PCP_CATALOGUE_READ_TOKEN (a fine-grained token with
+  # read-only Contents access to that one repository) is required.
+  relay-catalogue:
+    name: PC Control Plus relay catalogue matches the pinned signed release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read the pin
+        id: pin
+        run: |
+          echo "repository=$(jq -r .repository windows-companion/pc-control/pcp-upstream.json)" >> "$GITHUB_OUTPUT"
+          echo "commit=$(jq -r .commit windows-companion/pc-control/pcp-upstream.json)" >> "$GITHUB_OUTPUT"
+      - name: The read token is configured
+        env:
+          TOKEN: ${{ secrets.PCP_CATALOGUE_READ_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Set the repository secret PCP_CATALOGUE_READ_TOKEN (read-only Contents on ${{ steps.pin.outputs.repository }}) so the relay catalogue can be checked."
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.pin.outputs.repository }}
+          ref: ${{ steps.pin.outputs.commit }}
+          token: ${{ secrets.PCP_CATALOGUE_READ_TOKEN }}
+          path: pcp-upstream
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Import the catalogue from the pinned release and compare
+        run: |
+          python -m pip install -r pcp-upstream/remote/requirements.txt cryptography
+          python windows-companion/pc-control/server/import_pcp_catalogue.py --pcp pcp-upstream --pin windows-companion/pc-control/pcp-upstream.json --check
+
   windows-companion:
     name: Windows companion tests and script syntax
     runs-on: ubuntu-latest
@@ -92,7 +133,7 @@ jobs:
         run: |
           python -m pip install "fastmcp>=2.12" "playwright>=1.50" "PyYAML>=6.0" "psutil>=5.9"
           python -m playwright install --with-deps chromium
-          python -m unittest -v test_steps test_desktop_ui test_registry test_status test_engine test_browser test_security
+          python -m unittest -v test_steps test_desktop_ui test_registry test_status test_engine test_browser test_security test_text_state_only
       # A syntax error in an installer or launcher would only show on the PC.
       - name: PowerShell scripts parse
         shell: pwsh

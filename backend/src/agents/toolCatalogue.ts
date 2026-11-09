@@ -51,6 +51,11 @@ export const TOOL_CATALOGUE_FINGERPRINTS = {
   // clear_voice_history and remove_voice_alias: the speaker's own voice
   // housekeeping, read back before anything is removed.
   "1.4.0": "fbdf123feb3941ee46cfcc7112be2f8a97c64d695b96eec3f10ab1a0686d6bbf",
+  // The owner's phone (phone_status, list_phone_sms, list_phone_chats,
+  // phone_message_status, send_phone_sms, reply_phone_chat), WhatsApp Business
+  // delivery status (whatsapp_message_status) and the owner's PC (list_pc_tools,
+  // read_pc, operate_pc): the agent gets the same contracts as the MCP gateway.
+  "1.5.0": "540926f3d679069cd42d284c04e9b1123ae49e49c563e94efaa943e7d1e3fa25",
 } as const satisfies Record<string, string>;
 
 const ledger = Object.entries(TOOL_CATALOGUE_FINGERPRINTS);

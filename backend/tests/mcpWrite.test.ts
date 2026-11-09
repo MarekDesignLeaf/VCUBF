@@ -956,7 +956,8 @@ describe("MCP gateway write access", () => {
         continue;
       }
       assert.doesNotMatch(name, /(^|_)send(_|$)|publish|email|payment/, name);
-      if (!reviewed.has(name)) assert.doesNotMatch(name, /delete|whatsapp/, name);
+      // The PC's file deletions are reviewed PC steps (asserted below), not record deletions.
+      if (!reviewed.has(name) && !name.startsWith("pc_")) assert.doesNotMatch(name, /delete|whatsapp/, name);
     }
     // PC steps are previewed too, and no generic execute or shell tool exists.
     for (const name of writeNames.filter((entry) => entry.startsWith("pc_"))) {

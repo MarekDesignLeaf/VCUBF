@@ -33,8 +33,11 @@
  *   within ten minutes, runs it, and only if the preview computed again at that
  *   moment is still identical. Permanent deletion also needs the record's exact
  *   name, typed by the user, passed to confirm_action; a wrong name consumes
- *   nothing. Nothing here sends or publishes, and the only deletion is the
- *   guarded delete_contact_permanently.
+ *   nothing. Nothing here e-mails or publishes; the messages it sends are the
+ *   phone and WhatsApp Business tools (deviceTools.ts, each previewed and sent
+ *   once). The only deletion of a CRM record is the guarded
+ *   delete_contact_permanently; PC file deletions are previewed PC steps the
+ *   PC backs up and approves again.
  * - Emergency stop. The gateway refuses every POST during a stop; the engine
  *   refuses to claim a review; and every write here checks it once more.
  */

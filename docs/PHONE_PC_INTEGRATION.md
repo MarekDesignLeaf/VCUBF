@@ -96,9 +96,20 @@ The PC tools come from two generated catalogues, never from a hand-written list:
 - the shared engine (`pc_engine.TOOLS` → `pcEngineCatalogue.generated.ts`);
 - the relay's own tools (files, desktop input, `web_*`, `ui_*`, goals, camera,
   permissions) → `pcpRelayCatalogue.generated.ts`, written by
-  `windows-companion/pc-control/server/import_pcp_catalogue.py --pcp <pc-control-plus>`
-  from the relay's MCP tool list (names, descriptions, JSON schemas, relay job ids) and
-  stamped with the relay's SHA-256. Run it again after every PC Control Plus release.
+  `windows-companion/pc-control/server/import_pcp_catalogue.py --pcp <checkout> --pin pcp-upstream.json`
+  from the relay's MCP tool list (names, descriptions, JSON schemas, relay job ids).
+
+**Pinned upstream with release provenance.** The import is pinned to one signed PC
+Control Plus release: `windows-companion/pc-control/pcp-upstream.json` names the
+repository, the commit of its `signed-release` branch, the release id and the release
+public key (pinned in VCUBF, never taken from the checkout). The importer refuses unless
+the checkout is exactly that commit, the release manifest's Ed25519 signature verifies
+with the pinned key for the pinned release id, and every signed file has its signed
+SHA-256; the control-loop modules it attests screenshot-free must be those signed files.
+The generated catalogue records the release (`upstream`), so the pin and the catalogue
+change together. CI job `relay-catalogue` checks out the pinned commit and fails when the
+committed catalogue is not what that release produces. Today: release `1b4dc2d`
+(`signed-release` `a267875`).
 
 Secretary's decision per relay tool is `backend/src/modules/mcp/pcRelayPolicy.ts`;
 `tests/mcpDevices.test.ts` fails when a relay tool has no decision or a decision names
@@ -107,8 +118,11 @@ no tool:
 | Decision | Tools | How it runs |
 | --- | --- | --- |
 | read | `system_info`, `monitors_list`, `list_directory`, `read_text`, `search_files`, `audit_tail`, `approvals_list`, `permission_status`, `web_tabs_list`, `web_list_fields`, `web_dom`, `ui_tree`, `ui_wait`, `web_goal_status`, `ui_goal_status` | at once under `read_pc`; leaves nothing running or queued |
-| reviewed | file writes and moves, keyboard input to the window in front (`desktop_type`, `desktop_hotkey`, `desktop_focus_window`), `web_*` steps, `ui_batch`, `web_goal_start` / `ui_goal_start` (they keep running on the PC) and their cancel | preview → yes → one call, `operate_pc`; never read-only; the PC asks its owner again |
-| not offered | `run_command`, `run_approved_script` (no shell), `desktop_click`, `desktop_drag`, `desktop_scroll`, `desktop_batch` (screen coordinates: screenshot-style control), `delete_file`, `delete_workspace_file` (the gateway offers no deletion but the guarded contact deletion, issue #74), `permission_set`, `approvals_reset` (the PC's own safety settings), `screenshot`, `web_screenshot`, `camera_*` (no images of the PC or room), `web_close`, and the relay's `ui_windows` (the engine's is offered) | listed in `describe_capabilities.notOffered` with the reason; refused before any request |
+| reviewed | `write_file` (text or base64; the preview shows binary content by size and SHA-256), `write_workspace_text`, `make_directory`, `move_file`, **`delete_file`, `delete_workspace_file`** (the PC first saves a backup copy, refuses paths outside its profile or workspace), **`run_approved_script`** (only a `name.ps1`/`name.py` from the owner's approved-scripts folder, no shell, 12 s), keyboard input to the window in front (`desktop_type`, `desktop_hotkey`, `desktop_focus_window`), `open_url`, `web_*` steps, `ui_batch`, `web_goal_start` / `ui_goal_start` (they keep running on the PC) and their cancel | preview (with the PC's protections) → yes → one call, `operate_pc`; never read-only; the PC asks its owner again |
+| not offered | owner-local, pending review: `run_command` (an unreviewed shell), `permission_set`, `approvals_reset` (the PC's own safety settings); by the text-state rule: `desktop_click`, `desktop_drag`, `desktop_scroll`, `desktop_batch` (screen coordinates), `screenshot`, `web_screenshot`, `camera_*` (images never drive automation); `web_close`; the relay's `ui_windows` (the engine's is offered) | listed in `describe_capabilities.notOffered` with the reason; refused before any request |
+
+This is not every PC function: the shell, the PC's safety switches, coordinate input
+and image capture stay on the PC, each with its reason, until reviewed.
 
 **Text state only (owner's rule).** PC control through Secretary works only from text
 state: page snapshots (DOM) and Windows UI Automation. No screenshot, camera or
@@ -120,8 +134,7 @@ PC Control Plus source that the whole loop takes no screenshots
 Automation, each with its modules' SHA-256). A loop whose source uses pixels, or that has
 no attestation, is not offered, whatever the policy says (`decideRelayJob`, tested).
 
-`write_file` is offered without `content_base64` (text only). Arguments are checked
-against the relay's own schema, strictly. The approval on the PC itself stays in force
+Arguments are checked against the relay's own schema, strictly. The approval on the PC itself stays in force
 for every sensitive step.
 
 ### Single owner, server-side tokens
@@ -132,6 +145,43 @@ its tools are not listed, are described as `connector_not_configured`, and every
 refused before any request, so no other company can use the upstream token. The tokens
 and upstream addresses live only in the backend's environment: they are never in
 `tools/list`, `initialize`, `describe_capabilities`, a preview or an answer (tested).
+
+## Secretary's own assistant and agent (control tower)
+
+The same contracts are executable actions (`emmaExecutableActionCatalogue.ts`), so the
+agent tool catalogue (ledger `TOOL_CATALOGUE_FINGERPRINTS` 1.5.0) and voice/text commands
+offer them through the existing deterministic engine. There is no second orchestrator. The owning
+service is `backend/src/services/deviceActionService.ts`:
+
+| Action | Contract | Agent kind |
+| --- | --- | --- |
+| `phone_status`, `list_phone_sms`, `list_phone_chats`, `phone_message_status` | `read_phone_messages` | read (runs at once) |
+| `send_phone_sms`, `reply_phone_chat` | `send_phone_sms`, `reply_phone_chat` | external, preview → yes |
+| `whatsapp_message_status` | `read_whatsapp_delivery_status` | read |
+| `list_pc_tools`, `read_pc` | `read_pc` | read |
+| `operate_pc` | `operate_pc` | administration, preview → yes |
+
+WhatsApp Business send and reply were already agent actions (`send_whatsapp`,
+`reply_whatsapp`). Every call goes through the caller's permission and the
+administrator's switch (`evaluateEmmaCommand`, at proposal and again at execution);
+a send or PC step answers `CONFIRMATION_REQUIRED` with the exact preview and runs only
+with the yes, after checking the emergency stop again. An SMS or chat reply carries the
+bridge request id fixed in its preview; an unknown outcome is audited as
+`OUTCOME_UNKNOWN`, never retried by itself, and settled by preparing the same message
+with `reuse_request_id` (accepted only for a request id Secretary recorded as unknown for
+this company; SMS Bridge de-duplicates on it). `read_pc` and `operate_pc` take only the
+catalogue tools above (`list_pc_tools` lists them with their parameters and what is not
+offered). The communication specialist plans with the phone tools. Tested in
+`tests/agentDevices.test.ts`.
+
+## WhatsApp Business delivery status
+
+Meta's status webhooks (sent, delivered, read, failed with Meta's error) are recorded
+from the verified webhook into `whatsapp_message_statuses`, one row per sent message,
+only ever moved forward. They are read with `get_whatsapp_message_status` (by message
+id), `get_outbound_message_status` (by the MCP confirmation) and the agent action
+`whatsapp_message_status`. A message Meta has not reported on is `not_reported`; nothing
+is guessed.
 
 ## Configuration (no secrets in the repository)
 
@@ -150,45 +200,37 @@ Set on the Railway `backend` service:
 Writes additionally need `MCP_GATEWAY_ENABLED=true`, `MCP_WRITE_ENABLED=true`
 (already used) and a connection approved for `secretary.write`.
 
-## Phases
+GitHub repository secret for VCUBF CI:
 
-1. **Done in this PR**: SMS Bridge and PC Control Plus adapters; phone reads
-   (status, SMS, notification chats) and reviewed sends (SMS, notification reply,
-   resubmit of an unknown outcome); every PC Control Plus tool (engine and relay)
-   with Secretary's decision per tool; operation status; catalogue integration with
-   `notOffered`; locale-free fingerprints; tests against local fake services.
-2. **Done in this PR**: official WhatsApp Business send and reply through MCP
-   (existing service and audit, 24-hour window, unknown outcome kept unknown).
-3. **Open**: see "Gaps".
+| Secret | Meaning |
+| --- | --- |
+| `PCP_CATALOGUE_READ_TOKEN` | a fine-grained token with read-only Contents access to `MarekDesignLeaf/pc-control-plus` only; the `relay-catalogue` job fails until it is set |
 
-## Gaps (explicit, not implemented here)
+Confirm that `release_public_key_b64` in `pcp-upstream.json` equals the
+`PCP_RELEASE_PUBLIC_KEY_B64` pinned on the PC.
 
-- **Agent (control-tower / shadow agent) access.** The five new contracts are
-  `EMMA_NON_DIRECT_ACTIONS` (interactive): the agent's tool catalogue
-  (`AGENT_TOOL_CATALOGUE`, ledger `TOOL_CATALOGUE_FINGERPRINTS`) does not offer
-  them, nor the two WhatsApp Business MCP tools. Giving the agent the same
-  contracts needs agent executors with the same preview → yes boundary and a new
-  catalogue ledger entry; not started.
-- **Connector source binding for phone and PC.** SMS Bridge and the PC relay are
-  bound to one company by environment (`*_COMPANY_ID`), not by a `ConnectorSource`
-  row an administrator enables in Secretary, as WhatsApp Business is. A
-  `ConnectorSource` binding (enable/disable, audit, only one company) is the next
-  step.
-- **CRM linking.** Sent and received phone SMS and notification chats are not
-  written to CRM communication records; they live on SMS Bridge.
-- **Status of a WhatsApp Business send.** There is no MCP read of Meta's delivery
-  status; an unknown send is checked in WhatsApp itself.
-- **Not offered by design** (listed in `describe_capabilities.notOffered`): shell
-  and scripts, file deletion, screenshots and camera, the PC's own safety switches,
-  `browser_eval`, `browser_close` / `web_close`.
-- **Relay texts.** The relay's own instructions and image, camera and coordinate tool
-  descriptions now state the text-state rule in pc-control-plus `e4adfd6`
-  (branch `claude/shared-pc-engine`, not merged). `pcpRelayCatalogue.generated.ts` is
-  imported from merged `main` `6b0aecf`; run the importer again after that change is
-  merged (only descriptions and the relay SHA change; Secretary does not offer those tools).
-- **Relay catalogue freshness.** `pcpRelayCatalogue.generated.ts` is checked only
-  when `import_pcp_catalogue.py --check` runs against a pc-control-plus checkout;
-  VCUBF CI has no such checkout.
+The migration `20261109120000_whatsapp_message_status` adds one table; it changes no
+existing row.
+
+## Scope of this PR
+
+Done: SMS Bridge, PC Control Plus and WhatsApp Business through the MCP gateway and
+through Secretary's own assistant and agent, under the same contracts; operation state
+and unknown outcomes for every send; WhatsApp delivery status; every PC Control Plus
+tool decided (engine and relay), PC control from text state only; the relay catalogue
+pinned to a signed release with a drift check in CI; locale-free fingerprints. Tests run
+against local fake services only.
+
+## Still open (not done here)
+
+- **Owner-local PC functions pending review:** `run_command`, `permission_set`,
+  `approvals_reset`. Coordinate input and image capture are not offered under the
+  text-state rule.
+- **`ConnectorSource` binding for phone and PC:** they are bound to one company by
+  environment (`*_COMPANY_ID`), not by a row an administrator enables in Secretary.
+- **CRM linking:** phone SMS and notification chats are not written to CRM
+  communication records.
+- **Live acceptance:** none of this is accepted live (see below).
 
 ## Live verification still required (owner / Codex)
 

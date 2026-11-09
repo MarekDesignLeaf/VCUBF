@@ -727,6 +727,19 @@ export const READ_PHONE_MESSAGES_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "PROVIDER_UNAVAILABLE", "CONNECTOR_AUTHORIZATION_REQUIRED", "VALIDATION_FAILED"],
 };
 
+// What Meta last reported (sent, delivered, read, failed) for a message the
+// company's WhatsApp Business number sent, from Meta's verified status webhooks.
+// Read only; a message Meta has not reported on is said to be so.
+export const READ_WHATSAPP_DELIVERY_STATUS_ACTION: ActionContract = {
+  actionName: "read_whatsapp_delivery_status",
+  purpose: "Read the delivery status Meta reported for a WhatsApp message the company's WhatsApp Business number sent: sent, delivered, read or failed.",
+  requiredPermission: "connectors.read",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["meta.whatsapp_status_webhook", "whatsapp_message_statuses"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "VALIDATION_FAILED"],
+};
+
 // An SMS from the owner's SIM, queued on the phone by SMS Bridge only after the
 // user reviewed the exact number and text and confirmed. One confirmation is
 // one bridge request id: it can never be sent twice; an unknown outcome is

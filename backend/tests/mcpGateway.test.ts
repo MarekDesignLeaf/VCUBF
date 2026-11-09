@@ -77,7 +77,11 @@ describe("MCP gateway (read only)", () => {
     const res = await rpc(adminToken, { jsonrpc: "2.0", id: 3, method: "tools/list" });
     assert.equal(res.status, 200);
     const tools = res.body.result.tools as Array<{ name: string; inputSchema: { type: string }; annotations: Record<string, boolean> }>;
-    const expected = AGENT_TOOL_CATALOGUE.filter((tool) => tool.kind === "read" && EMMA_EXECUTABLE_ACTIONS[tool.name].confirmation === "none");
+    // The agent's device reads (phone, PC, WhatsApp delivery status) are served by the
+    // gateway's device tools instead, listed only where the device is set up (not here).
+    const deviceContracts = new Set(["action.read_phone_messages", "action.read_pc", "action.read_whatsapp_delivery_status"]);
+    const expected = AGENT_TOOL_CATALOGUE.filter((tool) => tool.kind === "read" && EMMA_EXECUTABLE_ACTIONS[tool.name].confirmation === "none"
+      && !deviceContracts.has(tool.capabilityId));
     assert.ok(expected.length > 0);
     // Plus the gateway's own reading tools for the WhatsApp sender review (issue #74).
     const gatewayReads = ["list_whatsapp_senders", "get_whatsapp_sender"];

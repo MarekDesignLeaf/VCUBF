@@ -17,18 +17,30 @@ already Secretary's pc_connection_status.
 Needs a checkout of pc-control-plus and its relay packages
 (remote/requirements.txt).
 
-Usage: python import_pcp_catalogue.py --pcp ../pc-control-plus            # rewrite
-       python import_pcp_catalogue.py --pcp ../pc-control-plus --check    # exit 1 if out of date
+Provenance: the import is pinned to one signed PC Control Plus release
+(windows-companion/pc-control/pcp-upstream.json: repository, commit of its
+signed-release branch, release id and the release public key, pinned here and
+not taken from the checkout). With --pin the checkout must be exactly that
+commit, its release manifest must carry a valid Ed25519 signature by the
+pinned key for the pinned release id, and every file the manifest names must
+have the signed SHA-256; the control-loop modules attested screenshot-free
+must be those signed files. The generated catalogue records the release, so
+the pin and the catalogue can only change together (CI: relay-catalogue job).
+
+Usage: python import_pcp_catalogue.py --pcp ../pc-control-plus --pin ../pcp-upstream.json            # rewrite
+       python import_pcp_catalogue.py --pcp ../pc-control-plus --pin ../pcp-upstream.json --check    # exit 1 if out of date
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import hashlib
 import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -110,7 +122,49 @@ def relay_job_ids(source: str) -> dict[str, str]:
     return ids
 
 
-def catalogue(pcp: Path) -> dict:
+def canonical(data) -> bytes:
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+
+
+def verified_release(pcp: Path, pin: dict) -> dict:
+    """The pinned, signed release this checkout is; raises SystemExit otherwise."""
+    try:
+        head = subprocess.run(["git", "-C", str(pcp), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"cannot read the checkout's commit: {error}")
+    if head != pin["commit"]:
+        raise SystemExit(f"the checkout is {head}, the pin is {pin['commit']}")
+    manifest_path = pcp / "remote" / "release-manifest.json"
+    if not manifest_path.is_file():
+        raise SystemExit("the checkout has no signed release manifest (remote/release-manifest.json)")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schema") != "pcp.release.v2" or manifest.get("release_id") != pin["release_id"]:
+        raise SystemExit(f"the manifest is release {manifest.get('release_id')}, the pin is {pin['release_id']}")
+    try:
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    except ImportError:
+        raise SystemExit("verifying the release needs the cryptography package (remote/requirements.txt installs it)")
+    signature = base64.b64decode(manifest["signature_ed25519"], validate=True)
+    payload = {key: value for key, value in manifest.items() if key != "signature_ed25519"}
+    try:
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(pin["release_public_key_b64"], validate=True)).verify(signature, canonical(payload))
+    except InvalidSignature:
+        raise SystemExit("the release manifest's signature does not verify with the pinned public key")
+    for name, digest in manifest["files"].items():
+        actual = hashlib.sha256((pcp / "remote" / name).read_bytes()).hexdigest()
+        if actual != digest:
+            raise SystemExit(f"remote/{name} is not the signed file ({actual} != {digest})")
+    return {
+        "repository": pin["repository"], "ref": pin["ref"], "commit": pin["commit"],
+        "release_id": manifest["release_id"], "release_sequence": manifest["release_sequence"],
+        "release_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "signed_files": manifest["files"],
+    }
+
+
+def catalogue(pcp: Path, pin: dict | None = None) -> dict:
+    release = verified_release(pcp, pin) if pin else None
     relay, tools = load_relay(pcp)
     source = (pcp / "remote" / "relay.py").read_text(encoding="utf-8")
     jobs = relay_job_ids(source)
@@ -132,20 +186,28 @@ def catalogue(pcp: Path) -> dict:
         })
     unlisted = sorted(job for job in relay.ALLOWED if not job.startswith("engine_") and job != "browser_connection_status"
                       and job not in {entry["relay_tool"] for entry in entries})
+    loops = control_loops(pcp / "remote")
+    if release:
+        for name, loop in loops.items():
+            for module, digest in loop["modules"].items():
+                if release["signed_files"].get(module) != digest:
+                    raise SystemExit(f"{name}: {module} is not a file of the signed release")
     return {
         "source": "MarekDesignLeaf/pc-control-plus remote/relay.py",
+        # The signed release this was imported from (None: an unpinned local import, never committed).
+        "upstream": release,
         "relay_sha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
         "engine_version": relay.pc_engine.ENGINE_VERSION,
         "tools": entries,
         # Jobs the relay accepts that no relay MCP tool sends (kept visible, never offered).
         "allowed_without_tool": unlisted,
         # Whether each control loop works from text state only (read from its source).
-        "control_loops": control_loops(pcp / "remote"),
+        "control_loops": loops,
     }
 
 
-def render(pcp: Path) -> str:
-    body = json.dumps(catalogue(pcp), indent=2, ensure_ascii=False, sort_keys=True)
+def render(pcp: Path, pin: dict | None = None) -> str:
+    body = json.dumps(catalogue(pcp, pin), indent=2, ensure_ascii=False, sort_keys=True)
     return (
         "// GENERATED by windows-companion/pc-control/server/import_pcp_catalogue.py from the PC Control Plus relay.\n"
         "// Do not edit: run the script against a pc-control-plus checkout. Secretary's trust decisions are in pcRelayPolicy.ts.\n"
@@ -157,9 +219,13 @@ def render(pcp: Path) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pcp", required=True, type=Path, help="path to a pc-control-plus checkout")
+    parser.add_argument("--pin", type=Path, help="pcp-upstream.json: the signed release to import from (required to write)")
     parser.add_argument("--check", action="store_true")
     options = parser.parse_args()
-    text = render(options.pcp.resolve())
+    pin = json.loads(options.pin.read_text(encoding="utf-8")) if options.pin else None
+    if not pin and not options.check:
+        parser.error("--pin is required: the committed catalogue is always imported from the pinned signed release")
+    text = render(options.pcp.resolve(), pin)
     if options.check:
         current = TARGET.read_text(encoding="utf-8") if TARGET.exists() else ""
         if current != text:

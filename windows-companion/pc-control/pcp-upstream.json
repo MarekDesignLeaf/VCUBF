@@ -1,0 +1,8 @@
+{
+  "comment": "The PC Control Plus release Secretary's relay catalogue is imported from. Change it only together with backend/src/modules/mcp/pcpRelayCatalogue.generated.ts (python server/import_pcp_catalogue.py --pcp <checkout of commit> --pin pcp-upstream.json); CI checks both.",
+  "repository": "MarekDesignLeaf/pc-control-plus",
+  "ref": "signed-release",
+  "commit": "a267875cb7d9d812bf5e3589a1aa7299f80274c1",
+  "release_id": "1b4dc2daab6b056a10e4cfb27d482a18c96b2f24",
+  "release_public_key_b64": "2eFLetx/SzGfn5h1UTWGS/8YqHEVCgmhjat5jwg6Zrs="
+}

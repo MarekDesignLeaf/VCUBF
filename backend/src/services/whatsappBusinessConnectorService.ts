@@ -9,6 +9,7 @@ import {
   verifyWhatsAppWebhookSignature,
   WhatsAppBusinessAdapterError,
   type WhatsAppInboundMessage,
+  type WhatsAppStatusUpdate,
 } from "../connectors/whatsappBusinessAdapter.js";
 import {
   DISCONNECT_WHATSAPP_SOURCE_ACTION,
@@ -246,6 +247,7 @@ export async function receiveWebhook(
       });
       importedIntakeIds.push(intake.id);
     }
+    const statusCount = await recordDeliveryStatuses(source, parsed.statuses.filter((status) => status.phoneNumberId === phoneNumberId));
     await prisma.connectorSource.update({
       where: { id: source.id },
       data: { lastSyncAt: new Date(), lastSyncStatus: "success", lastErrorCode: null },
@@ -255,7 +257,7 @@ export async function receiveWebhook(
       userId: source.createdBy,
       actionName: RECEIVE_WHATSAPP_MESSAGE_ACTION.actionName,
       inputPayload: { sourceId: source.id, signedWebhook: true, messageCount: messages.length, statusCount: parsed.statuses.length },
-      dataAfter: { importedCount: importedIntakeIds.length, duplicateCount, importedIntakeIds, contactSync },
+      dataAfter: { importedCount: importedIntakeIds.length, duplicateCount, importedIntakeIds, contactSync, deliveryStatusesRecorded: statusCount },
       riskLevel: RECEIVE_WHATSAPP_MESSAGE_ACTION.riskLevel,
       result: "success",
     });
@@ -745,4 +747,68 @@ export async function whatsAppBusinessReplyPreview(user: AuthedUser, input: { in
     body: parsed.data.body,
     ...repeatNote(await recentReplyOrAudited(user.companyId, REPLY_WHATSAPP_MESSAGE_ACTION.actionName, intake, parsed.data.body)),
   });
+}
+
+// ─── Delivery status (Meta's status webhooks) ───────────────────────────────
+
+/** How far a message has got; a state is only moved forward. failed ends it. */
+const DELIVERY_RANK: Record<string, number> = { sent: 1, delivered: 2, read: 3, failed: 4 };
+
+const DELIVERY_MEANING: Record<string, string> = {
+  sent: "Meta accepted the message and sent it towards the recipient's phone.",
+  delivered: "The message reached the recipient's phone.",
+  read: "The recipient opened the message (only when they have read receipts on).",
+  failed: "Meta could not deliver the message; nothing more will happen to it.",
+};
+
+/** Records the statuses of one verified webhook for the company's source. Returns how many changed. */
+async function recordDeliveryStatuses(source: { id: string; companyId: string }, statuses: WhatsAppStatusUpdate[]): Promise<number> {
+  let changed = 0;
+  for (const update of statuses) {
+    const rank = DELIVERY_RANK[update.status];
+    if (!rank) continue;
+    const key = { companyId_connectorSourceId_messageId: { companyId: source.companyId, connectorSourceId: source.id, messageId: update.id } };
+    const existing = await prisma.whatsAppMessageStatus.findUnique({ where: key, select: { status: true, occurredAt: true } });
+    if (existing) {
+      const before = DELIVERY_RANK[existing.status] ?? 0;
+      if (rank < before || (rank === before && update.occurredAt <= existing.occurredAt)) continue;
+    }
+    const data = { status: update.status, recipientId: update.recipientId, errorCode: update.errorCode, errorTitle: update.errorTitle, occurredAt: update.occurredAt };
+    await prisma.whatsAppMessageStatus.upsert({
+      where: key,
+      update: data,
+      create: { companyId: source.companyId, connectorSourceId: source.id, messageId: update.id, ...data },
+    });
+    changed += 1;
+  }
+  return changed;
+}
+
+/**
+ * What Meta last reported for a message the company's WhatsApp Business number
+ * sent, by its message id (wamid), inside the caller's company. A message Meta
+ * has not reported on yet is said to be so; nothing is guessed.
+ */
+export async function whatsAppDeliveryStatus(user: AuthedUser, messageId: string): Promise<ServiceResult<Record<string, unknown>>> {
+  const id = String(messageId ?? "").trim();
+  if (!/^wamid\.[A-Za-z0-9+/=_.-]{1,200}$/.test(id)) return fail(400, "VALIDATION_FAILED", "message_id must be a WhatsApp message id (wamid.…).");
+  const row = await prisma.whatsAppMessageStatus.findFirst({ where: { companyId: user.companyId, messageId: id } });
+  if (!row) {
+    return ok(200, { messageId: id, status: "not_reported", meaning: "Meta has not reported a status for this message yet (or it was not sent from this company's number)." });
+  }
+  return ok(200, {
+    messageId: id, status: row.status, occurredAt: row.occurredAt.toISOString(), meaning: DELIVERY_MEANING[row.status],
+    ...(row.errorCode ? { error: { code: row.errorCode, title: row.errorTitle } } : {}),
+  });
+}
+
+/** The message id of the caller's latest WhatsApp Business send or reply from Secretary, from its audit. */
+export async function latestWhatsAppBusinessSend(user: AuthedUser): Promise<string | null> {
+  const latest = await prisma.auditLog.findFirst({
+    where: { companyId: user.companyId, userId: user.id, actionName: { in: [SEND_WHATSAPP_MESSAGE_ACTION.actionName, REPLY_WHATSAPP_MESSAGE_ACTION.actionName] }, result: "success" },
+    orderBy: { createdAt: "desc" },
+    select: { dataAfter: true },
+  });
+  const messageId = (latest?.dataAfter as { messageId?: unknown } | null)?.messageId;
+  return typeof messageId === "string" ? messageId : null;
 }

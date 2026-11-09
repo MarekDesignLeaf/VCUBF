@@ -34,7 +34,7 @@ export const PCP_RELAY_CATALOGUE = {
     }
   },
   "engine_version": "1.1.1",
-  "relay_sha256": "529e335d038d4b519a474dd3f1d3a83f56e2249dcdfdac7bb794d9d02048fdc7",
+  "relay_sha256": "c0be38f4aab77b9ea09b3d44db63a1aafa59d510323fa41dec95f6ae064ab896",
   "source": "MarekDesignLeaf/pc-control-plus remote/relay.py",
   "tools": [
     {
@@ -89,7 +89,7 @@ export const PCP_RELAY_CATALOGUE = {
     },
     {
       "annotations": {},
-      "description": "Capture one photo from the PC camera after local approval; returns PNG base64 and the saved path. Optional device name from pc_camera_list.",
+      "description": "Capture one photo from the PC camera after local approval; returns PNG base64 and the saved path. Optional device name from pc_camera_list. Only for a picture the user explicitly asked for: never to find, click, read or check anything, never as a fallback when a text read cannot see something, and nothing acts on what it shows.",
       "input_schema": {
         "properties": {
           "device": {
@@ -106,7 +106,7 @@ export const PCP_RELAY_CATALOGUE = {
     },
     {
       "annotations": {},
-      "description": "Record a short video (1 to 60 s) from the PC camera after local approval; saves it locally and returns the path and size. Optional device name from pc_camera_list.",
+      "description": "Record a short video (1 to 60 s) from the PC camera after local approval; saves it locally and returns the path and size. Optional device name from pc_camera_list. Only for a recording the user explicitly asked for: never to find, click, read or check anything, and nothing acts on what it shows.",
       "input_schema": {
         "properties": {
           "device": {
@@ -166,7 +166,7 @@ export const PCP_RELAY_CATALOGUE = {
     },
     {
       "annotations": {},
-      "description": "Run 1-16 keyboard/mouse actions in a single network trip and one owner approval.\n\nEach entry is {tool: desktop_click|desktop_type|desktop_hotkey|desktop_scroll|desktop_drag,\n               args: {...}}. Not transactional; do not replay on partial failure.",
+      "description": "Run 1-16 keyboard/mouse actions in a single network trip and one owner approval.\n\nEach entry is {tool: desktop_click|desktop_type|desktop_hotkey|desktop_scroll|desktop_drag,\n               args: {...}}. Not transactional; do not replay on partial failure. Clicks, scrolls and drags only at coordinates the user gave, for a control UI Automation cannot reach; never at coordinates read from a screenshot.",
       "input_schema": {
         "properties": {
           "actions": {
@@ -189,7 +189,7 @@ export const PCP_RELAY_CATALOGUE = {
     },
     {
       "annotations": {},
-      "description": "Click the Windows desktop, including right/double click, after local approval.",
+      "description": "Click the Windows desktop, including right/double click, after local approval. Only at coordinates the user gave, for a control UI Automation cannot reach; never at coordinates read from a screenshot.",
       "input_schema": {
         "properties": {
           "button": {
@@ -223,7 +223,7 @@ export const PCP_RELAY_CATALOGUE = {
     },
     {
       "annotations": {},
-      "description": "Drag with the left mouse button between physical screen coordinates.",
+      "description": "Drag with the left mouse button between physical screen coordinates. Only at coordinates the user gave, for a control UI Automation cannot reach; never at coordinates read from a screenshot.",
       "input_schema": {
         "properties": {
           "duration_seconds": {
@@ -303,7 +303,7 @@ export const PCP_RELAY_CATALOGUE = {
     },
     {
       "annotations": {},
-      "description": "Scroll the mouse wheel; positive steps up, negative down. Optional cursor position.",
+      "description": "Scroll the mouse wheel; positive steps up, negative down. Optional cursor position. Only at coordinates the user gave, for a control UI Automation cannot reach; never at coordinates read from a screenshot.",
       "input_schema": {
         "properties": {
           "steps": {
@@ -592,7 +592,7 @@ export const PCP_RELAY_CATALOGUE = {
     },
     {
       "annotations": {},
-      "description": "Capture one monitor as PNG (default: first screen). Pass monitor=0 for all screens together.",
+      "description": "Capture one monitor as PNG (default: first screen). Pass monitor=0 for all screens together. Only for a picture the user explicitly asked for: never to find, click, read or check anything, never as a fallback when a text read cannot see something, and nothing acts on what it shows.",
       "input_schema": {
         "properties": {
           "monitor": {
@@ -696,7 +696,7 @@ export const PCP_RELAY_CATALOGUE = {
     },
     {
       "annotations": {},
-      "description": "Start autonomous Windows application work after one approval for the whole goal.",
+      "description": "Start autonomous Windows application work after one approval for the whole goal. Each step is decided from UI Automation text, never from screenshots.",
       "input_schema": {
         "properties": {
           "goal": {
@@ -930,7 +930,7 @@ export const PCP_RELAY_CATALOGUE = {
     },
     {
       "annotations": {},
-      "description": "DOM-first automation. Default: attach to an existing CDP-enabled Edge/Chrome\ntab without opening, focusing or closing windows. Explicit 'isolated' mode\nstarts a dedicated browser. One owner approval covers the named task.",
+      "description": "DOM-only automation: each step is decided from the page's DOM text, never from screenshots. Default: attach to an existing CDP-enabled Edge/Chrome\ntab without opening, focusing or closing windows. Explicit 'isolated' mode\nstarts a dedicated browser. One owner approval covers the named task.",
       "input_schema": {
         "properties": {
           "allow_changes": {
@@ -1032,7 +1032,7 @@ export const PCP_RELAY_CATALOGUE = {
     },
     {
       "annotations": {},
-      "description": "Capture a PNG screenshot of the current browser page.",
+      "description": "Capture a PNG of the current browser page. Only for a picture the user explicitly asked for: never to find, click, read or check anything, never as a fallback when a text read cannot see something, and nothing acts on what it shows.",
       "input_schema": {
         "properties": {},
         "title": "pc_web_screenshotArguments",
@@ -1158,5 +1158,21 @@ export const PCP_RELAY_CATALOGUE = {
       "name": "pc_write_workspace_text",
       "relay_tool": "write_workspace_text"
     }
-  ]
+  ],
+  "upstream": {
+    "commit": "a267875cb7d9d812bf5e3589a1aa7299f80274c1",
+    "ref": "signed-release",
+    "release_id": "1b4dc2daab6b056a10e4cfb27d482a18c96b2f24",
+    "release_manifest_sha256": "a54700f3c82425c63623f2e5edf7c4a3c9f502079c064d8fcd8201790ed559c2",
+    "release_sequence": 42550858906,
+    "repository": "MarekDesignLeaf/pc-control-plus",
+    "signed_files": {
+      "agent.py": "cbd56d752fd21b27e6f586b9de9253e1b149af544c72b048afcaf1b111307a4b",
+      "browser_dom.py": "26c8811f54c2eb644236dfab757c501c9ebdf1c344a39d4a28da75186d29af72",
+      "desktop_goal.py": "522ac75ee2e6aeccf20d04d7524ef466be3879f10b53dc8ec548bcec955678be",
+      "pc_engine.py": "7e1858530d55362a46935fbb1554ed85f2c0265e168531b633108f7c61631883",
+      "web_goal.py": "f7f5ec64ebc7b856977077f8d6a3d6e64e6b61060fc302436e972011cfd5e088",
+      "windows_uia.py": "3c75bcb0e38af7f40c7f4e9c5d66577d092c3b253fc2df16a9b128e62ba7fa85"
+    }
+  }
 } as const;

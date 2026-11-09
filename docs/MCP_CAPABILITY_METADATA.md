@@ -151,6 +151,18 @@ PC control only from text state: the screen-coordinate relay tools (`desktop_cli
 offered only with a screenshot-free attestation from the relay source; every PC tool's
 limitations and the `initialize` instructions state the rule.
 
+### Revision `2026-11-09.full-device-scope`
+
+- PC file deletion (`pc_delete_file`, `pc_delete_workspace_file`), binary file writes and the
+  owner's approved scripts (`pc_run_approved_script`) are offered: previewed with the PC's
+  protections (backup copy, profile or workspace, approved-scripts folder), irreversible,
+  approved again on the PC.
+- WhatsApp Business delivery status: `get_whatsapp_message_status`, and in
+  `get_outbound_message_status`.
+- The agent catalogue's device reads are served by the gateway's own device tools, not
+  listed twice.
+- The relay catalogue is imported from the pinned signed release `1b4dc2d`.
+
 ## Safety unchanged
 
 Tenant isolation, OAuth scopes, account permissions, administrator switches, audit,

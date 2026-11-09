@@ -43,9 +43,25 @@ describe("agent tool catalogue (parity with the deterministic core)", () => {
       "get_metrics",
       "get_recruitment_recommendation",
       "get_unpaid_invoices",
+      "list_pc_tools",
+      "list_phone_chats",
+      "list_phone_sms",
       "list_reference_activities",
+      // The owner's phone and PC, and WhatsApp delivery status: reads under
+      // read_phone_messages, read_pc and read_whatsapp_delivery_status. They change
+      // nothing on the device: a PC read is a text read (page snapshot, UI Automation).
+      "phone_message_status",
+      "phone_status",
+      "read_pc",
       "suggest_schedule",
+      "whatsapp_message_status",
     ]);
+    // A message from the owner's phone, and every PC step, stay proposals with a preview.
+    for (const name of ["send_phone_sms", "reply_phone_chat", "operate_pc"] as const) {
+      const tool = AGENT_TOOL_CATALOGUE.find((entry) => entry.name === name)!;
+      assert.notEqual(tool.kind, "read", name);
+      assert.equal(tool.confirmation, "service_preview", name);
+    }
     const byName = new Map(AGENT_TOOL_CATALOGUE.map((tool) => [tool.name, tool]));
     assert.equal(byName.get("send_email")?.kind, "external");
     assert.equal(byName.get("send_email")?.confirmation, "service_preview");

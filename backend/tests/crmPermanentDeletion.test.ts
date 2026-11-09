@@ -313,11 +313,22 @@ describe("Permanent deletion of CRM clients and contacts (separate from archive)
     }
   });
 
-  it("is not offered by voice; MCP offers only the guarded contact deletion, never client or generic delete", () => {
+  it("is not offered by voice; MCP offers only the guarded contact deletion of CRM records, never client or generic delete", () => {
     const names = MCP_WRITE_TOOLS.map((tool) => tool.name);
-    // Issue #74: the only MCP deletion is delete_contact_permanently, previewed,
-    // confirmed and with the exact name typed back (tests/mcpSenderReview.test.ts).
-    assert.deepEqual(names.filter((name) => /delete/.test(name)), ["delete_contact_permanently"]);
+    // Issue #74: the only MCP deletion of a CRM record is delete_contact_permanently,
+    // previewed, confirmed and with the exact name typed back (tests/mcpSenderReview.test.ts).
+    // The owner's PC file deletions (pc_delete_file, pc_delete_workspace_file) are not
+    // CRM deletions: each is previewed as irreversible, confirmed, backed up by the PC
+    // and approved again on the PC (tests/mcpDevices.test.ts).
+    assert.deepEqual(names.filter((name) => /delete/.test(name)).sort(), ["delete_contact_permanently", "pc_delete_file", "pc_delete_workspace_file"]);
+    for (const name of ["pc_delete_file", "pc_delete_workspace_file"]) {
+      const pcDeletion = MCP_WRITE_TOOLS.find((entry) => entry.name === name)!;
+      assert.equal(pcDeletion.kind, "reviewed", name);
+      assert.equal(pcDeletion.reviewReason, "irreversible", name);
+      assert.equal(pcDeletion.contract.actionName, "operate_pc", name);
+      assert.ok(pcDeletion.limitations?.some((line) => /backup copy/.test(line)), `${name} states the PC's backup`);
+    }
+    assert.ok(!names.some((name) => /delete_client|^delete$|delete_record/.test(name)), "no client or generic deletion");
     const tool = MCP_WRITE_TOOLS.find((entry) => entry.name === "delete_contact_permanently")!;
     assert.equal(tool.kind, "reviewed");
     assert.ok(tool.typedConfirmation);

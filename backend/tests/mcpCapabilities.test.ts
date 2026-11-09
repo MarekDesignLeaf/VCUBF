@@ -37,14 +37,33 @@ const BASE = "https://secretary.test";
 const RESOURCE = `${BASE}/mcp`;
 const REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect";
 const BOTH = `${MCP_READ_SCOPE} ${MCP_WRITE_SCOPE}`;
-const ENV_KEYS = ["MCP_GATEWAY_ENABLED", "MCP_WRITE_ENABLED", "MCP_PUBLIC_URL"] as const;
+// The connected systems are configured by environment. The test clears every one of
+// them, so the machine it runs on (with real WhatsApp, phone or PC settings) cannot
+// change what it sees; the configured case sets placeholders in this process only.
+const CONNECTOR_ENV_KEYS = [
+  "SMS_BRIDGE_URL", "SMS_BRIDGE_ADMIN_TOKEN", "SMS_BRIDGE_COMPANY_ID", "SMS_BRIDGE_DEVICE_ID",
+  "PCP_RELAY_URL", "PCP_CLIENT_TOKEN", "PCP_COMPANY_ID",
+  "WHATSAPP_GRAPH_API_VERSION", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_BUSINESS_ACCOUNT_ID", "WHATSAPP_ACCESS_TOKEN",
+  "WHATSAPP_WEBHOOK_VERIFY_TOKEN", "META_APP_SECRET",
+] as const;
+const WHATSAPP_PLACEHOLDERS = {
+  WHATSAPP_GRAPH_API_VERSION: "v21.0", WHATSAPP_PHONE_NUMBER_ID: "test-phone-number-id", WHATSAPP_BUSINESS_ACCOUNT_ID: "test-business-account",
+  WHATSAPP_ACCESS_TOKEN: "test-placeholder-token", WHATSAPP_WEBHOOK_VERIFY_TOKEN: "test-verify", META_APP_SECRET: "test-app-secret",
+};
+const WHATSAPP_BUSINESS_TOOLS = ["send_whatsapp_business_message", "reply_whatsapp_business_message", "get_whatsapp_message_status"];
+const ENV_KEYS = ["MCP_GATEWAY_ENABLED", "MCP_WRITE_ENABLED", "MCP_PUBLIC_URL", ...CONNECTOR_ENV_KEYS] as const;
+const clearConnectors = () => { for (const name of CONNECTOR_ENV_KEYS) delete process.env[name]; };
 const saved = Object.fromEntries(ENV_KEYS.map((name) => [name, process.env[name]]));
 
 type Json = Record<string, any>;
 
 /** Every tool name the gateway's definitions contain, collected independently of the catalogue. */
 function definedToolNames(): string[] {
-  const catalogueReads = AGENT_TOOL_CATALOGUE.filter((tool) => tool.kind === "read" && EMMA_EXECUTABLE_ACTIONS[tool.name].confirmation === "none");
+  // The agent's device reads (phone, PC, WhatsApp delivery status) are served by the
+  // gateway's own device tools, under the same contracts, and are not listed twice.
+  const deviceContracts = new Set(["action.read_phone_messages", "action.read_pc", "action.read_whatsapp_delivery_status"]);
+  const catalogueReads = AGENT_TOOL_CATALOGUE.filter((tool) => tool.kind === "read" && EMMA_EXECUTABLE_ACTIONS[tool.name].confirmation === "none"
+    && !deviceContracts.has(tool.capabilityId));
   return [
     MCP_DESCRIBE_TOOL,
     MCP_READ_COMMAND_TOOL,
@@ -230,6 +249,7 @@ describe("MCP capability metadata", () => {
       process.env.MCP_GATEWAY_ENABLED = "true";
       process.env.MCP_WRITE_ENABLED = "true";
       process.env.MCP_PUBLIC_URL = BASE;
+      clearConnectors();
       readToken = await connect(await register(), "admin@test.local", "approve");
       writeToken = await connect(await register(), "admin@test.local", "approve_write");
       workerToken = await connect(await register(), "worker@test.local", "approve_write");
@@ -239,6 +259,7 @@ describe("MCP capability metadata", () => {
       process.env.MCP_GATEWAY_ENABLED = "true";
       process.env.MCP_WRITE_ENABLED = "true";
       process.env.MCP_PUBLIC_URL = BASE;
+      clearConnectors();
     });
 
     after(async () => {
@@ -282,10 +303,12 @@ describe("MCP capability metadata", () => {
     it("tells a write-approved connection every tool by name, matching tools/list exactly", async () => {
       const listedTools = await list(writeToken);
       const listed = listedTools.map((tool) => tool.name as string);
-      // Every tool, except the owner's phone and PC, which are not set up in this test:
-      // they are described with connector_not_configured (tests/mcpDevices.test.ts sets them up).
+      // Every tool, except the owner's phone and PC and WhatsApp Business, which are not set up
+      // in this test: they are described with connector_not_configured (tests/mcpDevices.test.ts
+      // sets them up; the next test configures WhatsApp Business).
       const deviceTools = new Set([...MCP_DEVICE_READ_TOOL_NAMES, ...MCP_WRITE_TOOLS.filter((tool) => tool.available).map((tool) => tool.name)]);
       assert.ok(deviceTools.has("send_phone_sms") && deviceTools.has("pc_browser_act") && deviceTools.has("list_phone_sms"));
+      for (const name of WHATSAPP_BUSINESS_TOOLS) assert.ok(deviceTools.has(name), `${name} depends on WhatsApp Business being set up`);
       assert.deepEqual([...listed].sort(), definedToolNames().filter((name) => !deviceTools.has(name)).sort(), "a write-approved owner sees every tool");
       for (const name of ["create_task", "list_whatsapp_senders", "get_whatsapp_sender", ...WHATSAPP_REVIEW, "delete_contact_permanently", MCP_CONFIRM_TOOL, MCP_CANCEL_TOOL]) {
         assert.ok(listed.includes(name), name);
@@ -319,6 +342,24 @@ describe("MCP capability metadata", () => {
       const unknown = await describeCall(writeToken, { tool: "send_everything" });
       assert.equal(unknown.isError, true);
       assert.equal(unknown.body.error, "UNKNOWN_TOOL");
+    });
+
+    it("lists the WhatsApp Business tools only while WhatsApp Business is configured, and nothing else with them", async () => {
+      const before = new Set((await list(writeToken)).map((tool) => tool.name as string));
+      for (const name of WHATSAPP_BUSINESS_TOOLS) assert.ok(!before.has(name), `${name} is not listed without WhatsApp Business`);
+      Object.assign(process.env, WHATSAPP_PLACEHOLDERS);
+      const listed = new Set((await list(writeToken)).map((tool) => tool.name as string));
+      for (const name of WHATSAPP_BUSINESS_TOOLS) assert.ok(listed.has(name), `${name} is listed with WhatsApp Business`);
+      assert.deepEqual([...listed].filter((name) => !before.has(name)).sort(), [...WHATSAPP_BUSINESS_TOOLS].sort(), "configuring WhatsApp adds exactly its tools");
+      const { body } = await describeCall(writeToken);
+      for (const tool of body.tools as Json[]) {
+        if (WHATSAPP_BUSINESS_TOOLS.includes(tool.name)) assert.equal(tool.availability.reason, "available", tool.name);
+        if (tool.name === "send_phone_sms" || tool.name === "pc_browser_act") assert.equal(tool.availability.reason, "connector_not_configured", tool.name);
+      }
+      assert.ok(!JSON.stringify(body).includes(WHATSAPP_PLACEHOLDERS.WHATSAPP_ACCESS_TOKEN), "the token is never described");
+      clearConnectors();
+      const after = new Set((await list(writeToken)).map((tool) => tool.name as string));
+      assert.deepEqual([...after].sort(), [...before].sort());
     });
 
     it("marks write tools the account lacks the permission for, and when the server switch is off", async () => {

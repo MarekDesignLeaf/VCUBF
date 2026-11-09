@@ -427,7 +427,7 @@ describe("MCP: the owner's phone (SMS Bridge) and PC (PC Control Plus)", () => {
         if (decision.kind === "reviewed") assert.equal(entry.confirmation, "preview_then_confirm", tool.name);
       }
     }
-    for (const name of ["pc_run_command", "pc_run_approved_script", "pc_delete_file", "pc_delete_workspace_file", "pc_permission_set", "pc_approvals_reset", "pc_camera_photo", "pc_screenshot", "pc_browser_eval"]) {
+    for (const name of ["pc_run_command", "pc_permission_set", "pc_approvals_reset", "pc_camera_photo", "pc_screenshot", "pc_browser_eval"]) {
       assert.ok(!names.has(name), `${name} is not offered`);
       assert.ok(notOffered.has(name), `${name} is listed with its reason`);
       const called = await call(writeToken, name, { command: "whoami" });
@@ -484,8 +484,17 @@ describe("MCP: the owner's phone (SMS Bridge) and PC (PC Control Plus)", () => {
     assert.deepEqual(posts(relay, "/v1/call")[0].body, { tool: "list_directory", args: { path: "C:\\Users\\Owner\\Documents", limit: 5 } });
     const wrong = result(await call(readToken, "pc_list_directory", { path: 7 }));
     assert.equal(wrong.body.error, "VALIDATION_FAILED");
-    const binary = result(await call(writeToken, "pc_write_file", { path: "C:\\x.txt", content_base64: "TVqQAAMAAAAEAAAA" }));
-    assert.equal(binary.body.error, "VALIDATION_FAILED", "binary content is not offered");
+    const binary = result(await call(writeToken, "pc_write_file", { path: "C:\\x.bin", content_base64: "TVqQAAMAAAAEAAAA" }));
+    assert.equal(binary.body.status, "confirmation_required");
+    assert.deepEqual(binary.body.preview.arguments.content, { bytes: 12, sha256: createHash("sha256").update(Buffer.from("TVqQAAMAAAAEAAAA", "base64")).digest("hex") },
+      "binary content is previewed by its size and digest");
+    assert.match(binary.body.preview.protections, /backup copy/);
+    const script = result(await call(writeToken, "pc_run_approved_script", { name: "daily-report.ps1" }));
+    assert.equal(script.body.status, "confirmation_required");
+    assert.match(script.body.preview.protections, /approved-scripts folder/);
+    const deletion = result(await call(writeToken, "pc_delete_file", { path: "C:\\Users\\Owner\\old.txt" }));
+    assert.equal(deletion.body.status, "confirmation_required");
+    assert.match(deletion.body.preview.protections, /backup copy/);
     const readOnlyGoal = await call(readToken, "pc_web_goal_start", { url: "https://example.org/", goal: "Find the opening hours" });
     assert.equal(readOnlyGoal.status, 403, "a read-only connection cannot start a PC task");
     assert.equal(readOnlyGoal.body.error, "INSUFFICIENT_SCOPE");
@@ -539,6 +548,13 @@ describe("MCP: the owner's phone (SMS Bridge) and PC (PC Control Plus)", () => {
       const again = result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: confirmationId }));
       assert.equal(again.body.replayed, true);
       assert.equal(graph.length, 1, "a repeated yes sends nothing more");
+      const delivery = result(await call(writeToken, "get_outbound_message_status", { confirmation_id: confirmationId }));
+      assert.equal(delivery.body.data.status, "not_reported", JSON.stringify(delivery.body));
+      assert.equal(delivery.body.data.messageId, "wamid.OUT1");
+      const byId = result(await call(writeToken, "get_whatsapp_message_status", { message_id: "wamid.OUT1" }));
+      assert.equal(byId.body.data.status, "not_reported");
+      const resubmit = result(await call(writeToken, "resubmit_phone_message", { confirmation_id: confirmationId }));
+      assert.equal(resubmit.body.error, "NOT_RESUBMITTABLE", "a WhatsApp Business message is never resubmitted");
 
       const closed = result(await call(writeToken, "reply_whatsapp_business_message", { intake_id: stale.id, text: "Hello again" }));
       assert.equal(closed.body.error, "WHATSAPP_REPLY_WINDOW_CLOSED");

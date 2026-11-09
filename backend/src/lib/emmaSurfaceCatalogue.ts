@@ -155,7 +155,7 @@ function slug(value: string) {
 
 function actionCategory(action: ActionContract) {
   const name = action.actionName;
-  if (/gmail|whatsapp|google_|connector/.test(name)) return "connectors";
+  if (/gmail|whatsapp|google_|connector|phone|_pc$/.test(name)) return "connectors";
   if (/client|contact|lead/.test(name)) return "customers";
   if (/job_|task|capacity|schedule|overload/.test(name)) return "work";
   if (/quote|invoice|payment|service_catalogue|reference_activity/.test(name)) return "sales";
@@ -169,7 +169,11 @@ function actionCategory(action: ActionContract) {
 }
 
 function actionMode(action: ActionContract): EmmaCapabilityMode {
-  if (/gmail|whatsapp|google_|connector/.test(action.actionName)) return "external";
+  // A read of a connected device or provider (read_phone_messages, read_pc,
+  // read_whatsapp_delivery_status) changes nothing: the agent may run it at once.
+  if (/^read_/.test(action.actionName) && !action.confirmationRequired && action.riskLevel <= 2) return "read";
+  // A message from the owner's phone leaves the company like an e-mail does.
+  if (/gmail|whatsapp|google_|connector|phone/.test(action.actionName)) return "external";
   if (action.requiredPermission === "company.manage" || action.requiredPermission === "users.manage") return "administration";
   if (action.riskLevel === 0 || /^(get|list|find|detect|check|recall|export|analyze)_/.test(action.actionName)) return "read";
   return "write";

@@ -98,6 +98,11 @@ export const MCP_TOOLSET_FINGERPRINTS = {
   // Text state only: no coordinate tools, goals offered only when attested screenshot-free,
   // the rule in every PC tool's limitations and in the instructions.
   "2026-11-09.text-state-only": "e11270bdf1a47151f0932fded9752c419a3cd59d170fb243f9bc5d8a628e7577",
+  // PC file deletion, binary file writes and the owner's approved scripts offered with
+  // previews and the PC's protections; WhatsApp Business delivery status
+  // (get_whatsapp_message_status, and in get_outbound_message_status); the relay catalogue
+  // imported from the pinned signed release 1b4dc2d.
+  "2026-11-09.full-device-scope": "d475fd48e5ce2d0e97d6fedf90cb033e47bd4ee1d0cf95e41b54f11c0c646178",
 } as const satisfies Record<string, string>;
 const toolsetLedger = Object.entries(MCP_TOOLSET_FINGERPRINTS);
 export const MCP_TOOLSET_REVISION = toolsetLedger[toolsetLedger.length - 1][0];
@@ -150,9 +155,16 @@ export function connectionAccess(req: Pick<Request, "mcpAccess">): McpWriteAcces
 // ---------------------------------------------------------------------------
 // The tools.
 
+/**
+ * The agent catalogue's device reads (phone, PC, WhatsApp delivery status) are
+ * served here by the gateway's own device tools instead (deviceTools.ts): the
+ * same contracts, with exact schemas, availability and the company binding.
+ */
+const DEVICE_CAPABILITIES = new Set(["action.read_phone_messages", "action.read_pc", "action.read_whatsapp_delivery_status"]);
+
 /** Catalogue tools that read and need no yes: the only catalogue tools exposed. */
 const READ_TOOLS = AGENT_TOOL_CATALOGUE.filter(
-  (tool) => tool.kind === "read" && EMMA_EXECUTABLE_ACTIONS[tool.name].confirmation === "none",
+  (tool) => tool.kind === "read" && EMMA_EXECUTABLE_ACTIONS[tool.name].confirmation === "none" && !DEVICE_CAPABILITIES.has(tool.capabilityId),
 );
 const readToolsByName = new Map<string, (typeof READ_TOOLS)[number]>(READ_TOOLS.map((tool) => [tool.name, tool]));
 

@@ -46,13 +46,14 @@ const CUSTOMER_READS = {
 export const SPECIALISTS: Readonly<Record<SpecialistId, Specialist>> = {
   communication: {
     id: "communication",
-    covers: "E-mail and WhatsApp: reading received messages, replying to them, sending new messages and drafts, marking messages as handled, and logging calls, e-mails and meetings with a client.",
+    covers: "E-mail, WhatsApp and the owner's phone: reading received messages, replying to them, sending new messages and drafts, SMS and chat replies from the owner's phone, the delivery status of sent messages, marking messages as handled, and logging calls, e-mails and meetings with a client.",
     instructions:
-      "Communication: a received message is answered with a reply tool, a new message with a send tool. Recipients' addresses and numbers come only from a read (clients, contacts, messages) or the user's own words. Keep the message text as the user said it; Secretary sends customer messages in English unless the user names another language, and translates before the user hears it.",
+      "Communication: a received message is answered with a reply tool, a new message with a send tool. Recipients' addresses and numbers come only from a read (clients, contacts, messages) or the user's own words. Keep the message text as the user said it; Secretary sends customer messages in English unless the user names another language, and translates before the user hears it. An SMS or chat reply from the owner's phone is sent exactly as written; a chat reply goes only to a chat list_phone_chats returned. When a send's outcome is unknown, ask phone_message_status; never send it again yourself.",
     tools: [
       "send_email", "reply_email", "send_whatsapp", "reply_whatsapp", "create_gmail_draft",
       "draft_communication_reply", "set_communication_intake_resolution", "resolve_communication_intakes",
       "convert_communication_intake",
+      "phone_status", "list_phone_sms", "list_phone_chats", "send_phone_sms", "reply_phone_chat", "phone_message_status", "whatsapp_message_status",
     ],
     intents: ["list_channel_messages", "list_communications", "list_follow_ups", "list_unresolved_enquiries", "log_communication", ...CUSTOMER_READS.intents],
     forms: [

@@ -18,6 +18,7 @@
  * Secretary does not offer are described with the reason
  * (PC_TOOLS_NOT_OFFERED_THROUGH_SECRETARY).
  */
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import type { AuthedUser } from "../../middleware/auth.js";
@@ -25,6 +26,7 @@ import {
   OPERATE_PC_ACTION,
   READ_PC_ACTION,
   READ_PHONE_MESSAGES_ACTION,
+  READ_WHATSAPP_DELIVERY_STATUS_ACTION,
   REPLY_PHONE_CHAT_ACTION,
   REPLY_WHATSAPP_MESSAGE_ACTION,
   SEND_PHONE_SMS_ACTION,
@@ -165,7 +167,7 @@ export const DEVICE_READ_TOOLS: DeviceReadTool[] = [
   {
     name: "get_outbound_message_status",
     title: "Status of an SMS or phone chat reply sent through Secretary",
-    description: "What SMS Bridge knows about a message sent with send_phone_sms, reply_phone_chat or resubmit_phone_message, by the confirmation_id of that send: queued, sent, failed, uncertain, or unknown when Secretary could not learn whether the bridge received it.",
+    description: "The state of a message sent with send_phone_sms, reply_phone_chat, resubmit_phone_message, send_whatsapp_business_message or reply_whatsapp_business_message, by the confirmation_id of that send. Phone: what SMS Bridge knows (queued, sent, failed, uncertain). WhatsApp Business: what Meta reported (sent, delivered, read, failed, or not_reported yet). unknown when Secretary could not learn whether the send was received.",
     inputSchema: { type: "object", properties: { confirmation_id: { type: "string", format: "uuid" } }, required: ["confirmation_id"], additionalProperties: false },
     contract: READ_PHONE_MESSAGES_ACTION,
     available: phoneAvailable,
@@ -175,14 +177,28 @@ export const DEVICE_READ_TOOLS: DeviceReadTool[] = [
       return parsed.ok ? outboundStatus(user, parsed.data.confirmation_id) : parsed;
     },
   },
+  {
+    name: "get_whatsapp_message_status",
+    title: "Delivery status of a WhatsApp Business message",
+    description: "What Meta last reported for one message the company's WhatsApp Business number sent, by its WhatsApp message id (wamid…, as a send or reply returned it): sent, delivered, read (only with the recipient's read receipts on) or failed with Meta's error, or not_reported when Meta has not reported yet.",
+    inputSchema: { type: "object", properties: { message_id: { type: "string", description: "The WhatsApp message id (wamid.…)." } }, required: ["message_id"], additionalProperties: false },
+    contract: READ_WHATSAPP_DELIVERY_STATUS_ACTION,
+    available: () => whatsAppConfigurationAvailable(),
+    limitations: ["Only what Meta's status webhook reported to Secretary; a message sent outside Secretary's number is never reported.", "Reads only; never sends."],
+    run: async (user, args) => {
+      const parsed = parse(z.object({ message_id: z.string().trim().min(1).max(250) }).strict(), args);
+      return parsed.ok ? whatsapp.whatsAppDeliveryStatus(user, parsed.data.message_id) : parsed;
+    },
+  },
 ];
 
 // ─── Outbound operations: status and the original send ──────────────────────
 
 const PHONE_SEND_TOOLS = new Set(["send_phone_sms", "reply_phone_chat"]);
+const WHATSAPP_BUSINESS_TOOLS = new Set(["send_whatsapp_business_message", "reply_whatsapp_business_message"]);
 
 interface OriginalSend {
-  tool: "send_phone_sms" | "reply_phone_chat";
+  tool: "send_phone_sms" | "reply_phone_chat" | "send_whatsapp_business_message" | "reply_whatsapp_business_message";
   args: Record<string, any>;
   requestId: string;
   stored: { status: string; remoteId?: string; error?: string } | null;
@@ -213,6 +229,18 @@ async function originalSend(user: AuthedUser, confirmationId: string, depth = 0)
     if (depth > 3) return fail(400, "VALIDATION_FAILED", "This resubmission does not lead to a phone send.");
     return originalSend(user, String(args.confirmation_id), depth + 1);
   }
+  if (WHATSAPP_BUSINESS_TOOLS.has(operation.tool)) {
+    // Meta takes no request id: the confirmation's own record is the only trace.
+    const outcome = (own?.responseBody as { outcome?: { payload?: any } } | null)?.outcome;
+    return ok(200, {
+      tool: operation.tool as OriginalSend["tool"], args, requestId: "",
+      stored: own ? {
+        status: own.status,
+        remoteId: outcome?.payload?.data?.messageId ? String(outcome.payload.data.messageId) : undefined,
+        error: outcome?.payload?.error ? String(outcome.payload.error) : undefined,
+      } : null,
+    });
+  }
   if (!PHONE_SEND_TOOLS.has(operation.tool)) return fail(400, "VALIDATION_FAILED", "This confirmation_id belongs to another kind of change.");
   const requestId = phone.bridgeRequestId(user.companyId, confirmationId);
   // Any confirmation of this user that reached the bridge with this request id
@@ -240,6 +268,20 @@ async function outboundStatus(user: AuthedUser, confirmationId: string): Promise
   const { tool, stored, requestId } = original.data;
   if (!stored) {
     return ok(200, { confirmation_id: confirmationId, tool, status: "not_confirmed", meaning: "This send was previewed but not confirmed, so nothing was sent." });
+  }
+  if (WHATSAPP_BUSINESS_TOOLS.has(tool)) {
+    if (stored.remoteId) {
+      const delivery = await whatsapp.whatsAppDeliveryStatus(user, stored.remoteId);
+      return delivery.ok ? ok(200, { confirmation_id: confirmationId, tool, ...delivery.data }) : delivery;
+    }
+    if (stored.status === "unknown" || stored.error === "OUTCOME_UNKNOWN") {
+      return ok(200, {
+        confirmation_id: confirmationId, tool, status: "unknown",
+        meaning: "Secretary could not learn whether Meta accepted this WhatsApp message. Meta takes no request id, so it cannot be asked again safely and is never sent again by itself: check the chat in WhatsApp before preparing a new message.",
+      });
+    }
+    return ok(200, { confirmation_id: confirmationId, tool, status: stored.error ? "refused" : stored.status, error: stored.error ?? null,
+      meaning: stored.error ? "The message was refused and not sent." : "Recorded without a WhatsApp message id." });
   }
   if (stored.remoteId) {
     const live = tool === "send_phone_sms" ? await phone.phoneSmsStatus(user, stored.remoteId) : await phone.phoneChatReplyStatus(user, stored.remoteId);
@@ -344,6 +386,9 @@ export function deviceWriteTools(id: (what: string) => z.ZodTypeAny): WriteToolD
         const original = await originalSend(user, a.confirmation_id);
         if (!original.ok) return original;
         const { tool, args, requestId, stored } = original.data;
+        if (WHATSAPP_BUSINESS_TOOLS.has(tool)) {
+          return fail(409, "NOT_RESUBMITTABLE", "A WhatsApp Business message cannot be resubmitted: Meta takes no request id, so asking again could send it twice. Check the chat in WhatsApp first.");
+        }
         if (!stored) return fail(409, "NOT_CONFIRMED", "That send was never confirmed, so nothing is unknown about it.");
         if (stored.remoteId) return fail(409, "OUTCOME_KNOWN", "SMS Bridge has this message; use get_outbound_message_status instead.");
         if (stored.error && stored.error !== "OUTCOME_UNKNOWN") return fail(409, "OUTCOME_KNOWN", `That send was refused (${stored.error}); prepare a new one if it is still wanted.`);
@@ -356,6 +401,7 @@ export function deviceWriteTools(id: (what: string) => z.ZodTypeAny): WriteToolD
       run: async (user, a, verified) => unwrapThrownNetwork(async () => {
         const original = await originalSend(user, a.confirmation_id);
         if (!original.ok) return original;
+        if (original.data.tool !== "send_phone_sms" && original.data.tool !== "reply_phone_chat") return fail(409, "NOT_RESUBMITTABLE", "Only a phone send can be resubmitted.");
         return runPhoneSend(user, original.data.tool, original.data.args, String(verified?.request_id ?? original.data.requestId));
       }),
     },
@@ -584,11 +630,10 @@ function zodFromJson(schema: JsonSchema, where: string): z.ZodTypeAny {
 function relayTools(kind: "read" | "reviewed") {
   return PCP_RELAY_CATALOGUE.tools.filter((tool) => relayDecision(tool.relay_tool).kind === kind).map((tool: RelayTool) => {
     const decision = relayDecision(tool.relay_tool);
-    const omitted = new Set(decision.kind === "reviewed" ? decision.omitParams ?? [] : []);
     const source = tool.input_schema as { properties?: Record<string, JsonSchema>; required?: readonly string[] };
-    const properties = Object.fromEntries(Object.entries(source.properties ?? {}).filter(([name]) => !omitted.has(name))
+    const properties = Object.fromEntries(Object.entries(source.properties ?? {})
       .map(([name, property]) => [name, Object.fromEntries(Object.entries(property).filter(([key]) => key !== "title"))]));
-    const required = (source.required ?? []).filter((name) => !omitted.has(name));
+    const required = [...(source.required ?? [])];
     const fields = Object.fromEntries(Object.entries(properties).map(([name, property]) => {
       const base = zodFromJson(property as JsonSchema, `${tool.name}.${name}`);
       return [name, required.includes(name) ? base : base.optional()];
@@ -598,6 +643,18 @@ function relayTools(kind: "read" | "reviewed") {
   });
 }
 
+/**
+ * The arguments as the preview shows them: binary content is shown by its size
+ * and SHA-256 (the bytes sent are exactly the bytes that digest names), text as
+ * it is.
+ */
+function previewArguments(args: Record<string, unknown>): Record<string, unknown> {
+  if (typeof args.content_base64 !== "string") return args;
+  const bytes = Buffer.from(args.content_base64, "base64");
+  const { content_base64: _content, ...rest } = args;
+  return { ...rest, content: { bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") } };
+}
+
 /** Every PC tool Secretary does not offer, with the reason: shown by describe_capabilities. */
 export const PC_TOOLS_NOT_OFFERED_THROUGH_SECRETARY: { name: string; upstream: string; reason: string }[] = [
   ...Object.entries(PC_TOOLS_NOT_OFFERED).map(([name, reason]) => ({ name: `pc_${name}`, upstream: "pc_engine", reason })),
@@ -605,6 +662,14 @@ export const PC_TOOLS_NOT_OFFERED_THROUGH_SECRETARY: { name: string; upstream: s
     .filter(({ decision }) => decision.kind === "not_offered")
     .map(({ tool, decision }) => ({ name: tool.name, upstream: "PC Control Plus relay", reason: (decision as { reason: string }).reason })),
 ].sort((left, right) => ordinalCompare(left.name, right.name));
+
+/**
+ * The PC's reviewed steps, for the assistant and the agent (deviceActionService):
+ * the same definitions, previews and runs as the MCP tools, by name.
+ */
+export function pcReviewedToolsByName(): Map<string, WriteToolDefinition> {
+  return new Map(pcWriteTools().map((tool) => [tool.name, tool]));
+}
 
 function pcWriteTools(): WriteToolDefinition[] {
   return [...pcEngineWriteTools(), ...relayTools("reviewed").map(({ tool, decision, fields }): WriteToolDefinition => {
@@ -620,13 +685,15 @@ function pcWriteTools(): WriteToolDefinition[] {
       external: true,
       available: pcAvailable,
       limitations: [...PC_LIMITS, "If the PC does not answer, the outcome is kept as unknown and the step is never repeated by itself.",
+        ...(reviewed.protections ? [reviewed.protections] : []),
         ...(loopState(tool.relay_tool) ? [`Its control loop decides each step from ${loopState(tool.relay_tool) === "dom" ? "the page's DOM text" : "Windows UI Automation text"}, checked from the PC Control Plus source to take no screenshots.`] : [])],
       fields,
       preview: async (user, a) => {
         if (!pcAvailable(user)) return fail(409, "CONNECTOR_NOT_CONFIGURED", "The owner's PC (PC Control Plus) is not set up for this company.");
         return ok(200, {
           pc_tool: tool.relay_tool,
-          arguments: a,
+          arguments: previewArguments(a),
+          ...(reviewed.protections ? { protections: reviewed.protections } : {}),
           relay_catalogue: PCP_RELAY_CATALOGUE.relay_sha256.slice(0, 12),
           effect: `${reviewed.effect} It runs on the owner's PC after your yes here and the PC owner's approval on the PC.`,
         });

@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 37 mounted route groups, 55 Prisma models, 161 Action Contracts,
+- **Backend**: 37 mounted route groups, 56 Prisma models, 162 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,
@@ -132,7 +132,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 111 test files, including database integration tests and checks that only
+- **Tests**: 112 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -972,10 +972,13 @@ message or reply from the company's WhatsApp Business number
 24-hour window), all previewed, confirmed and sent at most once per confirmation; an unknown outcome is never retried by
 itself (`get_outbound_message_status`, `resubmit_phone_message`). The owner's PC is
 reachable only through PC Control Plus catalogue tools (`pc_*`, generated from the
-shared engine and the relay; changes previewed; no shell, camera or screenshots). These
-tools are listed only for the company named by `SMS_BRIDGE_COMPANY_ID` / `PCP_COMPANY_ID`
-(`docs/PHONE_PC_INTEGRATION.md`). The only deletion is
-`delete_contact_permanently`; recording payments, deleting clients and sending quotes or
+shared engine and the relay pinned to a signed release; changes previewed; no unreviewed
+shell, camera, screenshots or screen coordinates). These tools are listed only for the
+company named by `SMS_BRIDGE_COMPANY_ID` / `PCP_COMPANY_ID`
+(`docs/PHONE_PC_INTEGRATION.md`); Secretary's own assistant and agent use the same
+contracts. The only deletion of a CRM record is `delete_contact_permanently`; the owner's
+PC files are deleted only by previewed PC steps the PC backs up and approves again;
+recording payments, deleting clients and sending quotes or
 invoices are not exposed. WhatsApp sender review reads (`list_whatsapp_senders`,
 `get_whatsapp_sender`) are open to every connection with `crm.read` and the
 administrator's switch for reading WhatsApp messages. Every connection also sees
