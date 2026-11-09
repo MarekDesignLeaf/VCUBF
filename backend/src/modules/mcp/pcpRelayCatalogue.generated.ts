@@ -34,7 +34,7 @@ export const PCP_RELAY_CATALOGUE = {
       "state": "dom"
     }
   },
-  "engine_version": "1.1.1",
+  "engine_version": "1.1.2",
   "relay_sha256": "c0be38f4aab77b9ea09b3d44db63a1aafa59d510323fa41dec95f6ae064ab896",
   "source": "MarekDesignLeaf/pc-control-plus remote/relay.py",
   "tools": [
@@ -1161,21 +1161,21 @@ export const PCP_RELAY_CATALOGUE = {
     }
   ],
   "upstream": {
-    "commit": "a267875cb7d9d812bf5e3589a1aa7299f80274c1",
+    "commit": "dabf4c4809586785254c4874230329c21474f977",
     "ref": "signed-release",
-    "release_id": "1b4dc2daab6b056a10e4cfb27d482a18c96b2f24",
-    "release_manifest_sha256": "a54700f3c82425c63623f2e5edf7c4a3c9f502079c064d8fcd8201790ed559c2",
-    "release_sequence": 42550858906,
+    "release_id": "5aa76306494ca21537597525b1c1b0a7a846122f",
+    "release_manifest_sha256": "862d587606a6c4f6908125bcbd41180194c7285a6af344da4034a1f7235ea7f8",
+    "release_sequence": 42585227083,
     "repository": "MarekDesignLeaf/pc-control-plus",
     "signed_files": {
       "agent.py": "cbd56d752fd21b27e6f586b9de9253e1b149af544c72b048afcaf1b111307a4b",
       "browser_dom.py": "26c8811f54c2eb644236dfab757c501c9ebdf1c344a39d4a28da75186d29af72",
       "desktop_goal.py": "522ac75ee2e6aeccf20d04d7524ef466be3879f10b53dc8ec548bcec955678be",
-      "pc_engine.py": "7e1858530d55362a46935fbb1554ed85f2c0265e168531b633108f7c61631883",
+      "pc_engine.py": "22c7c652641018e60191a0992360a3b2d0384f31e5174b8131e93d71ba95a666",
       "web_goal.py": "f7f5ec64ebc7b856977077f8d6a3d6e64e6b61060fc302436e972011cfd5e088",
       "windows_uia.py": "3c75bcb0e38af7f40c7f4e9c5d66577d092c3b253fc2df16a9b128e62ba7fa85"
     },
-    "snapshot_sha256": "39e95cc616981712b8ef1bd77120395af865d75f18e2bf6e9ff2c67297c54796",
-    "tree": "bfe475585009c198e823eb5e65a9183215770546"
+    "snapshot_sha256": "b1e1ec129a142b674cbfb54db273c69de55399c53bcad67778d272d15c6a00f4",
+    "tree": "ac2dab7b80961e01763b8d25b698211125167336"
   }
 } as const;

@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol
 from urllib.parse import urljoin, urlparse
 
-ENGINE_VERSION = "1.1.1"
+ENGINE_VERSION = "1.1.2"
 
 
 class EngineError(RuntimeError):
@@ -1629,6 +1629,7 @@ class BrowserSession:
         self._guarded_pages: list[Any] = []
         self._context_guarded = False
         self._inflight = 0
+        self._pending_popup_pages = 0
 
     # lifecycle
 
@@ -1722,6 +1723,7 @@ class BrowserSession:
         # a tab the user opens by hand in their own browser does not.
         try:
             if page.opener() in self._owned:
+                self._pending_popup_pages = max(0, self._pending_popup_pages - 1)
                 self._own(page)
                 self.page = page
         except Exception:
@@ -1765,6 +1767,10 @@ class BrowserSession:
 
     def _route_checked(self, route, request) -> None:
         page = self._request_page(request)
+        if page is None and request.is_navigation_request():
+            # A new window's first request precedes its Page event. Settling
+            # only network handlers can otherwise finish before it is visible.
+            self._pending_popup_pages += 1
         if page is not None and page not in self._owned:
             return route.fallback()
         if not request.is_navigation_request():
@@ -1835,8 +1841,10 @@ class BrowserSession:
         if page is None or page.is_closed():
             return
         deadline = time.monotonic() + budget_s
-        while self._inflight and time.monotonic() < deadline:
+        while (self._inflight or self._pending_popup_pages) and time.monotonic() < deadline:
             page.wait_for_timeout(20)
+        if self._pending_popup_pages:
+            raise EngineError("New window state is not observable yet; stop and inspect before another action.")
         for frame in page.frames[1:]:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -1881,7 +1889,7 @@ class BrowserSession:
         notes = []
         # A window the engine's own action opened, whose navigation was refused, is closed again.
         for page in list(self.context.pages):
-            if page not in self._guard_pages_at_start and not page.is_closed() and page.url.startswith(("chrome-error:", "about:blank")):
+            if page not in self._guard_pages_at_start and page in self._owned and not page.is_closed():
                 try:
                     page.close()
                     notes.append("the window it opened was closed again")
@@ -1910,6 +1918,7 @@ class BrowserSession:
             self._owned = []
             self._guarded_pages = []
             self._context_guarded = False
+            self._pending_popup_pages = 0
 
     def close(self) -> dict[str, Any]:
         mode = self.mode
@@ -2233,10 +2242,20 @@ class BrowserSession:
             except Exception:
                 pass
             self._settle()
+            if blocked:
+                # A refused popup request can precede its Page event. The first
+                # recovery may not see it yet; recheck after browser events have
+                # settled, without ever closing a pre-existing or unowned tab.
+                note = self._after_refusal()
+                if failure is None:
+                    failure = {"step": index + 1, "action": step.describe(),
+                               "error": "navigation refused before it was sent: " + "; ".join(blocked)}
+                if note:
+                    failure["recovered"] = "; ".join(filter(None, (failure.get("recovered"), note)))
         result: dict[str, Any] = {"success": failure is None, "done": done, "url": _without_query(self.page.url), "title": self.page.title()}
         if failure:
             result["failed"] = failure
-            result["skipped"] = len(steps) - len(done) - 1
+            result["skipped"] = max(0, len(steps) - len(done) - 1)
         if snapshot != "none":
             try:
                 result["snapshot"] = self.snapshot(query=query)
