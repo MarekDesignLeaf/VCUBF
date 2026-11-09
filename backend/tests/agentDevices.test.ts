@@ -5,7 +5,8 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import bcrypt from "bcryptjs";
 import request from "supertest";
 import { createServer } from "../src/server.js";
-import { prisma } from "../src/db.js";
+import { prisma, runInAmbientTransaction } from "../src/db.js";
+import { receiveWebhook } from "../src/services/whatsappBusinessConnectorService.js";
 import { SPECIALISTS } from "../src/agents/specialists.js";
 import { AGENT_TOOL_CATALOGUE } from "../src/agents/toolCatalogue.js";
 import type { AuthedUser } from "../src/middleware/auth.js";
@@ -384,6 +385,21 @@ describe("agent and assistant: the owner's phone, PC and WhatsApp delivery statu
         await prisma.$executeRawUnsafe("DROP TRIGGER test_delay_delivery ON whatsapp_message_statuses");
         await prisma.$executeRawUnsafe("DROP FUNCTION test_delay_delivery()");
       }
+      // The stored instant does not depend on the database session's time zone.
+      const at = 1767226000;
+      const raw = JSON.stringify({ object: "whatsapp_business_account", entry: [{ changes: [{ field: "messages", value: {
+        metadata: { phone_number_id: "123456789" }, statuses: [{ id: "wamid.TZ42", status: "sent", recipient_id: "447700900405", timestamp: String(at) }],
+      } }] }] });
+      const signature = "sha256=" + createHmac("sha256", "test-app-secret").update(raw).digest("hex");
+      const before = Date.now();
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe("SET LOCAL timezone TO 'America/New_York'");
+        const received = await runInAmbientTransaction(tx, () => receiveWebhook(Buffer.from(raw), signature, JSON.parse(raw)));
+        assert.equal(received.ok, true);
+      });
+      const stored = await prisma.whatsAppMessageStatus.findFirstOrThrow({ where: { messageId: "wamid.TZ42" } });
+      assert.equal(stored.occurredAt.toISOString(), new Date(at * 1000).toISOString(), "occurred_at is stored in UTC whatever the session time zone");
+      assert.ok(Math.abs(stored.updatedAt.getTime() - before) < 60_000, "updated_at is stored in UTC too");
       const unsigned = await request(app).post("/connectors/whatsapp/webhook").set("Content-Type", "application/json").send("{}");
       assert.notEqual(unsigned.status, 200, "an unsigned webhook records nothing");
       const elsewhere = await action(other, "whatsapp_message_status", { message_id: "wamid.OUT42" });

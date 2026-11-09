@@ -770,16 +770,20 @@ async function recordDeliveryStatuses(source: { id: string; companyId: string },
     if (!rank) continue;
     // Compare while PostgreSQL holds the conflict row, not in an earlier
     // SELECT: simultaneous webhook requests must never move a state back.
+    // The columns are TIMESTAMP without time zone holding UTC, as Prisma
+    // writes them: the instants are converted to UTC explicitly, so the stored
+    // time does not depend on the database session's time zone.
     changed += await prisma.$executeRaw`
       INSERT INTO "whatsapp_message_statuses"
         ("id", "company_id", "connector_source_id", "message_id", "status", "recipient_id",
          "error_code", "error_title", "occurred_at", "updated_at")
       VALUES (${randomUUID()}, ${source.companyId}, ${source.id}, ${update.id}, ${update.status},
-        ${update.recipientId}, ${update.errorCode}, ${update.errorTitle}, ${update.occurredAt}, CURRENT_TIMESTAMP)
+        ${update.recipientId}, ${update.errorCode}, ${update.errorTitle}, (${update.occurredAt}::timestamptz AT TIME ZONE 'UTC'),
+        (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
       ON CONFLICT ("company_id", "connector_source_id", "message_id") DO UPDATE SET
         "status" = EXCLUDED."status", "recipient_id" = EXCLUDED."recipient_id",
         "error_code" = EXCLUDED."error_code", "error_title" = EXCLUDED."error_title",
-        "occurred_at" = EXCLUDED."occurred_at", "updated_at" = CURRENT_TIMESTAMP
+        "occurred_at" = EXCLUDED."occurred_at", "updated_at" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
       WHERE (CASE "whatsapp_message_statuses"."status"
           WHEN 'sent' THEN 1 WHEN 'delivered' THEN 2 WHEN 'read' THEN 3 WHEN 'failed' THEN 4 ELSE 0 END) < ${rank}
         OR ("whatsapp_message_statuses"."status" = EXCLUDED."status"
