@@ -265,9 +265,30 @@ class BrowserGuardLaunched(Servers):
     def test_a_popup_to_a_forbidden_address_is_refused_and_closed(self):
         self.engine.call("browser_open", {"url": self.P + "/"})
         pages_before = len(self.engine.call("browser_tabs")["tabs"])
-        self.engine.call("browser_act", {"steps": [{"click": {"css": "#pop"}}, {"wait_for": {"ms": 600}}], "snapshot": "none"})
+        result = self.engine.call("browser_act", {"steps": [{"click": {"css": "#pop"}}, {"wait_for": {"ms": 600}}], "snapshot": "none"})
+        self.assertFalse(result["success"], result)
+        self.assertForbiddenUntouched()
+        tabs = self.engine.call("browser_tabs")["tabs"]
+        self.assertEqual(len(tabs), pages_before, {"result": result, "tabs": tabs})
+
+    def test_popup_refusal_cleanup_rechecks_after_browser_events_settle(self):
+        self.engine.call("browser_open", {"url": self.P + "/"})
+        pages_before = len(self.engine.call("browser_tabs")["tabs"])
+        recover = self.engine.browser._after_refusal
+        attempts = []
+
+        def initially_not_visible():
+            attempts.append(True)
+            # The request can be refused before Playwright emits the popup's
+            # Page event. Make that first recovery miss deterministic.
+            return "" if len(attempts) == 1 else recover()
+
+        with mock.patch.object(self.engine.browser, "_after_refusal", side_effect=initially_not_visible):
+            result = self.engine.call("browser_act", {"steps": [{"click": {"css": "#pop"}}, {"wait_for": {"ms": 600}}], "snapshot": "none"})
+        self.assertFalse(result["success"], result)
         self.assertForbiddenUntouched()
         self.assertEqual(len(self.engine.call("browser_tabs")["tabs"]), pages_before)
+        self.assertGreaterEqual(len(attempts), 2)
 
     def test_a_late_navigation_by_the_page_itself_is_refused_and_reported(self):
         self.engine.call("browser_open", {"url": self.P + "/late"})

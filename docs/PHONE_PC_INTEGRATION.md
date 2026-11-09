@@ -153,8 +153,8 @@ python windows-companion/pc-control/server/import_pcp_catalogue.py --refresh --p
 `--refresh` reads the checkout's HEAD from git objects, not from the working tree. It
 writes the snapshot, the pin and the catalogue together, and only after the new snapshot
 passes every check; a failure changes nothing. A new release key is given explicitly
-with `--public-key-b64`. Today the pin is release `1b4dc2d` (`signed-release`
-`a267875`, tree `bfe4755`).
+with `--public-key-b64`. Today the pin is release `5aa7630` (`signed-release`
+`dabf4c4`, tree `ac2dab7`), shared engine1.1.2.
 
 Secretary's decision per relay tool is `backend/src/modules/mcp/pcRelayPolicy.ts`;
 `tests/mcpDevices.test.ts` fails when a relay tool has no decision or a decision names

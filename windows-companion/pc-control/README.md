@@ -49,6 +49,13 @@ exposes the same tools as `pc_<name>` (`pc_browser_open`, `pc_browser_act`,
 
 ## Where the engine may go (security boundary)
 
+Engine1.1.2 waits for a new window's Page event as well as its network request
+before settling an action. Refusal cleanup runs again after settlement and
+closes only new owned tabs, preserving pre-existing and unowned user tabs.
+If the new window remains unobservable within the bounded wait, the operation
+stops rather than reporting success. The real-Chromium delayed-popup regression
+fails on1.1.1 and passes on1.1.2.
+
 `pc_engine.UrlPolicy` decides before any request is sent:
 
 - `web_fetch` resolves the host once, requires every address to be allowed,

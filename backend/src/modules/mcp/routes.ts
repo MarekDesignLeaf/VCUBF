@@ -103,6 +103,9 @@ export const MCP_TOOLSET_FINGERPRINTS = {
   // (get_whatsapp_message_status, and in get_outbound_message_status); the relay catalogue
   // imported from the pinned signed release 1b4dc2d.
   "2026-11-09.full-device-scope": "d475fd48e5ce2d0e97d6fedf90cb033e47bd4ee1d0cf95e41b54f11c0c646178",
+  // Shared engine1.1.2; signed upstream snapshot and runtime recovery upgraded
+  // together. Tool names and policy metadata remain the same.
+  "2026-11-09.popup-recovery": "d475fd48e5ce2d0e97d6fedf90cb033e47bd4ee1d0cf95e41b54f11c0c646178",
 } as const satisfies Record<string, string>;
 const toolsetLedger = Object.entries(MCP_TOOLSET_FINGERPRINTS);
 export const MCP_TOOLSET_REVISION = toolsetLedger[toolsetLedger.length - 1][0];

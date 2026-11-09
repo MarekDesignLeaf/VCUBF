@@ -41,6 +41,31 @@ SMS/chats are not yet linked into CRM communication records; phone/PC connector
 bindings currently use server configuration rather than administrator-managed
 ConnectorSource rows. Full requested all-function acceptance remains open.
 
+### Follow-up verification, 9 November2026
+
+- Timestamp fix PR77: production deployment
+  `a6c1a002-0087-4b3b-87aa-4a7cba146284` SUCCESS, health build705d4aa3188d.
+  Actual Secretary list_phone_sms with the one-second time range
+  07:33:45–07:33:46 UTC returns exactly one row, device_sms_id6377,
+  at2026-11-09T07:33:45.483Z. Independent raw Bridge timestamp agrees.
+  No second SMS was sent. Backend final CI112files/1083passed/0failed.
+- Blocked-popup issue78 reproduced in real Chromium: deliberately delay the
+  first recovery until the popup's Page event; engine1.1.1 leaves two tabs.
+  Engine1.1.2 fixes event settlement and recovery without weakening URL policy
+  or closing pre-existing/unowned tabs. Security/catalogue/text-only checks35/35
+  pass; exact final release regression/integrity checks4/4 pass; PCP tests80pass,
+  1skip,81subtests. These remain isolated browser tests, not owner-browser
+  live acceptance.
+- PCP PR13 mergedf6379426; independent signing run42585227083 SUCCESS;
+  signed commitdabf4c4809586785254c4874230329c21474f977; deployment
+  826a9062-8ecf-4ad0-82c8-c487f098e2cb SUCCESS. Served manifest verified with
+  installed local trust pin. Normal Windows updater installed onlypc_engine.py
+  at08:23:00 and accepted authenticated child heartbeat08:23:08 PID51144.
+  Active engine1.1.2 SHA256
+  22c7c652641018e60191a0992360a3b2d0384f31e5174b8131e93d71ba95a666.
+  Secretary's generated signed snapshot is refreshed to that exact release;
+  matching gateway deployment is pending this follow-up PR's CI.
+
 ## Acceptance status summary
 
 | Area | Status | Last checked | Evidence | Notes |

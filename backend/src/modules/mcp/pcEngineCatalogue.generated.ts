@@ -2,7 +2,7 @@
 // Do not edit: change pc_engine.py, then run the script. tests/test_engine.py checks it.
 /* eslint-disable */
 export const PC_ENGINE_CATALOGUE = {
-  "engine_version": "1.1.1",
+  "engine_version": "1.1.2",
   "tools": [
     {
       "name": "browser_open",
