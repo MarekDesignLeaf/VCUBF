@@ -348,9 +348,9 @@ describe("agent and assistant: the owner's phone, PC and WhatsApp delivery statu
       WHATSAPP_ACCESS_TOKEN: "test-placeholder-token", WHATSAPP_WEBHOOK_VERIFY_TOKEN: "test-verify", META_APP_SECRET: "test-app-secret" });
     const source = await prisma.connectorSource.create({ data: { companyId: TEST_COMPANY_ID, connectorKey: "whatsapp_business", displayName: "Business number",
       serviceType: "messaging", configuredScopes: ["read:messages", "send:messages"], isEnabled: true, connectionStatus: "connected" } });
-    const webhook = (status: string, at: number, errors?: Json[]) => {
+    const webhook = (status: string, at: number, errors?: Json[], messageId = "wamid.OUT42") => {
       const raw = JSON.stringify({ object: "whatsapp_business_account", entry: [{ changes: [{ field: "messages", value: {
-        metadata: { phone_number_id: "123456789" }, statuses: [{ id: "wamid.OUT42", status, recipient_id: "447700900405", timestamp: String(at), ...(errors ? { errors } : {}) }],
+        metadata: { phone_number_id: "123456789" }, statuses: [{ id: messageId, status, recipient_id: "447700900405", timestamp: String(at), ...(errors ? { errors } : {}) }],
       } }] }] });
       return request(app).post("/connectors/whatsapp/webhook").set("Content-Type", "application/json")
         .set("X-Hub-Signature-256", "sha256=" + createHmac("sha256", "test-app-secret").update(raw).digest("hex")).send(raw);
@@ -364,6 +364,26 @@ describe("agent and assistant: the owner's phone, PC and WhatsApp delivery statu
       assert.equal(delivered.body.data?.status, "delivered", "a state is never moved back");
       await webhook("read", 1767225800);
       assert.equal((await action(admin, "whatsapp_message_status", { message_id: "wamid.OUT42" })).body.data?.status, "read");
+      // Real DB interleaving: hold the older delivered INSERT before it takes
+      // the conflict row, allowing the later read event to commit first.
+      await webhook("sent", 1767225600, undefined, "wamid.RACE42");
+      await prisma.$executeRawUnsafe(`CREATE FUNCTION test_delay_delivery() RETURNS trigger AS $$
+        BEGIN IF NEW.message_id = 'wamid.RACE42' AND NEW.status = 'delivered' THEN
+          PERFORM pg_sleep(1); END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`);
+      await prisma.$executeRawUnsafe(`CREATE TRIGGER test_delay_delivery BEFORE INSERT ON whatsapp_message_statuses
+        FOR EACH ROW EXECUTE FUNCTION test_delay_delivery()`);
+      try {
+        const answers = await Promise.all([
+          webhook("delivered", 1767225700, undefined, "wamid.RACE42"),
+          webhook("read", 1767225800, undefined, "wamid.RACE42"),
+        ]);
+        for (const answer of answers) assert.equal(answer.status, 200, JSON.stringify(answer.body));
+        assert.equal((await action(admin, "whatsapp_message_status", { message_id: "wamid.RACE42" })).body.data?.status,
+          "read", "concurrent delayed delivered event cannot overwrite a committed read event");
+      } finally {
+        await prisma.$executeRawUnsafe("DROP TRIGGER test_delay_delivery ON whatsapp_message_statuses");
+        await prisma.$executeRawUnsafe("DROP FUNCTION test_delay_delivery()");
+      }
       const unsigned = await request(app).post("/connectors/whatsapp/webhook").set("Content-Type", "application/json").send("{}");
       assert.notEqual(unsigned.status, 200, "an unsigned webhook records nothing");
       const elsewhere = await action(other, "whatsapp_message_status", { message_id: "wamid.OUT42" });

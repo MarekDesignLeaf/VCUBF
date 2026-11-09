@@ -1,4 +1,5 @@
 import { Prisma, type CommunicationIntake } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import {
@@ -767,19 +768,23 @@ async function recordDeliveryStatuses(source: { id: string; companyId: string },
   for (const update of statuses) {
     const rank = DELIVERY_RANK[update.status];
     if (!rank) continue;
-    const key = { companyId_connectorSourceId_messageId: { companyId: source.companyId, connectorSourceId: source.id, messageId: update.id } };
-    const existing = await prisma.whatsAppMessageStatus.findUnique({ where: key, select: { status: true, occurredAt: true } });
-    if (existing) {
-      const before = DELIVERY_RANK[existing.status] ?? 0;
-      if (rank < before || (rank === before && update.occurredAt <= existing.occurredAt)) continue;
-    }
-    const data = { status: update.status, recipientId: update.recipientId, errorCode: update.errorCode, errorTitle: update.errorTitle, occurredAt: update.occurredAt };
-    await prisma.whatsAppMessageStatus.upsert({
-      where: key,
-      update: data,
-      create: { companyId: source.companyId, connectorSourceId: source.id, messageId: update.id, ...data },
-    });
-    changed += 1;
+    // Compare while PostgreSQL holds the conflict row, not in an earlier
+    // SELECT: simultaneous webhook requests must never move a state back.
+    changed += await prisma.$executeRaw`
+      INSERT INTO "whatsapp_message_statuses"
+        ("id", "company_id", "connector_source_id", "message_id", "status", "recipient_id",
+         "error_code", "error_title", "occurred_at", "updated_at")
+      VALUES (${randomUUID()}, ${source.companyId}, ${source.id}, ${update.id}, ${update.status},
+        ${update.recipientId}, ${update.errorCode}, ${update.errorTitle}, ${update.occurredAt}, CURRENT_TIMESTAMP)
+      ON CONFLICT ("company_id", "connector_source_id", "message_id") DO UPDATE SET
+        "status" = EXCLUDED."status", "recipient_id" = EXCLUDED."recipient_id",
+        "error_code" = EXCLUDED."error_code", "error_title" = EXCLUDED."error_title",
+        "occurred_at" = EXCLUDED."occurred_at", "updated_at" = CURRENT_TIMESTAMP
+      WHERE (CASE "whatsapp_message_statuses"."status"
+          WHEN 'sent' THEN 1 WHEN 'delivered' THEN 2 WHEN 'read' THEN 3 WHEN 'failed' THEN 4 ELSE 0 END) < ${rank}
+        OR ("whatsapp_message_statuses"."status" = EXCLUDED."status"
+            AND "whatsapp_message_statuses"."occurred_at" < EXCLUDED."occurred_at")
+    `;
   }
   return changed;
 }
