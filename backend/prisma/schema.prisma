@@ -63,6 +63,7 @@ model Company {
   learningRules                LearningRule[]
   communicationRecords         CommunicationRecord[]
   communicationIntakes         CommunicationIntake[]
+  whatsappMessageStatuses      WhatsAppMessageStatus[]
   notificationAcknowledgements NotificationAcknowledgement[]
   clientMergeRecords           ClientMergeRecord[]
   portfolioPhotos              PortfolioPhoto[]
@@ -132,6 +133,7 @@ model ConnectorSource {
   externalDriveImages    ExternalDriveImage[]
   externalGooglePhotos   ExternalGooglePhoto[]
   voicePendingActions    VoicePendingAction[]
+  whatsappMessageStatuses WhatsAppMessageStatus[]
 
   @@unique([companyId, connectorKey, displayName])
   @@index([companyId, serviceType])
@@ -1217,6 +1219,32 @@ model CommunicationIntake {
   @@index([clientId])
   @@index([connectorSourceId])
   @@map("communication_intakes")
+}
+
+// WhatsApp Business delivery status: the latest state Meta reported, through
+// the verified webhook, for one message the business number sent (sent,
+// delivered, read, failed). One row per message; a state is only ever moved
+// forward, never back. Nothing here is sent or invented: a message Meta has
+// not reported on has no row.
+model WhatsAppMessageStatus {
+  id                String   @id @default(uuid())
+  companyId         String   @map("company_id")
+  connectorSourceId String   @map("connector_source_id")
+  messageId         String   @map("message_id")
+  status            String
+  recipientId       String?  @map("recipient_id")
+  errorCode         String?  @map("error_code")
+  errorTitle        String?  @map("error_title")
+  occurredAt        DateTime @map("occurred_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  company         Company         @relation(fields: [companyId], references: [id])
+  connectorSource ConnectorSource @relation(fields: [connectorSourceId], references: [id])
+
+  @@unique([companyId, connectorSourceId, messageId])
+  @@index([companyId, occurredAt])
+  @@map("whatsapp_message_statuses")
 }
 
 // Task Management — one structured task list shared by CRM, jobs,

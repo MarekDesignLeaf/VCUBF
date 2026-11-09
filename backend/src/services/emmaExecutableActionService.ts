@@ -56,6 +56,7 @@ import * as googlePhotosConnectorService from "./googlePhotosConnectorService.js
 import * as whatsappBusinessConnectorService from "./whatsappBusinessConnectorService.js";
 import * as emmaBehaviorService from "./emmaBehaviorService.js";
 import * as emmaPolicyService from "./emmaPolicyService.js";
+import * as deviceActionService from "./deviceActionService.js";
 
 type Row = Record<string, any>;
 
@@ -660,6 +661,26 @@ async function executeEmmaActionDirect(
       }
       return gmailConnectorService.setDefaultGmailSender(user, named[0].id);
     }
+    case "phone_status":
+      return deviceActionService.phoneStatus(user, p);
+    case "list_phone_sms":
+      return deviceActionService.listPhoneSms(user, p);
+    case "list_phone_chats":
+      return deviceActionService.listPhoneChats(user, p);
+    case "phone_message_status":
+      return deviceActionService.phoneMessageStatus(user, p);
+    case "send_phone_sms":
+      return deviceActionService.sendPhoneSms(user, p, confirmed);
+    case "reply_phone_chat":
+      return deviceActionService.replyPhoneChat(user, p, confirmed);
+    case "whatsapp_message_status":
+      return deviceActionService.whatsAppMessageStatus(user, p);
+    case "list_pc_tools":
+      return deviceActionService.listPcTools(user, p);
+    case "read_pc":
+      return deviceActionService.readPc(user, p);
+    case "operate_pc":
+      return deviceActionService.operatePc(user, p, confirmed);
     case "send_whatsapp": {
       const source = await connectorSource(user, "whatsapp_business");
       return source.ok ? whatsappBusinessConnectorService.sendWhatsAppMessage(user, source.data.id, { ...p, to: withDialledPlus(p.to), ...englishByDefault(p, confirmed), confirmed }) : source;

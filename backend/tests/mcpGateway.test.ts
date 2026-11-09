@@ -7,7 +7,7 @@ import { isReadCommand } from "../src/agents/agentProposal.js";
 import { AGENT_TOOL_CATALOGUE } from "../src/agents/toolCatalogue.js";
 import { CANONICAL_COMMAND, parseTextCommand } from "../src/lib/commandParser.js";
 import { EMMA_EXECUTABLE_ACTIONS } from "../src/lib/emmaExecutableActionCatalogue.js";
-import { MCP_READ_COMMAND_TOOL, mcpTools, readCommandForms } from "../src/modules/mcp/routes.js";
+import { MCP_DESCRIBE_TOOL, MCP_READ_COMMAND_TOOL, mcpTools, readCommandForms } from "../src/modules/mcp/routes.js";
 import { resetDb, seedCompanyAndAdmin, TEST_COMPANY_ID } from "./setup.js";
 
 // Read-only MCP gateway — voice assistant master document 1.1a, step P2a.
@@ -77,11 +77,16 @@ describe("MCP gateway (read only)", () => {
     const res = await rpc(adminToken, { jsonrpc: "2.0", id: 3, method: "tools/list" });
     assert.equal(res.status, 200);
     const tools = res.body.result.tools as Array<{ name: string; inputSchema: { type: string }; annotations: Record<string, boolean> }>;
-    const expected = AGENT_TOOL_CATALOGUE.filter((tool) => tool.kind === "read" && EMMA_EXECUTABLE_ACTIONS[tool.name].confirmation === "none");
+    // The agent's device reads (phone, PC, WhatsApp delivery status) are served by the
+    // gateway's device tools instead, listed only where the device is set up (not here).
+    const deviceContracts = new Set(["action.read_phone_messages", "action.read_pc", "action.read_whatsapp_delivery_status"]);
+    const expected = AGENT_TOOL_CATALOGUE.filter((tool) => tool.kind === "read" && EMMA_EXECUTABLE_ACTIONS[tool.name].confirmation === "none"
+      && !deviceContracts.has(tool.capabilityId));
     assert.ok(expected.length > 0);
     // Plus the gateway's own reading tools for the WhatsApp sender review (issue #74).
     const gatewayReads = ["list_whatsapp_senders", "get_whatsapp_sender"];
-    assert.deepEqual(tools.map((tool) => tool.name).sort(), [MCP_READ_COMMAND_TOOL, ...gatewayReads, ...expected.map((tool) => tool.name)].sort());
+    // And the metadata tool every connection sees (capability metadata, 3 Nov 2026).
+    assert.deepEqual(tools.map((tool) => tool.name).sort(), [MCP_DESCRIBE_TOOL, MCP_READ_COMMAND_TOOL, ...gatewayReads, ...expected.map((tool) => tool.name)].sort());
     for (const tool of tools) {
       assert.equal(tool.inputSchema.type, "object", tool.name);
       assert.equal(tool.annotations.readOnlyHint, true, tool.name);

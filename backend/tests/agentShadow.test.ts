@@ -382,7 +382,13 @@ describe("agent in shadow (F1)", () => {
     assert.equal(denied.status, 403);
   });
 
-  it("a language and request path are accepted only with enough agreement on real actions and few planner errors", async () => {
+  it("a language and request path are accepted only with enough agreement on real actions and few planner errors", async (t) => {
+    // The verdict needs an identified build (CI sets GITHUB_SHA, Railway its
+    // commit); outside both this test names one itself instead of depending on where it runs.
+    if (!process.env.RAILWAY_GIT_COMMIT_SHA && !process.env.GITHUB_SHA) {
+      process.env.GITHUB_SHA = "0123456789abcdef0123";
+      t.after(() => { delete process.env.GITHUB_SHA; });
+    }
     const template = {
       companyId: (await prisma.company.findFirstOrThrow()).id,
       userId: (await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } })).id,

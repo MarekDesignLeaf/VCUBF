@@ -137,6 +137,25 @@ export const EMMA_EXECUTABLE_ACTIONS = {
   remove_voice_alias: { capabilityAction: "delete_voice_alias", fields: "heard", confirmation: "service_preview" },
   send_quote: { capabilityAction: "send_quote_pdf", fields: "quote, to[]?", confirmation: "service_preview" },
   send_invoice: { capabilityAction: "send_invoice_pdf", fields: "invoice, to[]?", confirmation: "service_preview" },
+  // The owner's phone through SMS Bridge, for the company it is configured for.
+  // Reads at once; an SMS or a notification reply is previewed with its bridge
+  // request id and sent once after the yes. An unknown outcome is never sent
+  // again by itself: phone_message_status tells, and the same message prepared
+  // with reuse_request_id settles it without a second send.
+  phone_status: { capabilityAction: "read_phone_messages", fields: "", confirmation: "none" },
+  list_phone_sms: { capabilityAction: "read_phone_messages", fields: "address?, text?, direction? (in|out), since?, limit?", confirmation: "none" },
+  list_phone_chats: { capabilityAction: "read_phone_messages", fields: "channel? (whatsapp|messenger), since?, limit?", confirmation: "none" },
+  phone_message_status: { capabilityAction: "read_phone_messages", fields: "request_id", confirmation: "none" },
+  send_phone_sms: { capabilityAction: "send_phone_sms", fields: "to (E.164), text, reuse_request_id?", confirmation: "service_preview" },
+  reply_phone_chat: { capabilityAction: "reply_phone_chat", fields: "channel (whatsapp|messenger), chat, text, reuse_request_id?", confirmation: "service_preview" },
+  // What Meta reported for a WhatsApp Business message: by message_id, or the caller's latest.
+  whatsapp_message_status: { capabilityAction: "read_whatsapp_delivery_status", fields: "message_id?", confirmation: "none" },
+  // The owner's PC through PC Control Plus: only catalogue tools, text state
+  // only (list_pc_tools names them with their parameters). A step is previewed,
+  // runs after the yes, and the PC asks its owner again.
+  list_pc_tools: { capabilityAction: "read_pc", fields: "", confirmation: "none" },
+  read_pc: { capabilityAction: "read_pc", fields: "tool (a read tool from list_pc_tools), arguments?", confirmation: "none" },
+  operate_pc: { capabilityAction: "operate_pc", fields: "tool (a step from list_pc_tools), arguments?", confirmation: "service_preview" },
 } as const satisfies Record<string, EmmaExecutableActionDefinition>;
 
 export type EmmaExecutableActionName = keyof typeof EMMA_EXECUTABLE_ACTIONS;
@@ -193,6 +212,9 @@ export const EMMA_EXECUTABLE_ACTION_PAGES: Record<EmmaExecutableActionName, stri
   reactivate_learning_rule: "learning", archive_memory: "memory_model", get_metrics: "metrics", suggest_schedule: "calendar",
   get_recruitment_recommendation: "recruitment", merge_clients: "data_quality",
   send_quote: "quotes", send_invoice: "invoices",
+  phone_status: "connectors", list_phone_sms: "connectors", list_phone_chats: "connectors", phone_message_status: "connectors",
+  send_phone_sms: "connectors", reply_phone_chat: "connectors", whatsapp_message_status: "connectors",
+  list_pc_tools: "connectors", read_pc: "connectors", operate_pc: "connectors",
   update_task: "tasks", update_service: "services", update_invoice: "invoices", update_document: "documents",
   update_business_context: "business_context", update_industry: "industries",
   set_notification_digest: "notifications", send_notification_digest: "notifications",

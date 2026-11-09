@@ -57,6 +57,7 @@ export async function resetDb() {
   await prisma.documentRecord.deleteMany({});
   await prisma.task.deleteMany({});
   await prisma.communicationIntake.deleteMany({});
+  await prisma.whatsAppMessageStatus.deleteMany({});
   await prisma.connectorSource.deleteMany({});
   await prisma.communicationRecord.deleteMany({});
   await prisma.photoServiceSelection.deleteMany({});

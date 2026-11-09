@@ -34,6 +34,16 @@ jobs:
           else
             echo "No catalogue on master yet; nothing to compare."
           fi
+      # The MCP toolset ledger likewise: a shipped toolset revision always
+      # names the same tools and capability metadata.
+      - name: MCP toolset ledger is append-only
+        run: |
+          git fetch --no-tags --depth=1 origin master
+          if git show origin/master:backend/src/modules/mcp/routes.ts > /tmp/mcp-ledger-base.ts 2>/dev/null; then
+            node scripts/check-ledger-append-only.mjs /tmp/mcp-ledger-base.ts src/modules/mcp/routes.ts MCP_TOOLSET_FINGERPRINTS
+          else
+            echo "No MCP gateway on master yet; nothing to compare."
+          fi
       - run: npm run prisma:generate
       - run: npm run build
       - run: npm run test:embedded
@@ -55,6 +65,32 @@ jobs:
       - run: npm run lint
       - run: npm run build
 
+  # Secretary's PC Control Plus relay catalogue (pcpRelayCatalogue.generated.ts)
+  # is imported from a vendored minimal snapshot of one pinned, signed PC
+  # Control Plus release (windows-companion/pc-control/pcp-upstream/ and
+  # pcp-upstream.json), so this needs no credentials and no access to the
+  # private upstream. It proves the snapshot against the pinned commit and tree
+  # (git object ids of the commit, the trees and every vendored file, relay.py
+  # included), verifies the release manifest's Ed25519 signature with the key
+  # pinned in VCUBF and the signed file hashes, regenerates the catalogue from
+  # the relay in the snapshot and fails when the committed one differs; then
+  # runs the tamper tests. Updating: import_pcp_catalogue.py --refresh.
+  relay-catalogue:
+    name: PC Control Plus relay catalogue is the pinned signed release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install the relay's own requirements from the snapshot
+        run: python -m pip install -r windows-companion/pc-control/pcp-upstream/remote/requirements.txt cryptography
+      - name: Prove the snapshot, the pin and the catalogue
+        run: python windows-companion/pc-control/server/import_pcp_catalogue.py --check
+      - name: Tamper tests (relay.py, signed files, git objects, commit, key, stale catalogue)
+        working-directory: windows-companion/pc-control/tests
+        run: python -m unittest -v test_pcp_snapshot
+
   windows-companion:
     name: Windows companion tests and script syntax
     runs-on: ubuntu-latest
@@ -71,17 +107,29 @@ jobs:
       # tests, so this is no microphone, speaker or live-provider acceptance.
       - name: Python runtime tests
         run: python -m unittest -v test_voice_gate test_voice_runtime
+      # pc-control plugin: step language, UI Automation logic on a fake tree,
+      # the tool registry, and the browser tools against a real headless
+      # Chromium and local pages. Not an acceptance on the owner's Windows
+      # desktop, Edge profile or live websites.
+      - name: pc-control plugin tests
+        working-directory: windows-companion/pc-control/tests
+        env:
+          PC_CONTROL_REQUIRE_BROWSER: "1"
+        run: |
+          python -m pip install "fastmcp>=2.12" "playwright>=1.50" "PyYAML>=6.0" "psutil>=5.9"
+          python -m playwright install --with-deps chromium
+          python -m unittest -v test_steps test_desktop_ui test_registry test_status test_engine test_browser test_security test_text_state_only
       # A syntax error in an installer or launcher would only show on the PC.
       - name: PowerShell scripts parse
         shell: pwsh
         run: |
           $failed = $false
-          foreach ($file in Get-ChildItem -Path . -Filter *.ps1) {
+          foreach ($file in Get-ChildItem -Path . -Filter *.ps1 -Recurse) {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors) | Out-Null
             foreach ($problem in $errors) {
-              Write-Host "::error file=windows-companion/$($file.Name),line=$($problem.Extent.StartLineNumber)::$($problem.Message)"
+              Write-Host "::error file=$($file.FullName),line=$($problem.Extent.StartLineNumber)::$($problem.Message)"
               $failed = $true
             }
             if (-not $errors) { Write-Host "ok $($file.Name)" }

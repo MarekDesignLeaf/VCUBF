@@ -943,10 +943,27 @@ describe("MCP gateway write access", () => {
     // name-typed delete_contact_permanently. Nothing sends, publishes, e-mails
     // or records a payment.
     const reviewed = new Set(["approve_whatsapp_sender", "reject_whatsapp_sender", "reopen_whatsapp_sender", "defer_whatsapp_sender", "delete_contact_permanently"]);
+    // The only tools that send anything (phone integration): named here, every
+    // one previewed, declared external, and backed by the owner's phone.
+    const senders = new Set(["send_phone_sms", "reply_phone_chat", "resubmit_phone_message",
+      "send_whatsapp_business_message", "reply_whatsapp_business_message"]);
     for (const name of writeNames) {
+      if (senders.has(name)) {
+        const tool = MCP_WRITE_TOOLS.find((entry) => entry.name === name)!;
+        assert.equal(tool.kind, "reviewed", name);
+        assert.equal(tool.external, true, name);
+        assert.ok(tool.available, `${name} must depend on its channel being set up`);
+        continue;
+      }
       assert.doesNotMatch(name, /(^|_)send(_|$)|publish|email|payment/, name);
-      if (!reviewed.has(name)) assert.doesNotMatch(name, /delete|whatsapp/, name);
+      // The PC's file deletions are reviewed PC steps (asserted below), not record deletions.
+      if (!reviewed.has(name) && !name.startsWith("pc_")) assert.doesNotMatch(name, /delete|whatsapp/, name);
     }
+    // PC steps are previewed too, and no generic execute or shell tool exists.
+    for (const name of writeNames.filter((entry) => entry.startsWith("pc_"))) {
+      assert.equal(MCP_WRITE_TOOLS.find((entry) => entry.name === name)?.kind, "reviewed", name);
+    }
+    for (const name of [...readNames, ...writeNames]) assert.doesNotMatch(name, /exec|shell|command_line|run_command|eval/, name);
     const deletion = MCP_WRITE_TOOLS.find((tool) => tool.name === "delete_contact_permanently");
     assert.equal(deletion?.kind, "reviewed");
     assert.ok(deletion?.typedConfirmation, "permanent deletion needs the typed name");

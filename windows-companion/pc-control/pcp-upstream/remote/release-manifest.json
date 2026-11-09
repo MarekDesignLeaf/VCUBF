@@ -1,0 +1,15 @@
+{
+  "bootstrap_runner_sha256": "624663fca082592c443b49a6668a12df93bba8c077ca6fa16ac08582d615234b",
+  "files": {
+    "agent.py": "cbd56d752fd21b27e6f586b9de9253e1b149af544c72b048afcaf1b111307a4b",
+    "browser_dom.py": "26c8811f54c2eb644236dfab757c501c9ebdf1c344a39d4a28da75186d29af72",
+    "desktop_goal.py": "522ac75ee2e6aeccf20d04d7524ef466be3879f10b53dc8ec548bcec955678be",
+    "pc_engine.py": "7e1858530d55362a46935fbb1554ed85f2c0265e168531b633108f7c61631883",
+    "web_goal.py": "f7f5ec64ebc7b856977077f8d6a3d6e64e6b61060fc302436e972011cfd5e088",
+    "windows_uia.py": "3c75bcb0e38af7f40c7f4e9c5d66577d092c3b253fc2df16a9b128e62ba7fa85"
+  },
+  "release_id": "1b4dc2daab6b056a10e4cfb27d482a18c96b2f24",
+  "release_sequence": 42550858906,
+  "schema": "pcp.release.v2",
+  "signature_ed25519": "YYAy4mOvhCBpikWcmrXb514a4FKVnbYb7SboALQrgIip2OgLWYXjOzNf+fUzZeL05EJiMZ0enTTKoUnnQ3wRCA=="
+}

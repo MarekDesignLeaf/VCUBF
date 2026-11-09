@@ -74,6 +74,7 @@ import {
   requestFingerprint,
 } from "./shadowAgent.js";
 import { AGENT_TOOL_CATALOGUE, TOOL_CATALOGUE_FINGERPRINT, TOOL_CATALOGUE_VERSION } from "./toolCatalogue.js";
+import { ordinalCompare } from "../lib/ordinalCompare.js";
 
 type Row = Record<string, any>;
 
@@ -184,7 +185,7 @@ function stableJson(value: unknown): string {
   if (value && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, item]) => item !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right));
+      .sort(([left], [right]) => ordinalCompare(left, right));
     return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(",")}}`;
   }
   return JSON.stringify(value);
