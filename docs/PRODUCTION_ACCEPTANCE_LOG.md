@@ -14,6 +14,33 @@ Environment:
 
 `production`
 
+## Phone / PC gateway verification — 9 November 2026
+
+These results apply to the exact checked paths, not full product acceptance.
+Actual ChatGPT connection: existing Secretary plugin
+`plugin_asdk_app_6ae7860efa388191bf1640aba2486b8d`, test chat
+https://chatgpt.com/c/6af17584-00a4-83eb-ab1f-2ded1bd59a63.
+No screenshots or coordinate fallback were used.
+
+| Requirement | Direct evidence | Remaining limit |
+| --- | --- | --- |
+| Secretary deployment and migration | Railway deployment `0ec27613-96fe-44a4-95fe-e942f6a5c1b2` SUCCESS; /health build `b18614371533`; startup logs applied `20261109120000_whatsapp_message_status` | Timestamp follow-up PR77 needs post-deploy read-back |
+| Upgrade existing plugin | Same plugin/account refreshed, 100 tools: 40 read, 60 write; live describe_capabilities version1.5.0 / revision1.5.0+2026-11-09.full-device-scope | Long-running clients may need their own tool refresh |
+| Samsung and SMS reading | phone_status online; 50 synchronized SMS; list_phone_sms(limit=1) returns one real row | Only owner-synchronized SMS |
+| One approved self SMS | Exactly one preview/confirmation and matching outbound; remote_id `8f3d4658-2b2e-4e4d-8e07-b469dc094d32`; get_outbound_message_status=sent, Android SMS sent callback; one matching incoming SMS device_sms_id6377; independent bridge read agrees | NEVER repeat this test. Request_id `vcubf-00000000-4e8cfb56-5206-40e7-ac02-15c8460d9f99`. Phone sent callback alone is not a carrier delivery receipt; incoming copy proves self-receipt |
+| Phone WhatsApp notification input | Actual list_phone_chat_messages(limit=5) returns five WhatsApp notifications; listener active | No Messenger notifications in this page; no full app history or notification reply delivery proof |
+| PC text reading | Actual pc_ui_windows returns9 windows; pc_web_fetch python.org HTTP200 / Welcome to Python.org | Interactive browser CDP is disabled; no browser-action acceptance |
+| Guarded PC write/read | pc_write_workspace_text preview `c0d246cd-0ad1-454b-8a9a-16abdf1fbab8` confirmed once, backup=null; actual pc_read_text returns expected disposable acceptance-file text; independent disk read agrees (Windows CRLF) | Existing local write approval preserved; does not validate every PC action |
+| Signed shared PC engine | Engine1.1.1 exact SHA256 `7e1858530d55362a46935fbb1554ed85f2c0265e168531b633108f7c61631883`, accepted nonce heartbeat; PCP signed release `a267875cb7d9d812bf5e3589a1aa7299f80274c1`, deployment `1f87def3-3dac-48c2-861d-1cd198db01a5` SUCCESS; pinned public key independently matches | Raw shell and permission/approval resets remain owner-local |
+| Agent governance | Independently reviewed shared contracts/executors; disposable migrated PostgreSQL agent11/11 and MCP17/17; per-person/tenant, concurrent confirmations, emergency stop, unknown outcome and audit tests | These are isolated integration tests, not live assistant-path acceptance |
+| WhatsApp Business sending | Connector read ready; reviewed implementation, delivery webhook and concurrency regression tests pass | No live recipient/body was authorized for another test; Business send/reply/delivery remains unverified |
+
+No real CRM contact or task was created for these checks. Existing OAuth scopes,
+tenant bindings and PC permissions were retained. No other test message was sent.
+SMS/chats are not yet linked into CRM communication records; phone/PC connector
+bindings currently use server configuration rather than administrator-managed
+ConnectorSource rows. Full requested all-function acceptance remains open.
+
 ## Acceptance status summary
 
 | Area | Status | Last checked | Evidence | Notes |

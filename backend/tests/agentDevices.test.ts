@@ -105,7 +105,7 @@ describe("agent and assistant: the owner's phone, PC and WhatsApp delivery statu
     bridge.handlers.set("GET /api/phone/health", (_req, res) => json(res, 200, { battery: 81 }));
     bridge.handlers.set("GET /api/chat/messages", (_req, res) => json(res, 200, {
       device_id: "samsung-s938b", next_cursor: null, listener: { enabled: true, reported_at: 1767225600 },
-      messages: [{ key: "k1aaaaaaa", channel: "whatsapp", chat: "Jana Nováková", sender: "Jana Nováková", text: "Kdy přijedete?", ts: 1767225600, direction: "in", is_group: false }],
+      messages: [{ key: "k1aaaaaaa", channel: "whatsapp", chat: "Jana Nováková", sender: "Jana Nováková", text: "Kdy přijedete?", ts: 1767225600000, direction: "in", is_group: false }],
     }));
     bridge.handlers.set("POST /api/send", (req, res) => {
       const known = bridgeMessages.get(req.body.request_id);

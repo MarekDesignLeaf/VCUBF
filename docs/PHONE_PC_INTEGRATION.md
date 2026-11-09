@@ -1,8 +1,21 @@
 # Phone and PC integration through the Secretary MCP gateway
 
-Status: **in development** on branch `claude/modest-keller-42onis`. Not deployed,
-not accepted live. No real message has been sent and no production data was
-touched while building it.
+Status (9 November 2026): PR76 merged and deployed as `b18614371533`.
+The existing Secretary plugin was refreshed in place: 100 tools, 40 read and
+60 write. Actual ChatGPT checks passed for capability metadata, phone/SMS
+reads, PC permissions/window reads and public HTTPS text fetching. One explicitly
+approved self-addressed SMS was sent and received, with exactly one outbound
+operation. Do not repeat that test. Live notification replies, WhatsApp Business
+delivery and interactive browser control remain unverified; full acceptance is
+not claimed from these partial checks.
+
+### Phone timestamp contract
+
+Android SMS `received_at`, notification `ts` and their `since`/`until` filters
+use Unix milliseconds, as supplied by Android. Bridge bookkeeping fields
+(`last_upload_at`, `gateway_last_seen`, listener `reported_at` and outbound
+`updated_at`) use Unix seconds. Secretary converts each according to its field
+contract and returns ISO dates. Do not infer units from the number's magnitude.
 
 ## Goal
 
@@ -258,15 +271,19 @@ against local fake services only.
   environment (`*_COMPANY_ID`), not by a row an administrator enables in Secretary.
 - **CRM linking:** phone SMS and notification chats are not written to CRM
   communication records.
-- **Live acceptance:** none of this is accepted live (see below).
+- **Live acceptance:** phone/SMS reads, one self-addressed SMS, notification
+  input and PC text reads/writes have direct evidence recorded in the acceptance
+  log. Notification replies, Business delivery and interactive browser actions
+  remain open (see below).
 - **PC steps run twice in parallel:** guarded by the single claim of the review or
   agent proposal, not by the PC (PC Control Plus takes no request id). Phone sends are
   additionally de-duplicated by SMS Bridge on the request id.
 
 ## Live verification still required (owner / Codex)
 
-Nothing here is accepted live until recorded in
-`docs/PRODUCTION_ACCEPTANCE_LOG.md`. All tests run against local fake bridges.
+Record live checks in `docs/PRODUCTION_ACCEPTANCE_LOG.md`. Automated adapter
+tests use local fake bridges; they do not substitute for the checks below.
+Already recorded checks must not trigger another real SMS test.
 
 1. `phone_status` on the owner's connection: the bridge reports the Samsung
    SM-S938B online and its last sync.
