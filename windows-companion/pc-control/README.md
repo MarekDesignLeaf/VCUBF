@@ -1,4 +1,4 @@
-# pc-control plugin 0.3.1
+# pc-control plugin 0.3.2
 
 Fast, audited control of the owner's Windows PC and browser for AI assistants
 (Claude, and any other MCP client). Part of the VCUBF Windows companion; the
@@ -19,8 +19,10 @@ The plugin works from **text, not screenshots**:
   ExpandCollapse). No screen coordinates.
 - Files, applications, terminal and audit, as in 0.1.0.
 
-Screenshots are switched off by default. Coordinate tools remain as a fallback
-for controls UI Automation cannot see.
+**Control works only from text state.** Screenshots never drive control and are never a
+fallback: `take_screenshot` (off by default) only captures a picture the user explicitly
+asked for, and nothing acts on what it shows. Coordinate tools take only coordinates the
+user gave, for a control UI Automation cannot reach (0.3.2).
 
 ## One engine for Claude and ChatGPT
 
@@ -80,11 +82,11 @@ declared `destructiveHint: true`.
 
 ## Why it is fast
 
-| Old way (0.1.0) | Now |
+| Old way (0.1.0, no longer used) | Now |
 | --- | --- |
-| Screenshot → model reads pixels → coordinates → click → screenshot to verify | One text snapshot; act by ref |
+| Not used any more: screenshot → model reads pixels → coordinates → click → screenshot to verify | One text snapshot; act by ref |
 | One tool call per click | `browser_act` / `ui_act` run a batch of steps in one call |
-| Scroll and screenshot to find a control | Off-screen controls are listed; `query=` filters |
+| Not used any more: scroll and screenshot to find a control | Off-screen controls are listed; `query=` filters |
 | Fixed pauses | Playwright waits until each element is actionable; no sleeps |
 | Browser started per task | One persistent session, kept between calls |
 | Typing key by key (loses diacritics) | `fill` / Value pattern / clipboard paste |
@@ -236,7 +238,7 @@ pc-control/
   the dedicated profile keeps it.
 - **"The uiautomation package is missing"** — run `Install-PcControl.ps1`.
 - **An app shows no controls in `ui_snapshot`** — it does not expose UI
-  Automation (some games and custom-drawn canvases); use the coordinate
-  fallback with known coordinates, or enable screenshots for that task only.
+  Automation (some games and custom-drawn canvases). Say so; use the coordinate
+  tools only with coordinates the user gave. Screenshots never drive control.
 - **A ref is "no longer on the page"** — the page changed; take
   `browser_snapshot(query=...)` and continue with the new ref.

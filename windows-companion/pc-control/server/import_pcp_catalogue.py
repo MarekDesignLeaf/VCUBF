@@ -36,6 +36,40 @@ from pathlib import Path
 TARGET = Path(__file__).resolve().parents[3] / "backend" / "src" / "modules" / "mcp" / "pcpRelayCatalogue.generated.ts"
 RELAY_LOCAL = {"pc_status", "pc_capabilities", "pc_browser_connection_status"}
 
+# The relay jobs that run a control loop on the PC (an AI deciding step after
+# step), and the agent modules that loop runs in. Secretary offers such a job
+# only when its whole loop works from text state (DOM, UI Automation) and
+# never from screenshots: the check below reads those modules' source.
+CONTROL_LOOPS = {
+    "web_goal": {"jobs": ["web_goal_start", "web_goal_status", "web_goal_cancel"], "state": "dom",
+                 "modules": ["web_goal.py", "browser_dom.py"]},
+    "ui_goal": {"jobs": ["ui_goal_start", "ui_goal_status", "ui_goal_cancel"], "state": "uia",
+                "modules": ["desktop_goal.py", "windows_uia.py"]},
+}
+# Anything that captures or sends pixels: a screenshot API, an image library,
+# an image input to a model, or a camera.
+PIXEL_PATTERNS = re.compile(
+    r"\.screenshot\s*\(|ImageGrab|\bmss\b|pyautogui|\bPIL\b|from\s+PIL|input_image|image_url|\bcv2\b|VideoCapture|"
+    r"capture_screen|grab_screen|\bBitBlt\b|PrintWindow"
+)
+
+
+def control_loops(remote: Path) -> dict:
+    loops = {}
+    for name, loop in CONTROL_LOOPS.items():
+        modules = {}
+        evidence = []
+        for module in loop["modules"]:
+            text = (remote / module).read_text(encoding="utf-8")
+            modules[module] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            for number, line in enumerate(text.splitlines(), 1):
+                code = line.split("#", 1)[0]
+                if PIXEL_PATTERNS.search(code):
+                    evidence.append(f"{module}:{number}: {line.strip()[:120]}")
+        loops[name] = {"jobs": loop["jobs"], "state": loop["state"], "modules": modules,
+                       "screenshot_free": not evidence, "evidence": evidence}
+    return loops
+
 
 def load_relay(pcp: Path):
     remote = pcp / "remote"
@@ -105,6 +139,8 @@ def catalogue(pcp: Path) -> dict:
         "tools": entries,
         # Jobs the relay accepts that no relay MCP tool sends (kept visible, never offered).
         "allowed_without_tool": unlisted,
+        # Whether each control loop works from text state only (read from its source).
+        "control_loops": control_loops(pcp / "remote"),
     }
 
 

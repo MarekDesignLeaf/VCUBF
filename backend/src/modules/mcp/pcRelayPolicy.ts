@@ -15,6 +15,12 @@
  * - "not_offered": visible in describe_capabilities with the reason, never
  *   callable through Secretary.
  *
+ * Text state only (owner's rule): PC control works from DOM snapshots and
+ * UI Automation, never from screenshots. No image, camera or screen-coordinate
+ * tool is offered, and a control loop (a goal) is offered only while the
+ * importer attests from its source that the loop is screenshot-free
+ * (pcpRelayCatalogue.control_loops); otherwise it is not offered.
+ *
  * tests/mcpDevices.test.ts fails when a relay tool has no decision here or a
  * decision names no relay tool.
  */
@@ -26,9 +32,10 @@ export type PcRelayDecision =
 
 const SHELL = "Runs a program or command line on the PC. Secretary offers no shell or command execution; it stays a local tool of PC Control Plus.";
 const PC_SAFETY = "Changes the PC's own safety settings. Only the owner changes them, on the PC itself.";
-const IMAGES = "Captures images of the screen or a camera. Secretary does not take photographs or screenshots of the owner's PC or room; use the text reads (pc_browser_snapshot, pc_ui_snapshot).";
+const IMAGES = "Captures an image of the screen or a camera. Secretary never controls the PC from images and does not take pictures of the owner's PC or room; read the screen as text with pc_browser_snapshot or pc_ui_snapshot.";
 const NO_DELETION = "Deletes a file on the PC. The Secretary MCP gateway offers no deletion other than the guarded contact deletion (issue #74); delete files on the PC itself.";
-const INPUT = "Sends mouse or keyboard input to whatever window is in front on the PC.";
+const KEYS = "Sends keyboard input to the window in front on the PC; read it first with pc_ui_snapshot.";
+const COORDINATES = "Acts at screen coordinates, the way screenshot-driven control does. PC control through Secretary works only from text state: use pc_ui_act (UI Automation refs) or pc_browser_act (page refs).";
 
 export const PC_RELAY_POLICY: Record<string, PcRelayDecision> = {
   // Reads: the answer is the whole effect.
@@ -57,13 +64,9 @@ export const PC_RELAY_POLICY: Record<string, PcRelayDecision> = {
   },
   make_directory: { kind: "reviewed", reviewReason: "destructive", effect: "Creates a folder on the PC." },
   move_file: { kind: "reviewed", reviewReason: "irreversible", effect: "Moves or renames a file or folder on the PC." },
-  desktop_click: { kind: "reviewed", reviewReason: "irreversible", effect: INPUT },
-  desktop_type: { kind: "reviewed", reviewReason: "irreversible", effect: INPUT },
-  desktop_hotkey: { kind: "reviewed", reviewReason: "irreversible", effect: INPUT },
-  desktop_scroll: { kind: "reviewed", reviewReason: "destructive", effect: INPUT },
-  desktop_drag: { kind: "reviewed", reviewReason: "irreversible", effect: INPUT },
+  desktop_type: { kind: "reviewed", reviewReason: "irreversible", effect: KEYS },
+  desktop_hotkey: { kind: "reviewed", reviewReason: "irreversible", effect: KEYS },
   desktop_focus_window: { kind: "reviewed", reviewReason: "destructive", effect: "Brings a window to the front on the PC." },
-  desktop_batch: { kind: "reviewed", reviewReason: "irreversible", effect: INPUT },
   web_open: { kind: "reviewed", reviewReason: "irreversible", effect: "Navigates the PC Control Plus browser to the address." },
   web_attach_existing: { kind: "reviewed", reviewReason: "destructive", effect: "Attaches PC Control Plus to the Chrome or Edge already open on the PC." },
   web_tab_select: { kind: "reviewed", reviewReason: "destructive", effect: "Switches the browser tab PC Control Plus works in." },
@@ -80,6 +83,10 @@ export const PC_RELAY_POLICY: Record<string, PcRelayDecision> = {
 
   // Never through Secretary.
   run_command: { kind: "not_offered", reason: SHELL },
+  desktop_click: { kind: "not_offered", reason: COORDINATES },
+  desktop_drag: { kind: "not_offered", reason: COORDINATES },
+  desktop_scroll: { kind: "not_offered", reason: COORDINATES },
+  desktop_batch: { kind: "not_offered", reason: COORDINATES },
   run_approved_script: { kind: "not_offered", reason: SHELL },
   delete_file: { kind: "not_offered", reason: NO_DELETION },
   delete_workspace_file: { kind: "not_offered", reason: NO_DELETION },

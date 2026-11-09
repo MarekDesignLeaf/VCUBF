@@ -107,8 +107,18 @@ no tool:
 | Decision | Tools | How it runs |
 | --- | --- | --- |
 | read | `system_info`, `monitors_list`, `list_directory`, `read_text`, `search_files`, `audit_tail`, `approvals_list`, `permission_status`, `web_tabs_list`, `web_list_fields`, `web_dom`, `ui_tree`, `ui_wait`, `web_goal_status`, `ui_goal_status` | at once under `read_pc`; leaves nothing running or queued |
-| reviewed | file writes and moves, desktop input, `web_*` steps, `ui_batch`, `web_goal_start` / `ui_goal_start` (they keep running on the PC) and their cancel | preview → yes → one call, `operate_pc`; never read-only; the PC asks its owner again |
-| not offered | `run_command`, `run_approved_script` (no shell), `delete_file`, `delete_workspace_file` (the gateway offers no deletion but the guarded contact deletion, issue #74), `permission_set`, `approvals_reset` (the PC's own safety settings), `screenshot`, `web_screenshot`, `camera_*` (no images of the PC or room), `web_close`, and the relay's `ui_windows` (the engine's is offered) | listed in `describe_capabilities.notOffered` with the reason; refused before any request |
+| reviewed | file writes and moves, keyboard input to the window in front (`desktop_type`, `desktop_hotkey`, `desktop_focus_window`), `web_*` steps, `ui_batch`, `web_goal_start` / `ui_goal_start` (they keep running on the PC) and their cancel | preview → yes → one call, `operate_pc`; never read-only; the PC asks its owner again |
+| not offered | `run_command`, `run_approved_script` (no shell), `desktop_click`, `desktop_drag`, `desktop_scroll`, `desktop_batch` (screen coordinates: screenshot-style control), `delete_file`, `delete_workspace_file` (the gateway offers no deletion but the guarded contact deletion, issue #74), `permission_set`, `approvals_reset` (the PC's own safety settings), `screenshot`, `web_screenshot`, `camera_*` (no images of the PC or room), `web_close`, and the relay's `ui_windows` (the engine's is offered) | listed in `describe_capabilities.notOffered` with the reason; refused before any request |
+
+**Text state only (owner's rule).** PC control through Secretary works only from text
+state: page snapshots (DOM) and Windows UI Automation. No screenshot, camera or
+screen-coordinate tool is offered, and no image ever drives a step. The rule is in every
+PC tool's limitations and in the gateway instructions. A control loop (a goal: an AI
+deciding step after step on the PC) is offered only while the importer attests from the
+PC Control Plus source that the whole loop takes no screenshots
+(`pcpRelayCatalogue.control_loops`: `web_goal` works from the DOM, `ui_goal` from UI
+Automation, each with its modules' SHA-256). A loop whose source uses pixels, or that has
+no attestation, is not offered, whatever the policy says (`decideRelayJob`, tested).
 
 `write_file` is offered without `content_base64` (text only). Arguments are checked
 against the relay's own schema, strictly. The approval on the PC itself stays in force
@@ -171,6 +181,11 @@ Writes additionally need `MCP_GATEWAY_ENABLED=true`, `MCP_WRITE_ENABLED=true`
 - **Not offered by design** (listed in `describe_capabilities.notOffered`): shell
   and scripts, file deletion, screenshots and camera, the PC's own safety switches,
   `browser_eval`, `browser_close` / `web_close`.
+- **Relay texts.** The relay's own instructions and image, camera and coordinate tool
+  descriptions now state the text-state rule in pc-control-plus `e4adfd6`
+  (branch `claude/shared-pc-engine`, not merged). `pcpRelayCatalogue.generated.ts` is
+  imported from merged `main` `6b0aecf`; run the importer again after that change is
+  merged (only descriptions and the relay SHA change; Secretary does not offer those tools).
 - **Relay catalogue freshness.** `pcpRelayCatalogue.generated.ts` is checked only
   when `import_pcp_catalogue.py --check` runs against a pc-control-plus checkout;
   VCUBF CI has no such checkout.

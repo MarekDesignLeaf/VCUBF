@@ -466,7 +466,11 @@ function engineSchema(tool: EngineTool): Record<string, unknown> {
   };
 }
 
+/** The owner's rule for every PC tool, stated in each tool's limitations and in the gateway instructions. */
+export const PC_TEXT_STATE_RULE = "PC control works only from text state (page snapshots and UI Automation), never from screenshots: no screenshot, camera or screen-coordinate tool is offered, and no image ever drives a step.";
+
 const PC_LIMITS = [
+  PC_TEXT_STATE_RULE,
   "Runs on the owner's PC through PC Control Plus; the PC must be online and its agent connected.",
   "The PC keeps its own rules: public HTTPS addresses only, the owner's other tabs untouched, its read-only profile, and its own approval on the PC.",
 ];
@@ -524,9 +528,36 @@ export const PC_READ_TOOLS: DeviceReadTool[] = [
 type RelayTool = (typeof PCP_RELAY_CATALOGUE.tools)[number];
 interface JsonSchema { type?: string; anyOf?: JsonSchema[]; items?: JsonSchema; default?: unknown; description?: string; [key: string]: unknown }
 
-/** Secretary's decision for a relay job; a job without one is not offered. */
+interface ControlLoop { jobs: readonly string[]; state: string; screenshot_free: boolean; evidence: readonly string[] }
+
+/**
+ * Secretary's decision for a relay job, under the text-state rule: a control
+ * loop is offered only when the importer attested from its source that the
+ * whole loop works without screenshots; a loop without that attestation, or
+ * whose source uses pixels, is not offered, whatever the policy says. A job
+ * without a decision is not offered.
+ */
+export function decideRelayJob(job: string, policy: Record<string, PcRelayDecision>, loops: Record<string, ControlLoop>): PcRelayDecision {
+  const decision = policy[job] ?? { kind: "not_offered", reason: "Secretary has not decided how to offer this PC Control Plus tool yet." };
+  if (decision.kind === "not_offered") return decision;
+  const loop = Object.values(loops).find((entry) => entry.jobs.includes(job));
+  // A job that runs a control loop on the PC (an AI deciding step after step) needs the attestation.
+  if (/_goal_/.test(job) && !loop) {
+    return { kind: "not_offered", reason: "This PC task runs a control loop that is not attested to work from text state only; PC control through Secretary never uses screenshots." };
+  }
+  if (loop && !loop.screenshot_free) {
+    return { kind: "not_offered", reason: `This PC task's control loop uses screenshots or images (${loop.evidence[0] ?? "pixel capture"}); PC control through Secretary works only from text state.` };
+  }
+  return decision;
+}
+
 export function relayDecision(job: string): PcRelayDecision {
-  return PC_RELAY_POLICY[job] ?? { kind: "not_offered", reason: "Secretary has not decided how to offer this PC Control Plus tool yet." };
+  return decideRelayJob(job, PC_RELAY_POLICY, PCP_RELAY_CATALOGUE.control_loops as unknown as Record<string, ControlLoop>);
+}
+
+/** The text state a relay job's control loop works from ("dom" or "uia"), when it runs one. */
+function loopState(job: string): string | undefined {
+  return Object.values(PCP_RELAY_CATALOGUE.control_loops as unknown as Record<string, ControlLoop>).find((entry) => entry.jobs.includes(job))?.state;
 }
 
 /** The relay's argument schema as a strict validator; an unknown schema shape fails when this module loads. */
@@ -588,7 +619,8 @@ function pcWriteTools(): WriteToolDefinition[] {
       reviewReason: reviewed.reviewReason,
       external: true,
       available: pcAvailable,
-      limitations: [...PC_LIMITS, "If the PC does not answer, the outcome is kept as unknown and the step is never repeated by itself."],
+      limitations: [...PC_LIMITS, "If the PC does not answer, the outcome is kept as unknown and the step is never repeated by itself.",
+        ...(loopState(tool.relay_tool) ? [`Its control loop decides each step from ${loopState(tool.relay_tool) === "dom" ? "the page's DOM text" : "Windows UI Automation text"}, checked from the PC Control Plus source to take no screenshots.`] : [])],
       fields,
       preview: async (user, a) => {
         if (!pcAvailable(user)) return fail(409, "CONNECTOR_NOT_CONFIGURED", "The owner's PC (PC Control Plus) is not set up for this company.");

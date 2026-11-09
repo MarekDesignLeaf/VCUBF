@@ -95,6 +95,9 @@ export const MCP_TOOLSET_FINGERPRINTS = {
   // describe_capabilities.notOffered, openWorldHint on phone and PC tools, and the official
   // WhatsApp Business send and reply (send_whatsapp_business_message, reply_whatsapp_business_message).
   "2026-11-09.pc-relay-tools": "c9a0a51bbf7e9c918ead96eceab8e109a7a36b28ec1b8ca49d13d61df811f561",
+  // Text state only: no coordinate tools, goals offered only when attested screenshot-free,
+  // the rule in every PC tool's limitations and in the instructions.
+  "2026-11-09.text-state-only": "e11270bdf1a47151f0932fded9752c419a3cd59d170fb243f9bc5d8a628e7577",
 } as const satisfies Record<string, string>;
 const toolsetLedger = Object.entries(MCP_TOOLSET_FINGERPRINTS);
 export const MCP_TOOLSET_REVISION = toolsetLedger[toolsetLedger.length - 1][0];
@@ -130,7 +133,9 @@ export const MCP_WRITE_POLICY =
   "chats the phone has a notification of. The company's official WhatsApp Business number sends with " +
   "send_whatsapp_business_message or reply_whatsapp_business_message (a message id from get_whatsapp_sender), previewed, " +
   "only within 24 hours of the person's last message. An unknown outcome is checked with get_outbound_message_status and never sent " +
-  "again by guessing. Steps on the owner's PC (pc_ tools) are previewed here and approved again on the PC.";
+  "again by guessing. Steps on the owner's PC (pc_ tools) are previewed here and approved again on the PC. " +
+  "PC control works only from text: read with pc_browser_snapshot or pc_ui_snapshot and act on the controls they list; never ask for a " +
+  "screenshot to find, click or check anything, and never act at screen coordinates.";
 
 /** This request may write: the switch is on and the person approved writing for this token. */
 function canWrite(req: Request): boolean {

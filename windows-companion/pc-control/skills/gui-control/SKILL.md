@@ -1,26 +1,30 @@
 ---
 name: gui-control
 description: >
-  Fallback only. Use when a control cannot be reached by ui_act or
-  browser_act (custom-drawn canvases, games, apps without UI Automation), when
-  the user explicitly asks for a screenshot, or to move the mouse or press a
-  shortcut in the focused window. For normal app and web work use the
+  Use only with coordinates the user gave, for a control ui_act or
+  browser_act cannot reach (custom-drawn canvases, games, apps without UI
+  Automation), to press a shortcut in the focused window, or to capture a
+  picture the user explicitly asked for. Never screenshot-driven. For normal app and web work use the
   desktop-ui-control and browser-control skills.
 metadata:
   version: "0.2.1"
 ---
 
-# GUI Control — coordinate fallback
+# GUI Control — coordinates the user gave, never screenshots
 
-Use these tools only when `ui_snapshot` / `browser_snapshot` cannot see the
-control. They work on screen coordinates, which are slow to obtain and break
-when windows move.
+Control works only from text state (`ui_snapshot`, `browser_snapshot`). The
+coordinate tools take only coordinates the user gave, for a control UI
+Automation cannot reach; they break when windows move. Never read coordinates
+off a screenshot.
 
-## Screenshots are off by default
+## Screenshots never drive control
 
-`take_screenshot` answers with an error unless `gui.allow_screenshots: true` is
-set in `server/config.yaml`. Read windows with `ui_snapshot` and pages with
-`browser_snapshot` instead: they return the controls as text with refs.
+`take_screenshot` is off unless `gui.allow_screenshots: true` is set in
+`server/config.yaml`, and even then it only captures a picture the user
+explicitly asked for. Never take one to find, click, read or check a control,
+and never fall back to one when a snapshot cannot see something; nothing acts
+on what it shows. Read windows with `ui_snapshot` and pages with
+`browser_snapshot`: they return the controls as text with refs.
 
 ## Keyboard shortcuts
 

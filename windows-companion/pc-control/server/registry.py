@@ -27,7 +27,8 @@ CATEGORIES = {
     "files": "Files",
     "apps": "Applications",
     "terminal": "Terminal",
-    "gui_fallback": "Coordinate fallback (only when UI Automation cannot see a control)",
+    "gui_fallback": "Coordinates the user gave (only when UI Automation cannot reach a control; never from a screenshot)",
+    "image": "An image the user explicitly asked for (never used to control the PC)",
     "audit": "Audit",
 }
 
@@ -155,8 +156,11 @@ def instructions(version: str) -> str:
         f"pc-control {version}: audited control of this Windows PC and its browser for AI assistants.",
         "",
         *pc_engine.fast_path().split("\n"),
-        "4. take_screenshot is off by default; click(x,y) and other coordinate tools are a last resort for controls "
-        "that UI Automation cannot see.",
+        "4. Control works only from text state (browser_snapshot, ui_snapshot). Never take a screenshot to find, "
+        "click, read or check anything, and never fall back to one when a snapshot cannot see something. "
+        "take_screenshot (off by default) only captures a picture the user explicitly asked for; nothing acts on what "
+        "it shows. click(x,y) and the other coordinate tools take only coordinates the user gave, for a control UI "
+        "Automation cannot reach.",
         "",
         "Safety: safe tools run at once; tell the user before sensitive ones (clicks, typing, launching, writing) and get "
         "an explicit yes for destructive ones. Never type passwords: the user signs in in the browser window and the "

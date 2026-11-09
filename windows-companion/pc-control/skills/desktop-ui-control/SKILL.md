@@ -73,9 +73,10 @@ in the next `ui_act` call, or take `ui_snapshot(window="foreground")`.
 
 ## When UI Automation cannot see a control
 
-Some canvases, games and old custom-drawn apps expose nothing. Then, and only
-then, use the coordinate fallback (`click(x, y)`, `press_keys`), and only with
-coordinates you know. Screenshots are off by default (`gui.allow_screenshots`).
+Some canvases, games and old custom-drawn apps expose nothing. Then say so and
+ask the user; use `click(x, y)` or `press_keys` only with coordinates or keys the
+user gave. Never take a screenshot to find the control: control works only from
+text state.
 
 ## Rules
 

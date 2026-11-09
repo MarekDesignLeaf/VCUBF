@@ -18,7 +18,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 SERVER_DIR = Path(__file__).parent
 PLUGIN_DIR = SERVER_DIR.parent
 

@@ -120,10 +120,10 @@ Targets: ref or `{"name", "role", "id", "class", "exact", "nth"}`.
 
 ---
 
-## Coordinate Fallback Tools
+## Coordinates the user gave (never from a screenshot)
 
 ### `take_screenshot(region=None)`
-Off by default (`gui.allow_screenshots: false`); answers with a pointer to `ui_snapshot` / `browser_snapshot`.
+Only for a picture the user explicitly asked for; never used to find, click, read or check a control, and nothing acts on what it shows. Off by default (`gui.allow_screenshots: false`); answers with a pointer to `ui_snapshot` / `browser_snapshot`.
 
 ### `click(x, y, button="left", double=False)`
 - `button`: "left" | "right" | "middle"

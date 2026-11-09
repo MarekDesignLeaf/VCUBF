@@ -144,6 +144,13 @@ of the fingerprinted document. Phone and PC tools carry `openWorldHint: true`. A
 Business tools `send_whatsapp_business_message` and `reply_whatsapp_business_message`
 (previewed; an unanswered send to Meta is kept unknown).
 
+### Revision `2026-11-09.text-state-only`
+
+PC control only from text state: the screen-coordinate relay tools (`desktop_click`,
+`desktop_drag`, `desktop_scroll`, `desktop_batch`) are no longer offered; goals are
+offered only with a screenshot-free attestation from the relay source; every PC tool's
+limitations and the `initialize` instructions state the rule.
+
 ## Safety unchanged
 
 Tenant isolation, OAuth scopes, account permissions, administrator switches, audit,

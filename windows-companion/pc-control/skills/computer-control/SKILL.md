@@ -55,8 +55,8 @@ and when to use it, plus the current settings.
 
 1. **Understand the task** — clarify with the user if the goal is ambiguous.
 2. **Read the state as text** — `browser_snapshot` / `ui_snapshot` (with
-   `query=` to find one control), `list_files`, `get_processes`. Never start
-   with a screenshot; they are off by default.
+   `query=` to find one control), `list_files`, `get_processes`. Never use a
+   screenshot to find, click, read or check anything; control works only from text.
 3. **Announce intent** — tell the user what you will do before sensitive steps.
 4. **Act in batches** — put every step you already know into one
    `browser_act` / `ui_act` call; each returns a fresh snapshot, so no extra
@@ -73,7 +73,8 @@ and when to use it, plus the current settings.
 - **System**: `get_system_status`, `get_processes`, `list_windows`, `focus_window`
 - **Files**: `list_files`, `read_file`, `write_file`, `copy_file`, `move_file`, `delete_file`, `create_directory`, `search_files`, `create_backup`, `restore_backup`
 - **Applications**: `launch_app`, `close_app`, `is_app_running`, `open_project`
-- **Coordinate fallback**: `take_screenshot` (off by default), `click`, `type_text`, `type_text_fast`, `press_keys`, `scroll`, `move_mouse`, `get_mouse_position`
+- **Coordinates the user gave** (never from a screenshot): `click`, `type_text`, `type_text_fast`, `press_keys`, `scroll`, `move_mouse`, `get_mouse_position`
+- **An image the user explicitly asked for** (never used to control the PC; off by default): `take_screenshot`
 - **Terminal**: `run_command`, `start_process`, `read_terminal_output`, `analyse_build_error`
 - **Audit**: `get_audit_log`
 

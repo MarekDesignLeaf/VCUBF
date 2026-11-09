@@ -3,6 +3,36 @@
 /* eslint-disable */
 export const PCP_RELAY_CATALOGUE = {
   "allowed_without_tool": [],
+  "control_loops": {
+    "ui_goal": {
+      "evidence": [],
+      "jobs": [
+        "ui_goal_start",
+        "ui_goal_status",
+        "ui_goal_cancel"
+      ],
+      "modules": {
+        "desktop_goal.py": "522ac75ee2e6aeccf20d04d7524ef466be3879f10b53dc8ec548bcec955678be",
+        "windows_uia.py": "3c75bcb0e38af7f40c7f4e9c5d66577d092c3b253fc2df16a9b128e62ba7fa85"
+      },
+      "screenshot_free": true,
+      "state": "uia"
+    },
+    "web_goal": {
+      "evidence": [],
+      "jobs": [
+        "web_goal_start",
+        "web_goal_status",
+        "web_goal_cancel"
+      ],
+      "modules": {
+        "browser_dom.py": "26c8811f54c2eb644236dfab757c501c9ebdf1c344a39d4a28da75186d29af72",
+        "web_goal.py": "f7f5ec64ebc7b856977077f8d6a3d6e64e6b61060fc302436e972011cfd5e088"
+      },
+      "screenshot_free": true,
+      "state": "dom"
+    }
+  },
   "engine_version": "1.1.1",
   "relay_sha256": "529e335d038d4b519a474dd3f1d3a83f56e2249dcdfdac7bb794d9d02048fdc7",
   "source": "MarekDesignLeaf/pc-control-plus remote/relay.py",

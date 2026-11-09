@@ -283,12 +283,12 @@ def open_project(project_path: str, editor: str = "auto") -> dict:
     return app_t.open_project(project_path=project_path, editor=editor)
 
 
-# ─── Coordinate fallback (legacy GUI tools) ──────────────────────────────────
+# ─── An image on request; coordinates the user gave (legacy GUI tools) ──────
 
-@pc_tool(mcp, category="gui_fallback", level=SAFE,
-         use_when="Never as a first step. Only if the user asks for an image, or ui_snapshot and browser_snapshot cannot see the content; off unless gui.allow_screenshots is true.")
+@pc_tool(mcp, category="image", level=SAFE,
+         use_when="Only when the user explicitly asks for a picture of the screen. Never to find, click, read or check a control, never as a fallback when a snapshot cannot see something, and nothing acts on what it shows. Off unless gui.allow_screenshots is true.")
 def take_screenshot(region: dict | None = None) -> dict:
-    """Capture the screen or a region as base64 PNG (switched off by default; use ui_snapshot or browser_snapshot instead).
+    """Capture the screen or a region as base64 PNG, for a picture the user asked for (switched off by default). It never drives control: read the state with ui_snapshot or browser_snapshot.
 
     region: {"left": x, "top": y, "width": w, "height": h}
     """
@@ -297,7 +297,7 @@ def take_screenshot(region: dict | None = None) -> dict:
     return gui_t.take_screenshot(region=region)
 
 
-@pc_tool(mcp, category="gui_fallback", level=SENSITIVE, use_when="Only for a control that ui_act cannot reach; coordinates must come from a known layout.")
+@pc_tool(mcp, category="gui_fallback", level=SENSITIVE, use_when="Only for a control that ui_act cannot reach, at coordinates the user gave; never at coordinates read from a screenshot.")
 def click(x: int, y: int, button: str = "left", double: bool = False) -> dict:
     """Click at screen coordinates."""
     return gui_t.click(x=x, y=y, button=button, double=double)
@@ -324,7 +324,7 @@ def press_keys(keys: str) -> dict:
     return gui_t.press_keys(keys=keys)
 
 
-@pc_tool(mcp, category="gui_fallback", level=SENSITIVE, use_when="Scroll an app that UI Automation does not scroll by itself.")
+@pc_tool(mcp, category="gui_fallback", level=SENSITIVE, use_when="Scroll an app that UI Automation does not scroll by itself, at a point the user gave; never from a screenshot.")
 def scroll(x: int, y: int, clicks: int = 3, direction: str = "down") -> dict:
     """Scroll at screen coordinates. direction: 'up' or 'down'."""
     return gui_t.scroll(x=x, y=y, clicks=clicks, direction=direction)
@@ -336,7 +336,7 @@ def get_mouse_position() -> dict:
     return gui_t.get_mouse_position()
 
 
-@pc_tool(mcp, category="gui_fallback", level=SENSITIVE, use_when="Move the mouse without clicking (hover menus).")
+@pc_tool(mcp, category="gui_fallback", level=SENSITIVE, use_when="Move the mouse without clicking (hover menus), to a point the user gave; never from a screenshot.")
 def move_mouse(x: int, y: int, duration: float = 0.2) -> dict:
     """Move the mouse cursor without clicking."""
     return gui_t.move_mouse(x=x, y=y, duration=duration)

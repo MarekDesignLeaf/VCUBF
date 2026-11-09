@@ -12,6 +12,7 @@ import { bridgeRequestId } from "../src/services/smsBridgeService.js";
 import { callPcRelay } from "../src/services/pcControlPlusService.js";
 import { PC_RELAY_POLICY } from "../src/modules/mcp/pcRelayPolicy.js";
 import { PCP_RELAY_CATALOGUE } from "../src/modules/mcp/pcpRelayCatalogue.generated.js";
+import { decideRelayJob, PC_TEXT_STATE_RULE } from "../src/modules/mcp/deviceTools.js";
 import { resetDb, seedCompanyAndAdmin, TEST_COMPANY_ID } from "./setup.js";
 
 // The owner's phone (SMS Bridge) and PC (PC Control Plus relay) through the
@@ -443,6 +444,38 @@ describe("MCP: the owner's phone (SMS Bridge) and PC (PC Control Plus)", () => {
     const refused = await callPcRelay({ companyId: TEST_COMPANY_ID } as never, "run_command", { command: "whoami" }, { mayHaveEffect: true });
     assert.equal(refused.ok, false);
     assert.equal(posts(relay, "/v1/call").length, 0, "nothing reached the PC");
+  });
+
+  it("controls the PC only from text state: no screenshot, camera or coordinate tool, and goals only when attested screenshot-free", async () => {
+    const owner = await describeTools(writeToken);
+    const offered = owner.filter((entry) => entry.name.startsWith("pc_"));
+    const relayByName = new Map(PCP_RELAY_CATALOGUE.tools.map((tool) => [tool.name, tool]));
+    for (const entry of offered) {
+      assert.doesNotMatch(entry.name, /screenshot|camera|photo|video|image/, `${entry.name} captures no image`);
+      const relayTool = relayByName.get(entry.name);
+      const params = Object.keys((relayTool?.input_schema as { properties?: object } | undefined)?.properties ?? {});
+      assert.ok(!params.some((param) => /^(x|y|x1|y1|x2|y2)$/.test(param)), `${entry.name} takes no screen coordinates`);
+      // Screenshots may be named only to say they are not used.
+      for (const sentence of `${entry.purpose} ${entry.limitations.join(" ")}`.split(/(?<=[.;:])\s+/)) {
+        if (/screenshot/i.test(sentence)) assert.match(sentence, /\b(no|not|never|without)\b/i, `${entry.name}: "${sentence}"`);
+      }
+      assert.ok(entry.limitations.includes(PC_TEXT_STATE_RULE), `${entry.name} states the text-state rule`);
+    }
+    for (const loop of Object.values(PCP_RELAY_CATALOGUE.control_loops)) {
+      assert.equal(loop.screenshot_free, true, `the ${loop.state} control loop is attested screenshot-free`);
+      for (const job of loop.jobs) assert.ok(offered.some((entry) => entry.name === `pc_${job}`), `pc_${job} is offered on that attestation`);
+    }
+    const goal = owner.find((entry) => entry.name === "pc_web_goal_start")!;
+    assert.ok(goal.limitations.some((line: string) => /DOM text/.test(line)), "the web goal says it decides from the DOM");
+    // A loop whose source uses pixels, or that is not attested at all, is not offered, whatever the policy says.
+    const policy = { web_goal_start: { kind: "reviewed", reviewReason: "irreversible", effect: "x" } } as const;
+    const pixels = { web_goal: { jobs: ["web_goal_start"], state: "dom", screenshot_free: false, evidence: ["web_goal.py:9: page.screenshot()"] } };
+    assert.equal(decideRelayJob("web_goal_start", policy, pixels).kind, "not_offered");
+    assert.match((decideRelayJob("web_goal_start", policy, pixels) as { reason: string }).reason, /screenshots/);
+    assert.equal(decideRelayJob("web_goal_start", policy, {}).kind, "not_offered", "an unattested loop is not offered");
+    // The gateway instructions carry the rule.
+    const init = (await rpc(writeToken, { jsonrpc: "2.0", id: 5, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } })).body;
+    assert.match(init.result.instructions, /never ask for a screenshot to find, click or check anything, and never act at screen coordinates/);
   });
 
   it("reads and changes the PC through the relay's own tools, with the relay's schemas", async () => {
