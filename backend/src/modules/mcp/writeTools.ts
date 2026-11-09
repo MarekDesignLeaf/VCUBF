@@ -732,7 +732,7 @@ export interface McpWriteToolListing {
   title: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  annotations: { readOnlyHint: false; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: false };
+  annotations: { readOnlyHint: false; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean };
 }
 
 /** What the connection allows, decided by routes.ts from the server switch and the token's scopes. */
@@ -890,7 +890,7 @@ function toolListing(tool: WriteToolDefinition): McpWriteToolListing {
         ? " Requires an idempotency_key."
         : " Show the returned preview to the user word for word and call confirm_action only after the user explicitly says yes."),
     inputSchema: jsonSchema(envelopeSchema(tool, true)),
-    annotations: { readOnlyHint: false, destructiveHint: classification(tool).destructive, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: classification(tool).destructive, idempotentHint: true, openWorldHint: Boolean(tool.external) },
   };
 }
 

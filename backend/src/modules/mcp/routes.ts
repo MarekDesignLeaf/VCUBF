@@ -41,7 +41,7 @@ import { z } from "zod";
 import type { AuthedUser } from "../../middleware/auth.js";
 import { MCP_RESULT_CHARS, mcpGatewayEnabled, mcpWriteEnabled } from "./gate.js";
 import { insufficientScope, MCP_READ_SCOPE, MCP_WRITE_SCOPE, requireMcpAuth } from "./oauth.js";
-import { contractAllowed, DEVICE_READ_TOOLS, PC_READ_TOOLS, type DeviceReadTool } from "./deviceTools.js";
+import { contractAllowed, DEVICE_READ_TOOLS, PC_READ_TOOLS, PC_TOOLS_NOT_OFFERED_THROUGH_SECRETARY, type DeviceReadTool } from "./deviceTools.js";
 import { isWriteToolName, runWriteTool, writeToolCatalogue, type McpWriteAccess, type McpWriteToolListing } from "./writeTools.js";
 import {
   availability,
@@ -91,6 +91,10 @@ export const MCP_TOOLSET_FINGERPRINTS = {
   // The owner's phone (SMS Bridge: SMS, WhatsApp/Messenger notification replies, status)
   // and PC (PC Control Plus, generated from pc_engine), with connector_not_configured.
   "2026-11-09.phone-and-pc": "d795f0798bbb3fd5da8b8690adf24f69214829fb794ffda114e10ed9902ae22c",
+  // The PC Control Plus relay's own tools (pcpRelayCatalogue, Secretary's decision per tool),
+  // describe_capabilities.notOffered, openWorldHint on phone and PC tools, and the official
+  // WhatsApp Business send and reply (send_whatsapp_business_message, reply_whatsapp_business_message).
+  "2026-11-09.pc-relay-tools": "c9a0a51bbf7e9c918ead96eceab8e109a7a36b28ec1b8ca49d13d61df811f561",
 } as const satisfies Record<string, string>;
 const toolsetLedger = Object.entries(MCP_TOOLSET_FINGERPRINTS);
 export const MCP_TOOLSET_REVISION = toolsetLedger[toolsetLedger.length - 1][0];
@@ -123,7 +127,9 @@ export const MCP_WRITE_POLICY =
   "e-mailed or published through this gateway. The owner's phone sends an SMS (send_phone_sms) or a WhatsApp/Messenger " +
   "notification reply (reply_phone_chat) only after its preview and the user's explicit yes, to exactly the number or chat " +
   "the user named; never invent recipients or text. A notification reply is not the WhatsApp Business API and reaches only " +
-  "chats the phone has a notification of. An unknown outcome is checked with get_outbound_message_status and never sent " +
+  "chats the phone has a notification of. The company's official WhatsApp Business number sends with " +
+  "send_whatsapp_business_message or reply_whatsapp_business_message (a message id from get_whatsapp_sender), previewed, " +
+  "only within 24 hours of the person's last message. An unknown outcome is checked with get_outbound_message_status and never sent " +
   "again by guessing. Steps on the owner's PC (pc_ tools) are previewed here and approved again on the PC.";
 
 /** This request may write: the switch is on and the person approved writing for this token. */
@@ -171,6 +177,8 @@ export function readCommandForms(): string[] {
 const READ_COMMAND_FORMS = readCommandForms();
 
 const READ_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
+/** A read of the owner's phone or PC: changes nothing, but answers from a system outside Secretary. */
+const DEVICE_READ_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
 
 /**
  * Gateway read tools that are not voice catalogue tools: the WhatsApp sender
@@ -285,7 +293,7 @@ export interface McpTool {
   title?: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  annotations: typeof READ_ANNOTATIONS;
+  annotations: typeof READ_ANNOTATIONS | typeof DEVICE_READ_ANNOTATIONS;
 }
 
 /** The tools/list entries of every connection: the metadata tool, the command bridge and the reads. */
@@ -339,7 +347,7 @@ function readListings(): McpTool[] {
       title: tool.title,
       description: tool.description,
       inputSchema: tool.inputSchema,
-      annotations: READ_ANNOTATIONS,
+      annotations: DEVICE_READ_ANNOTATIONS,
     })),
   ];
 }
@@ -492,7 +500,10 @@ export function mcpInstructions(user: AuthedUser | undefined, access: McpWriteAc
  */
 export function mcpToolsetDocument(): string {
   const everything = { id: "fingerprint", companyId: "fingerprint", permissions: [...KNOWN_PERMISSIONS] } as unknown as AuthedUser;
-  return JSON.stringify(mcpCatalogue(everything, { writeEnabled: true, writeScope: true }).map(({ listing, capability }) => ({ listing, capability })));
+  return JSON.stringify({
+    tools: mcpCatalogue(everything, { writeEnabled: true, writeScope: true }).map(({ listing, capability }) => ({ listing, capability })),
+    notOffered: PC_TOOLS_NOT_OFFERED_THROUGH_SECRETARY,
+  });
 }
 
 export function mcpToolsetFingerprint(): string {
@@ -546,6 +557,8 @@ export function describeCapabilities(user: AuthedUser | undefined, access: McpWr
       },
       counts: { total: catalogue.length, listed, notListed: catalogue.length - listed },
       tools: chosen.map((entry) => ({ ...entry.capability, availability: entry.availability })),
+      // Tools of a connected system that Secretary deliberately does not offer, and why.
+      notOffered: parsed.data.tool ? [] : PC_TOOLS_NOT_OFFERED_THROUGH_SECRETARY,
       notes: [
         "listed: the tool is in this connection's tools/list. A tool that is not listed cannot be called on this connection; its availability says why and how to enable it.",
         "Every call is still checked against the account permission, the administrator's switch and the company's emergency stop at the moment it runs.",

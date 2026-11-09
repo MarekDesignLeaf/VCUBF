@@ -11,8 +11,12 @@
  * is a new, previewed decision that reuses the original request id.
  *
  * The PC tools are generated from the pc_engine catalogue
- * (pcEngineCatalogue.generated.ts): names, parameters and guidance are the
- * engine's, prefixed pc_. There is no generic execute or shell tool.
+ * (pcEngineCatalogue.generated.ts: names, parameters and guidance are the
+ * engine's, prefixed pc_) and from the PC Control Plus relay's own tools
+ * (pcpRelayCatalogue.generated.ts, with Secretary's decision per tool in
+ * pcRelayPolicy.ts). There is no generic execute or shell tool; the tools
+ * Secretary does not offer are described with the reason
+ * (PC_TOOLS_NOT_OFFERED_THROUGH_SECRETARY).
  */
 import { z } from "zod";
 import { prisma } from "../../db.js";
@@ -22,16 +26,23 @@ import {
   READ_PC_ACTION,
   READ_PHONE_MESSAGES_ACTION,
   REPLY_PHONE_CHAT_ACTION,
+  REPLY_WHATSAPP_MESSAGE_ACTION,
   SEND_PHONE_SMS_ACTION,
+  SEND_WHATSAPP_MESSAGE_ACTION,
   type ActionContract,
 } from "../../lib/actionContracts.js";
 import { reviewedActionById } from "../../lib/executionEngine.js";
 import { evaluateEmmaCapabilities } from "../../services/emmaPolicyService.js";
 import * as pc from "../../services/pcControlPlusService.js";
 import * as phone from "../../services/smsBridgeService.js";
+import * as whatsapp from "../../services/whatsappBusinessConnectorService.js";
+import { whatsAppConfigurationAvailable } from "../../connectors/whatsappBusinessAdapter.js";
 import { fail, ok, type ServiceResult } from "../../services/result.js";
 import { PC_ENGINE_CATALOGUE } from "./pcEngineCatalogue.generated.js";
+import { PC_RELAY_POLICY, type PcRelayDecision } from "./pcRelayPolicy.js";
+import { PCP_RELAY_CATALOGUE } from "./pcpRelayCatalogue.generated.js";
 import { RESERVED_IDEMPOTENCY_PREFIX } from "../../middleware/idempotency.js";
+import { ordinalCompare } from "../../lib/ordinalCompare.js";
 import type { StoredOperation, WriteToolDefinition } from "./writeTools.js";
 
 /** The keys under which writeTools stores each confirmation's answer. */
@@ -348,7 +359,74 @@ export function deviceWriteTools(id: (what: string) => z.ZodTypeAny): WriteToolD
         return runPhoneSend(user, original.data.tool, original.data.args, String(verified?.request_id ?? original.data.requestId));
       }),
     },
+    ...whatsAppBusinessWriteTools(),
     ...pcWriteTools(),
+  ];
+}
+
+// ─── The official WhatsApp Business API (existing connector) ───────────────
+
+const WHATSAPP_BUSINESS_LIMITS = [
+  "Sent from the company's WhatsApp Business number through Meta's Cloud API (the existing connector), not from the owner's phone.",
+  "Meta accepts a free-form message only within 24 hours of the person's last message to the business; approved templates are not sent by Secretary, so a later message is refused and nothing is sent.",
+  "Meta takes no request id: if Secretary cannot learn whether Meta accepted the message, the outcome is kept as unknown and is never sent again by itself. Check the chat in WhatsApp before preparing it again.",
+];
+
+/** Meta may have taken the message although Secretary learned no answer: kept as unknown, never retried. */
+const WHATSAPP_UNCERTAIN = new Set(["PROVIDER_UNAVAILABLE", "PROVIDER_RESPONSE_INVALID", "CONNECTOR_INTERNAL_ERROR"]);
+
+class WhatsAppOutcomeUnknownError extends Error {}
+
+async function runWhatsAppBusiness(send: () => Promise<ServiceResult<unknown>>): Promise<ServiceResult<unknown>> {
+  const result = await send();
+  if (!result.ok && WHATSAPP_UNCERTAIN.has(result.error)) {
+    throw new WhatsAppOutcomeUnknownError(`WhatsApp Business answered ${result.error}; the message may or may not have been sent.`);
+  }
+  return result;
+}
+
+function whatsAppBusinessWriteTools(): WriteToolDefinition[] {
+  const available = () => whatsAppConfigurationAvailable();
+  const text = z.string().trim().min(1).max(4096).describe("The exact message text, in the language it is sent in. It is sent as written; nothing is translated.");
+  return [
+    {
+      name: "send_whatsapp_business_message",
+      title: "Send a WhatsApp Business message (preview first)",
+      description: "Prepare one WhatsApp message from the company's WhatsApp Business number (Meta Cloud API) to an explicit international number. Returns the exact number and text and a confirmation_id; nothing is sent until confirm_action after the user's explicit yes. Meta delivers it only within 24 hours of that person's last message to the business. Only send what the user asked for; never invent a recipient or text.",
+      contract: SEND_WHATSAPP_MESSAGE_ACTION,
+      sideEffects: "After confirmation, one WhatsApp text message is sent from the company's WhatsApp Business number to the previewed number. It cannot be recalled.",
+      kind: "reviewed",
+      reviewReason: "irreversible",
+      external: true,
+      available,
+      limitations: WHATSAPP_BUSINESS_LIMITS,
+      fields: {
+        to: z.string().trim().regex(phone.E164, "to must be an international number such as +447700900123").describe("The recipient's number in international E.164 form, exactly as the user gave it."),
+        text,
+      },
+      preview: (user, a) => whatsapp.whatsAppBusinessSendPreview(user, { to: a.to, body: a.text }),
+      run: (user, a, verified) => runWhatsAppBusiness(() =>
+        whatsapp.sendWhatsAppMessage(user, String(verified?.sourceId), { to: a.to, body: a.text, confirmed: true })),
+    },
+    {
+      name: "reply_whatsapp_business_message",
+      title: "Reply to a WhatsApp Business message (preview first)",
+      description: "Prepare a reply to one message received on the company's WhatsApp Business number, by its id (messages[].id from get_whatsapp_sender). The reply quotes that message in the customer's WhatsApp thread. Returns the recipient, the message answered and the exact text and a confirmation_id; nothing is sent until confirm_action after the user's explicit yes. Refused when the 24-hour window has closed.",
+      contract: REPLY_WHATSAPP_MESSAGE_ACTION,
+      sideEffects: "After confirmation, one WhatsApp reply is sent from the company's WhatsApp Business number to the sender of the previewed message, and noted on that message. It cannot be recalled.",
+      kind: "reviewed",
+      reviewReason: "irreversible",
+      external: true,
+      available,
+      limitations: [...WHATSAPP_BUSINESS_LIMITS, "Answers only messages the connector received (webhook); a chat on the owner's phone is reply_phone_chat."],
+      fields: {
+        intake_id: z.string().uuid().describe("The received message's id, exactly as get_whatsapp_sender returned it (messages[].id)."),
+        text,
+      },
+      preview: (user, a) => whatsapp.whatsAppBusinessReplyPreview(user, { intake_id: a.intake_id, body: a.text }),
+      run: (user, a, verified) => runWhatsAppBusiness(() =>
+        whatsapp.replyToWhatsAppMessage(user, String(verified?.sourceId), { intake_id: a.intake_id, body: a.text, confirmed: true })),
+    },
   ];
 }
 
@@ -423,9 +501,110 @@ export const PC_READ_TOOLS: DeviceReadTool[] = [
       },
     };
   }),
+  ...relayTools("read").map(({ tool, schema, fields }): DeviceReadTool => {
+    const validator = z.object(fields).strict();
+    return {
+      name: tool.name,
+      title: `PC: ${tool.relay_tool.replace(/_/g, " ")}`,
+      description: `${tool.description}\n\nOn the owner's PC through PC Control Plus.`,
+      inputSchema: schema,
+      contract: READ_PC_ACTION,
+      available: pcAvailable,
+      limitations: PC_LIMITS,
+      run: async (user, args) => {
+        const parsed = parse(validator, args);
+        return parsed.ok ? pc.callPcRelay(user, tool.relay_tool, parsed.data, { mayHaveEffect: false }) : parsed;
+      },
+    };
+  }),
 ];
 
+// ─── The PC: the relay's own tools, by Secretary's decision ─────────────────
+
+type RelayTool = (typeof PCP_RELAY_CATALOGUE.tools)[number];
+interface JsonSchema { type?: string; anyOf?: JsonSchema[]; items?: JsonSchema; default?: unknown; description?: string; [key: string]: unknown }
+
+/** Secretary's decision for a relay job; a job without one is not offered. */
+export function relayDecision(job: string): PcRelayDecision {
+  return PC_RELAY_POLICY[job] ?? { kind: "not_offered", reason: "Secretary has not decided how to offer this PC Control Plus tool yet." };
+}
+
+/** The relay's argument schema as a strict validator; an unknown schema shape fails when this module loads. */
+function zodFromJson(schema: JsonSchema, where: string): z.ZodTypeAny {
+  if (schema.anyOf) {
+    const others = schema.anyOf.filter((option) => option.type !== "null");
+    if (others.length !== 1 || others.length === schema.anyOf.length) throw new Error(`${where}: unsupported anyOf`);
+    return zodFromJson(others[0], where).nullable();
+  }
+  switch (schema.type) {
+    case "string": return z.string().max(20_000);
+    case "integer": return z.number().int();
+    case "number": return z.number();
+    case "boolean": return z.boolean();
+    case "object": return z.record(z.unknown());
+    case "array": return z.array(schema.items ? zodFromJson(schema.items, `${where}[]`) : z.unknown()).max(40);
+    // An item the relay leaves untyped (a bare Python list): any JSON value; the PC checks it.
+    case undefined: if (Object.keys(schema).length === 0) return z.unknown();
+    // falls through
+    default: throw new Error(`${where}: unsupported schema type ${String(schema.type)}`);
+  }
+}
+
+function relayTools(kind: "read" | "reviewed") {
+  return PCP_RELAY_CATALOGUE.tools.filter((tool) => relayDecision(tool.relay_tool).kind === kind).map((tool: RelayTool) => {
+    const decision = relayDecision(tool.relay_tool);
+    const omitted = new Set(decision.kind === "reviewed" ? decision.omitParams ?? [] : []);
+    const source = tool.input_schema as { properties?: Record<string, JsonSchema>; required?: readonly string[] };
+    const properties = Object.fromEntries(Object.entries(source.properties ?? {}).filter(([name]) => !omitted.has(name))
+      .map(([name, property]) => [name, Object.fromEntries(Object.entries(property).filter(([key]) => key !== "title"))]));
+    const required = (source.required ?? []).filter((name) => !omitted.has(name));
+    const fields = Object.fromEntries(Object.entries(properties).map(([name, property]) => {
+      const base = zodFromJson(property as JsonSchema, `${tool.name}.${name}`);
+      return [name, required.includes(name) ? base : base.optional()];
+    }));
+    const schema = { type: "object", properties, ...(required.length ? { required } : {}), additionalProperties: false };
+    return { tool, decision, schema, fields };
+  });
+}
+
+/** Every PC tool Secretary does not offer, with the reason: shown by describe_capabilities. */
+export const PC_TOOLS_NOT_OFFERED_THROUGH_SECRETARY: { name: string; upstream: string; reason: string }[] = [
+  ...Object.entries(PC_TOOLS_NOT_OFFERED).map(([name, reason]) => ({ name: `pc_${name}`, upstream: "pc_engine", reason })),
+  ...PCP_RELAY_CATALOGUE.tools.map((tool) => ({ tool, decision: relayDecision(tool.relay_tool) }))
+    .filter(({ decision }) => decision.kind === "not_offered")
+    .map(({ tool, decision }) => ({ name: tool.name, upstream: "PC Control Plus relay", reason: (decision as { reason: string }).reason })),
+].sort((left, right) => ordinalCompare(left.name, right.name));
+
 function pcWriteTools(): WriteToolDefinition[] {
+  return [...pcEngineWriteTools(), ...relayTools("reviewed").map(({ tool, decision, fields }): WriteToolDefinition => {
+    const reviewed = decision as Extract<PcRelayDecision, { kind: "reviewed" }>;
+    return {
+      name: tool.name,
+      title: `PC: ${tool.relay_tool.replace(/_/g, " ")} (preview first)`,
+      description: `${tool.description}\n\nOn the owner's PC through PC Control Plus. The first call returns the exact step and a confirmation_id; nothing runs until confirm_action after the user's explicit yes, and the PC then asks its owner again for every sensitive step.`,
+      contract: OPERATE_PC_ACTION,
+      sideEffects: `After confirmation and the PC owner's approval: ${reviewed.effect}`,
+      kind: "reviewed",
+      reviewReason: reviewed.reviewReason,
+      external: true,
+      available: pcAvailable,
+      limitations: [...PC_LIMITS, "If the PC does not answer, the outcome is kept as unknown and the step is never repeated by itself."],
+      fields,
+      preview: async (user, a) => {
+        if (!pcAvailable(user)) return fail(409, "CONNECTOR_NOT_CONFIGURED", "The owner's PC (PC Control Plus) is not set up for this company.");
+        return ok(200, {
+          pc_tool: tool.relay_tool,
+          arguments: a,
+          relay_catalogue: PCP_RELAY_CATALOGUE.relay_sha256.slice(0, 12),
+          effect: `${reviewed.effect} It runs on the owner's PC after your yes here and the PC owner's approval on the PC.`,
+        });
+      },
+      run: (user, a) => pc.callPcRelay(user, tool.relay_tool, a, { mayHaveEffect: true }),
+    };
+  })];
+}
+
+function pcEngineWriteTools(): WriteToolDefinition[] {
   return engineTools.filter((tool) => !tool.read_only).map((tool): WriteToolDefinition => ({
     name: `pc_${tool.name}`,
     title: `PC: ${tool.name.replace(/_/g, " ")} (preview first)`,
@@ -436,7 +615,7 @@ function pcWriteTools(): WriteToolDefinition[] {
       : "After confirmation, the previewed step runs on the PC.",
     kind: "reviewed",
     reviewReason: tool.destructive ? "irreversible" : "destructive",
-    external: tool.destructive,
+    external: true,
     available: pcAvailable,
     limitations: [...PC_LIMITS, "If the PC does not answer, the outcome is kept as unknown and the step is never repeated by itself."],
     fields: Object.fromEntries(tool.params.map((param) => [param.name, zodType(param)])),

@@ -26,7 +26,7 @@ systems that already exist and own the devices:
 | Channel | Read | Send | Limits stated to the AI |
 | --- | --- | --- | --- |
 | SMS (phone SIM via SMS Bridge) | SMS the phone owner synchronised to the bridge (filters: address, text, time) | new SMS to an E.164 number; preview → yes → queued on the phone | only synchronised SMS are visible; daily send cap on the bridge; the phone must be online |
-| WhatsApp **Business** (official Cloud API, existing connector) | inbound messages received by webhook into communication intakes, sender review | reply inside the 24-hour customer-service window (existing service) | only the business number; templates outside 24 h are not in scope |
+| WhatsApp **Business** (official Cloud API, existing connector) | inbound messages received by webhook into communication intakes, sender review | MCP `send_whatsapp_business_message` (to a number) and `reply_whatsapp_business_message` (to a received message by its id from `get_whatsapp_sender`), previewed, through the existing service | only the business number; free-form only within 24 h of the person's last message; no templates, media or history beyond received webhooks; Meta takes no request id, so an unanswered send stays **unknown** and is never retried |
 | WhatsApp / Messenger **from the phone's notifications** (SMS Bridge listener) | only messages whose notification the phone showed after notification access was granted | reply through the notification's reply action, to a chat with a recent notification | **no history, no media, no contacts list, no new chats**; a dismissed notification can make the reply fail; delivery is not confirmed by WhatsApp |
 | PC browser and Windows apps (PC Control Plus) | page snapshots, text, extraction, web fetch, window/control snapshots | browser and UI actions; the PC asks its owner again locally | public HTTPS only; the owner's other tabs untouched; see `pc-control-plus` README |
 
@@ -89,6 +89,40 @@ levels and guidance are generated from `pc_engine.TOOLS`
 `windows-companion/pc-control/tests/test_engine.py`). `browser_eval` and
 `browser_close` are not offered through Secretary.
 
+### The PC: every PC Control Plus tool, each with its own trust boundary
+
+The PC tools come from two generated catalogues, never from a hand-written list:
+
+- the shared engine (`pc_engine.TOOLS` → `pcEngineCatalogue.generated.ts`);
+- the relay's own tools (files, desktop input, `web_*`, `ui_*`, goals, camera,
+  permissions) → `pcpRelayCatalogue.generated.ts`, written by
+  `windows-companion/pc-control/server/import_pcp_catalogue.py --pcp <pc-control-plus>`
+  from the relay's MCP tool list (names, descriptions, JSON schemas, relay job ids) and
+  stamped with the relay's SHA-256. Run it again after every PC Control Plus release.
+
+Secretary's decision per relay tool is `backend/src/modules/mcp/pcRelayPolicy.ts`;
+`tests/mcpDevices.test.ts` fails when a relay tool has no decision or a decision names
+no tool:
+
+| Decision | Tools | How it runs |
+| --- | --- | --- |
+| read | `system_info`, `monitors_list`, `list_directory`, `read_text`, `search_files`, `audit_tail`, `approvals_list`, `permission_status`, `web_tabs_list`, `web_list_fields`, `web_dom`, `ui_tree`, `ui_wait`, `web_goal_status`, `ui_goal_status` | at once under `read_pc`; leaves nothing running or queued |
+| reviewed | file writes and moves, desktop input, `web_*` steps, `ui_batch`, `web_goal_start` / `ui_goal_start` (they keep running on the PC) and their cancel | preview → yes → one call, `operate_pc`; never read-only; the PC asks its owner again |
+| not offered | `run_command`, `run_approved_script` (no shell), `delete_file`, `delete_workspace_file` (the gateway offers no deletion but the guarded contact deletion, issue #74), `permission_set`, `approvals_reset` (the PC's own safety settings), `screenshot`, `web_screenshot`, `camera_*` (no images of the PC or room), `web_close`, and the relay's `ui_windows` (the engine's is offered) | listed in `describe_capabilities.notOffered` with the reason; refused before any request |
+
+`write_file` is offered without `content_base64` (text only). Arguments are checked
+against the relay's own schema, strictly. The approval on the PC itself stays in force
+for every sensitive step.
+
+### Single owner, server-side tokens
+
+SMS Bridge and the PC relay each serve one owner. Each is bound to exactly one
+Secretary company (`SMS_BRIDGE_COMPANY_ID`, `PCP_COMPANY_ID`): for every other company
+its tools are not listed, are described as `connector_not_configured`, and every call is
+refused before any request, so no other company can use the upstream token. The tokens
+and upstream addresses live only in the backend's environment: they are never in
+`tools/list`, `initialize`, `describe_capabilities`, a preview or an answer (tested).
+
 ## Configuration (no secrets in the repository)
 
 Set on the Railway `backend` service:
@@ -108,15 +142,38 @@ Writes additionally need `MCP_GATEWAY_ENABLED=true`, `MCP_WRITE_ENABLED=true`
 
 ## Phases
 
-1. **This PR**: SMS Bridge and PC Control Plus adapters; MCP read tools
-   (phone status, SMS, notification chats, PC connection, PC read tools) and
-   reviewed writes (send SMS, notification reply, PC browser/UI actions);
-   operation status; catalogue integration; tests against local fake bridges.
-2. Official WhatsApp Business reply through MCP (existing service, 24-hour
-   window), and linking sent/received phone messages to CRM communication
-   records.
-3. Agent (control-tower) access to the same contracts; live acceptance with
-   the owner's phone and PC.
+1. **Done in this PR**: SMS Bridge and PC Control Plus adapters; phone reads
+   (status, SMS, notification chats) and reviewed sends (SMS, notification reply,
+   resubmit of an unknown outcome); every PC Control Plus tool (engine and relay)
+   with Secretary's decision per tool; operation status; catalogue integration with
+   `notOffered`; locale-free fingerprints; tests against local fake services.
+2. **Done in this PR**: official WhatsApp Business send and reply through MCP
+   (existing service and audit, 24-hour window, unknown outcome kept unknown).
+3. **Open**: see "Gaps".
+
+## Gaps (explicit, not implemented here)
+
+- **Agent (control-tower / shadow agent) access.** The five new contracts are
+  `EMMA_NON_DIRECT_ACTIONS` (interactive): the agent's tool catalogue
+  (`AGENT_TOOL_CATALOGUE`, ledger `TOOL_CATALOGUE_FINGERPRINTS`) does not offer
+  them, nor the two WhatsApp Business MCP tools. Giving the agent the same
+  contracts needs agent executors with the same preview → yes boundary and a new
+  catalogue ledger entry; not started.
+- **Connector source binding for phone and PC.** SMS Bridge and the PC relay are
+  bound to one company by environment (`*_COMPANY_ID`), not by a `ConnectorSource`
+  row an administrator enables in Secretary, as WhatsApp Business is. A
+  `ConnectorSource` binding (enable/disable, audit, only one company) is the next
+  step.
+- **CRM linking.** Sent and received phone SMS and notification chats are not
+  written to CRM communication records; they live on SMS Bridge.
+- **Status of a WhatsApp Business send.** There is no MCP read of Meta's delivery
+  status; an unknown send is checked in WhatsApp itself.
+- **Not offered by design** (listed in `describe_capabilities.notOffered`): shell
+  and scripts, file deletion, screenshots and camera, the PC's own safety switches,
+  `browser_eval`, `browser_close` / `web_close`.
+- **Relay catalogue freshness.** `pcpRelayCatalogue.generated.ts` is checked only
+  when `import_pcp_catalogue.py --check` runs against a pc-control-plus checkout;
+  VCUBF CI has no such checkout.
 
 ## Live verification still required (owner / Codex)
 
@@ -136,6 +193,9 @@ Nothing here is accepted live until recorded in
 5. `pc_connection_status` and one read (`pc_browser_snapshot`) with the PC
    agent online; one `pc_browser_open` of a harmless public page after the yes,
    approved on the PC by the owner.
-6. Disconnect the bridge during a send in a test environment (not production)
+6. One `reply_whatsapp_business_message` to a message received on the business
+   number within 24 hours: one reply in that thread, quoting it; a repeated yes
+   sends nothing.
+7. Disconnect the bridge during a send in a test environment (not production)
    to see `unknown`, then `resubmit_phone_message` resolving it without a
    second message.

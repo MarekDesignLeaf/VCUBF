@@ -9,6 +9,9 @@ import { prisma } from "../src/db.js";
 import { MCP_READ_SCOPE, MCP_WRITE_SCOPE } from "../src/modules/mcp/oauth.js";
 import { MCP_CONFIRM_TOOL } from "../src/modules/mcp/writeTools.js";
 import { bridgeRequestId } from "../src/services/smsBridgeService.js";
+import { callPcRelay } from "../src/services/pcControlPlusService.js";
+import { PC_RELAY_POLICY } from "../src/modules/mcp/pcRelayPolicy.js";
+import { PCP_RELAY_CATALOGUE } from "../src/modules/mcp/pcpRelayCatalogue.generated.js";
 import { resetDb, seedCompanyAndAdmin, TEST_COMPANY_ID } from "./setup.js";
 
 // The owner's phone (SMS Bridge) and PC (PC Control Plus relay) through the
@@ -401,5 +404,142 @@ describe("MCP: the owner's phone (SMS Bridge) and PC (PC Control Plus)", () => {
     relay.handlers.set("POST /v1/call", (_req, res) => relay.json(res, 200, { id: "job", ok: false, error: "Denied or approval timed out" }));
     const denied = await prepareAndConfirm(writeToken, "pc_browser_open", { url: "https://example.org/" });
     assert.equal(denied.confirmed.body.error, "PC_OWNER_DENIED");
+  });
+
+  it("covers every PC Control Plus relay tool with a decision, and offers no shell, camera or PC safety switch", async () => {
+    const relayJobs = PCP_RELAY_CATALOGUE.tools.map((tool) => tool.relay_tool).sort();
+    assert.deepEqual(Object.keys(PC_RELAY_POLICY).sort(), relayJobs, "every relay tool has exactly one Secretary decision");
+    const owner = await describeTools(writeToken);
+    const names = new Set(owner.map((entry) => entry.name));
+    const described = result(await call(writeToken, "describe_capabilities", {})).body;
+    const notOffered = new Map((described.notOffered as Json[]).map((entry) => [entry.name, entry.reason]));
+    for (const tool of PCP_RELAY_CATALOGUE.tools) {
+      const decision = PC_RELAY_POLICY[tool.relay_tool];
+      if (decision.kind === "not_offered") {
+        assert.ok(!names.has(tool.name) || tool.name === "pc_ui_windows", `${tool.name} is not a Secretary tool`);
+        assert.equal(notOffered.get(tool.name), decision.reason, `${tool.name} is described as not offered, with the reason`);
+      } else {
+        const entry = owner.find((item) => item.name === tool.name)!;
+        assert.ok(entry, tool.name);
+        assert.equal(entry.access, decision.kind === "read" ? "read" : "write", tool.name);
+        assert.equal(entry.readOnly, decision.kind === "read", tool.name);
+        if (decision.kind === "reviewed") assert.equal(entry.confirmation, "preview_then_confirm", tool.name);
+      }
+    }
+    for (const name of ["pc_run_command", "pc_run_approved_script", "pc_delete_file", "pc_delete_workspace_file", "pc_permission_set", "pc_approvals_reset", "pc_camera_photo", "pc_screenshot", "pc_browser_eval"]) {
+      assert.ok(!names.has(name), `${name} is not offered`);
+      assert.ok(notOffered.has(name), `${name} is listed with its reason`);
+      const called = await call(writeToken, name, { command: "whoami" });
+      assert.match(called.body.error?.message ?? "", /Unknown tool/, name);
+    }
+    // A goal keeps running on the PC: it is a reviewed change, never read-only.
+    const listing = (await rpc(writeToken, { jsonrpc: "2.0", id: 2, method: "tools/list" })).body.result.tools as Json[];
+    for (const name of ["pc_web_goal_start", "pc_ui_goal_start", "send_phone_sms", "pc_browser_open"]) {
+      const tool = listing.find((entry) => entry.name === name)!;
+      assert.equal(tool.annotations.readOnlyHint, false, name);
+      assert.equal(tool.annotations.openWorldHint, true, name);
+    }
+    // The service refuses a job no policy offers before any request.
+    const refused = await callPcRelay({ companyId: TEST_COMPANY_ID } as never, "run_command", { command: "whoami" }, { mayHaveEffect: true });
+    assert.equal(refused.ok, false);
+    assert.equal(posts(relay, "/v1/call").length, 0, "nothing reached the PC");
+  });
+
+  it("reads and changes the PC through the relay's own tools, with the relay's schemas", async () => {
+    const info = result(await call(readToken, "pc_list_directory", { path: "C:\\Users\\Owner\\Documents", limit: 5 }));
+    assert.equal(info.isError, false, JSON.stringify(info.body));
+    assert.deepEqual(posts(relay, "/v1/call")[0].body, { tool: "list_directory", args: { path: "C:\\Users\\Owner\\Documents", limit: 5 } });
+    const wrong = result(await call(readToken, "pc_list_directory", { path: 7 }));
+    assert.equal(wrong.body.error, "VALIDATION_FAILED");
+    const binary = result(await call(writeToken, "pc_write_file", { path: "C:\\x.txt", content_base64: "TVqQAAMAAAAEAAAA" }));
+    assert.equal(binary.body.error, "VALIDATION_FAILED", "binary content is not offered");
+    const readOnlyGoal = await call(readToken, "pc_web_goal_start", { url: "https://example.org/", goal: "Find the opening hours" });
+    assert.equal(readOnlyGoal.status, 403, "a read-only connection cannot start a PC task");
+    assert.equal(readOnlyGoal.body.error, "INSUFFICIENT_SCOPE");
+    assert.equal(posts(relay, "/v1/call").length, 1);
+
+    const { prepared, confirmed } = await prepareAndConfirm(writeToken, "pc_web_goal_start", { url: "https://example.org/", goal: "Find the opening hours" });
+    assert.equal(prepared.body.preview.pc_tool, "web_goal_start");
+    assert.match(prepared.body.preview.effect, /keeps running on the PC/);
+    assert.equal(confirmed.isError, false, JSON.stringify(confirmed.body));
+    const sent = posts(relay, "/v1/call")[1].body;
+    assert.equal(sent.tool, "web_goal_start");
+    assert.equal(sent.args.goal, "Find the opening hours");
+  });
+
+  it("sends through the official WhatsApp Business API only after the yes, inside the 24-hour window, and keeps an unanswered send unknown", async () => {
+    const env = { WHATSAPP_GRAPH_API_VERSION: "v21.0", WHATSAPP_PHONE_NUMBER_ID: "123456789", WHATSAPP_ACCESS_TOKEN: "test-whatsapp-token-0123456789",
+      WHATSAPP_BUSINESS_ACCOUNT_ID: "987654321", WHATSAPP_WEBHOOK_VERIFY_TOKEN: "test-verify-token", META_APP_SECRET: "test-app-secret" };
+    const savedEnv = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+    Object.assign(process.env, env);
+    const originalFetch = globalThis.fetch;
+    const graph: Json[] = [];
+    let graphAnswer: () => Response = () => new Response(JSON.stringify({ messages: [{ id: `wamid.OUT${graph.length}` }] }), { status: 200, headers: { "content-type": "application/json" } });
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (!url.includes("graph.facebook.com")) return originalFetch(input, init);
+      graph.push(JSON.parse(String(init?.body ?? "{}")));
+      return graphAnswer();
+    }) as typeof globalThis.fetch;
+    const source = await prisma.connectorSource.create({ data: { companyId: TEST_COMPANY_ID, connectorKey: "whatsapp_business", displayName: "Business number",
+      serviceType: "messaging", configuredScopes: ["read:messages", "send:messages"], isEnabled: true, connectionStatus: "connected" } });
+    const hour = 60 * 60 * 1000;
+    const recent = await prisma.communicationIntake.create({ data: { companyId: TEST_COMPANY_ID, connectorSourceId: source.id, externalMessageId: "wamid.IN1",
+      channel: "whatsapp", senderName: "Jana Nováková", senderPhone: "+447700900321", messageText: "Can you come on Monday?", receivedAt: new Date(Date.now() - 2 * hour) } });
+    const stale = await prisma.communicationIntake.create({ data: { companyId: TEST_COMPANY_ID, connectorSourceId: source.id, externalMessageId: "wamid.IN2",
+      channel: "whatsapp", senderName: "Petr Old", senderPhone: "+447700900322", messageText: "Hello", receivedAt: new Date(Date.now() - 30 * hour) } });
+    try {
+      const owner = await describeTools(writeToken);
+      for (const name of ["send_whatsapp_business_message", "reply_whatsapp_business_message"]) {
+        const tool = owner.find((entry) => entry.name === name)!;
+        assert.equal(tool.availability.reason, "available", name);
+        assert.equal(tool.confirmation, "preview_then_confirm", name);
+      }
+      const { prepared, confirmed, confirmationId } = await prepareAndConfirm(writeToken, "reply_whatsapp_business_message", { intake_id: recent.id, text: "Yes, we can come on Monday at 9." });
+      assert.equal(prepared.body.preview.to, "+447700900321");
+      assert.equal(prepared.body.preview.inReplyTo.text, "Can you come on Monday?");
+      assert.equal(confirmed.isError, false, JSON.stringify(confirmed.body));
+      assert.equal(graph.length, 1, "one message after the yes");
+      assert.equal(graph[0].to, "447700900321");
+      assert.deepEqual(graph[0].context, { message_id: "wamid.IN1" });
+      assert.equal(graph[0].text.body, "Yes, we can come on Monday at 9.", "sent exactly as previewed, untranslated");
+      const again = result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: confirmationId }));
+      assert.equal(again.body.replayed, true);
+      assert.equal(graph.length, 1, "a repeated yes sends nothing more");
+
+      const closed = result(await call(writeToken, "reply_whatsapp_business_message", { intake_id: stale.id, text: "Hello again" }));
+      assert.equal(closed.body.error, "WHATSAPP_REPLY_WINDOW_CLOSED");
+      assert.equal(graph.length, 1);
+
+      graphAnswer = () => new Response("bad gateway", { status: 502 });
+      const unanswered = await prepareAndConfirm(writeToken, "send_whatsapp_business_message", { to: "+447700900321", text: "See you on Monday." });
+      assert.equal(unanswered.confirmed.body.error, "OUTCOME_UNKNOWN", "Meta may have taken it: unknown, not failed");
+      const retried = result(await call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: unanswered.confirmationId }));
+      assert.equal(retried.body.error, "OUTCOME_UNKNOWN");
+      assert.equal(graph.length, 2, "never sent again by itself");
+      assert.ok(!JSON.stringify([prepared.body, confirmed.body, unanswered]).includes(env.WHATSAPP_ACCESS_TOKEN), "the Meta token never reaches the model");
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries(savedEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await prisma.communicationIntake.deleteMany({ where: { connectorSourceId: source.id } });
+      await prisma.connectorSource.delete({ where: { id: source.id } });
+    }
+  });
+
+  it("never shows a server-side token to the model: not in tools/list, describe_capabilities, previews or answers", async () => {
+    const seen: unknown[] = [];
+    seen.push((await rpc(writeToken, { jsonrpc: "2.0", id: 3, method: "tools/list" })).body);
+    seen.push((await rpc(writeToken, { jsonrpc: "2.0", id: 4, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } })).body);
+    seen.push(result(await call(writeToken, "describe_capabilities", {})).body);
+    seen.push(result(await call(writeToken, "phone_status", {})).body);
+    seen.push(result(await call(writeToken, "pc_system_info", {})).body);
+    seen.push(result(await call(writeToken, "send_phone_sms", { to: "+447700900199", text: "Token check" })).body);
+    const text = JSON.stringify(seen);
+    for (const secret of [BRIDGE_TOKEN, RELAY_TOKEN, process.env.SMS_BRIDGE_URL!, process.env.PCP_RELAY_URL!]) {
+      assert.ok(!text.includes(secret), "no token or upstream address reaches the model");
+    }
   });
 });

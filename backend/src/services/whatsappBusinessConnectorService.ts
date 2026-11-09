@@ -696,3 +696,53 @@ export async function disconnectWhatsAppSource(
   });
   return ok(200, { sourceId, provider: "whatsapp_business", disconnectedAt: new Date(), providerGrantRevoked: false });
 }
+
+// ─── For the MCP gateway's reviewed writes (backend/src/modules/mcp) ────────
+//
+// The gateway shows its own preview and sends only after the user's yes
+// through confirm_action, then calls sendWhatsAppMessage / replyToWhatsAppMessage
+// with confirmed: true. These previews are deterministic (no translation:
+// the text shown is the text sent), so the digest checked at the yes holds.
+
+/** The company's enabled WhatsApp Business source that may send, or why there is none. */
+export async function whatsAppBusinessSendingSource(user: AuthedUser): Promise<ServiceResult<{ id: string }>> {
+  const source = await prisma.connectorSource.findFirst({
+    where: { companyId: user.companyId, connectorKey: "whatsapp_business", isActive: true, isEnabled: true },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, configuredScopes: true },
+  });
+  if (!source) return fail(409, "CONNECTOR_NOT_ENABLED", "WhatsApp Business is not connected and enabled for this company.");
+  if (!source.configuredScopes.includes("send:messages")) return fail(409, "CONNECTOR_SCOPE_REQUIRED", "The WhatsApp Business connection may not send messages.");
+  return ok(200, { id: source.id });
+}
+
+export async function whatsAppBusinessSendPreview(user: AuthedUser, input: { to: string; body: string }): Promise<ServiceResult<Record<string, unknown>>> {
+  const parsed = sendWhatsAppMessageSchema.safeParse({ to: input.to, body: input.body });
+  if (!parsed.success) return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  const source = await whatsAppBusinessSendingSource(user);
+  if (!source.ok) return source;
+  const fingerprint = sendFingerprint({ recipients: [parsed.data.to.replace(/\D/g, "")], body: parsed.data.body });
+  const repeat = await recentAuditedSend(user.companyId, SEND_WHATSAPP_MESSAGE_ACTION.actionName, fingerprint);
+  return ok(200, {
+    provider: "whatsapp_business", sourceId: source.data.id, to: parsed.data.to, body: parsed.data.body,
+    window: "WhatsApp delivers a free-form message only within 24 hours of this person's last message to the business; otherwise Meta refuses it and nothing is sent.",
+    ...repeatNote(repeat),
+  });
+}
+
+export async function whatsAppBusinessReplyPreview(user: AuthedUser, input: { intake_id: string; body: string }): Promise<ServiceResult<Record<string, unknown>>> {
+  const parsed = replyWhatsAppMessageSchema.safeParse({ intake_id: input.intake_id, body: input.body });
+  if (!parsed.success || !parsed.data.intake_id) return fail(400, "VALIDATION_FAILED", parsed.success ? "intake_id is required." : parsed.error.message);
+  const source = await whatsAppBusinessSendingSource(user);
+  if (!source.ok) return source;
+  const target = await whatsAppReplyTarget(user, { intake_id: parsed.data.intake_id });
+  if (!target.ok) return target;
+  const intake = target.data;
+  if (!await replyWindowOpen(user, intake.senderPhone)) return windowClosed();
+  return ok(200, {
+    provider: "whatsapp_business", sourceId: source.data.id, intakeId: intake.id, to: intake.senderPhone, recipientName: intake.senderName,
+    inReplyTo: { receivedAt: intake.receivedAt.toISOString(), text: intake.messageText.slice(0, 500) },
+    body: parsed.data.body,
+    ...repeatNote(await recentReplyOrAudited(user.companyId, REPLY_WHATSAPP_MESSAGE_ACTION.actionName, intake, parsed.data.body)),
+  });
+}

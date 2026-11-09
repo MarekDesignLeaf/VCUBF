@@ -945,13 +945,14 @@ describe("MCP gateway write access", () => {
     const reviewed = new Set(["approve_whatsapp_sender", "reject_whatsapp_sender", "reopen_whatsapp_sender", "defer_whatsapp_sender", "delete_contact_permanently"]);
     // The only tools that send anything (phone integration): named here, every
     // one previewed, declared external, and backed by the owner's phone.
-    const senders = new Set(["send_phone_sms", "reply_phone_chat", "resubmit_phone_message"]);
+    const senders = new Set(["send_phone_sms", "reply_phone_chat", "resubmit_phone_message",
+      "send_whatsapp_business_message", "reply_whatsapp_business_message"]);
     for (const name of writeNames) {
       if (senders.has(name)) {
         const tool = MCP_WRITE_TOOLS.find((entry) => entry.name === name)!;
         assert.equal(tool.kind, "reviewed", name);
         assert.equal(tool.external, true, name);
-        assert.ok(tool.available, `${name} must depend on the phone being set up`);
+        assert.ok(tool.available, `${name} must depend on its channel being set up`);
         continue;
       }
       assert.doesNotMatch(name, /(^|_)send(_|$)|publish|email|payment/, name);

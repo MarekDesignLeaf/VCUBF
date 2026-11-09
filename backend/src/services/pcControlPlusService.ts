@@ -5,15 +5,18 @@
  * every sensitive step, keeps its read-only profile, opens only public HTTPS
  * addresses, and runs the shared pc_engine. Secretary does not duplicate any
  * of that. It calls the relay's server API (POST /v1/call) with a server-side
- * token, only with tool names from the engine catalogue (engine_<name>) plus
- * the read-only browser_connection_status, never a shell, command or raw
- * passthrough; the relay additionally runs only tools in its own allowlist.
+ * token, only with tool names from the engine catalogue (engine_<name>), the
+ * relay tools Secretary's policy offers (pcRelayPolicy.ts) and the read-only
+ * browser_connection_status, never a shell, command or raw passthrough; the
+ * relay additionally runs only tools in its own allowlist.
  *
  * Configuration (environment, never in code or the database):
  *   PCP_RELAY_URL, PCP_CLIENT_TOKEN (secret), PCP_COMPANY_ID.
  */
 import type { AuthedUser } from "../middleware/auth.js";
 import { PC_ENGINE_CATALOGUE } from "../modules/mcp/pcEngineCatalogue.generated.js";
+import { PCP_RELAY_CATALOGUE } from "../modules/mcp/pcpRelayCatalogue.generated.js";
+import { PC_RELAY_POLICY } from "../modules/mcp/pcRelayPolicy.js";
 import { fail, ok, type ServiceResult } from "./result.js";
 import { networkErrorCode } from "./smsBridgeService.js";
 
@@ -21,6 +24,9 @@ import { networkErrorCode } from "./smsBridgeService.js";
 export const PCP_TIMEOUT_MS = 80_000;
 export const PC_STATUS_TOOL = "browser_connection_status";
 const ENGINE_NAMES = new Set<string>(PC_ENGINE_CATALOGUE.tools.map((tool) => tool.name));
+/** Relay jobs Secretary may send: in the relay's catalogue and offered by Secretary's policy. */
+const OFFERED_RELAY_JOBS = new Set<string>(PCP_RELAY_CATALOGUE.tools.map((tool) => tool.relay_tool)
+  .filter((job) => PC_RELAY_POLICY[job] && PC_RELAY_POLICY[job].kind !== "not_offered"));
 
 export interface PcControlPlusConfig {
   url: string;
@@ -58,6 +64,26 @@ export async function callPc(user: AuthedUser, engineTool: string, args: Record<
   }
   const relayTool = engineTool === PC_STATUS_TOOL ? PC_STATUS_TOOL : ENGINE_NAMES.has(engineTool) ? `engine_${engineTool}` : null;
   if (!relayTool) return fail(400, "VALIDATION_FAILED", `${engineTool} is not a PC Control Plus engine tool.`);
+  return send(config, relayTool, args, options);
+}
+
+/**
+ * Call one of the relay's own tools by its relay job name (pcpRelayCatalogue),
+ * only when Secretary's policy offers it. Anything else is refused here,
+ * before any request.
+ */
+export async function callPcRelay(user: AuthedUser, relayJob: string, args: Record<string, unknown>,
+  options: { mayHaveEffect: boolean }): Promise<ServiceResult<unknown>> {
+  const config = pcControlPlusConfig();
+  if (!config || config.companyId !== user.companyId) {
+    return fail(409, "CONNECTOR_NOT_CONFIGURED", "The owner's PC (PC Control Plus) is not set up for this company.");
+  }
+  if (!OFFERED_RELAY_JOBS.has(relayJob)) return fail(400, "VALIDATION_FAILED", `${relayJob} is not offered through Secretary.`);
+  return send(config, relayJob, args, options);
+}
+
+async function send(config: PcControlPlusConfig, relayTool: string, args: Record<string, unknown>,
+  options: { mayHaveEffect: boolean }): Promise<ServiceResult<unknown>> {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PCP_TIMEOUT_MS);

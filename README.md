@@ -132,7 +132,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 110 test files, including database integration tests and checks that only
+- **Tests**: 111 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -965,11 +965,14 @@ name consumes nothing; the service then re-checks the preview digest under the c
 row lock and the emergency-stop lock); `cancel_action` withdraws one. The
 preview queue is its own (`mcp_write_review`), so Alfonzo's spoken yes cannot confirm it.
 Nothing is e-mailed or published through the gateway. The only messages it can send are
-an SMS from the owner's phone (`send_phone_sms`) and a reply to a phone chat notification
-(`reply_phone_chat`, not the WhatsApp Business API), both through SMS Bridge, previewed,
-confirmed and sent at most once per confirmation; an unknown outcome is never retried by
+an SMS from the owner's phone (`send_phone_sms`), a reply to a phone chat notification
+(`reply_phone_chat`, not the WhatsApp Business API), both through SMS Bridge, and a
+message or reply from the company's WhatsApp Business number
+(`send_whatsapp_business_message`, `reply_whatsapp_business_message`, existing connector,
+24-hour window), all previewed, confirmed and sent at most once per confirmation; an unknown outcome is never retried by
 itself (`get_outbound_message_status`, `resubmit_phone_message`). The owner's PC is
-reachable only through PC Control Plus catalogue tools (`pc_*`; changes previewed). These
+reachable only through PC Control Plus catalogue tools (`pc_*`, generated from the
+shared engine and the relay; changes previewed; no shell, camera or screenshots). These
 tools are listed only for the company named by `SMS_BRIDGE_COMPANY_ID` / `PCP_COMPANY_ID`
 (`docs/PHONE_PC_INTEGRATION.md`). The only deletion is
 `delete_contact_permanently`; recording payments, deleting clients and sending quotes or

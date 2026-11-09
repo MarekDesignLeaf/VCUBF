@@ -96,6 +96,18 @@ with how to enable it, and a pointer to `describe_capabilities`.
   disagrees with the metadata, a reported administrator switch does not exist or cannot be
   turned off, or the hand-written policy text names a tool or argument that does not exist.
 
+### Deterministic on every machine
+
+Every order that is hashed or recorded (the agent tool catalogue, the MCP
+catalogue, stable JSON, the Emma surface) uses `ordinalCompare`
+(`backend/src/lib/ordinalCompare.ts`): code-unit order, never `localeCompare`
+with the default locale. Before this, a Czech Windows PC sorted `ch…` names after
+`h…` and computed a different fingerprint from the English CI runner. The shipped
+ledger entries are the English (= code-unit) order and stay valid.
+`tests/canonicalOrder.test.ts` computes both fingerprints in fresh processes under
+English, Czech, Polish and Turkish collation and checks they are equal and match
+the ledgers.
+
 ### How to change the tool set
 
 1. Change or add the tool definition (`GATEWAY_READ_TOOLS` in `routes.ts`, or
@@ -120,6 +132,17 @@ the read-only `pc_*` engine tools. Previewed writes: `send_phone_sms`, `reply_ph
 are not offered. A tool whose connector is not set up for the caller's company is not
 listed and is described with the reason `connector_not_configured`. The fingerprint does
 not depend on the environment.
+
+### Revision `2026-11-09.pc-relay-tools`
+
+Adds the PC Control Plus relay's own tools, generated from the relay
+(`pcpRelayCatalogue.generated.ts`) with Secretary's decision per tool
+(`pcRelayPolicy.ts`: read, reviewed, or not offered). `describe_capabilities` gains
+`notOffered`: every PC tool Secretary deliberately does not offer (shell, camera,
+screenshots, the PC's safety switches, `browser_eval`), each with the reason; it is part
+of the fingerprinted document. Phone and PC tools carry `openWorldHint: true`. Adds the official WhatsApp
+Business tools `send_whatsapp_business_message` and `reply_whatsapp_business_message`
+(previewed; an unanswered send to Meta is kept unknown).
 
 ## Safety unchanged
 
