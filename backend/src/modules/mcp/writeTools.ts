@@ -83,6 +83,7 @@ import { RESERVED_IDEMPOTENCY_PREFIX } from "../../middleware/idempotency.js";
 import { EMMA_CAPABILITIES, evaluateEmmaCapabilities } from "../../services/emmaPolicyService.js";
 import { fail, ok, type ServiceResult } from "../../services/result.js";
 import { MCP_RESULT_CHARS } from "./gate.js";
+import { deviceWriteTools } from "./deviceTools.js";
 import { availability, schemaFields, type McpAvailabilityReason, type McpCapability, type McpCatalogueEntry } from "./capabilities.js";
 import * as clientService from "../../services/clientService.js";
 import * as contactService from "../../services/contactService.js";
@@ -150,7 +151,13 @@ interface Body {
 type Kind = "direct" | "reviewed";
 type ReviewReason = "destructive" | "irreversible" | "financial" | "classification" | "permanent";
 
-interface WriteToolDefinition {
+/** What a confirmed change knows about its own confirmation. */
+export interface WriteRunContext {
+  /** The confirmation_id a reviewed change runs under (stable across a retry of the same yes). */
+  confirmationId?: string;
+}
+
+export interface WriteToolDefinition {
   name: string;
   title: string;
   description: string;
@@ -171,7 +178,7 @@ interface WriteToolDefinition {
    * Direct: the change. Reviewed: the change, run only after the yes, with the
    * preview just verified against the one the person approved.
    */
-  run: (user: AuthedUser, args: Record<string, any>, verifiedPreview?: any) => Promise<ServiceResult<unknown>>;
+  run: (user: AuthedUser, args: Record<string, any>, verifiedPreview?: any, context?: WriteRunContext) => Promise<ServiceResult<unknown>>;
   /** Reviewed only: exactly what the change will do, without doing any of it. */
   preview?: (user: AuthedUser, args: Record<string, any>) => Promise<ServiceResult<unknown>>;
   /**
@@ -179,6 +186,16 @@ interface WriteToolDefinition {
    * record's exact name). confirm_action must carry it as confirm_display_name.
    */
   typedConfirmation?: (preview: any) => string;
+  /**
+   * A tool backed by an external system that may not be set up for this
+   * company (the owner's phone or PC): false makes it unavailable here, with
+   * the reason connector_not_configured.
+   */
+  available?: (user: AuthedUser) => boolean;
+  /** Contacts someone outside the company (sends a message): replaces "nothing is messaged". */
+  external?: boolean;
+  /** What a client must know beyond the description. */
+  limitations?: string[];
 }
 
 const record = (key: string, schema: z.ZodTypeAny, description: string): Body => ({ key, schema, description });
@@ -675,6 +692,9 @@ WRITE_TOOLS.push(
   },
 );
 
+// The owner's phone (SMS Bridge) and PC (PC Control Plus): reviewed sends and PC steps.
+WRITE_TOOLS.push(...deviceWriteTools(id));
+
 export const MCP_WRITE_TOOLS: readonly WriteToolDefinition[] = WRITE_TOOLS;
 const toolsByName = new Map(WRITE_TOOLS.map((tool) => [tool.name, tool]));
 
@@ -735,8 +755,8 @@ function classification(tool: WriteToolDefinition) {
 const WRITE_LIMITATIONS = [
   "Records are named by id only, inside the caller's company; read the record first to get its id.",
   "Refused during the company's emergency stop, without the account permission, or when the administrator has switched the capability off.",
-  "Nothing is e-mailed, messaged or published.",
 ];
+const NOTHING_SENT = "Nothing is e-mailed, messaged or published.";
 
 /**
  * The administrator's switch for a contract, only if the assistant policy page
@@ -772,6 +792,8 @@ function writeCapability(tool: WriteToolDefinition, listing: McpWriteToolListing
     sideEffects: tool.sideEffects,
     limitations: [
       ...WRITE_LIMITATIONS,
+      ...(tool.external ? ["This contacts someone outside the company; it is sent only after the preview and the user's explicit yes, and cannot be recalled."] : [NOTHING_SENT]),
+      ...(tool.limitations ?? []),
       ...(capabilitySwitch ? [] : [
         `No separate administrator switch: governed by the server's write switch, this connection's secretary.write approval and the ${tool.contract.requiredPermission} permission.`,
       ]),
@@ -793,7 +815,8 @@ function hasPermission(user: AuthedUser | undefined, permission: string) {
 }
 
 /** Why this connection may or may not use a tool needing this permission. */
-function writeReason(user: AuthedUser | undefined, access: McpWriteAccess, permission: string): McpAvailabilityReason {
+function writeReason(user: AuthedUser | undefined, access: McpWriteAccess, permission: string, tool?: WriteToolDefinition): McpAvailabilityReason {
+  if (tool?.available && !(user && tool.available(user))) return "connector_not_configured";
   if (!access.writeEnabled) return "write_disabled_on_server";
   if (!access.writeScope) return "requires_write_scope";
   if (!hasPermission(user, permission)) return "missing_permission";
@@ -880,7 +903,7 @@ function toolListing(tool: WriteToolDefinition): McpWriteToolListing {
 export function writeToolCatalogue(user: AuthedUser | undefined, access: McpWriteAccess): Array<McpCatalogueEntry & { listing: McpWriteToolListing }> {
   const entries = WRITE_TOOLS.map((tool) => {
     const listing = toolListing(tool);
-    const reason = writeReason(user, access, tool.contract.requiredPermission);
+    const reason = writeReason(user, access, tool.contract.requiredPermission, tool);
     return { listing, capability: writeCapability(tool, listing), availability: availability(reason, reason === "available"), reviewed: tool.kind === "reviewed" };
   });
   const anyReviewed = entries.some((entry) => entry.reviewed && entry.availability.listed);
@@ -969,12 +992,18 @@ const OUTCOME_UNKNOWN_MESSAGE =
  * reconciled, never repeated). Neither an unknown nor an unfinished claim is
  * freed when its retention ends; only a finished answer expires.
  */
+/** What an external send did, kept in its confirmation's idempotency record. */
+export interface StoredOperation {
+  tool: string;
+  arguments: Record<string, unknown>;
+}
+
 async function onceOnly(
   user: AuthedUser,
   phase: WriteOutcome["phase"],
   key: string,
   fingerprint: string,
-  work: (begin: () => void) => Promise<WriteOutcome>,
+  work: (begin: (operation?: StoredOperation) => void) => Promise<WriteOutcome>,
   mismatch: () => WriteOutcome,
 ): Promise<WriteOutcome> {
   const expiresAt = new Date(Date.now() + MCP_IDEMPOTENCY_HOURS * 60 * 60 * 1000);
@@ -1007,9 +1036,10 @@ async function onceOnly(
       return { ...outcome, replayed: true };
     }
     let started = false;
+    let operation: StoredOperation | undefined;
     let outcome: WriteOutcome;
     try {
-      outcome = await work(() => { started = true; });
+      outcome = await work((what) => { started = true; operation = what; });
     } catch (error) {
       if (!started || error instanceof NothingChanged) {
         await prisma.idempotencyRecord.deleteMany({ where: { companyId: user.companyId, key, status: "in_progress" } });
@@ -1026,14 +1056,14 @@ async function onceOnly(
       const unknown: WriteOutcome = { ok: false, phase, payload: { ok: false, error: "OUTCOME_UNKNOWN", message: OUTCOME_UNKNOWN_MESSAGE } };
       await prisma.idempotencyRecord.updateMany({
         where: { companyId: user.companyId, key },
-        data: { status: "unknown", responseStatus: 500, responseBody: { outcome: unknown } as unknown as Prisma.InputJsonValue },
+        data: { status: "unknown", responseStatus: 500, responseBody: { outcome: unknown, ...(operation ? { operation } : {}) } as unknown as Prisma.InputJsonValue },
       });
       return unknown;
     }
     const { contract: _contract, ...storable } = outcome;
     await prisma.idempotencyRecord.updateMany({
       where: { companyId: user.companyId, key },
-      data: { status: "completed", responseStatus: outcome.ok ? 200 : 409, responseBody: { outcome: storable } as unknown as Prisma.InputJsonValue },
+      data: { status: "completed", responseStatus: outcome.ok ? 200 : 409, responseBody: { outcome: storable, ...(operation ? { operation } : {}) } as unknown as Prisma.InputJsonValue },
     });
     return outcome;
   }
@@ -1253,10 +1283,13 @@ async function confirm(caller: McpCaller, confirmationId: string, typedText?: st
       await claimed.complete(false).catch(() => undefined);
       throw error;
     }
-    begin();
+    // An external send keeps what it sent next to its outcome (the review's
+    // payload is cleared once it resolves), so its state can be looked up and
+    // an unknown outcome reconciled later. It expires with the record.
+    begin(tool.external ? { tool: tool.name, arguments: claimed.payload.arguments } : undefined);
     let result: ServiceResult<unknown>;
     try {
-      result = await tool.run(caller.user, claimed.payload.arguments, now.data);
+      result = await tool.run(caller.user, claimed.payload.arguments, now.data, { confirmationId });
     } catch (error) {
       if (error instanceof SafeModeActiveError) {
         await claimed.complete(false).catch(() => undefined);

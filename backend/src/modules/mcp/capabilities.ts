@@ -99,7 +99,8 @@ export type McpAvailabilityReason =
   | "missing_permission"
   | "requires_write_scope"
   | "write_disabled_on_server"
-  | "no_previewed_tool_available";
+  | "no_previewed_tool_available"
+  | "connector_not_configured";
 
 export interface McpAvailability {
   /** The tool is in this connection's tools/list. */
@@ -119,6 +120,8 @@ export const AVAILABILITY_HELP: Record<Exclude<McpAvailabilityReason, "available
   requires_write_scope:
     "This connection was approved for reading only. Disconnect and connect the Secretary connector again, and on the consent page tick the box allowing Secretary to create and change records.",
   write_disabled_on_server: "Writing through this gateway is switched off on the Secretary server (MCP_WRITE_ENABLED). The owner must switch it on.",
+  connector_not_configured:
+    "The device or system behind this tool (the owner's phone through SMS Bridge, or the owner's PC through PC Control Plus) is not set up for this company on the Secretary server. The owner configures it; see docs/PHONE_PC_INTEGRATION.md.",
   no_previewed_tool_available: "Available only when at least one previewed tool (archive, conversion, invoice status, WhatsApp sender review, permanent deletion) is available to this connection.",
 };
 

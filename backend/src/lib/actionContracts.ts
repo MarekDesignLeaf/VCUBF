@@ -713,6 +713,73 @@ export const REVIEW_WHATSAPP_SENDER_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONNECTOR_SOURCE_NOT_FOUND", "WHATSAPP_SENDER_NOT_FOUND", "WHATSAPP_SENDER_INVALID_NUMBER", "WHATSAPP_SENDER_SUPPRESSED", "WHATSAPP_SENDER_CHANGED", "CLIENT_NOT_FOUND", "DUPLICATE_CONTACT_AMBIGUOUS", "DUPLICATE_CLIENT_POSSIBLE", "CONFIRMATION_REQUIRED"],
 };
 
+// The owner's phone through SMS Bridge (MarekDesignLeaf/sms-bridge-api): SMS the
+// owner synchronised to the bridge, WhatsApp and Messenger messages captured
+// from the phone's notifications (no history, no media), and the phone's
+// health. Read only; the bridge serves one configured company.
+export const READ_PHONE_MESSAGES_ACTION: ActionContract = {
+  actionName: "read_phone_messages",
+  purpose: "Read the owner phone's status, the SMS the owner synchronised to SMS Bridge, and WhatsApp/Messenger messages captured from the phone's notifications, for the one company the phone is configured for.",
+  requiredPermission: "connectors.read",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["sms_bridge.phone_messages", "sms_bridge.chat_messages", "sms_bridge.device_health"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "PROVIDER_UNAVAILABLE", "CONNECTOR_AUTHORIZATION_REQUIRED", "VALIDATION_FAILED"],
+};
+
+// An SMS from the owner's SIM, queued on the phone by SMS Bridge only after the
+// user reviewed the exact number and text and confirmed. One confirmation is
+// one bridge request id: it can never be sent twice; an unknown outcome is
+// reported, never retried by itself.
+export const SEND_PHONE_SMS_ACTION: ActionContract = {
+  actionName: "send_phone_sms",
+  purpose: "Send one SMS from the owner's phone to an explicit E.164 number through SMS Bridge, only after the user reviews the final number and text and confirms the external action.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "sms_bridge.messages"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "CONFIRMATION_REQUIRED", "VALIDATION_FAILED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "OUTCOME_UNKNOWN"],
+};
+
+// A reply in a WhatsApp or Messenger chat sent by the phone through that chat's
+// notification reply action (SMS Bridge listener), not through any WhatsApp
+// API: only to a chat with a captured notification, after preview and yes.
+export const REPLY_PHONE_CHAT_ACTION: ActionContract = {
+  actionName: "reply_phone_chat",
+  purpose: "Reply in a WhatsApp or Messenger chat through the owner phone's notification reply action (SMS Bridge), only to a chat with a captured notification and only after the user reviews the exact chat and text and confirms.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "sms_bridge.chat_messages", "sms_bridge.device_actions"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "CONFIRMATION_REQUIRED", "VALIDATION_FAILED", "PHONE_CHAT_NOT_FOUND", "PROVIDER_UNAVAILABLE", "OUTCOME_UNKNOWN"],
+};
+
+// The owner's PC through the PC Control Plus relay, reading only: connection
+// status, page snapshots, page text and data, public web pages, and Windows
+// window/control snapshots, as the shared pc_engine catalogue defines them.
+export const READ_PC_ACTION: ActionContract = {
+  actionName: "read_pc",
+  purpose: "Read from the owner's PC through PC Control Plus: browser connection status, the current page's controls, text and data, public web pages, and Windows window and control snapshots, without changing anything.",
+  requiredPermission: "company.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["pc_control_plus.browser", "pc_control_plus.windows_ui", "public_web"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "PROVIDER_UNAVAILABLE", "PC_AGENT_OFFLINE", "PC_AGENT_BUSY", "VALIDATION_FAILED"],
+};
+
+// Acting on the owner's PC (browser navigation and steps, Windows UI steps)
+// through PC Control Plus, only after a preview and the user's yes here, and
+// then again only with the PC owner's local approval on the PC itself.
+export const OPERATE_PC_ACTION: ActionContract = {
+  actionName: "operate_pc",
+  purpose: "Operate the owner's PC through PC Control Plus (open a page, run browser or Windows UI steps, switch tabs) from the shared pc_engine catalogue, only after the user reviews the exact steps and confirms; the PC owner approves again on the PC.",
+  requiredPermission: "company.manage",
+  riskLevel: 4,
+  confirmationRequired: true,
+  dataSources: ["user_input", "pc_control_plus.browser", "pc_control_plus.windows_ui"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "CONFIRMATION_REQUIRED", "VALIDATION_FAILED", "PC_AGENT_OFFLINE", "PC_AGENT_BUSY", "PC_OWNER_DENIED", "PROVIDER_UNAVAILABLE", "OUTCOME_UNKNOWN"],
+};
+
 export const SEND_WHATSAPP_MESSAGE_ACTION: ActionContract = {
   actionName: "send_whatsapp_message",
   purpose: "Send a WhatsApp Business text to an explicit recipient only after the user reviews the final number and message and confirms the external action.",

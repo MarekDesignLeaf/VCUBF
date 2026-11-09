@@ -12,6 +12,7 @@ import { capabilityProblems, REQUIRED_TEXT_FIELDS } from "../src/modules/mcp/cap
 import {
   describeCapabilities,
   MCP_DESCRIBE_TOOL,
+  MCP_DEVICE_READ_TOOL_NAMES,
   MCP_GATEWAY_READ_TOOL_NAMES,
   MCP_READ_COMMAND_TOOL,
   MCP_READ_POLICY,
@@ -49,6 +50,7 @@ function definedToolNames(): string[] {
     MCP_READ_COMMAND_TOOL,
     ...catalogueReads.map((tool) => tool.name),
     ...MCP_GATEWAY_READ_TOOL_NAMES,
+    ...MCP_DEVICE_READ_TOOL_NAMES,
     ...MCP_WRITE_TOOLS.map((tool) => tool.name),
     MCP_CONFIRM_TOOL,
     MCP_CANCEL_TOOL,
@@ -280,15 +282,24 @@ describe("MCP capability metadata", () => {
     it("tells a write-approved connection every tool by name, matching tools/list exactly", async () => {
       const listedTools = await list(writeToken);
       const listed = listedTools.map((tool) => tool.name as string);
-      assert.deepEqual([...listed].sort(), definedToolNames().sort(), "a write-approved owner sees every tool");
+      // Every tool, except the owner's phone and PC, which are not set up in this test:
+      // they are described with connector_not_configured (tests/mcpDevices.test.ts sets them up).
+      const deviceTools = new Set([...MCP_DEVICE_READ_TOOL_NAMES, ...MCP_WRITE_TOOLS.filter((tool) => tool.available).map((tool) => tool.name)]);
+      assert.ok(deviceTools.has("send_phone_sms") && deviceTools.has("pc_browser_act") && deviceTools.has("list_phone_sms"));
+      assert.deepEqual([...listed].sort(), definedToolNames().filter((name) => !deviceTools.has(name)).sort(), "a write-approved owner sees every tool");
       for (const name of ["create_task", "list_whatsapp_senders", "get_whatsapp_sender", ...WHATSAPP_REVIEW, "delete_contact_permanently", MCP_CONFIRM_TOOL, MCP_CANCEL_TOOL]) {
         assert.ok(listed.includes(name), name);
       }
 
       const { body } = await describeCall(writeToken);
       assert.equal(body.connection.canWrite, true);
-      assert.equal(body.counts.notListed, 0);
+      assert.equal(body.counts.notListed, deviceTools.size);
       for (const tool of body.tools as Json[]) {
+        if (deviceTools.has(tool.name)) {
+          assert.equal(tool.availability.reason, "connector_not_configured", tool.name);
+          assert.match(tool.availability.howToEnable, /PHONE_PC_INTEGRATION/, tool.name);
+          continue;
+        }
         assert.equal(tool.availability.reason, "available", tool.name);
         const listing = listedTools.find((entry) => entry.name === tool.name)!;
         assert.ok(listing, tool.name);
@@ -299,7 +310,9 @@ describe("MCP capability metadata", () => {
       assert.match(init.instructions, new RegExp(`${listed.length} tools on this connection`));
       for (const name of listed) assert.ok(init.instructions.includes(name), `initialize names ${name}`);
       assert.match(init.instructions, /Permanent, after a preview, the user's yes and the exact name typed by the user \(1\): delete_contact_permanently/);
-      assert.doesNotMatch(init.instructions, /Not available on this connection/);
+      // Only the devices that are not set up are held back, with their reason.
+      assert.doesNotMatch(init.instructions, /Not available on this connection, (requires_write_scope|missing_permission|write_disabled_on_server)/);
+      assert.match(init.instructions, /Not available on this connection, connector_not_configured \(\d+\): phone_status/);
 
       const one = await describeCall(writeToken, { tool: "create_task" });
       assert.deepEqual(one.body.tools.map((tool: Json) => tool.name), ["create_task"]);

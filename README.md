@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 37 mounted route groups, 55 Prisma models, 156 Action Contracts,
+- **Backend**: 37 mounted route groups, 55 Prisma models, 161 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,
@@ -132,7 +132,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 109 test files, including database integration tests and checks that only
+- **Tests**: 110 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -964,7 +964,14 @@ carry `confirm_display_name`, the contact's exact name typed by the user; a miss
 name consumes nothing; the service then re-checks the preview digest under the contact's
 row lock and the emergency-stop lock); `cancel_action` withdraws one. The
 preview queue is its own (`mcp_write_review`), so Alfonzo's spoken yes cannot confirm it.
-Nothing is e-mailed, messaged or published through the gateway, and the only deletion is
+Nothing is e-mailed or published through the gateway. The only messages it can send are
+an SMS from the owner's phone (`send_phone_sms`) and a reply to a phone chat notification
+(`reply_phone_chat`, not the WhatsApp Business API), both through SMS Bridge, previewed,
+confirmed and sent at most once per confirmation; an unknown outcome is never retried by
+itself (`get_outbound_message_status`, `resubmit_phone_message`). The owner's PC is
+reachable only through PC Control Plus catalogue tools (`pc_*`; changes previewed). These
+tools are listed only for the company named by `SMS_BRIDGE_COMPANY_ID` / `PCP_COMPANY_ID`
+(`docs/PHONE_PC_INTEGRATION.md`). The only deletion is
 `delete_contact_permanently`; recording payments, deleting clients and sending quotes or
 invoices are not exposed. WhatsApp sender review reads (`list_whatsapp_senders`,
 `get_whatsapp_sender`) are open to every connection with `crm.read` and the

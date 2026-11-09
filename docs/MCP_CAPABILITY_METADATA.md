@@ -65,7 +65,7 @@ see:
 | `idempotency` | `not_applicable`, `idempotency_key_required`, `once_per_confirmation_id` |
 | `readsCompanyRecords`, `sideEffects`, `limitations`, `audit` | what a call touches, changes and records |
 | `inputFields`, `requiredInputs` | top-level argument names from the `tools/list` schema |
-| `availability` | `listed`, `reason` (`available`, `missing_permission`, `requires_write_scope`, `write_disabled_on_server`, `no_previewed_tool_available`) and `howToEnable` |
+| `availability` | `listed`, `reason` (`available`, `missing_permission`, `requires_write_scope`, `write_disabled_on_server`, `no_previewed_tool_available`, `connector_not_configured`) and `howToEnable` |
 
 A read-only connection therefore learns that, for example, `create_task` and
 `delete_contact_permanently` exist and are `requires_write_scope`, with the instruction to
@@ -106,6 +106,20 @@ with how to enable it, and a pointer to `describe_capabilities`.
    `MCP_TOOLSET_FINGERPRINTS`. Never edit a shipped entry.
 4. Update the README MCP section and the relevant acceptance document.
 5. After deployment, refresh or reconnect the ChatGPT/Claude connector.
+
+### Revision `2026-11-09.phone-and-pc`
+
+Adds the owner's phone (SMS Bridge) and PC (PC Control Plus) tools; see
+`docs/PHONE_PC_INTEGRATION.md`. Reads: `phone_status`, `list_phone_sms`,
+`list_phone_chat_messages`, `get_outbound_message_status`, `pc_connection_status` and
+the read-only `pc_*` engine tools. Previewed writes: `send_phone_sms`, `reply_phone_chat`,
+`resubmit_phone_message`, `pc_browser_open`, `pc_browser_act`, `pc_browser_tabs`,
+`pc_ui_act`. The PC tool names and schemas are generated from the pc_engine catalogue
+(`pcEngineCatalogue.generated.ts`, checked by
+`windows-companion/pc-control/tests/test_engine.py`); `browser_eval` and `browser_close`
+are not offered. A tool whose connector is not set up for the caller's company is not
+listed and is described with the reason `connector_not_configured`. The fingerprint does
+not depend on the environment.
 
 ## Safety unchanged
 

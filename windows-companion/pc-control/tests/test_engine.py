@@ -34,6 +34,13 @@ class Release(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
 
+class GeneratedForSecretary(unittest.TestCase):
+    def test_the_backend_catalogue_is_generated_from_the_engine(self):
+        # The Secretary MCP gateway offers the PC with exactly these tools.
+        done = subprocess.run([sys.executable, str(_env.SERVER / "export_catalogue.py"), "--check"], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr + " — run python windows-companion/pc-control/server/export_catalogue.py")
+
+
 class Catalogue(unittest.TestCase):
     def test_every_tool_has_guidance_and_a_known_level(self):
         for spec in pc_engine.TOOLS.values():
