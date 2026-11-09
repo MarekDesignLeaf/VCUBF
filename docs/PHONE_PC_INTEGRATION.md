@@ -271,15 +271,19 @@ against local fake services only.
   environment (`*_COMPANY_ID`), not by a row an administrator enables in Secretary.
 - **CRM linking:** phone SMS and notification chats are not written to CRM
   communication records.
-- **Live acceptance:** none of this is accepted live (see below).
+- **Live acceptance:** phone/SMS reads, one self-addressed SMS, notification
+  input and PC text reads/writes have direct evidence recorded in the acceptance
+  log. Notification replies, Business delivery and interactive browser actions
+  remain open (see below).
 - **PC steps run twice in parallel:** guarded by the single claim of the review or
   agent proposal, not by the PC (PC Control Plus takes no request id). Phone sends are
   additionally de-duplicated by SMS Bridge on the request id.
 
 ## Live verification still required (owner / Codex)
 
-Nothing here is accepted live until recorded in
-`docs/PRODUCTION_ACCEPTANCE_LOG.md`. All tests run against local fake bridges.
+Record live checks in `docs/PRODUCTION_ACCEPTANCE_LOG.md`. Automated adapter
+tests use local fake bridges; they do not substitute for the checks below.
+Already recorded checks must not trigger another real SMS test.
 
 1. `phone_status` on the owner's connection: the bridge reports the Samsung
    SM-S938B online and its last sync.
