@@ -24,6 +24,7 @@ import {
 } from "../lib/emmaExecutableActionCatalogue.js";
 import { isVoiceActionName, voiceActionSchemas } from "../lib/voiceActionCatalogue.js";
 import { EMMA_CAPABILITIES, type EmmaCapability } from "../lib/emmaSurfaceCatalogue.js";
+import { ordinalCompare } from "../lib/ordinalCompare.js";
 
 /**
  * The version ledger: every catalogue version ever shipped, paired with the
@@ -135,7 +136,7 @@ function deepFreeze<T>(value: T): T {
 
 export const AGENT_TOOL_CATALOGUE: readonly AgentTool[] = deepFreeze(
   (Object.keys(EMMA_EXECUTABLE_ACTIONS) as EmmaExecutableActionName[])
-    .sort((left, right) => left.localeCompare(right))
+    .sort(ordinalCompare)
     .map(toolFor)
 );
 
