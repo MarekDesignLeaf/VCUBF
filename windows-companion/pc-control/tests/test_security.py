@@ -305,16 +305,19 @@ class BrowserGuardAttached(Servers):
         cls.profile = tempfile.mkdtemp(prefix="pc_engine_user_")
         cls.browser_process = subprocess.Popen(
             [chromium_path(), "--headless=new", f"--remote-debugging-port={cls.port}", f"--user-data-dir={cls.profile}",
-             *(["--no-sandbox"] if hasattr(os, "geteuid") and os.geteuid() == 0 else []),
+             # As Playwright itself launches Chromium: CI runners (Ubuntu 24 AppArmor) and root refuse its sandbox.
+             "--no-sandbox",
              "--no-first-run", "--no-default-browser-check", "about:blank"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         cls.user = sync_playwright().start()  # the "user", driving their own two tabs
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 30
         while True:
             try:
                 cls.user_browser = cls.user.chromium.connect_over_cdp(f"http://127.0.0.1:{cls.port}")
                 break
             except Exception:
+                if cls.browser_process.poll() is not None:
+                    raise RuntimeError("the stand-in browser exited: " + cls.browser_process.stderr.read().decode(errors="replace")[-800:])
                 if time.monotonic() > deadline:
                     raise
                 time.sleep(0.2)
