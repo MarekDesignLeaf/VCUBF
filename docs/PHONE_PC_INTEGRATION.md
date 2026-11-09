@@ -96,20 +96,52 @@ The PC tools come from two generated catalogues, never from a hand-written list:
 - the shared engine (`pc_engine.TOOLS` → `pcEngineCatalogue.generated.ts`);
 - the relay's own tools (files, desktop input, `web_*`, `ui_*`, goals, camera,
   permissions) → `pcpRelayCatalogue.generated.ts`, written by
-  `windows-companion/pc-control/server/import_pcp_catalogue.py --pcp <checkout> --pin pcp-upstream.json`
+  `windows-companion/pc-control/server/import_pcp_catalogue.py --refresh --pcp <checkout>`
   from the relay's MCP tool list (names, descriptions, JSON schemas, relay job ids).
 
-**Pinned upstream with release provenance.** The import is pinned to one signed PC
-Control Plus release: `windows-companion/pc-control/pcp-upstream.json` names the
-repository, the commit of its `signed-release` branch, the release id and the release
-public key (pinned in VCUBF, never taken from the checkout). The importer refuses unless
-the checkout is exactly that commit, the release manifest's Ed25519 signature verifies
-with the pinned key for the pinned release id, and every signed file has its signed
-SHA-256; the control-loop modules it attests screenshot-free must be those signed files.
-The generated catalogue records the release (`upstream`), so the pin and the catalogue
-change together. CI job `relay-catalogue` checks out the pinned commit and fails when the
-committed catalogue is not what that release produces. Today: release `1b4dc2d`
-(`signed-release` `a267875`).
+**Pinned upstream with release provenance, checked without credentials.**
+pc-control-plus is private, so VCUBF vendors a minimal snapshot of exactly the pinned
+signed release in `windows-companion/pc-control/pcp-upstream/`. It holds:
+
+- the nine files the import reads: `relay.py`, `oauth.py`, `pc_engine.py`,
+  `requirements.txt`, `release-manifest.json` and the four control-loop modules;
+- three git objects: the commit, its root tree and the `remote/` tree.
+
+No history and no other file is vendored (no `.env.example`, no agent or installer
+code). The pin `windows-companion/pc-control/pcp-upstream.json` names the commit, its
+tree, the release id and the release public key, pinned in VCUBF and never taken from
+upstream.
+
+`import_pcp_catalogue.py --check` (no network, no token) proves:
+
+1. the commit object hashes to the pinned commit and names the pinned tree;
+2. the root tree hashes to that tree, its `remote/` entry to the remote tree, and every
+   vendored file to its blob there — `relay.py` included, which the release manifest
+   does not sign;
+3. nothing else is in the snapshot;
+4. the manifest's Ed25519 signature verifies with the pinned key for the pinned release
+   id, and the vendored signed files have their signed SHA-256;
+5. the attested goal modules are those signed files;
+6. the committed catalogue records this snapshot and is exactly what the relay in it
+   produces now.
+
+CI job `relay-catalogue` runs that, then the tamper tests
+(`windows-companion/pc-control/tests/test_pcp_snapshot.py`: changed `relay.py`, changed
+signed file, rewritten tree, wrong commit, tree, release or key, extra file, stale
+catalogue, failed refresh changes nothing).
+
+**Updating** (on a machine with an authenticated pc-control-plus checkout at the signed
+release to pin):
+
+```bash
+python windows-companion/pc-control/server/import_pcp_catalogue.py --refresh --pcp ../pc-control-plus
+```
+
+`--refresh` reads the checkout's HEAD from git objects, not from the working tree. It
+writes the snapshot, the pin and the catalogue together, and only after the new snapshot
+passes every check; a failure changes nothing. A new release key is given explicitly
+with `--public-key-b64`. Today the pin is release `1b4dc2d` (`signed-release`
+`a267875`, tree `bfe4755`).
 
 Secretary's decision per relay tool is `backend/src/modules/mcp/pcRelayPolicy.ts`;
 `tests/mcpDevices.test.ts` fails when a relay tool has no decision or a decision names
@@ -200,11 +232,7 @@ Set on the Railway `backend` service:
 Writes additionally need `MCP_GATEWAY_ENABLED=true`, `MCP_WRITE_ENABLED=true`
 (already used) and a connection approved for `secretary.write`.
 
-GitHub repository secret for VCUBF CI:
-
-| Secret | Meaning |
-| --- | --- |
-| `PCP_CATALOGUE_READ_TOKEN` | a fine-grained token with read-only Contents access to `MarekDesignLeaf/pc-control-plus` only; the `relay-catalogue` job fails until it is set |
+VCUBF CI needs no secret for the relay catalogue: it checks the vendored snapshot.
 
 Confirm that `release_public_key_b64` in `pcp-upstream.json` equals the
 `PCP_RELEASE_PUBLIC_KEY_B64` pinned on the PC.
@@ -231,6 +259,9 @@ against local fake services only.
 - **CRM linking:** phone SMS and notification chats are not written to CRM
   communication records.
 - **Live acceptance:** none of this is accepted live (see below).
+- **PC steps run twice in parallel:** guarded by the single claim of the review or
+  agent proposal, not by the PC (PC Control Plus takes no request id). Phone sends are
+  additionally de-duplicated by SMS Bridge on the request id.
 
 ## Live verification still required (owner / Codex)
 

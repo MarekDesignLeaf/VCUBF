@@ -1,3 +1,6 @@
 # The shared pc_engine is identical byte for byte on every platform (SHA-256 in its release record).
 windows-companion/pc-control/server/pc_engine.py text eol=lf
 windows-companion/pc-control/server/pc_engine.release.json text eol=lf
+# The vendored snapshot of the pinned PC Control Plus release is kept byte for byte:
+# its files are proved against git blob ids and signed SHA-256 values.
+windows-companion/pc-control/pcp-upstream/** -text

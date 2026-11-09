@@ -76,6 +76,7 @@ describe("MCP: the owner's phone (SMS Bridge) and PC (PC Control Plus)", () => {
   let readToken: string;
   let workerToken: string;
   let otherToken: string;
+  let colleagueToken: string;
   let otherCompanyId: string;
   /** The bridge's own idempotency: request_id -> message. */
   const bridgeMessages = new Map<string, { id: string; status: string }>();
@@ -120,10 +121,13 @@ describe("MCP: the owner's phone (SMS Bridge) and PC (PC Control Plus)", () => {
       SMS_BRIDGE_URL: bridgeUrl, SMS_BRIDGE_ADMIN_TOKEN: BRIDGE_TOKEN, SMS_BRIDGE_COMPANY_ID: TEST_COMPANY_ID, SMS_BRIDGE_DEVICE_ID: "samsung-s938b",
       PCP_RELAY_URL: relayUrl, PCP_CLIENT_TOKEN: RELAY_TOKEN, PCP_COMPANY_ID: TEST_COMPANY_ID,
     });
+    await prisma.user.create({ data: { companyId: TEST_COMPANY_ID, email: "colleague@test.local", passwordHash: hash, displayName: "Colleague", role: "administrator",
+      permissions: ["company.manage", "connectors.read", "connectors.manage", "crm.read", "crm.manage"] } });
     writeToken = await connect("admin@test.local");
     readToken = await connect("admin@test.local", "approve");
     workerToken = await connect("worker@test.local");
     otherToken = await connect("other-owner@test.local");
+    colleagueToken = await connect("colleague@test.local");
   });
 
   beforeEach(() => {
@@ -276,6 +280,21 @@ describe("MCP: the owner's phone (SMS Bridge) and PC (PC Control Plus)", () => {
     const audit = await prisma.auditLog.findMany({ where: { companyId: TEST_COMPANY_ID, actionName: "mcp_write_tool", interpretedIntent: { in: ["send_phone_sms", MCP_CONFIRM_TOOL] } } });
     assert.ok(audit.length >= 2);
     assert.ok(!JSON.stringify(audit).includes("Přijedeme"), "the message text is not in the audit log");
+  });
+
+  it("keeps a send to the person who prepared it, and sends once when two confirmations arrive at the same moment", async () => {
+    const prepared = result(await call(writeToken, "send_phone_sms", { to: "+447700900140", text: "Only mine" }));
+    const confirmationId = prepared.body.confirmation_id as string;
+    const theirs = result(await call(colleagueToken, MCP_CONFIRM_TOOL, { confirmation_id: confirmationId }));
+    assert.equal(theirs.body.error, "CONFIRMATION_NOT_FOUND", "a colleague cannot confirm another person's preview");
+    assert.equal(posts(bridge, "/api/send").length, 0);
+    const answers = await Promise.all([call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: confirmationId }), call(writeToken, MCP_CONFIRM_TOOL, { confirmation_id: confirmationId })]);
+    assert.equal(posts(bridge, "/api/send").length, 1, "two simultaneous confirmations send once");
+    assert.ok(answers.map(result).some((answer) => answer.isError === false), "one of them carries the send's answer");
+    const status = result(await call(colleagueToken, "get_outbound_message_status", { confirmation_id: confirmationId }));
+    assert.equal(status.body.error, "CONFIRMATION_NOT_FOUND", "a colleague cannot read another person's send");
+    const resubmit = result(await call(colleagueToken, "resubmit_phone_message", { confirmation_id: confirmationId }));
+    assert.equal(resubmit.body.error, "CONFIRMATION_NOT_FOUND", "nor resubmit it");
   });
 
   it("refuses invalid numbers and over-long texts before any preview", async () => {

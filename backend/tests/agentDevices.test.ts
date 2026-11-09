@@ -62,6 +62,8 @@ describe("agent and assistant: the owner's phone, PC and WhatsApp delivery statu
   let admin: string;
   let worker: string;
   let other: string;
+  /** A second administrator of the same company: same permissions, another person. */
+  let colleague: string;
   let adminUser: AuthedUser;
 
   const login = async (email: string) => (await request(app).post("/auth/login").send({ email, password: "Password123!" })).body.token as string;
@@ -77,6 +79,8 @@ describe("agent and assistant: the owner's phone, PC and WhatsApp delivery statu
     const company = await prisma.company.create({ data: { name: "Other Agent Co" } });
     await prisma.user.create({ data: { companyId: company.id, email: "other-agent@test.local", passwordHash: hash, displayName: "Other", role: "administrator",
       permissions: ["company.manage", "connectors.read", "connectors.manage", "crm.read", "crm.manage", "voice.execute"] } });
+    await prisma.user.create({ data: { companyId: TEST_COMPANY_ID, email: "colleague@test.local", passwordHash: hash, displayName: "Colleague", role: "administrator",
+      permissions: ["company.manage", "connectors.read", "connectors.manage", "crm.read", "crm.manage", "voice.execute"] } });
     for (const name of ENV_KEYS) delete process.env[name];
     Object.assign(process.env, {
       SMS_BRIDGE_URL: await bridge.start(), SMS_BRIDGE_ADMIN_TOKEN: BRIDGE_TOKEN, SMS_BRIDGE_COMPANY_ID: TEST_COMPANY_ID,
@@ -85,6 +89,7 @@ describe("agent and assistant: the owner's phone, PC and WhatsApp delivery statu
     admin = await login("admin@test.local");
     worker = await login("worker@test.local");
     other = await login("other-agent@test.local");
+    colleague = await login("colleague@test.local");
     const row = await prisma.user.findFirstOrThrow({ where: { email: "admin@test.local" } });
     adminUser = { id: row.id, companyId: row.companyId, role: row.role, permissions: row.permissions, voiceLanguage: "en-GB", mustChangePassword: false } as unknown as AuthedUser;
   });
@@ -274,6 +279,68 @@ describe("agent and assistant: the owner's phone, PC and WhatsApp delivery statu
     assert.equal(posts(bridge, "/api/send").length, 0);
     assert.equal(bridge.seen.length, 0, "the other company and the refused calls reached nothing");
     assert.equal(relay.seen.length, 0);
+  });
+
+  it("keeps each person's sends to themselves: a colleague can neither read nor settle them", async () => {
+    const prepared = await action(admin, "send_phone_sms", { to: "+447700900410", text: "Mine" });
+    const requestId = JSON.stringify(prepared.body).match(/vcubf-[0-9a-f-]{8}-[0-9a-f-]{36}/)![0];
+    assert.equal((await say(admin, "yes")).status, 202);
+    const theirs = await action(colleague, "phone_message_status", { request_id: requestId });
+    assert.equal(theirs.body.data?.status, "not_sent", "a colleague learns nothing about another person's send");
+    assert.equal((await action(admin, "phone_message_status", { request_id: requestId })).body.data?.status, "sent");
+
+    bridge.handlers.set("POST /api/send", (_req, res) => res.socket?.destroy());
+    const unknown = await action(admin, "send_phone_sms", { to: "+447700900411", text: "Unknown, mine" });
+    const unknownId = JSON.stringify(unknown.body).match(/vcubf-[0-9a-f-]{8}-[0-9a-f-]{36}/)![0];
+    assert.equal((await say(admin, "yes")).body.error, "OUTCOME_UNKNOWN");
+    const settle = await action(colleague, "send_phone_sms", { to: "+447700900411", text: "Unknown, mine", reuse_request_id: unknownId });
+    assert.equal(settle.body.error, "NOT_RESUBMITTABLE", "a colleague cannot settle another person's unknown send");
+    // The colleague's own yes cannot confirm the owner's waiting review either.
+    const waiting = await action(admin, "send_phone_sms", { to: "+447700900412", text: "Waiting for my yes" });
+    assert.equal(waiting.body.error, "CONFIRMATION_REQUIRED");
+    const before = posts(bridge, "/api/send").length;
+    assert.ok((await say(colleague, "yes")).status >= 400);
+    assert.equal(posts(bridge, "/api/send").length, before, "another person's yes sends nothing");
+  });
+
+  it("sends once when the same yes arrives twice at the same moment", async () => {
+    await action(admin, "send_phone_sms", { to: "+447700900420", text: "Simultaneous" });
+    const answers = await Promise.all([say(admin, "yes"), say(admin, "yes")]);
+    assert.deepEqual(answers.map((answer) => answer.status >= 400).sort(), [false, true], JSON.stringify(answers.map((answer) => answer.body)));
+    assert.equal(posts(bridge, "/api/send").length, 1, "exactly one request reached the phone");
+  });
+
+  it("creates one message when the same approved agent step runs twice at once, and when an unknown send is settled twice at once", async () => {
+    const { reviewed } = await previewEmmaActionForProposal(adminUser, { action: "send_phone_sms", parameters: { to: "+447700900430", text: "Agent step" } });
+    const requestId = String(reviewed.parameters.request_id);
+    const before = bridgeMessages.size;
+    const [first, second] = await Promise.all([executeApprovedEmmaAction(adminUser, reviewed, true), executeApprovedEmmaAction(adminUser, reviewed, true)]);
+    assert.equal(first.ok && second.ok, true);
+    assert.equal(bridgeMessages.size, before + 1, "the bridge holds one message for the one request id");
+    assert.ok(posts(bridge, "/api/send").every((entry) => entry.body.request_id === requestId));
+    assert.equal((first as { data: { remote_id: string } }).data.remote_id, (second as { data: { remote_id: string } }).data.remote_id);
+
+    bridge.handlers.set("POST /api/send", (_req, res) => res.socket?.destroy());
+    const { reviewed: lost } = await previewEmmaActionForProposal(adminUser, { action: "send_phone_sms", parameters: { to: "+447700900431", text: "Lost" } });
+    const lostRun = await executeApprovedEmmaAction(adminUser, lost, true);
+    assert.equal(lostRun.ok ? "ok" : lostRun.error, "OUTCOME_UNKNOWN");
+    const lostId = String(lost.parameters.request_id);
+    bridge.handlers.set("POST /api/send", (req, res) => {
+      const known = bridgeMessages.get(req.body.request_id);
+      if (known) return bridge.json(res, 202, { created: false, message: known });
+      const message = { id: `sms-${bridgeMessages.size + 1}`, status: "queued" };
+      bridgeMessages.set(req.body.request_id, message);
+      bridge.json(res, 202, { created: true, message });
+    });
+    const settleA = await previewEmmaActionForProposal(adminUser, { action: "send_phone_sms", parameters: { to: "+447700900431", text: "Lost", reuse_request_id: lostId } });
+    const settleB = await previewEmmaActionForProposal(adminUser, { action: "send_phone_sms", parameters: { to: "+447700900431", text: "Lost", reuse_request_id: lostId } });
+    assert.equal(settleA.reviewed.parameters.request_id, lostId);
+    const sizeBefore = bridgeMessages.size;
+    const settled = await Promise.all([executeApprovedEmmaAction(adminUser, settleA.reviewed, true), executeApprovedEmmaAction(adminUser, settleB.reviewed, true)]);
+    assert.ok(settled.every((entry) => entry.ok), JSON.stringify(settled));
+    assert.equal(bridgeMessages.size, sizeBefore + 1, "two settlements at once still make one message");
+    const status = await action(admin, "phone_message_status", { request_id: lostId });
+    assert.equal(status.body.data?.status, "sent");
   });
 
   it("records WhatsApp Business delivery statuses from the verified webhook, only forward, and reads them back", async () => {

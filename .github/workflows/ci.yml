@@ -66,45 +66,30 @@ jobs:
       - run: npm run build
 
   # Secretary's PC Control Plus relay catalogue (pcpRelayCatalogue.generated.ts)
-  # is imported from one pinned, signed PC Control Plus release
-  # (windows-companion/pc-control/pcp-upstream.json). This checks out exactly
-  # that commit, verifies the release manifest's Ed25519 signature with the
-  # key pinned in VCUBF and every signed file hash, and fails when the committed
-  # catalogue is not what that release produces. pc-control-plus is private:
-  # the repository secret PCP_CATALOGUE_READ_TOKEN (a fine-grained token with
-  # read-only Contents access to that one repository) is required.
+  # is imported from a vendored minimal snapshot of one pinned, signed PC
+  # Control Plus release (windows-companion/pc-control/pcp-upstream/ and
+  # pcp-upstream.json), so this needs no credentials and no access to the
+  # private upstream. It proves the snapshot against the pinned commit and tree
+  # (git object ids of the commit, the trees and every vendored file, relay.py
+  # included), verifies the release manifest's Ed25519 signature with the key
+  # pinned in VCUBF and the signed file hashes, regenerates the catalogue from
+  # the relay in the snapshot and fails when the committed one differs; then
+  # runs the tamper tests. Updating: import_pcp_catalogue.py --refresh.
   relay-catalogue:
-    name: PC Control Plus relay catalogue matches the pinned signed release
+    name: PC Control Plus relay catalogue is the pinned signed release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Read the pin
-        id: pin
-        run: |
-          echo "repository=$(jq -r .repository windows-companion/pc-control/pcp-upstream.json)" >> "$GITHUB_OUTPUT"
-          echo "commit=$(jq -r .commit windows-companion/pc-control/pcp-upstream.json)" >> "$GITHUB_OUTPUT"
-      - name: The read token is configured
-        env:
-          TOKEN: ${{ secrets.PCP_CATALOGUE_READ_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::error::Set the repository secret PCP_CATALOGUE_READ_TOKEN (read-only Contents on ${{ steps.pin.outputs.repository }}) so the relay catalogue can be checked."
-            exit 1
-          fi
-      - uses: actions/checkout@v7
-        with:
-          repository: ${{ steps.pin.outputs.repository }}
-          ref: ${{ steps.pin.outputs.commit }}
-          token: ${{ secrets.PCP_CATALOGUE_READ_TOKEN }}
-          path: pcp-upstream
-          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - name: Import the catalogue from the pinned release and compare
-        run: |
-          python -m pip install -r pcp-upstream/remote/requirements.txt cryptography
-          python windows-companion/pc-control/server/import_pcp_catalogue.py --pcp pcp-upstream --pin windows-companion/pc-control/pcp-upstream.json --check
+      - name: Install the relay's own requirements from the snapshot
+        run: python -m pip install -r windows-companion/pc-control/pcp-upstream/remote/requirements.txt cryptography
+      - name: Prove the snapshot, the pin and the catalogue
+        run: python windows-companion/pc-control/server/import_pcp_catalogue.py --check
+      - name: Tamper tests (relay.py, signed files, git objects, commit, key, stale catalogue)
+        working-directory: windows-companion/pc-control/tests
+        run: python -m unittest -v test_pcp_snapshot
 
   windows-companion:
     name: Windows companion tests and script syntax

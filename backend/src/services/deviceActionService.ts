@@ -107,10 +107,14 @@ function companyRequestId(user: AuthedUser, value: unknown): value is string {
   return typeof value === "string" && value.startsWith(`vcubf-${user.companyId.slice(0, 8)}-`) && /^vcubf-[0-9a-f-]{8}-[0-9a-f-]{36}$/i.test(value);
 }
 
-/** A request id Secretary itself recorded as an unknown outcome, for this company and contract. */
+/**
+ * A request id Secretary itself recorded as an unknown outcome of this person's
+ * own send, in this company, under this contract. Nobody settles another
+ * person's send (the MCP gateway's status and resubmit are per person too).
+ */
 async function unknownRequest(user: AuthedUser, contract: ActionContract, requestId: string): Promise<boolean> {
   const unknown = await prisma.auditLog.findFirst({
-    where: { companyId: user.companyId, actionName: contract.actionName, errorMessage: "OUTCOME_UNKNOWN", inputPayload: { path: ["request_id"], equals: requestId } },
+    where: { companyId: user.companyId, userId: user.id, actionName: contract.actionName, errorMessage: "OUTCOME_UNKNOWN", inputPayload: { path: ["request_id"], equals: requestId } },
     select: { id: true },
   });
   return Boolean(unknown);
@@ -133,7 +137,7 @@ const chatReply = z.object({
 async function previewRequestId(user: AuthedUser, contract: ActionContract, reuse: string | undefined): Promise<ServiceResult<{ requestId: string; reused: boolean }>> {
   if (reuse === undefined) return ok(200, { requestId: phone.bridgeRequestId(user.companyId, randomUUID()), reused: false });
   if (!companyRequestId(user, reuse) || !await unknownRequest(user, contract, reuse)) {
-    return fail(409, "NOT_RESUBMITTABLE", "reuse_request_id must be the request id of one of this company's sends whose outcome is unknown.");
+    return fail(409, "NOT_RESUBMITTABLE", "reuse_request_id must be the request id of one of your own sends whose outcome is unknown.");
   }
   return ok(200, { requestId: reuse, reused: true });
 }
@@ -209,14 +213,14 @@ export async function replyPhoneChat(user: AuthedUser, params: Params, confirmed
   return bridgeSend(user, REPLY_PHONE_CHAT_ACTION, requestId, input, () => phone.replyPhoneChat(user, { channel, chat, text }, requestId));
 }
 
-/** What became of a phone send, by the request id its preview showed, from this company's audit and SMS Bridge. */
+/** What became of the caller's own phone send, by the request id its preview showed, from the audit and SMS Bridge. */
 export async function phoneMessageStatus(user: AuthedUser, params: Params): Promise<ServiceResult<unknown>> {
   const parsed = parse(z.object({ request_id: z.string() }).strict(), params);
   if (!parsed.ok) return parsed;
   const requestId = parsed.data.request_id;
   if (!companyRequestId(user, requestId)) return fail(400, "VALIDATION_FAILED", "request_id must be a request id of this company's phone send.");
   const entries = await prisma.auditLog.findMany({
-    where: { companyId: user.companyId, actionName: { in: [SEND_PHONE_SMS_ACTION.actionName, REPLY_PHONE_CHAT_ACTION.actionName] }, inputPayload: { path: ["request_id"], equals: requestId } },
+    where: { companyId: user.companyId, userId: user.id, actionName: { in: [SEND_PHONE_SMS_ACTION.actionName, REPLY_PHONE_CHAT_ACTION.actionName] }, inputPayload: { path: ["request_id"], equals: requestId } },
     orderBy: { createdAt: "desc" },
     select: { actionName: true, result: true, errorMessage: true, dataAfter: true },
   });
@@ -227,7 +231,7 @@ export async function phoneMessageStatus(user: AuthedUser, params: Params): Prom
     return live.ok ? ok(200, { request_id: requestId, ...(live.data as Params) }) : live;
   }
   const latest = entries[0];
-  if (!latest) return ok(200, { request_id: requestId, status: "not_sent", meaning: "No send with this request id was confirmed, so nothing was sent." });
+  if (!latest) return ok(200, { request_id: requestId, status: "not_sent", meaning: "You confirmed no send with this request id." });
   if (latest.errorMessage === "OUTCOME_UNKNOWN") {
     return ok(200, { request_id: requestId, status: "unknown", meaning: "Secretary could not learn whether SMS Bridge took this message. It is never sent again by itself; prepare the same message with reuse_request_id to settle it without a second send." });
   }
