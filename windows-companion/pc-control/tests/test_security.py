@@ -222,25 +222,22 @@ except ImportError:
 class BrowserGuardLaunched(Servers):
     """The engine's own browser."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.profile = tempfile.mkdtemp(prefix="pc_engine_guard_")
+    def setUp(self):
+        super().setUp()
+        # A late navigation and a popup intentionally leave asynchronous browser
+        # events behind. They must not contaminate the next security scenario.
+        self.profile = tempfile.mkdtemp(prefix="pc_engine_guard_")
+        self.addCleanup(shutil.rmtree, self.profile, ignore_errors=True)
         settings = pc_engine.EngineSettings(mode="launch", channel="chromium", executable_path=chromium_path(), headless=True,
-                                            profile_dir=cls.profile, policy=UrlPolicy(address_allowed=only_public_server))
-        cls.engine = pc_engine.Engine(settings)
+                                            profile_dir=self.profile, policy=UrlPolicy(address_allowed=only_public_server))
+        self.engine = pc_engine.Engine(settings)
+        self.addCleanup(self.engine.shutdown)
         try:
-            cls.engine.call("browser_snapshot")
+            self.engine.call("browser_snapshot")
         except Exception as exc:
             if os.environ.get("PC_CONTROL_REQUIRE_BROWSER"):
                 raise
-            raise unittest.SkipTest(f"no Chromium: {exc}")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.engine.shutdown()
-        shutil.rmtree(cls.profile, ignore_errors=True)
-        super().tearDownClass()
+            self.skipTest(f"no Chromium: {exc}")
 
     def test_opening_a_forbidden_address_sends_nothing(self):
         for url in (self.F + "/direct", self.P + "/to-forbidden", self.P + "/to-metadata"):
