@@ -344,7 +344,7 @@ def refresh(checkout: Path, pin_path: Path = PIN, snapshot: Path = SNAPSHOT, tar
         raw = {"commit": git(checkout, "cat-file", "commit", "HEAD"), "tree-root": git(checkout, "cat-file", "tree", "HEAD^{tree}"),
                "tree-remote": git(checkout, "cat-file", "tree", "HEAD:remote")}
         for name, data in raw.items():
-            (staged / "git" / f"{name}.b64").write_text(base64.b64encode(data).decode("ascii") + "\n", encoding="ascii")
+            (staged / "git" / f"{name}.b64").write_text(base64.b64encode(data).decode("ascii") + "\n", encoding="ascii", newline="\n")
         release = verify_snapshot(staged, pin)
         text = render(staged, release)
         # Everything verified: replace the three together.
