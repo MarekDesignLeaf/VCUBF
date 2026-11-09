@@ -160,6 +160,13 @@ async function read(user: AuthedUser, path: string, query?: Record<string, strin
 }
 
 const iso = (seconds: unknown) => (typeof seconds === "number" && seconds > 0 ? new Date(seconds * 1000).toISOString() : null);
+// Android SMS dates and notification post times are milliseconds. Bridge
+// bookkeeping (last upload, listener heartbeat, send status) uses seconds.
+const androidIso = (milliseconds: unknown) => {
+  if (typeof milliseconds !== "number" || !Number.isFinite(milliseconds) || milliseconds <= 0) return null;
+  const date = new Date(milliseconds);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+};
 
 // ─── Reading ────────────────────────────────────────────────────────────────
 
@@ -192,10 +199,10 @@ export interface SmsFilters {
   cursor?: string;
 }
 
-const epoch = (value?: string) => {
+const androidEpoch = (value?: string) => {
   if (!value) return undefined;
   const ms = Date.parse(value);
-  return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
+  return Number.isFinite(ms) ? ms : undefined;
 };
 
 /** Android message_type: 1 inbox (received), 2 sent; the rest (drafts, outbox) are reported as they are. */
@@ -206,8 +213,8 @@ export async function readPhoneSms(user: AuthedUser, filters: SmsFilters): Promi
     limit: Math.max(1, Math.min(filters.limit ?? 30, 100)),
     address: filters.address,
     text: filters.text,
-    since: epoch(filters.since),
-    until: epoch(filters.until),
+    since: androidEpoch(filters.since),
+    until: androidEpoch(filters.until),
     message_type: filters.direction === "in" ? 1 : filters.direction === "out" ? 2 : undefined,
     cursor: filters.cursor,
   });
@@ -218,7 +225,7 @@ export async function readPhoneSms(user: AuthedUser, filters: SmsFilters): Promi
       device_sms_id: row.device_sms_id,
       address: row.address,
       text: row.body,
-      at: iso(row.received_at),
+      at: androidIso(row.received_at),
       kind: SMS_TYPES[row.message_type] ?? `type_${row.message_type}`,
       thread_id: row.thread_id ?? null,
     })),
@@ -231,12 +238,12 @@ export async function readPhoneSms(user: AuthedUser, filters: SmsFilters): Promi
 
 export async function readPhoneChats(user: AuthedUser, filters: { channel?: PhoneChatChannel; since?: string; limit?: number; cursor?: string }): Promise<ServiceResult<unknown>> {
   const limit = Math.max(1, Math.min(filters.limit ?? 50, 200));
-  const answer = await read(user, "/api/chat/messages", { since: epoch(filters.since), limit, cursor: filters.cursor });
+  const answer = await read(user, "/api/chat/messages", { since: androidEpoch(filters.since), limit, cursor: filters.cursor });
   if (!answer.ok) return answer;
   const data = answer.data ?? {};
   const messages = (data.messages ?? [])
     .filter((row: any) => !filters.channel || row.channel === filters.channel)
-    .map((row: any) => ({ channel: row.channel, chat: row.chat, sender: row.sender, text: row.text, at: iso(row.ts), direction: row.direction, group: Boolean(row.is_group) }));
+    .map((row: any) => ({ channel: row.channel, chat: row.chat, sender: row.sender, text: row.text, at: androidIso(row.ts), direction: row.direction, group: Boolean(row.is_group) }));
   return ok(200, {
     messages,
     next_cursor: data.next_cursor ?? null,

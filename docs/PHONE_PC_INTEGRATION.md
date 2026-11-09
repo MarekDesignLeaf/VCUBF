@@ -1,8 +1,21 @@
 # Phone and PC integration through the Secretary MCP gateway
 
-Status: **in development** on branch `claude/modest-keller-42onis`. Not deployed,
-not accepted live. No real message has been sent and no production data was
-touched while building it.
+Status (9 November 2026): PR76 merged and deployed as `b18614371533`.
+The existing Secretary plugin was refreshed in place: 100 tools, 40 read and
+60 write. Actual ChatGPT checks passed for capability metadata, phone/SMS
+reads, PC permissions/window reads and public HTTPS text fetching. One explicitly
+approved self-addressed SMS was sent and received, with exactly one outbound
+operation. Do not repeat that test. Live notification replies, WhatsApp Business
+delivery and interactive browser control remain unverified; full acceptance is
+not claimed from these partial checks.
+
+### Phone timestamp contract
+
+Android SMS `received_at`, notification `ts` and their `since`/`until` filters
+use Unix milliseconds, as supplied by Android. Bridge bookkeeping fields
+(`last_upload_at`, `gateway_last_seen`, listener `reported_at` and outbound
+`updated_at`) use Unix seconds. Secretary converts each according to its field
+contract and returns ISO dates. Do not infer units from the number's magnitude.
 
 ## Goal
 

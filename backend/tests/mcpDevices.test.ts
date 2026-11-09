@@ -141,13 +141,13 @@ describe("MCP: the owner's phone (SMS Bridge) and PC (PC Control Plus)", () => {
     bridge.handlers.set("GET /api/chat/messages", (_req, res) => json(res, 200, {
       device_id: "samsung-s938b", next_cursor: null, listener: { enabled: true, reported_at: 1767225600 },
       messages: [
-        { key: "k1aaaaaaa", channel: "whatsapp", chat: "Jana Nováková", sender: "Jana Nováková", text: "Kdy přijedete?", ts: 1767225600, direction: "in", is_group: false },
-        { key: "k2aaaaaaa", channel: "messenger", chat: "Petr", sender: "Petr", text: "Ahoj", ts: 1767225500, direction: "in", is_group: false },
+        { key: "k1aaaaaaa", channel: "whatsapp", chat: "Jana Nováková", sender: "Jana Nováková", text: "Kdy přijedete?", ts: 1767225600000, direction: "in", is_group: false },
+        { key: "k2aaaaaaa", channel: "messenger", chat: "Petr", sender: "Petr", text: "Ahoj", ts: 1767225500000, direction: "in", is_group: false },
       ],
     }));
     bridge.handlers.set("GET /api/phone/messages", (_req, res) => json(res, 200, {
       device_id: "samsung-s938b", total: 1, offset: 0, has_more: false, next_cursor: null, last_upload_at: 1767225600,
-      messages: [{ device_sms_id: 501, address: "+447700900123", body: "Can you come on Monday?", received_at: 1767225600, message_type: 1, thread_id: 7 }],
+      messages: [{ device_sms_id: 501, address: "+447700900123", body: "Can you come on Monday?", received_at: 1767225600000, message_type: 1, thread_id: 7 }],
     }));
     bridge.handlers.set("POST /api/send", (req, res) => {
       const known = bridgeMessages.get(req.body.request_id);
@@ -236,14 +236,21 @@ describe("MCP: the owner's phone (SMS Bridge) and PC (PC Control Plus)", () => {
     assert.equal(status.isError, false, JSON.stringify(status.body));
     assert.equal(status.body.data.phone_online, true);
     assert.equal(status.body.data.notification_listener.enabled, true);
-    const sms = result(await call(readToken, "list_phone_sms", { address: "+447700900123", direction: "in", limit: 5 }));
+    const sms = result(await call(readToken, "list_phone_sms", { address: "+447700900123", direction: "in", limit: 5, since: "2026-01-01T00:00:00.123Z", until: "2026-01-02T00:00:00.456Z" }));
     assert.deepEqual(sms.body.data.messages[0], { device_sms_id: 501, address: "+447700900123", text: "Can you come on Monday?", at: "2026-01-01T00:00:00.000Z", kind: "received", thread_id: 7 });
     const smsRequest = bridge.seen.find((entry) => entry.path === "/api/phone/messages")!;
     assert.equal(smsRequest.headers["x-admin-token"], BRIDGE_TOKEN);
     assert.equal(smsRequest.query.get("message_type"), "1");
+    assert.equal(smsRequest.query.get("since"), "1767225600123");
+    assert.equal(smsRequest.query.get("until"), "1767312000456");
+    assert.equal(sms.body.data.last_upload_at, "2026-01-01T00:00:00.000Z");
+    assert.equal(status.body.data.last_seen, "2026-01-01T00:00:00.000Z");
     assert.equal(smsRequest.query.get("device_id"), "samsung-s938b");
-    const chats = result(await call(readToken, "list_phone_chat_messages", { channel: "whatsapp" }));
+    const chats = result(await call(readToken, "list_phone_chat_messages", { channel: "whatsapp", since: "2026-01-01T00:00:00.123Z" }));
     assert.deepEqual(chats.body.data.messages.map((message: Json) => message.chat), ["Jana Nováková"]);
+    assert.equal(chats.body.data.messages[0].at, "2026-01-01T00:00:00.000Z");
+    assert.equal(chats.body.data.notification_listener.reported_at, "2026-01-01T00:00:00.000Z");
+    assert.equal(bridge.seen.filter((entry) => entry.path === "/api/chat/messages").at(-1)!.query.get("since"), "1767225600123");
     assert.match(chats.body.data.limitation, /No earlier history/);
     assert.ok(!JSON.stringify([status.body, sms.body, chats.body]).includes(BRIDGE_TOKEN), "the token never reaches the client");
   });
