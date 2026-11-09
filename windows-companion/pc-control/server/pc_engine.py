@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol
 from urllib.parse import urljoin, urlparse
 
-ENGINE_VERSION = "1.1.0"
+ENGINE_VERSION = "1.1.1"
 
 
 class EngineError(RuntimeError):
@@ -2005,14 +2005,21 @@ class BrowserSession:
                 self._own(page)
                 self.page = page
             try:
-                try:
-                    page.goto(url, wait_until="domcontentloaded")
-                except Exception as exc:
-                    # A refused navigation the page started itself was still committing its notice.
-                    if "interrupted by another navigation" not in str(exc) or len(blocked) > refused_before:
-                        raise
-                    page.wait_for_load_state("domcontentloaded", timeout=3000)
-                    page.goto(url, wait_until="domcontentloaded")
+                for attempt in range(3):
+                    try:
+                        page.goto(url, wait_until="domcontentloaded")
+                        break
+                    except Exception as exc:
+                        # Another navigation (a page's own late one being refused, or a
+                        # restarted one to the same address) overlapped with this one.
+                        if "interrupted by another navigation" not in str(exc) or len(blocked) > refused_before or attempt == 2:
+                            raise
+                        try:
+                            page.wait_for_load_state("domcontentloaded", timeout=3000)
+                        except Exception:
+                            pass
+                        if page.url == url:
+                            break
             except Exception:
                 if len(blocked) == refused_before:
                     raise
