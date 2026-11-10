@@ -127,6 +127,11 @@ describe("WhatsApp sender staging and customer review", () => {
     assert.equal(staged.importedContactId, null);
     assert.equal(staged.phone, "+447700900123");
     assert.equal(await prisma.communicationIntake.count({ where: { companyId, senderPhone: "+447700900123" } }), 1);
+    const storedMessage = await prisma.communicationIntake.findFirstOrThrow({
+      where: { companyId, externalMessageId: "wamid.staged-1" },
+      select: { sourceMetadata: true },
+    });
+    assert.deepEqual(storedMessage.sourceMetadata, { provider: "whatsapp_business", messageType: "text" });
 
     const replay = await sendSignedWebhook(firstPayload);
     assert.equal(replay.status, 200);

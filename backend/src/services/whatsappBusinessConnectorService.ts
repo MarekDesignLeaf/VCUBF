@@ -243,6 +243,10 @@ export async function receiveWebhook(
           messageText: message.messageText,
           receivedAt: message.receivedAt,
           sourceReference: `whatsapp:${phoneNumberId}:${message.id}`,
+          // Persist only provider metadata we actually received. For media,
+          // the type can support triage together with a real caption; it is
+          // never treated as knowledge of the attachment's contents.
+          sourceMetadata: { provider: "whatsapp_business", messageType: message.messageType },
           createdBy: source.createdBy,
         },
       });
