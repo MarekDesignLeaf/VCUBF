@@ -406,6 +406,24 @@ describe("Unresolved Enquiry Monitoring", () => {
     await request(app).post("/notifications/acknowledge").set("Authorization", `Bearer ${adminToken}`).send({ notification_key: `unresolved_enquiry:${closing.id}` });
     const again = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
     assert.ok(again.body.some((item: any) => item.key === `whatsapp_reply_window:${closing.id}`));
+
+    // A second inbound message from an approved customer replaces, rather
+    // than duplicates, the old notification for that conversation.
+    const scheduling = await whatsapp("+447700900102", 1, { messageText: "Saturday 14th?" });
+    const groupedResponse = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+    assert.equal(groupedResponse.status, 200);
+    assert.equal(groupedResponse.body.filter((item: any) =>
+      item.key === `unresolved_enquiry:${fresh.id}` || item.key === `unresolved_enquiry:${scheduling.id}`).length, 1);
+    assert.ok(groupedResponse.body.some((item: any) => item.key === `unresolved_enquiry:${scheduling.id}`));
+    assert.match(groupedResponse.body.find((item: any) => item.key === `unresolved_enquiry:${scheduling.id}`).message, /2 unresolved incoming message/);
+
+    // An unknown sender gets review, not an urgent customer reply warning.
+    const unknown = await whatsapp("+447700900107", 2);
+    const reviewResponse = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+    const review = reviewResponse.body.find((item: any) => item.key === `unresolved_enquiry:${unknown.id}`);
+    assert.equal(review.severity, "info");
+    assert.match(review.message, /not been confirmed as a customer/);
+    assert.equal(reviewResponse.body.some((item: any) => item.key === `whatsapp_reply_window:${unknown.id}`), false);
   });
 });
 
