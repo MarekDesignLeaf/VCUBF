@@ -386,7 +386,7 @@ describe("Unresolved Enquiry Monitoring", () => {
     const open: any = byKey.get(`unresolved_enquiry:${fresh.id}`);
     assert.equal(open.severity, "warning");
     assert.equal(open.dueAt, new Date(fresh.receivedAt.getTime() + 24 * hour).toISOString());
-    assert.match(open.message, /free-form reply for about 2\d h more/);
+    assert.match(open.message, /window lasts for about 2\d h more/);
 
     const gone: any = byKey.get(`unresolved_enquiry:${closed.id}`);
     assert.equal(gone.severity, "warning");
