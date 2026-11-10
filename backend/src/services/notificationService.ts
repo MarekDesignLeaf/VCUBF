@@ -17,6 +17,7 @@ import { detectUpcomingOverload } from "./calendarService.js";
 import { whatsAppReplyWindows } from "./whatsappBusinessConnectorService.js";
 import { buildDataQualityItems } from "./dataQualityService.js";
 import { getNotificationThresholds, type NotificationThresholds } from "./notificationThresholdService.js";
+import { triageWhatsAppConversation } from "../lib/whatsappConversationTriage.js";
 
 // Notification and Escalation Module — see VCUBF master documentation and the
 // vcubf-programmer-skill module list. This module stores no duplicate
@@ -136,57 +137,120 @@ function timeLeft(ms: number): string {
   return minutes >= 120 ? `about ${Math.floor(minutes / 60)} h` : `about ${minutes} min`;
 }
 
+/**
+ * The intake inbox is deliberately lossless. The *attention feed*, however,
+ * must not turn every inbound WhatsApp message into a sales lead.
+ *
+ * Classify each sender's recent conversation, apply a human-reviewed sender
+ * classification where available, and emit at most ONE alert per conversation.
+ * Ambiguous/personal messages stay in the intake inbox and are not deleted or
+ * implicitly marked resolved.
+ */
 async function buildUnresolvedEnquiryItems(user: AuthedUser): Promise<AttentionItemBase[]> {
   const enquiries = await listUnresolvedIntakeEnquiries(user);
+  const nonWhatsApp = enquiries.filter((item) => item.channel !== "whatsapp");
+  const whatsApp = enquiries.filter((item) => item.channel === "whatsapp");
+
+  const [intakes, senders] = whatsApp.length ? await Promise.all([
+    prisma.communicationIntake.findMany({
+      where: { companyId: user.companyId, channel: "whatsapp", intakeStatus: { in: ["new", "extracted"] }, resolutionNeeded: true },
+      select: { id: true, connectorSourceId: true, senderPhone: true, messageText: true, receivedAt: true },
+    }),
+    prisma.externalContact.findMany({
+      where: { companyId: user.companyId, connectorSource: { connectorKey: "whatsapp_business" } },
+      select: { connectorSourceId: true, phone: true, reviewStatus: true, reviewClassification: true },
+    }),
+  ]) : [[], []];
+
+  const byId = new Map(intakes.map((intake) => [intake.id, intake]));
+  const bySender = new Map(senders.filter((sender) => sender.phone).map((sender) => [
+    `${sender.connectorSourceId}:${sender.phone}`, sender,
+  ]));
+  const conversations = new Map<string, typeof enquiries>();
+  for (const enquiry of whatsApp) {
+    const intake = byId.get(enquiry.sourceId);
+    if (!intake) continue;
+    const key = intake.senderPhone
+      ? `${intake.connectorSourceId ?? "manual"}:${intake.senderPhone}`
+      : `intake:${intake.id}`;
+    const group = conversations.get(key) ?? [];
+    group.push(enquiry);
+    conversations.set(key, group);
+  }
+
+  const triaged: Array<{ latest: (typeof enquiries)[number]; decision: "actionable" | "review"; count: number }> = [];
+  for (const group of conversations.values()) {
+    group.sort((a, b) => b.receivedAt.getTime() - a.receivedAt.getTime());
+    const latest = group[0];
+    const intake = byId.get(latest.sourceId);
+    if (!intake) continue;
+    const sender = intake.senderPhone ? bySender.get(`${intake.connectorSourceId}:${intake.senderPhone}`) ?? null : null;
+    const decision = triageWhatsAppConversation(
+      group.map((item) => byId.get(item.sourceId)).filter((item): item is NonNullable<typeof item> => Boolean(item))
+        .map((item) => ({ text: item.messageText, receivedAt: item.receivedAt })),
+      sender,
+    ).decision;
+    if (decision !== "ignore") triaged.push({ latest, decision, count: group.length });
+  }
+
+  // Only a person already approved as a customer gets an actionable business
+  // reply-window warning. Possible customers get a review prompt instead.
   const windows = await whatsAppReplyWindows(
-    user.companyId,
-    enquiries.filter((enquiry) => enquiry.channel === "whatsapp").map((enquiry) => enquiry.sourceId),
+    user.companyId, triaged.filter((group) => group.decision === "actionable").map((group) => group.latest.sourceId),
   );
   const now = Date.now();
-  return enquiries.map((enquiry): AttentionItemBase => {
-    const entity = { type: "communication_intake", id: enquiry.sourceId, label: enquiry.senderLabel };
-    const unresolved: AttentionItemBase = {
-      key: `unresolved_enquiry:${enquiry.sourceId}`,
+
+  const rawNonWhatsApp = nonWhatsApp.map((enquiry): AttentionItemBase => ({
+    key: `unresolved_enquiry:${enquiry.sourceId}`,
+    type: "unresolved_enquiry",
+    severity: "warning",
+    title: `Unresolved enquiry from ${enquiry.senderLabel}`,
+    message: `Inbound ${enquiry.channel.replace(/_/g, " ")} enquiry is still marked as needing resolution. No response deadline is recorded.`,
+    dueAt: null,
+    entity: { type: "communication_intake", id: enquiry.sourceId, label: enquiry.senderLabel },
+  }));
+
+  const whatsAppItems = triaged.map(({ latest, decision, count }): AttentionItemBase => {
+    const entity = { type: "communication_intake", id: latest.sourceId, label: latest.senderLabel };
+    const base: AttentionItemBase = {
+      key: `unresolved_enquiry:${latest.sourceId}`,
       type: "unresolved_enquiry",
-      // No deadline/SLA is stored for a raw intake, so urgency must not be
-      // fabricated from age alone. The explicit unresolved state warrants a
-      // warning; only records with real overdue dates can become urgent.
-      severity: "warning",
-      title: `Unresolved enquiry from ${enquiry.senderLabel}`,
-      message: `Inbound ${enquiry.channel.replace(/_/g, " ")} enquiry is still marked as needing resolution. No response deadline is recorded.`,
+      severity: decision === "actionable" ? "warning" : "info",
+      title: decision === "actionable"
+        ? `Work conversation with ${latest.senderLabel} needs review`
+        : `Review possible work enquiry from ${latest.senderLabel}`,
+      message: decision === "actionable"
+        ? `${count} unresolved incoming message(s) in this customer conversation. Check whether a reply or follow-up is actually needed.`
+        : `${count} incoming message(s) may concern work, but the sender has not been confirmed as a customer. Review first; nothing was sent or imported.`,
       dueAt: null,
       entity,
     };
-    // An unanswered WhatsApp message does have a real deadline: the platform's
-    // reply window.
-    const closesAt = windows.get(enquiry.sourceId);
-    if (!closesAt) return unresolved;
+    if (decision !== "actionable") return base;
+    const closesAt = windows.get(latest.sourceId);
+    if (!closesAt) return base;
     const left = closesAt.getTime() - now;
     if (left <= 0) {
-      return {
-        ...unresolved,
-        message: "Still unanswered, and WhatsApp's 24-hour reply window has closed: WhatsApp now accepts only approved template messages, which Secretary does not send yet. Call or email them instead.",
-      };
+      return { ...base, message: `${base.message} The WhatsApp 24-hour free-form reply window has closed.` };
     }
     if (left <= WHATSAPP_WINDOW_URGENT_MS) {
-      // A key of its own, so a warning acknowledged earlier still comes back
-      // when the window is about to close.
       return {
-        key: `whatsapp_reply_window:${enquiry.sourceId}`,
+        ...base,
+        key: `whatsapp_reply_window:${latest.sourceId}`,
         type: "whatsapp_reply_window",
         severity: "urgent",
-        title: `Reply to ${enquiry.senderLabel} on WhatsApp soon`,
-        message: `A free-form WhatsApp reply is possible for ${timeLeft(left)} more — until 24 hours after their last message. After that WhatsApp accepts only approved templates, which Secretary does not send yet.`,
+        title: `WhatsApp reply window closing for ${latest.senderLabel}`,
+        message: `${base.message} A free-form reply may be possible for ${timeLeft(left)} more. Verify that a response is needed before sending.`,
         dueAt: closesAt.toISOString(),
-        entity,
       };
     }
     return {
-      ...unresolved,
-      message: `Still unanswered. WhatsApp accepts a free-form reply for ${timeLeft(left)} more (until 24 hours after their last message).`,
+      ...base,
+      message: `${base.message} The WhatsApp free-form reply window lasts for ${timeLeft(left)} more.`,
       dueAt: closesAt.toISOString(),
     };
   });
+
+  return [...rawNonWhatsApp, ...whatsAppItems];
 }
 
 async function buildOverloadItems(user: AuthedUser): Promise<AttentionItemBase[]> {
