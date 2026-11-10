@@ -335,9 +335,21 @@ describe("Unresolved Enquiry Monitoring", () => {
   it("gives an unanswered WhatsApp message its real deadline: the 24-hour reply window", async () => {
     const hour = 60 * 60 * 1000;
     const now = Date.now();
+    // Actionable reply-window alerts are for human-approved business customers.
+    const source = await prisma.connectorSource.create({
+      data: { companyId: TEST_COMPANY_ID, connectorKey: "whatsapp_business", displayName: "Test enquiries", serviceType: "messaging", isEnabled: true },
+    });
+    const approvedPhones = ["+447700900101", "+447700900102", "+447700900103", "+447700900104", "+447700900105"];
+    await prisma.externalContact.createMany({
+      data: approvedPhones.map((phone) => ({
+        companyId: TEST_COMPANY_ID, connectorSourceId: source.id, externalResourceName: `wa_id:${phone.slice(1)}`,
+        phone, reviewStatus: "approved", reviewClassification: "customer",
+      })),
+    });
     const whatsapp = (phone: string, hoursAgo: number, extra: Record<string, unknown> = {}) => prisma.communicationIntake.create({
       data: {
         companyId: TEST_COMPANY_ID,
+        connectorSourceId: source.id,
         channel: "whatsapp",
         senderName: `Sender ${phone.slice(-3)}`,
         senderPhone: phone,
@@ -381,11 +393,10 @@ describe("Unresolved Enquiry Monitoring", () => {
     assert.equal(gone.dueAt, null);
     assert.match(gone.message, /reply window has closed/);
 
-    for (const plain of [answered, manual]) {
-      const item: any = byKey.get(`unresolved_enquiry:${plain.id}`);
-      assert.equal(item.dueAt, null);
-      assert.match(item.message, /No response deadline is recorded/);
-    }
+    const answeredItem: any = byKey.get(`unresolved_enquiry:${answered.id}`);
+    assert.equal(answeredItem.dueAt, null);
+    assert.match(answeredItem.message, /Check whether a reply or follow-up is actually needed/);
+    assert.equal(byKey.has(`unresolved_enquiry:${manual.id}`), false, "a standalone personal-like hello has no sales alert");
 
     const renewed: any = byKey.get(`unresolved_enquiry:${older.id}`);
     assert.equal(renewed.severity, "warning", "the sender wrote again, so the window is open for another day");
