@@ -107,7 +107,8 @@ export const MCP_IDEMPOTENCY_HOURS = 24;
 /** Longest a direct write's transaction may stay open (MCP_WRITE_TRANSACTION_MS overrides). */
 export function mcpWriteTransactionMs(): number {
   const configured = Number(process.env.MCP_WRITE_TRANSACTION_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : 60_000;
+  // Short: an emergency stop waits for changes already under way, at most this long.
+  return Number.isFinite(configured) && configured > 0 ? configured : 15_000;
 }
 
 /** Who is calling: the person, and the OAuth client the person approved. */
@@ -1108,12 +1109,13 @@ async function runDirect(caller: McpCaller, tool: WriteToolDefinition, args: Rec
     fingerprint,
     async (begin) => {
       await assertNotInSafeMode(caller.user.companyId);
-      // One transaction for the whole change, holding the company row FOR
-      // SHARE: the owning service's writes and its audit entry commit with
-      // the emergency-stop check, or not at all. A stop committed first is
-      // refused before anything starts; a stop requested meanwhile commits
-      // only after this change. A failure inside rolls everything back, so
-      // nothing was saved and the same key may be tried again.
+      // One transaction for the whole change, holding the company's stop
+      // lock shared: the owning service's writes and its audit entry commit
+      // with the emergency-stop check, or not at all. A stop committed first
+      // is refused before anything starts; a stop requested meanwhile waits
+      // for this change, and changes after it wait for the stop. A failure
+      // inside rolls everything back, so nothing was saved and the same key
+      // may be tried again.
       let rolledBack = false;
       try {
         return await whileNotInSafeMode(caller.user.companyId, async () => {

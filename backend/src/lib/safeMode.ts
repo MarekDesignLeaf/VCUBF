@@ -47,31 +47,55 @@ export async function assertNotInSafeMode(companyId: string): Promise<void> {
 }
 
 /**
- * The same refusal from inside a transaction, serialised with the switch: the
- * company row is read FOR SHARE, which the switch's own FOR UPDATE waits for.
- * A stop committed before this read is seen here; a stop requested after it
- * takes effect only once this transaction has ended. So a change made under
- * this check can never commit after the stop did. Throws SafeModeActiveError,
- * which rolls the transaction back.
+ * The lock that serialises the emergency-stop switch with the changes checked
+ * against it: a transaction-scoped advisory lock per company. Changes take it
+ * shared, the switch exclusive. Advisory locks are queued fairly by the lock
+ * manager: once the switch waits, a change arriving after it waits behind it.
+ * A row lock (FOR SHARE on the company row, used before) is not queued that
+ * way, so overlapping changes could keep the stop from ever committing.
+ */
+function safeModeLock(companyId: string, mode: "shared" | "exclusive") {
+  return mode === "shared"
+    ? Prisma.sql`SELECT pg_advisory_xact_lock_shared(hashtext('vcubf.safe_mode'), hashtext(${companyId}))::text`
+    : Prisma.sql`SELECT pg_advisory_xact_lock(hashtext('vcubf.safe_mode'), hashtext(${companyId}))::text`;
+}
+
+/**
+ * For the switch itself, first inside its transaction: waits until every
+ * change already checked against the stop has ended, and holds back every
+ * change that arrives later until the switch has committed.
+ */
+export async function lockSafeModeSwitch(tx: Prisma.TransactionClient, companyId: string): Promise<void> {
+  await tx.$queryRaw(safeModeLock(companyId, "exclusive"));
+}
+
+/**
+ * The same refusal from inside a transaction, serialised with the switch:
+ * the company's stop lock is taken shared and held until the transaction
+ * ends, then the stop is read. A stop committed before is seen here; a stop
+ * requested after waits until this transaction has ended. So a change made
+ * under this check can never commit after the stop did. Throws
+ * SafeModeActiveError, which rolls the transaction back.
  */
 export async function assertNotInSafeModeLocked(tx: Prisma.TransactionClient, companyId: string): Promise<void> {
+  await tx.$queryRaw(safeModeLock(companyId, "shared"));
   const rows = await tx.$queryRaw<Array<{ safe_mode_since: Date | null }>>(
-    Prisma.sql`SELECT "safe_mode_since" FROM "companies" WHERE "id" = ${companyId} FOR SHARE`,
+    Prisma.sql`SELECT "safe_mode_since" FROM "companies" WHERE "id" = ${companyId}`,
   );
   if (rows[0]?.safe_mode_since) throw new SafeModeActiveError();
 }
 
 /**
- * Runs work inside one transaction that first takes the company row FOR SHARE
- * and refuses if the stop is on. Every query work makes through `prisma` runs
- * in that same transaction (db.ts, ambient transaction), so whatever work
- * saves commits together with the check, while the lock is held, or not at
- * all. The switch's FOR UPDATE waits for it: nothing can commit after a stop
- * did. If the transaction ends early (its time limit, a failure), every write
- * of work is rolled back with it. Work must not lock the company row for
- * update itself.
+ * Runs work inside one transaction that first takes the company's stop lock
+ * shared and refuses if the stop is on. Every query work makes through
+ * `prisma` runs in that same transaction (db.ts, ambient transaction), so
+ * whatever work saves commits together with the check, while the lock is
+ * held, or not at all. The switch waits for it, and changes arriving after
+ * the switch wait for the switch: nothing can commit after a stop did, and
+ * no stream of changes can hold the stop off. If the transaction ends early
+ * (its time limit, a failure), every write of work is rolled back with it.
  */
-export async function whileNotInSafeMode<T>(companyId: string, work: () => Promise<T>, timeoutMs = 60_000): Promise<T> {
+export async function whileNotInSafeMode<T>(companyId: string, work: () => Promise<T>, timeoutMs = 15_000): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await assertNotInSafeModeLocked(tx, companyId);
     return runInAmbientTransaction(tx, work);
