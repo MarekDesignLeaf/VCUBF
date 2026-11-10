@@ -63,13 +63,15 @@ export function triageWhatsAppConversation(
 
   const cutoff = newestFirst[0].receivedAt.getTime() - CONTEXT_DAYS * 86_400_000;
   const recent = newestFirst.filter((message) => message.receivedAt.getTime() >= cutoff).map((message) => normalize(message.text));
-  const explicitRequest = recent.some(isExplicitWorkRequest);
+  const latestRequest = isExplicitWorkRequest(recent[0]);
+  const priorWorkRequest = recent.slice(1).some(isExplicitWorkRequest);
   const serviceContext = recent.some((message) => SERVICE.test(message));
-  // An earlier clear work request can make a subsequent "Saturday 14th?"
-  // meaningful, without treating a standalone "tomorrow" as an enquiry.
-  const contextualScheduling = explicitRequest && serviceContext && recent.slice(0, 3).some((message) => SCHEDULE.test(message));
+  // A short scheduling reply gets business context ONLY from a preceding
+  // explicit request. A subsequent unrelated personal topic is not promoted
+  // just because someone discussed a patio earlier in the same chat.
+  const contextualScheduling = !latestRequest && priorWorkRequest && serviceContext && SCHEDULE.test(recent[0]);
 
-  if (!explicitRequest && !contextualScheduling) {
+  if (!latestRequest && !contextualScheduling) {
     return { decision: "ignore", reason: "insufficient_work_context" };
   }
   if (reviewStatus === "approved" && sender?.reviewClassification === "customer") {
