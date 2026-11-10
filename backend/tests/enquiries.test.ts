@@ -339,7 +339,7 @@ describe("Unresolved Enquiry Monitoring", () => {
     const source = await prisma.connectorSource.create({
       data: { companyId: TEST_COMPANY_ID, connectorKey: "whatsapp_business", displayName: "Test enquiries", serviceType: "messaging", isEnabled: true },
     });
-    const approvedPhones = ["+447700900101", "+447700900102", "+447700900103", "+447700900104", "+447700900105"];
+    const approvedPhones = ["+447700900101", "+447700900102", "+447700900103", "+447700900104", "+447700900105", "+447700900108"];
     await prisma.externalContact.createMany({
       data: approvedPhones.map((phone) => ({
         companyId: TEST_COMPANY_ID, connectorSourceId: source.id, externalResourceName: `wa_id:${phone.slice(1)}`,
@@ -393,14 +393,13 @@ describe("Unresolved Enquiry Monitoring", () => {
     assert.equal(gone.dueAt, null);
     assert.match(gone.message, /reply window has closed/);
 
-    const answeredItem: any = byKey.get(`unresolved_enquiry:${answered.id}`);
-    assert.equal(answeredItem.dueAt, null);
-    assert.match(answeredItem.message, /Check whether a reply or follow-up is actually needed/);
+    assert.equal(byKey.has(`unresolved_enquiry:${answered.id}`), false, "a request already answered from Secretary needs no attention item");
     assert.equal(byKey.has(`unresolved_enquiry:${manual.id}`), false, "a standalone personal-like hello has no sales alert");
 
-    const renewed: any = byKey.get(`unresolved_enquiry:${older.id}`);
-    assert.equal(renewed.severity, "warning", "the sender wrote again, so the window is open for another day");
-    assert.ok(Date.parse(renewed.dueAt) > now + 22 * hour);
+    assert.equal(byKey.has(`unresolved_enquiry:${older.id}`), false, "a newer explicitly resolved message prevents the old conversation resurfacing");
+    assert.equal(open.classification.relevance, "work");
+    assert.equal(open.classification.actionNeed, "needs_action");
+    assert.ok(open.classification.reasons.includes("confirmed_customer"));
 
     // Acknowledged while it was only a warning, it still comes back when the window is about to close.
     await request(app).post("/notifications/acknowledge").set("Authorization", `Bearer ${adminToken}`).send({ notification_key: `unresolved_enquiry:${closing.id}` });
@@ -416,14 +415,42 @@ describe("Unresolved Enquiry Monitoring", () => {
       item.key === `unresolved_enquiry:${fresh.id}` || item.key === `unresolved_enquiry:${scheduling.id}`).length, 1);
     assert.ok(groupedResponse.body.some((item: any) => item.key === `unresolved_enquiry:${scheduling.id}`));
     assert.match(groupedResponse.body.find((item: any) => item.key === `unresolved_enquiry:${scheduling.id}`).message, /2 unresolved incoming message/);
+    assert.ok(groupedResponse.body.find((item: any) => item.key === `unresolved_enquiry:${scheduling.id}`).classification.reasons.includes("contextual_short_reply"));
 
     // An unknown sender gets review, not an urgent customer reply warning.
     const unknown = await whatsapp("+447700900107", 2);
     const reviewResponse = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
     const review = reviewResponse.body.find((item: any) => item.key === `unresolved_enquiry:${unknown.id}`);
     assert.equal(review.severity, "info");
-    assert.match(review.message, /not been confirmed as a customer/);
+    assert.match(review.message, /not a confirmed business contact/);
     assert.equal(reviewResponse.body.some((item: any) => item.key === `whatsapp_reply_window:${unknown.id}`), false);
+
+    // A customer identity is supporting context, not proof that every message
+    // from that person concerns work.
+    const personalCustomer = await whatsapp("+447700900108", 1, { messageText: "Happy birthday! See you at dinner." });
+    // Media metadata without actual work text does not invent what a photo contains.
+    const photoOnly = await whatsapp("+447700900109", 1, {
+      messageText: "[WhatsApp image]",
+      sourceMetadata: { provider: "whatsapp_business", messageType: "image" },
+    });
+    await prisma.externalContact.create({
+      data: {
+        companyId: TEST_COMPANY_ID,
+        connectorSourceId: source.id,
+        externalResourceName: "wa_id:447700900110",
+        phone: "+447700900110",
+        reviewStatus: "rejected",
+        reviewClassification: "supplier",
+      },
+    });
+    const supplier = await whatsapp("+447700900110", 1, { messageText: "Can you deliver the patio slabs to site tomorrow?" });
+    const varied = await request(app).get("/notifications").set("Authorization", `Bearer ${adminToken}`);
+    assert.equal(varied.body.some((item: any) => item.key === `unresolved_enquiry:${personalCustomer.id}`), false);
+    assert.equal(varied.body.some((item: any) => item.key === `unresolved_enquiry:${photoOnly.id}`), false);
+    const supplierItem = varied.body.find((item: any) => item.key === `unresolved_enquiry:${supplier.id}`);
+    assert.equal(supplierItem.classification.relevance, "work");
+    assert.ok(supplierItem.classification.reasons.includes("manual_business_role"));
+    assert.equal(varied.body.some((item: any) => item.key === `whatsapp_reply_window:${supplier.id}`), false);
   });
 });
 

@@ -81,6 +81,25 @@ docs/               User guide, connector engine, production architecture, voice
   `list_whatsapp_senders`, `get_whatsapp_sender`, and with `secretary.write` and
   `crm.manage` the previewed `approve_whatsapp_sender`, `reject_whatsapp_sender`,
   `reopen_whatsapp_sender` and `defer_whatsapp_sender`.
+- **Explainable WhatsApp conversation triage**: the attention feed groups unresolved
+  intakes into one item per connector conversation and classifies work relevance separately
+  from whether a new action appears necessary. It uses at most the latest 12 messages over
+  21 days, the exact normalized sender number within that connector, the current human
+  sender label, and — only for an exactly linked CRM client — real open jobs, quotes,
+  invoices and tasks. An exact open lead phone can support review but never auto-approves a
+  sender. English/Czech request, scope, visit, site-access, materials/dimensions,
+  delivery/order, payment and repair language is combined with recent-topic and short-reply
+  context. A recorded outgoing Secretary reply, an explicitly resolved latest intake, or
+  completion/thanks is not treated as a fresh action. Known customers may still write
+  personal messages; known suppliers, subcontractors and employees may still have relevant
+  work messages without becoming customer leads. Each emitted item exposes stable reason
+  codes, relevance, action need and confidence. Human personal/exclusion labels take
+  precedence and remain reversible through sender review. Provider attachment type and a
+  real caption are only supporting metadata: a bare image/document never implies its
+  contents. There is no OCR, full WhatsApp history, group-participant model, safely linked
+  calendar-event evidence or learned correction model yet; business-account status,
+  time/weekend, urgency, emoji and friendly wording never decide by themselves. No triage
+  result sends, deletes, imports or resolves anything.
 - **WhatsApp replies**: “Odpověz Honzovi na WhatsApp, že přijedeme v pondělí” answers
   that sender's latest received message (or “last” for the newest from anyone). The
   recipient is always the message's sender, never a spoken number; the reply quotes the
