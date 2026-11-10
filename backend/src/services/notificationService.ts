@@ -151,7 +151,7 @@ async function buildUnresolvedEnquiryItems(user: AuthedUser): Promise<AttentionI
   const nonWhatsApp = enquiries.filter((item) => item.channel !== "whatsapp");
   const whatsApp = enquiries.filter((item) => item.channel === "whatsapp");
 
-  const [intakes, senders] = whatsApp.length ? await Promise.all([
+  const [intakes, senders] = await Promise.all([
     prisma.communicationIntake.findMany({
       where: { companyId: user.companyId, channel: "whatsapp", intakeStatus: { in: ["new", "extracted"] }, resolutionNeeded: true },
       select: { id: true, connectorSourceId: true, senderPhone: true, messageText: true, receivedAt: true },
@@ -160,7 +160,7 @@ async function buildUnresolvedEnquiryItems(user: AuthedUser): Promise<AttentionI
       where: { companyId: user.companyId, connectorSource: { connectorKey: "whatsapp_business" } },
       select: { connectorSourceId: true, phone: true, reviewStatus: true, reviewClassification: true },
     }),
-  ]) : [[], []];
+  ]);
 
   const byId = new Map(intakes.map((intake) => [intake.id, intake]));
   const bySender = new Map(senders.filter((sender) => sender.phone).map((sender) => [
