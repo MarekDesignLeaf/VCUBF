@@ -60,6 +60,16 @@ test("old work discussions do not contaminate a recent personal topic", () => {
   );
 });
 
+test("a recent business discussion does not make a new personal topic actionable", () => {
+  assert.equal(
+    triageWhatsAppConversation(
+      [at("See you for dinner tonight"), at("Please quote for the garden", 2)],
+      { reviewStatus: "approved", reviewClassification: "customer" },
+    ).decision,
+    "ignore",
+  );
+});
+
 test("employee conversation never creates a customer sales alert", () => {
   assert.equal(
     triageWhatsAppConversation(
