@@ -56,8 +56,6 @@ export const TOOL_CATALOGUE_FINGERPRINTS = {
   // delivery status (whatsapp_message_status) and the owner's PC (list_pc_tools,
   // read_pc, operate_pc): the agent gets the same contracts as the MCP gateway.
   "1.5.0": "540926f3d679069cd42d284c04e9b1123ae49e49c563e94efaa943e7d1e3fa25",
-  // rename_company: voice-reviewed company rename; the previous version is unchanged.
-  "1.6.0": "0000000000000000000000000000000000000000000000000000000000000000",
 } as const satisfies Record<string, string>;
 
 const ledger = Object.entries(TOOL_CATALOGUE_FINGERPRINTS);
