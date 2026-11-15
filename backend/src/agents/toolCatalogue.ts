@@ -57,7 +57,7 @@ export const TOOL_CATALOGUE_FINGERPRINTS = {
   // read_pc, operate_pc): the agent gets the same contracts as the MCP gateway.
   "1.5.0": "540926f3d679069cd42d284c04e9b1123ae49e49c563e94efaa943e7d1e3fa25",
   // rename_company: reviewed company rename added after the phone/PC tools.
-  "1.6.0": "0000000000000000000000000000000000000000000000000000000000000000",
+  "1.6.0": "7c5d57cbaf6b6c8533e4a83bb0a599a6932c51cb5173dd89e929722e965ab32e",
 } as const satisfies Record<string, string>;
 
 const ledger = Object.entries(TOOL_CATALOGUE_FINGERPRINTS);
