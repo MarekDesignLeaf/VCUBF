@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><title>Objednávka – test</title></head>
+<body>
+<nav><a href="/catalogue.html">Katalog</a> <a href="/catalogue.html" target="_blank">Katalog v novém okně</a></nav>
+<main>
+  <h1>Objednávka služby</h1>
+  <form id="order" onsubmit="event.preventDefault(); document.getElementById('result').textContent = 'Objednávka přijata: ' + document.getElementById('name').value + ' / ' + document.getElementById('service').value + (document.getElementById('terms').checked ? ' / podmínky OK' : '');">
+    <label for="name">Jméno</label> <input id="name" name="name" required>
+    <label>E-mail <input id="email" type="email" placeholder="vas@email.cz"></label>
+    <label for="pwd">Heslo</label> <input id="pwd" type="password">
+    <label for="service">Služba</label>
+    <select id="service"><option value="">–</option><option value="lawn">Sekání trávy</option><option value="hedge">Stříhání živého plotu</option></select>
+    <label><input id="terms" type="checkbox"> Souhlasím s podmínkami</label>
+    <button type="submit">Odeslat objednávku</button>
+  </form>
+  <p id="result" aria-live="polite"></p>
+  <div style="height: 3000px"></div>
+  <button id="far" onclick="this.textContent='Dole kliknuto'">Tlačítko dole</button>
+  <my-widget></my-widget>
+  <iframe src="/frame.html" title="Rámec"></iframe>
+</main>
+<script>
+customElements.define("my-widget", class extends HTMLElement {
+  connectedCallback() {
+    const root = this.attachShadow({ mode: "open" });
+    root.innerHTML = '<button id="shadow">Stínové tlačítko</button>';
+    root.querySelector("button").onclick = (e) => { e.target.textContent = "Stín kliknut"; };
+  }
+});
+</script>
+</body></html>

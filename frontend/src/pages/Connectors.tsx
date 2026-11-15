@@ -10,6 +10,7 @@ import {
   type ExternalDriveImage,
   type ExternalGooglePhoto,
 } from "../api/client";
+import { WhatsAppSenderReview } from "../components/WhatsAppSenderReview";
 import { useAuth } from "../context/useAuth";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -86,7 +87,7 @@ function enableImpact(source: ConnectorSource) {
         ? "Enable Google Calendar with event writing? Synchronisation stages event previews; creating, moving or cancelling an event always shows a review first and needs a separate confirmation. Nobody else is emailed."
         : "Enable read-only Google Calendar access? Synchronisation will stage event previews but will not change jobs, tasks or capacity."
       : source.connectorKey === "whatsapp_business"
-        ? "Enable WhatsApp Business? Signed inbound messages and sender contacts will be synchronised automatically. A new valid number becomes a CRM contact only when no active match exists; existing contacts are linked but never overwritten. Every outgoing message still needs a separate confirmation."
+        ? "Enable WhatsApp Business? Signed inbound messages will be stored automatically. Senders wait in Review WhatsApp senders and become CRM contacts only after you mark them as customers and confirm. Every outgoing message still needs a separate confirmation."
         : source.connectorKey === "google_drive"
           ? "Enable per-file Google Drive access? Secretary will only use image files you explicitly select."
           : source.connectorKey === "google_photos"
@@ -131,11 +132,11 @@ export function Connectors() {
   const [googlePhotosItems, setGooglePhotosItems] = useState<ExternalGooglePhoto[] | null>(null);
   const googlePhotosPollTimer = useRef<number | null>(null);
   const [composeSourceId, setComposeSourceId] = useState<string | null>(null);
+  const [senderReviewSourceId, setSenderReviewSourceId] = useState<string | null>(null);
   const guidedSetupRunning = useRef(false);
   const selectedContactSource = contactSourceId
     ? sources?.find((source) => source.id === contactSourceId) ?? null
     : null;
-  const isWhatsAppContactSource = selectedContactSource?.connectorKey === "whatsapp_business";
 
   function loadSources() {
     return api.connectors.sources(activeOnly).then(setSources);
@@ -565,7 +566,7 @@ export function Connectors() {
         ) : null}
       </div>
       <p className="hint">
-        Enabled Gmail (with read access), Contacts and Calendar sources synchronise automatically in the background. Sync now is an optional immediate refresh. Gmail can read mail, create drafts and send only after confirmation. Contacts are read-only. Calendar is read-only until you choose Allow calendar writing; then events can be created, moved or cancelled, each after a review and confirmation. Google Drive uses per-file access; Google Photos opens its own picker for exact user-selected photos. WhatsApp imports signed inbound webhooks, synchronises valid sender contacts without overwriting CRM data, and confirms every send.
+        Enabled Gmail (with read access), Contacts and Calendar sources synchronise automatically in the background. Sync now is an optional immediate refresh. Gmail can read mail, create drafts and send only after confirmation. Contacts are read-only. Calendar is read-only until you choose Allow calendar writing; then events can be created, moved or cancelled, each after a review and confirmation. Google Drive uses per-file access; Google Photos opens its own picker for exact user-selected photos. WhatsApp imports signed inbound webhooks, adds a sender to CRM only after you review them as a customer, and confirms every send.
         Never paste an OAuth token, client secret or password here.
       </p>
 
@@ -637,10 +638,11 @@ export function Connectors() {
                         Sync now
                       </button>
                     ) : null}
-                    {["google_contacts", "whatsapp_business"].includes(source.connectorKey) ? (
-                      <button className="secondary" onClick={() => showExternalContacts(source)}>
-                        {source.connectorKey === "whatsapp_business" ? "View synced contacts" : "Review contacts"}
-                      </button>
+                    {source.connectorKey === "google_contacts" ? (
+                      <button className="secondary" onClick={() => showExternalContacts(source)}>Review contacts</button>
+                    ) : null}
+                    {source.connectorKey === "whatsapp_business" ? (
+                      <button className="secondary" data-action="whatsapp-sender-review" onClick={() => setSenderReviewSourceId(source.id)}>Review WhatsApp senders</button>
                     ) : null}
                     {source.connectorKey === "google_calendar" ? <button className="secondary" onClick={() => showExternalEvents(source)}>Review events</button> : null}
                     {source.connectorKey === "google_calendar" && !source.configuredScopes.includes("write:events") ? (
@@ -684,26 +686,31 @@ export function Connectors() {
         />
       ) : null}
 
+      {senderReviewSourceId && sources?.find((source) => source.id === senderReviewSourceId) ? (
+        <WhatsAppSenderReview
+          source={sources.find((source) => source.id === senderReviewSourceId)!}
+          canDecide={canImportContacts}
+          onClose={() => setSenderReviewSourceId(null)}
+          onNotice={setNotice}
+        />
+      ) : null}
+
       {contactSourceId ? (
         <section className="card" style={{ marginTop: 20 }}>
           <div className="page-header">
-            <h2>{isWhatsAppContactSource ? "Synced WhatsApp contacts" : "Staged Google contacts"}</h2>
+            <h2>Staged Google contacts</h2>
             <button className="secondary" onClick={() => { setContactSourceId(null); setExternalContacts(null); }}>Close</button>
           </div>
-          <p className="hint">{isWhatsAppContactSource
-            ? "Contacts come from signed inbound WhatsApp messages. A valid new number creates a CRM contact only when no active match exists; one exact match is linked without changing it. Multiple matches remain here for duplicate review. This connector cannot backfill a complete historical WhatsApp address book."
-            : "Read-only provider data. Nothing becomes a CRM contact until you review and confirm it."}</p>
-          {!externalContacts ? <p>Loading…</p> : externalContacts.length === 0 ? <p className="hint">{isWhatsAppContactSource ? "No sender contacts have arrived through WhatsApp yet." : "No active contacts staged."}</p> : (
+          <p className="hint">Read-only provider data. Nothing becomes a CRM contact until you review and confirm it.</p>
+          {!externalContacts ? <p>Loading…</p> : externalContacts.length === 0 ? <p className="hint">No active contacts staged.</p> : (
             <table className="data-table">
               <thead><tr><th>Name</th><th>Contact</th><th>Organisation</th><th>Status</th><th></th></tr></thead>
               <tbody>{externalContacts.map((contact) => <tr key={contact.id}>
                 <td><strong>{contact.displayName ?? "Unnamed contact"}</strong><div className="hint">{contact.jobTitle ?? ""}</div></td>
                 <td>{contact.email ?? "—"}<div className="hint">{contact.phone ?? ""}</div></td>
                 <td>{contact.organisation ?? "—"}<div className="hint">{contact.department ?? ""}</div></td>
-                <td>{isWhatsAppContactSource
-                  ? contact.importedContactId ? "Synced to CRM" : !contact.phoneValid ? "Invalid WhatsApp number" : "Needs duplicate review"
-                  : contact.importedContactId ? "Imported" : !contact.phoneValid ? "Invalid phone format" : contact.importable ? "Ready for review" : "Missing email/phone"}</td>
-                <td>{!isWhatsAppContactSource && canImportContacts && contact.importable && !contact.importedContactId ? <button onClick={() => importExternalContact(contact)}>Import to CRM</button> : "—"}</td>
+                <td>{contact.importedContactId ? "Imported" : !contact.phoneValid ? "Invalid phone format" : contact.importable ? "Ready for review" : "Missing email/phone"}</td>
+                <td>{canImportContacts && contact.importable && !contact.importedContactId ? <button onClick={() => importExternalContact(contact)}>Import to CRM</button> : "—"}</td>
               </tr>)}</tbody>
             </table>
           )}

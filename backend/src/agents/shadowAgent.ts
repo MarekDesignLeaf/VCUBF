@@ -34,6 +34,7 @@ import { modelFor, modelRequest, recordUsage } from "../lib/modelGateway.js";
 import { COMMAND_POLICY } from "../lib/emmaSurfaceCatalogue.js";
 import { validateVoiceActionParameters } from "../lib/voiceActionCatalogue.js";
 import { AGENT_TOOL_CATALOGUE, TOOL_CATALOGUE_FINGERPRINT, TOOL_CATALOGUE_VERSION } from "./toolCatalogue.js";
+import { ordinalCompare } from "../lib/ordinalCompare.js";
 
 /**
  * Run budgets (decision D5). The 15-second limit is the agent_plan task's
@@ -615,7 +616,7 @@ export async function shadowSummary(companyId: string) {
   // within it each request path does too (typed commands never vouch for the
   // voice assistant). Shape: byLanguage[language][channel].
   const segments = [...perSegment.values()].sort((left, right) =>
-    left.language === right.language ? left.channel.localeCompare(right.channel) : left.language.localeCompare(right.language),
+    left.language === right.language ? ordinalCompare(left.channel, right.channel) : ordinalCompare(left.language, right.language),
   );
   const byLanguage: Record<string, Record<string, ReturnType<typeof verdict> & { total: number; errors: number; parserRejected: number; byAgreement: Record<string, number> }>> = {};
   const accepted: Array<{ language: string; channel: string }> = [];

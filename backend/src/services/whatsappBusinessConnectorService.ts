@@ -1,4 +1,5 @@
 import { Prisma, type CommunicationIntake } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import {
@@ -9,6 +10,7 @@ import {
   verifyWhatsAppWebhookSignature,
   WhatsAppBusinessAdapterError,
   type WhatsAppInboundMessage,
+  type WhatsAppStatusUpdate,
 } from "../connectors/whatsappBusinessAdapter.js";
 import {
   DISCONNECT_WHATSAPP_SOURCE_ACTION,
@@ -49,32 +51,44 @@ const externalContactQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 }).strict();
 
-type WhatsAppContactSyncOutcome = "created" | "linked" | "already_synced" | "needs_review" | "invalid";
+// Staging outcomes of one inbound sender. No outcome creates, links or
+// changes CRM data: a sender becomes a CRM contact only through the sender
+// review (whatsappSenderReviewService), after a person has classified it as a
+// customer and confirmed.
+type WhatsAppContactSyncOutcome = "staged_for_review" | "already_in_crm" | "suppressed" | "invalid";
 type WhatsAppContactSource = { id: string; companyId: string; createdBy: string | null };
 interface WhatsAppContactSyncCounts {
-  createdCount: number;
-  linkedCount: number;
-  alreadySyncedCount: number;
-  awaitingReviewCount: number;
+  /** New or still undecided senders waiting for a person's review. */
+  stagedForReviewCount: number;
+  /** Senders a person already approved; their CRM contact exists. */
+  alreadyInCrmCount: number;
+  /** Senders a person rejected, or whose CRM contact was deleted: never imported again by themselves. */
+  suppressedCount: number;
   skippedInvalidCount: number;
 }
 
 function emptyContactSyncCounts(): WhatsAppContactSyncCounts {
-  return { createdCount: 0, linkedCount: 0, alreadySyncedCount: 0, awaitingReviewCount: 0, skippedInvalidCount: 0 };
+  return { stagedForReviewCount: 0, alreadyInCrmCount: 0, suppressedCount: 0, skippedInvalidCount: 0 };
 }
 
 function addContactSyncOutcome(counts: WhatsAppContactSyncCounts, outcome: WhatsAppContactSyncOutcome) {
-  if (outcome === "created") counts.createdCount += 1;
-  else if (outcome === "linked") counts.linkedCount += 1;
-  else if (outcome === "already_synced") counts.alreadySyncedCount += 1;
-  else if (outcome === "needs_review") counts.awaitingReviewCount += 1;
+  if (outcome === "staged_for_review") counts.stagedForReviewCount += 1;
+  else if (outcome === "already_in_crm") counts.alreadyInCrmCount += 1;
+  else if (outcome === "suppressed") counts.suppressedCount += 1;
   else counts.skippedInvalidCount += 1;
 }
 
-function whatsappExternalResourceName(from: string) {
+export function whatsappExternalResourceName(from: string) {
   const waId = from.replace(/\D/g, "");
   return waId.length > 0 && waId.length <= 40 ? "wa_id:" + waId : null;
 }
+
+/** The sourceReference a CRM contact imported from this sender carries. */
+export function whatsappContactSourceReference(sourceId: string, externalResourceName: string) {
+  return "whatsapp:" + sourceId + ":" + externalResourceName;
+}
+
+export const SUPPRESSED_SENDER_STATUSES = ["rejected", "deleted_from_crm"] as const;
 
 async function syncInboundWhatsAppContact(
   source: WhatsAppContactSource,
@@ -84,94 +98,48 @@ async function syncInboundWhatsAppContact(
   if (!externalResourceName) return "invalid";
 
   const senderPhone = normalizePhone(message.from);
-  const sourceReference = "whatsapp:" + source.id + ":" + externalResourceName;
   const syncedAt = new Date();
   let lastError: unknown;
 
-  // The CRM has no global phone uniqueness constraint because legitimate
-  // shared office numbers exist. Serializable retries keep concurrent webhook
-  // deliveries from creating duplicate contacts for the same new sender.
+  // Two deliveries for the same new sender may race on the unique key; the
+  // loser retries and finds the row. The review fields are never written
+  // here, so a provider update can never undo a person's decision.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      return await prisma.$transaction(async (tx) => {
-        const external = await tx.externalContact.upsert({
-          where: {
-            companyId_connectorSourceId_externalResourceName: {
-              companyId: source.companyId,
-              connectorSourceId: source.id,
-              externalResourceName,
-            },
-          },
-          update: {
-            sourceEtag: message.id,
-            ...(message.senderName ? { displayName: message.senderName } : {}),
-            ...(senderPhone ? { phone: senderPhone } : {}),
-            isDeleted: false,
-            syncedAt,
-          },
-          create: {
+      const external = await prisma.externalContact.upsert({
+        where: {
+          companyId_connectorSourceId_externalResourceName: {
             companyId: source.companyId,
             connectorSourceId: source.id,
             externalResourceName,
-            sourceEtag: message.id,
-            displayName: message.senderName,
-            phone: senderPhone ?? message.from,
-            syncedAt,
           },
-        });
-
-        // Preserve the source evidence even if Meta's sender number cannot be
-        // validated as a real phone number. Such a record never becomes CRM data.
-        if (!senderPhone) return "invalid";
-
-        if (external.importedContactId) {
-          const linkedContact = await tx.contact.findFirst({
-            where: { id: external.importedContactId, companyId: source.companyId, isActive: true },
-            select: { id: true },
-          });
-          if (linkedContact) return "already_synced";
-          await tx.externalContact.update({ where: { id: external.id }, data: { importedContactId: null } });
-        }
-
-        const candidates = await tx.contact.findMany({
-          where: {
-            companyId: source.companyId,
-            isActive: true,
-            OR: [{ sourceReference }, { phone: { not: null } }],
-          },
-          select: { id: true, phone: true, sourceReference: true },
-        });
-        const matches = candidates.filter((contact) =>
-          contact.sourceReference === sourceReference || normalizePhone(contact.phone) === senderPhone
-        );
-
-        // Linking exactly one existing contact is safe. More than one match is
-        // deliberately left for a human to resolve; existing CRM data is never
-        // overwritten with provider profile data.
-        if (matches.length === 1) {
-          await tx.externalContact.update({ where: { id: external.id }, data: { importedContactId: matches[0].id } });
-          return "linked";
-        }
-        if (matches.length > 1) return "needs_review";
-
-        const created = await tx.contact.create({
-          data: {
-            companyId: source.companyId,
-            displayName: message.senderName ?? "WhatsApp " + senderPhone,
-            phone: senderPhone,
-            preferredChannel: "whatsapp",
-            source: "whatsapp_business",
-            sourceReference,
-            createdBy: source.createdBy,
-          },
-        });
-        await tx.externalContact.update({ where: { id: external.id }, data: { importedContactId: created.id } });
-        return "created";
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        },
+        update: {
+          sourceEtag: message.id,
+          ...(message.senderName ? { displayName: message.senderName } : {}),
+          ...(senderPhone ? { phone: senderPhone } : {}),
+          isDeleted: false,
+          syncedAt,
+        },
+        create: {
+          companyId: source.companyId,
+          connectorSourceId: source.id,
+          externalResourceName,
+          sourceEtag: message.id,
+          displayName: message.senderName,
+          phone: senderPhone ?? message.from,
+          syncedAt,
+        },
+      });
+      // The source evidence is kept even if Meta's sender number cannot be
+      // validated as a real phone number. Such a sender can never be imported.
+      if (!senderPhone) return "invalid";
+      if ((SUPPRESSED_SENDER_STATUSES as readonly string[]).includes(external.reviewStatus)) return "suppressed";
+      if (external.reviewStatus === "approved" && external.importedContactId) return "already_in_crm";
+      return "staged_for_review";
     } catch (error) {
       lastError = error;
-      const retryable = error instanceof Prisma.PrismaClientKnownRequestError
-        && (error.code === "P2034" || error.code === "P2002");
+      const retryable = error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
       if (!retryable || attempt === 2) throw error;
     }
   }
@@ -275,11 +243,16 @@ export async function receiveWebhook(
           messageText: message.messageText,
           receivedAt: message.receivedAt,
           sourceReference: `whatsapp:${phoneNumberId}:${message.id}`,
+          // Persist only provider metadata we actually received. For media,
+          // the type can support triage together with a real caption; it is
+          // never treated as knowledge of the attachment's contents.
+          sourceMetadata: { provider: "whatsapp_business", messageType: message.messageType },
           createdBy: source.createdBy,
         },
       });
       importedIntakeIds.push(intake.id);
     }
+    const statusCount = await recordDeliveryStatuses(source, parsed.statuses.filter((status) => status.phoneNumberId === phoneNumberId));
     await prisma.connectorSource.update({
       where: { id: source.id },
       data: { lastSyncAt: new Date(), lastSyncStatus: "success", lastErrorCode: null },
@@ -289,7 +262,7 @@ export async function receiveWebhook(
       userId: source.createdBy,
       actionName: RECEIVE_WHATSAPP_MESSAGE_ACTION.actionName,
       inputPayload: { sourceId: source.id, signedWebhook: true, messageCount: messages.length, statusCount: parsed.statuses.length },
-      dataAfter: { importedCount: importedIntakeIds.length, duplicateCount, importedIntakeIds, contactSync },
+      dataAfter: { importedCount: importedIntakeIds.length, duplicateCount, importedIntakeIds, contactSync, deliveryStatusesRecorded: statusCount },
       riskLevel: RECEIVE_WHATSAPP_MESSAGE_ACTION.riskLevel,
       result: "success",
     });
@@ -729,4 +702,122 @@ export async function disconnectWhatsAppSource(
     result: "success",
   });
   return ok(200, { sourceId, provider: "whatsapp_business", disconnectedAt: new Date(), providerGrantRevoked: false });
+}
+
+// ─── For the MCP gateway's reviewed writes (backend/src/modules/mcp) ────────
+//
+// The gateway shows its own preview and sends only after the user's yes
+// through confirm_action, then calls sendWhatsAppMessage / replyToWhatsAppMessage
+// with confirmed: true. These previews are deterministic (no translation:
+// the text shown is the text sent), so the digest checked at the yes holds.
+
+/** The company's enabled WhatsApp Business source that may send, or why there is none. */
+export async function whatsAppBusinessSendingSource(user: AuthedUser): Promise<ServiceResult<{ id: string }>> {
+  const source = await prisma.connectorSource.findFirst({
+    where: { companyId: user.companyId, connectorKey: "whatsapp_business", isActive: true, isEnabled: true },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, configuredScopes: true },
+  });
+  if (!source) return fail(409, "CONNECTOR_NOT_ENABLED", "WhatsApp Business is not connected and enabled for this company.");
+  if (!source.configuredScopes.includes("send:messages")) return fail(409, "CONNECTOR_SCOPE_REQUIRED", "The WhatsApp Business connection may not send messages.");
+  return ok(200, { id: source.id });
+}
+
+export async function whatsAppBusinessSendPreview(user: AuthedUser, input: { to: string; body: string }): Promise<ServiceResult<Record<string, unknown>>> {
+  const parsed = sendWhatsAppMessageSchema.safeParse({ to: input.to, body: input.body });
+  if (!parsed.success) return fail(400, "VALIDATION_FAILED", parsed.error.message);
+  const source = await whatsAppBusinessSendingSource(user);
+  if (!source.ok) return source;
+  const fingerprint = sendFingerprint({ recipients: [parsed.data.to.replace(/\D/g, "")], body: parsed.data.body });
+  const repeat = await recentAuditedSend(user.companyId, SEND_WHATSAPP_MESSAGE_ACTION.actionName, fingerprint);
+  return ok(200, {
+    provider: "whatsapp_business", sourceId: source.data.id, to: parsed.data.to, body: parsed.data.body,
+    window: "WhatsApp delivers a free-form message only within 24 hours of this person's last message to the business; otherwise Meta refuses it and nothing is sent.",
+    ...repeatNote(repeat),
+  });
+}
+
+export async function whatsAppBusinessReplyPreview(user: AuthedUser, input: { intake_id: string; body: string }): Promise<ServiceResult<Record<string, unknown>>> {
+  const parsed = replyWhatsAppMessageSchema.safeParse({ intake_id: input.intake_id, body: input.body });
+  if (!parsed.success || !parsed.data.intake_id) return fail(400, "VALIDATION_FAILED", parsed.success ? "intake_id is required." : parsed.error.message);
+  const source = await whatsAppBusinessSendingSource(user);
+  if (!source.ok) return source;
+  const target = await whatsAppReplyTarget(user, { intake_id: parsed.data.intake_id });
+  if (!target.ok) return target;
+  const intake = target.data;
+  if (!await replyWindowOpen(user, intake.senderPhone)) return windowClosed();
+  return ok(200, {
+    provider: "whatsapp_business", sourceId: source.data.id, intakeId: intake.id, to: intake.senderPhone, recipientName: intake.senderName,
+    inReplyTo: { receivedAt: intake.receivedAt.toISOString(), text: intake.messageText.slice(0, 500) },
+    body: parsed.data.body,
+    ...repeatNote(await recentReplyOrAudited(user.companyId, REPLY_WHATSAPP_MESSAGE_ACTION.actionName, intake, parsed.data.body)),
+  });
+}
+
+// ─── Delivery status (Meta's status webhooks) ───────────────────────────────
+
+/** How far a message has got; a state is only moved forward. failed ends it. */
+const DELIVERY_RANK: Record<string, number> = { sent: 1, delivered: 2, read: 3, failed: 4 };
+
+const DELIVERY_MEANING: Record<string, string> = {
+  sent: "Meta accepted the message and sent it towards the recipient's phone.",
+  delivered: "The message reached the recipient's phone.",
+  read: "The recipient opened the message (only when they have read receipts on).",
+  failed: "Meta could not deliver the message; nothing more will happen to it.",
+};
+
+/** Records the statuses of one verified webhook for the company's source. Returns how many changed. */
+async function recordDeliveryStatuses(source: { id: string; companyId: string }, statuses: WhatsAppStatusUpdate[]): Promise<number> {
+  let changed = 0;
+  for (const update of statuses) {
+    const rank = DELIVERY_RANK[update.status];
+    if (!rank) continue;
+    // Compare while PostgreSQL holds the conflict row, not in an earlier
+    // SELECT: simultaneous webhook requests must never move a state back.
+    changed += await prisma.$executeRaw`
+      INSERT INTO "whatsapp_message_statuses"
+        ("id", "company_id", "connector_source_id", "message_id", "status", "recipient_id",
+         "error_code", "error_title", "occurred_at", "updated_at")
+      VALUES (${randomUUID()}, ${source.companyId}, ${source.id}, ${update.id}, ${update.status},
+        ${update.recipientId}, ${update.errorCode}, ${update.errorTitle}, ${update.occurredAt}, CURRENT_TIMESTAMP)
+      ON CONFLICT ("company_id", "connector_source_id", "message_id") DO UPDATE SET
+        "status" = EXCLUDED."status", "recipient_id" = EXCLUDED."recipient_id",
+        "error_code" = EXCLUDED."error_code", "error_title" = EXCLUDED."error_title",
+        "occurred_at" = EXCLUDED."occurred_at", "updated_at" = CURRENT_TIMESTAMP
+      WHERE (CASE "whatsapp_message_statuses"."status"
+          WHEN 'sent' THEN 1 WHEN 'delivered' THEN 2 WHEN 'read' THEN 3 WHEN 'failed' THEN 4 ELSE 0 END) < ${rank}
+        OR ("whatsapp_message_statuses"."status" = EXCLUDED."status"
+            AND "whatsapp_message_statuses"."occurred_at" < EXCLUDED."occurred_at")
+    `;
+  }
+  return changed;
+}
+
+/**
+ * What Meta last reported for a message the company's WhatsApp Business number
+ * sent, by its message id (wamid), inside the caller's company. A message Meta
+ * has not reported on yet is said to be so; nothing is guessed.
+ */
+export async function whatsAppDeliveryStatus(user: AuthedUser, messageId: string): Promise<ServiceResult<Record<string, unknown>>> {
+  const id = String(messageId ?? "").trim();
+  if (!/^wamid\.[A-Za-z0-9+/=_.-]{1,200}$/.test(id)) return fail(400, "VALIDATION_FAILED", "message_id must be a WhatsApp message id (wamid.…).");
+  const row = await prisma.whatsAppMessageStatus.findFirst({ where: { companyId: user.companyId, messageId: id } });
+  if (!row) {
+    return ok(200, { messageId: id, status: "not_reported", meaning: "Meta has not reported a status for this message yet (or it was not sent from this company's number)." });
+  }
+  return ok(200, {
+    messageId: id, status: row.status, occurredAt: row.occurredAt.toISOString(), meaning: DELIVERY_MEANING[row.status],
+    ...(row.errorCode ? { error: { code: row.errorCode, title: row.errorTitle } } : {}),
+  });
+}
+
+/** The message id of the caller's latest WhatsApp Business send or reply from Secretary, from its audit. */
+export async function latestWhatsAppBusinessSend(user: AuthedUser): Promise<string | null> {
+  const latest = await prisma.auditLog.findFirst({
+    where: { companyId: user.companyId, userId: user.id, actionName: { in: [SEND_WHATSAPP_MESSAGE_ACTION.actionName, REPLY_WHATSAPP_MESSAGE_ACTION.actionName] }, result: "success" },
+    orderBy: { createdAt: "desc" },
+    select: { dataAfter: true },
+  });
+  const messageId = (latest?.dataAfter as { messageId?: unknown } | null)?.messageId;
+  return typeof messageId === "string" ? messageId : null;
 }

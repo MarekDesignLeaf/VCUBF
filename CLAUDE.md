@@ -112,6 +112,14 @@ GitHub Actions CI exists and runs backend build, Prisma generation, embedded Pos
 
 Node 22 is the current validated CI runtime. Node 24 remains a target only until a real migration is completed and verified.
 
+## PC control: text state only
+
+PC and browser automation (the `pc-control` plugin, PC Control Plus through Secretary, and every agent loop) works only from text state: DOM / page snapshots and Windows UI Automation. Never drive control from screenshots, never fall back to a screenshot when a snapshot cannot see something, and never act at coordinates read off an image. A screenshot or camera capture may only produce an image the user explicitly asked for. A control loop that needs vision is not offered as compliant. See `docs/PHONE_PC_INTEGRATION.md` and `windows-companion/pc-control/tests/test_text_state_only.py`.
+
+## MCP capability metadata rule
+
+Every Secretary MCP tool must carry machine-readable capability metadata generated from its own definition (`backend/src/modules/mcp/capabilities.ts`, `routes.ts`, `writeTools.ts`). Never hand-write a separate tool list. When the MCP tool set changes in any way, append a new revision to `MCP_TOOLSET_FINGERPRINTS` (never edit a shipped one) and update `docs/MCP_CAPABILITY_METADATA.md`; `tests/mcpCapabilities.test.ts` fails until you do. See `docs/MCP_CAPABILITY_METADATA.md`.
+
 ## Testing expectations
 
 For backend work, run or update:

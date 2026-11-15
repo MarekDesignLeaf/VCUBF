@@ -320,6 +320,136 @@ export interface Client {
   createdAt: string;
 }
 
+// Permanent deletion (a separate action from archiving). The preview names the
+// exact record, its links and what depends on it; deletion is confirmed with
+// the preview's digest and the record's name typed back.
+export interface PermanentDeletionPreview {
+  kind: "client" | "contact";
+  id: string;
+  displayName: string;
+  status: "active" | "archived";
+  createdAt: string;
+  revision: string;
+  canDelete: boolean;
+  blockers: Array<{ key: string; count: number }>;
+  digest: string;
+  kept: string[];
+  identity: Record<string, string | null>;
+  dependencies?: Record<string, number>;
+  client?: { id: string; displayName: string } | null;
+  externalLinks?: Array<{ id: string; connectorKey: string; sourceName: string; externalResourceName: string }>;
+  communicationIntakesKept?: number;
+}
+
+export const PERMANENT_DELETION_DEPENDENCY_LABELS: Record<string, string> = {
+  jobs: "Jobs",
+  quotes: "Quotes",
+  invoices: "Invoices",
+  payments: "Payments",
+  communicationRecords: "Communication records",
+  communicationIntakes: "Received messages",
+  tasks: "Tasks",
+  portfolioPhotos: "Photos",
+  documentRecords: "Documents",
+  contacts: "Contacts (including archived)",
+  convertedLeads: "Converted leads",
+  mergeRecords: "Merge history",
+};
+
+export const PERMANENT_DELETION_IDENTITY_LABELS: Record<string, string> = {
+  firstName: "First name",
+  lastName: "Last name",
+  companyName: "Company",
+  emailPrimary: "Email",
+  phonePrimary: "Phone",
+  email: "Email",
+  phone: "Phone",
+  source: "Source",
+  sourceReference: "Source reference",
+  clientType: "Type",
+  jobTitle: "Job title",
+  department: "Department",
+};
+
+export const PERMANENT_DELETION_KEPT_LABELS: Record<string, string> = {
+  client: "The linked client",
+  staged_connector_records: "WhatsApp or Google source records (unlinked, not imported again by themselves)",
+  communication_history: "Received messages from this person",
+  audit_history: "Audit history, including this deletion",
+};
+
+export const WHATSAPP_SENDER_STATUSES = ["pending", "review_needed", "approved", "rejected", "deleted_from_crm"] as const;
+export type WhatsAppSenderStatus = (typeof WHATSAPP_SENDER_STATUSES)[number];
+export const WHATSAPP_SENDER_STATUS_LABELS: Record<WhatsAppSenderStatus, string> = {
+  pending: "Not reviewed",
+  review_needed: "Review later",
+  approved: "Customer in CRM",
+  rejected: "Not a customer",
+  deleted_from_crm: "Deleted from CRM",
+};
+export const WHATSAPP_NOT_CUSTOMER_CLASSIFICATIONS = ["personal", "employee", "subcontractor", "supplier", "other"] as const;
+export type WhatsAppNotCustomerClassification = (typeof WHATSAPP_NOT_CUSTOMER_CLASSIFICATIONS)[number];
+export const WHATSAPP_CLASSIFICATION_LABELS: Record<string, string> = {
+  customer: "Customer",
+  personal: "Personal",
+  employee: "Employee",
+  subcontractor: "Subcontractor",
+  supplier: "Supplier",
+  other: "Other",
+};
+export const WORK_SIGNAL_LABELS: Record<string, string> = {
+  work_related_candidate: "Work-related messages (likely customer)",
+  weak_signal: "One work-related word only",
+  no_work_terms: "No work-related words found",
+  no_messages: "No messages",
+};
+
+export interface WhatsAppSender {
+  id: string;
+  displayName?: string | null;
+  phone?: string | null;
+  phoneValid: boolean;
+  externalResourceName: string;
+  reviewStatus: WhatsAppSenderStatus;
+  reviewClassification?: string | null;
+  reviewNote?: string | null;
+  reviewedAt?: string | null;
+  revision: string;
+  linkedContact?: { id: string; displayName: string; isActive: boolean; client?: { id: string; displayName: string } | null } | null;
+  messageCount: number;
+  firstMessageAt?: string | null;
+  lastMessageAt?: string | null;
+  recentMessages: Array<{ receivedAt: string; text: string }>;
+  signal: { level: keyof typeof WORK_SIGNAL_LABELS; matchedTerms: string[]; basis: string };
+}
+
+export interface WhatsAppSenderList {
+  items: WhatsAppSender[];
+  total: number;
+  offset: number;
+  limit: number;
+  counts: Record<WhatsAppSenderStatus, number>;
+}
+
+export interface WhatsAppApprovalPreview {
+  sender: { id: string; displayName?: string | null; phone: string; externalResourceName: string };
+  revision: string;
+  contact: { action: "keep_linked" | "link_existing"; contact: { id: string; displayName: string } } | { action: "create"; displayName: string };
+  client: { action: "none" } | { action: "keep_existing" | "link_existing"; client: { id: string; displayName: string } } | { action: "create"; displayName: string };
+}
+
+export type WhatsAppSenderDecision =
+  | { decision: "approve_customer"; import_as?: "contact" | "contact_and_client"; client_id?: string; display_name?: string; note?: string; confirmed?: boolean; expected_revision?: string }
+  | { decision: "reject"; classification: WhatsAppNotCustomerClassification; note?: string }
+  | { decision: "mark_review_needed"; note?: string }
+  | { decision: "reopen"; note?: string };
+
+export interface PermanentDeletionConfirmation {
+  confirmed: true;
+  preview_digest: string;
+  confirm_display_name: string;
+}
+
 export const CONTACT_CHANNELS = ["email", "phone_call", "whatsapp", "sms", "messenger", "other"] as const;
 export type ContactChannel = (typeof CONTACT_CHANNELS)[number];
 export const CONTACT_LANGUAGES = ["en", "cs", "pl", "other"] as const;
@@ -1959,7 +2089,8 @@ export const api = {
     request<Pick<LoginResponse["user"], "voiceWakeWord" | "voiceContinuous" | "voiceLanguage" | "assistantName" | "voiceSpeechRate">>("/auth/voice-preferences", { method: "PUT", body: JSON.stringify({ wake_word: wakeWord, continuous_listening: continuousListening, language, assistant_name: assistantName, speech_rate: speechRate }) }),
   approveDevicePairing: (code: string) => request<{status:string;expires_at:string}>("/auth/device/approve", { method: "POST", body: JSON.stringify({ code }) }),
   clients: {
-    list: () => request<Client[]>("/crm/clients"),
+    list: (status: "active" | "archived" = "active") =>
+      request<Client[]>(status === "archived" ? "/crm/clients?status=archived" : "/crm/clients"),
     get: (id: string) => request<Client>(`/crm/clients/${id}`),
     create: (data: Record<string, unknown>) =>
       request<Client>("/crm/clients", { method: "POST", body: JSON.stringify(data) }),
@@ -1971,6 +2102,14 @@ export const api = {
         body: JSON.stringify({ confirmed }),
       }),
     search: (q: string) => request<Client[]>(`/crm/clients/search?q=${encodeURIComponent(q)}`),
+    // Permanent deletion: a different action from archive above.
+    permanentDeletionPreview: (id: string) => request<PermanentDeletionPreview>(`/crm/clients/${id}/permanent-deletion`),
+    deletePermanently: (id: string, confirmation: PermanentDeletionConfirmation, idempotencyKey: string) =>
+      request<{ deleted?: boolean; alreadyDeleted?: boolean; message: string }>(`/crm/clients/${id}/permanent-deletion`, {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: JSON.stringify(confirmation),
+      }),
   },
   contacts: {
     list: (params?: { clientId?: string; activeOnly?: boolean; search?: string }) => {
@@ -1990,6 +2129,13 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ confirmed }),
     }),
+    permanentDeletionPreview: (id: string) => request<PermanentDeletionPreview>(`/crm/contacts/${id}/permanent-deletion`),
+    deletePermanently: (id: string, confirmation: PermanentDeletionConfirmation, idempotencyKey: string) =>
+      request<{ deleted?: boolean; alreadyDeleted?: boolean; message: string }>(`/crm/contacts/${id}/permanent-deletion`, {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: JSON.stringify(confirmation),
+      }),
   },
   documents: {
     list: (params?: { clientId?: string; jobId?: string; documentType?: string; sensitivity?: string; activeOnly?: boolean }) => {
@@ -2066,6 +2212,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ confirmed }),
       }),
+    whatsappSenders: (sourceId: string, status: WhatsAppSenderStatus | "open" | "all" = "open") =>
+      request<WhatsAppSenderList>(`/connectors/sources/${sourceId}/whatsapp/senders?status=${status}&limit=100`),
+    reviewWhatsAppSender: (sourceId: string, senderId: string, decision: WhatsAppSenderDecision) =>
+      request<{ message: string; reviewStatus?: string; contactId?: string; clientId?: string | null; alreadyApproved?: boolean }>(
+        `/connectors/sources/${sourceId}/whatsapp/senders/${senderId}/review`,
+        { method: "POST", body: JSON.stringify(decision) },
+      ),
     externalCalendarEvents: (id: string) =>
       request<ExternalCalendarEventList>(`/connectors/sources/${id}/external-calendar-events?limit=100`),
     drivePickerToken: (id: string) => request<DrivePickerToken>(`/connectors/sources/${id}/drive-picker-token`),

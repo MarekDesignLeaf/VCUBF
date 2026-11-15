@@ -17,6 +17,13 @@ import { detectUpcomingOverload } from "./calendarService.js";
 import { whatsAppReplyWindows } from "./whatsappBusinessConnectorService.js";
 import { buildDataQualityItems } from "./dataQualityService.js";
 import { getNotificationThresholds, type NotificationThresholds } from "./notificationThresholdService.js";
+import { normalizePhone } from "../lib/contactNormalization.js";
+import {
+  triageWhatsAppConversation,
+  WHATSAPP_TRIAGE_CONTEXT_DAYS,
+  type WhatsAppTriageMessage,
+  type WhatsAppTriageResult,
+} from "../lib/whatsappConversationTriage.js";
 
 // Notification and Escalation Module — see VCUBF master documentation and the
 // vcubf-programmer-skill module list. This module stores no duplicate
@@ -74,6 +81,14 @@ export interface AttentionItemBase {
   message: string;
   dueAt: string | null;
   entity: { type: string; id: string; label?: string };
+  /** Present for explainable WhatsApp triage; no message text is repeated. */
+  classification?: {
+    relevance: WhatsAppTriageResult["relevance"];
+    actionNeed: WhatsAppTriageResult["actionNeed"];
+    confidence: WhatsAppTriageResult["confidence"];
+    reasons: WhatsAppTriageResult["reasons"];
+    basis: "inference_with_verified_company_context";
+  };
 }
 
 export interface AttentionItem extends AttentionItemBase {
@@ -136,59 +151,288 @@ function timeLeft(ms: number): string {
   return minutes >= 120 ? `about ${Math.floor(minutes / 60)} h` : `about ${minutes} min`;
 }
 
+/**
+ * The intake inbox is deliberately lossless. The *attention feed*, however,
+ * must not turn every inbound WhatsApp message into a sales lead.
+ *
+ * Classify each sender's recent conversation, apply a human-reviewed sender
+ * classification where available, and emit at most ONE alert per conversation.
+ * Ambiguous/personal messages stay in the intake inbox and are not deleted or
+ * implicitly marked resolved.
+ */
+type WhatsAppContextIntake = {
+  id: string;
+  connectorSourceId: string | null;
+  externalThreadId: string | null;
+  senderPhone: string | null;
+  messageText: string;
+  receivedAt: Date;
+  sourceMetadata: unknown;
+  resolutionNeeded: boolean;
+};
+
+function whatsappSenderKey(connectorSourceId: string | null, phone: string | null) {
+  const normalized = normalizePhone(phone);
+  return connectorSourceId && normalized ? `${connectorSourceId}:${normalized}` : null;
+}
+
+function whatsappConversationKey(intake: Pick<WhatsAppContextIntake, "id" | "connectorSourceId" | "externalThreadId" | "senderPhone">) {
+  if (intake.externalThreadId) return `${intake.connectorSourceId ?? "manual"}:thread:${intake.externalThreadId}`;
+  return whatsappSenderKey(intake.connectorSourceId, intake.senderPhone) ??
+    (normalizePhone(intake.senderPhone) ? `manual:${normalizePhone(intake.senderPhone)}` : `intake:${intake.id}`);
+}
+
+function metadataRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function whatsappTriageMessage(intake: WhatsAppContextIntake): WhatsAppTriageMessage {
+  const metadata = metadataRecord(intake.sourceMetadata);
+  const messageType = typeof metadata.messageType === "string" &&
+    !["text", "button", "interactive"].includes(metadata.messageType)
+    ? metadata.messageType
+    : null;
+  return {
+    text: intake.messageText,
+    receivedAt: intake.receivedAt,
+    resolutionNeeded: intake.resolutionNeeded,
+    hasOutgoingReply: Array.isArray(metadata.replies) && metadata.replies.length > 0,
+    attachmentType: messageType,
+  };
+}
+
+function attentionClassification(triage: WhatsAppTriageResult): NonNullable<AttentionItemBase["classification"]> {
+  return {
+    relevance: triage.relevance,
+    actionNeed: triage.actionNeed,
+    confidence: triage.confidence,
+    reasons: triage.reasons,
+    basis: "inference_with_verified_company_context",
+  };
+}
+
 async function buildUnresolvedEnquiryItems(user: AuthedUser): Promise<AttentionItemBase[]> {
   const enquiries = await listUnresolvedIntakeEnquiries(user);
+  const nonWhatsApp = enquiries.filter((item) => item.channel !== "whatsapp");
+  const whatsApp = enquiries.filter((item) => item.channel === "whatsapp");
+
+  const rawNonWhatsApp = nonWhatsApp.map((enquiry): AttentionItemBase => ({
+    key: `unresolved_enquiry:${enquiry.sourceId}`,
+    type: "unresolved_enquiry",
+    severity: "warning",
+    title: `Unresolved enquiry from ${enquiry.senderLabel}`,
+    message: `Inbound ${enquiry.channel.replace(/_/g, " ")} enquiry is still marked as needing resolution. No response deadline is recorded.`,
+    dueAt: null,
+    entity: { type: "communication_intake", id: enquiry.sourceId, label: enquiry.senderLabel },
+  }));
+  if (!whatsApp.length) return rawNonWhatsApp;
+
+  const unresolvedIds = whatsApp.map((item) => item.sourceId);
+  const unresolvedIntakes = await prisma.communicationIntake.findMany({
+    where: { companyId: user.companyId, id: { in: unresolvedIds }, channel: "whatsapp" },
+    select: {
+      id: true, connectorSourceId: true, externalThreadId: true, senderPhone: true,
+      messageText: true, receivedAt: true, sourceMetadata: true, resolutionNeeded: true,
+    },
+  });
+  const sourceIds = [...new Set(unresolvedIntakes.map((item) => item.connectorSourceId).filter((id): id is string => Boolean(id)))];
+  const connectorPhones = [...new Set(unresolvedIntakes
+    .filter((item) => item.connectorSourceId)
+    .map((item) => normalizePhone(item.senderPhone))
+    .filter((phone): phone is string => Boolean(phone)))];
+  const manualPhones = [...new Set(unresolvedIntakes
+    .filter((item) => !item.connectorSourceId)
+    .map((item) => normalizePhone(item.senderPhone))
+    .filter((phone): phone is string => Boolean(phone)))];
+  const contextCutoff = new Date(Date.now() - WHATSAPP_TRIAGE_CONTEXT_DAYS * 86_400_000);
+
+  const [history, senders, leads] = await Promise.all([
+    prisma.communicationIntake.findMany({
+      where: {
+        companyId: user.companyId,
+        channel: "whatsapp",
+        OR: [
+          { id: { in: unresolvedIds } },
+          ...(sourceIds.length && connectorPhones.length ? [{
+            receivedAt: { gte: contextCutoff },
+            connectorSourceId: { in: sourceIds },
+            senderPhone: { in: connectorPhones },
+          }] : []),
+          ...(manualPhones.length ? [{
+            receivedAt: { gte: contextCutoff },
+            connectorSourceId: null,
+            senderPhone: { in: manualPhones },
+          }] : []),
+        ],
+      },
+      select: {
+        id: true, connectorSourceId: true, externalThreadId: true, senderPhone: true,
+        messageText: true, receivedAt: true, sourceMetadata: true, resolutionNeeded: true,
+      },
+    }),
+    sourceIds.length
+      ? prisma.externalContact.findMany({
+          where: {
+            companyId: user.companyId,
+            connectorSourceId: { in: sourceIds },
+            connectorSource: { connectorKey: "whatsapp_business" },
+            phone: { in: connectorPhones },
+          },
+          select: {
+            connectorSourceId: true,
+            phone: true,
+            reviewStatus: true,
+            reviewClassification: true,
+            importedContact: {
+              select: {
+                id: true,
+                isActive: true,
+                client: {
+                  select: {
+                    id: true,
+                    isActive: true,
+                    jobs: {
+                      where: { jobStatus: { notIn: [JOB_STATUS_COMPLETED, "zruseno"] } },
+                      select: { id: true },
+                    },
+                    quotes: {
+                      where: { quoteStatus: { in: ["draft", "sent"] } },
+                      select: { id: true },
+                    },
+                    invoices: {
+                      where: { invoiceStatus: { in: ["draft", "issued"] } },
+                      select: { id: true },
+                    },
+                    tasks: {
+                      where: { taskStatus: { notIn: ["completed", "cancelled"] } },
+                      select: { id: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        })
+      : Promise.resolve([]),
+    prisma.lead.findMany({
+      where: {
+        companyId: user.companyId,
+        phone: { not: null },
+        leadStatus: { in: ["new", "contacted", "qualified"] },
+      },
+      select: { phone: true },
+    }),
+  ]);
+
+  const unresolvedById = new Map(unresolvedIntakes.map((intake) => [intake.id, intake]));
+  const contextByConversation = new Map<string, WhatsAppContextIntake[]>();
+  for (const intake of history) {
+    const key = whatsappConversationKey(intake);
+    const group = contextByConversation.get(key) ?? [];
+    group.push(intake);
+    contextByConversation.set(key, group);
+  }
+
+  const sendersByPhone = new Map(senders.flatMap((sender) => {
+    const key = whatsappSenderKey(sender.connectorSourceId, sender.phone);
+    return key ? [[key, sender] as const] : [];
+  }));
+  const openLeadPhones = new Set(leads.map((lead) => normalizePhone(lead.phone)).filter((phone): phone is string => Boolean(phone)));
+
+  const conversations = new Map<string, typeof enquiries>();
+  for (const enquiry of whatsApp) {
+    const intake = unresolvedById.get(enquiry.sourceId);
+    if (!intake) continue;
+    const key = whatsappConversationKey(intake);
+    const group = conversations.get(key) ?? [];
+    group.push(enquiry);
+    conversations.set(key, group);
+  }
+
+  const triaged: Array<{
+    latest: (typeof enquiries)[number];
+    triage: WhatsAppTriageResult;
+    count: number;
+  }> = [];
+  for (const [conversationKey, group] of conversations) {
+    group.sort((a, b) => b.receivedAt.getTime() - a.receivedAt.getTime());
+    const latest = group[0];
+    const intake = unresolvedById.get(latest.sourceId);
+    if (!intake) continue;
+    const senderKey = whatsappSenderKey(intake.connectorSourceId, intake.senderPhone);
+    const sender = senderKey ? sendersByPhone.get(senderKey) ?? null : null;
+    const client = sender?.importedContact?.client;
+    const phone = normalizePhone(intake.senderPhone);
+    const triage = triageWhatsAppConversation(
+      (contextByConversation.get(conversationKey) ?? [intake]).map(whatsappTriageMessage),
+      {
+        reviewStatus: sender?.reviewStatus ?? "pending",
+        reviewClassification: sender?.reviewClassification ?? null,
+        exactPhoneMatch: Boolean(sender),
+        linkedContact: Boolean(sender?.importedContact?.isActive),
+        linkedClient: Boolean(client?.isActive),
+        exactOpenLead: Boolean(phone && openLeadPhones.has(phone)),
+        activeJobCount: client?.jobs.length ?? 0,
+        activeQuoteCount: client?.quotes.length ?? 0,
+        openInvoiceCount: client?.invoices.length ?? 0,
+        openTaskCount: client?.tasks.length ?? 0,
+      },
+    );
+    if (triage.decision !== "ignore") triaged.push({ latest, triage, count: group.length });
+  }
+
+  // Reply-window urgency remains restricted to a human-confirmed customer.
+  // Supplier/employee work can be relevant without being treated as a sale.
   const windows = await whatsAppReplyWindows(
     user.companyId,
-    enquiries.filter((enquiry) => enquiry.channel === "whatsapp").map((enquiry) => enquiry.sourceId),
+    triaged.filter((group) => group.triage.reason === "confirmed_customer_work").map((group) => group.latest.sourceId),
   );
   const now = Date.now();
-  return enquiries.map((enquiry): AttentionItemBase => {
-    const entity = { type: "communication_intake", id: enquiry.sourceId, label: enquiry.senderLabel };
-    const unresolved: AttentionItemBase = {
-      key: `unresolved_enquiry:${enquiry.sourceId}`,
+
+  const whatsAppItems = triaged.map(({ latest, triage, count }): AttentionItemBase => {
+    const actionable = triage.decision === "actionable";
+    const entity = { type: "communication_intake", id: latest.sourceId, label: latest.senderLabel };
+    const base: AttentionItemBase = {
+      key: `unresolved_enquiry:${latest.sourceId}`,
       type: "unresolved_enquiry",
-      // No deadline/SLA is stored for a raw intake, so urgency must not be
-      // fabricated from age alone. The explicit unresolved state warrants a
-      // warning; only records with real overdue dates can become urgent.
-      severity: "warning",
-      title: `Unresolved enquiry from ${enquiry.senderLabel}`,
-      message: `Inbound ${enquiry.channel.replace(/_/g, " ")} enquiry is still marked as needing resolution. No response deadline is recorded.`,
+      severity: actionable ? "warning" : "info",
+      title: actionable
+        ? `Work conversation with ${latest.senderLabel} needs review`
+        : `Review possible work enquiry from ${latest.senderLabel}`,
+      message: actionable
+        ? `${count} unresolved incoming message(s) in this work conversation. Check whether a reply or follow-up is actually needed.`
+        : `${count} incoming message(s) contain work and action signals, but the sender is not a confirmed business contact. Review first; nothing was sent or imported.`,
       dueAt: null,
       entity,
+      classification: attentionClassification(triage),
     };
-    // An unanswered WhatsApp message does have a real deadline: the platform's
-    // reply window.
-    const closesAt = windows.get(enquiry.sourceId);
-    if (!closesAt) return unresolved;
+    if (triage.reason !== "confirmed_customer_work") return base;
+    const closesAt = windows.get(latest.sourceId);
+    if (!closesAt) return base;
     const left = closesAt.getTime() - now;
     if (left <= 0) {
-      return {
-        ...unresolved,
-        message: "Still unanswered, and WhatsApp's 24-hour reply window has closed: WhatsApp now accepts only approved template messages, which Secretary does not send yet. Call or email them instead.",
-      };
+      return { ...base, message: `${base.message} The WhatsApp 24-hour free-form reply window has closed.` };
     }
     if (left <= WHATSAPP_WINDOW_URGENT_MS) {
-      // A key of its own, so a warning acknowledged earlier still comes back
-      // when the window is about to close.
       return {
-        key: `whatsapp_reply_window:${enquiry.sourceId}`,
+        ...base,
+        key: `whatsapp_reply_window:${latest.sourceId}`,
         type: "whatsapp_reply_window",
         severity: "urgent",
-        title: `Reply to ${enquiry.senderLabel} on WhatsApp soon`,
-        message: `A free-form WhatsApp reply is possible for ${timeLeft(left)} more — until 24 hours after their last message. After that WhatsApp accepts only approved templates, which Secretary does not send yet.`,
+        title: `WhatsApp reply window closing for ${latest.senderLabel}`,
+        message: `${base.message} A free-form reply may be possible for ${timeLeft(left)} more. Verify that a response is needed before sending.`,
         dueAt: closesAt.toISOString(),
-        entity,
       };
     }
     return {
-      ...unresolved,
-      message: `Still unanswered. WhatsApp accepts a free-form reply for ${timeLeft(left)} more (until 24 hours after their last message).`,
+      ...base,
+      message: `${base.message} The WhatsApp free-form reply window lasts for ${timeLeft(left)} more.`,
       dueAt: closesAt.toISOString(),
     };
   });
-}
 
+  return [...rawNonWhatsApp, ...whatsAppItems];
+}
 async function buildOverloadItems(user: AuthedUser): Promise<AttentionItemBase[]> {
   const report = await detectUpcomingOverload(user);
   return report.overloadedWeeks.map((w) => {

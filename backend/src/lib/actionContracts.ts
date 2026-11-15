@@ -119,6 +119,25 @@ export const ARCHIVE_CLIENT_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "CLIENT_NOT_FOUND", "CONFIRMATION_REQUIRED", "VALIDATION_FAILED"],
 };
 
+// Permanent deletion is a different action from archiving, never a stronger
+// form of it. Archive (above) hides a client and keeps every record; this
+// removes the client row itself and is refused while anything of business
+// value still points at it (jobs, quotes, invoices, payments, communication,
+// tasks, photos, documents, contacts, converted leads, merge history). It is
+// an interactive action only: a fresh preview with dependency counts, the
+// exact name typed back and the preview's digest, all compared again under
+// the row lock of the delete. Not offered to voice or to MCP clients (the
+// contact counterpart below is offered to MCP, with the same guards).
+export const DELETE_CLIENT_PERMANENTLY_ACTION: ActionContract = {
+  actionName: "delete_client_permanently",
+  purpose: "Permanently remove a client that has no jobs, quotes, invoices, payments, communication, tasks, photos, documents, contacts or other dependent history, after a fresh dependency preview and an explicit typed confirmation.",
+  requiredPermission: "crm.manage",
+  riskLevel: 5,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.clients", "crm.jobs", "crm.quotes", "crm.invoices", "crm.payments", "crm.communications", "crm.communication_intakes", "crm.tasks", "crm.portfolio_photos", "crm.document_records", "crm.contacts", "crm.leads", "crm.client_merge_records"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CLIENT_NOT_FOUND", "CONFIRMATION_REQUIRED", "CONFIRMATION_TEXT_MISMATCH", "PREVIEW_STALE", "DELETION_BLOCKED", "SAFE_MODE_ACTIVE"],
+};
+
 // Canonical job statuses — must stay in sync with prisma/schema.prisma and the
 // VCUBF master documentation section 25 (Calendar and Scheduling Intelligence
 // Module statuses). Technical ASCII codes; Czech/English display labels belong
@@ -239,6 +258,48 @@ export const SET_COMPANY_AGENT_MODE_ACTION: ActionContract = {
   confirmationRequired: false,
   dataSources: ["user_input", "companies.agent_enabled_at"],
   possibleErrors: ["MISSING_PERMISSION", "ADMINISTRATOR_REQUIRED", "VALIDATION_FAILED", "COMPANY_NOT_FOUND"],
+};
+
+export const AUTHORIZE_MCP_CLIENT_ACTION: ActionContract = {
+  actionName: "authorize_mcp_client",
+  purpose:
+    "Let an external AI client (ChatGPT, Claude) use the MCP gateway. The person approves on the OAuth consent page with their Secretary e-mail and password. secretary.read is always granted; secretary.write is offered only while MCP_WRITE_ENABLED is on and granted only with its own ticked box and button, never by a refresh. Refused for an inactive account, a temporary password or during an emergency stop. Changing the password ends every such connection.",
+  requiredPermission: "authenticated",
+  riskLevel: 2,
+  confirmationRequired: true,
+  dataSources: ["user_input", "auth.users", "mcp_oauth_clients", "mcp_oauth_grants"],
+  possibleErrors: ["INVALID_CREDENTIALS", "MUST_CHANGE_PASSWORD", "SAFE_MODE_ACTIVE", "INVALID_REQUEST"],
+};
+
+export const MCP_READ_TOOL_ACTION: ActionContract = {
+  actionName: "mcp_read_tool",
+  purpose:
+    "Answer one read-only tool call from an external AI client (ChatGPT, Claude) through the MCP gateway: a catalogue tool that only reads and needs no confirmation, or a canonical parser command the parser classifies as a read. Runs under the caller's identity, permissions and the administrator's capability switches; refused during an emergency stop. Audited with the tool name, the result and a keyed fingerprint of the arguments, never the arguments or the data returned.",
+  requiredPermission: "authenticated",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["user_input", "company_records"],
+  possibleErrors: ["MISSING_PERMISSION", "NOT_ALLOWED", "READ_ONLY_GATEWAY", "UNRECOGNIZED_COMMAND", "VALIDATION_FAILED", "SAFE_MODE_ACTIVE"],
+};
+
+// The write half of the MCP gateway (step P2c). A wrapper, like
+// mcp_read_tool: every change is made by the owning service under its own
+// Action Contract (create_client, update_task, prepare_quote, ...), which
+// keeps its own permission, validation and detailed audit entry. This entry
+// records that the change came from an external AI client, which client, the
+// tool, the phase (direct, prepare, confirm, cancel) and the outcome.
+export const MCP_WRITE_TOOL_ACTION: ActionContract = {
+  actionName: "mcp_write_tool",
+  purpose:
+    "Carry out one write tool call from an external AI client (ChatGPT, Claude) through the MCP gateway, only with an access token the person approved for secretary.write and only while MCP_WRITE_ENABLED is on. Internal record changes run once per idempotency key; archiving, lead conversion, invoice status changes, WhatsApp sender approval and rejection, and permanent contact deletion are first returned as an exact preview and run only on an explicit confirmation bound to that preview, that user and that client, once (permanent deletion also needs the contact's exact name typed by the person). Runs under the caller's identity, permissions and the administrator's capability switches; refused during an emergency stop. Nothing is e-mailed, messaged or published. Audited with the tool, the phase, the result and a keyed fingerprint of the arguments.",
+  requiredPermission: "authenticated",
+  riskLevel: 3,
+  confirmationRequired: false,
+  dataSources: ["user_input", "company_records", "voice.pending_actions", "idempotency_records"],
+  possibleErrors: [
+    "INSUFFICIENT_SCOPE", "WRITE_DISABLED", "NOT_ALLOWED", "MISSING_PERMISSION", "VALIDATION_FAILED", "IDEMPOTENCY_KEY_REUSED",
+    "IDEMPOTENCY_IN_PROGRESS", "CONFIRMATION_NOT_FOUND", "CONFIRMATION_ALREADY_USED", "CONFIRMATION_TEXT_MISMATCH", "SAFE_MODE_ACTIVE",
+  ],
 };
 
 export const EXECUTE_AGENT_PROPOSAL_ACTION: ActionContract = {
@@ -641,12 +702,107 @@ export const RECEIVE_WHATSAPP_MESSAGE_ACTION: ActionContract = {
 
 export const SYNC_WHATSAPP_CONTACTS_ACTION: ActionContract = {
   actionName: "sync_whatsapp_sender_contacts",
-  purpose: "Stage sender metadata from signed inbound WhatsApp Business webhooks, create a CRM contact only for a new valid number, or link exactly one existing contact without modifying existing CRM data.",
+  purpose: "Stage sender metadata from signed inbound WhatsApp Business webhooks for the sender review. Never creates, links or changes a CRM contact or client and never changes a review decision.",
   requiredPermission: "connectors.manage",
   riskLevel: 2,
   confirmationRequired: false,
-  dataSources: ["meta.whatsapp_webhook", "connector_sources", "external_contacts", "crm.contacts"],
+  dataSources: ["meta.whatsapp_webhook", "connector_sources", "external_contacts"],
   possibleErrors: ["CONNECTOR_CONFIGURATION_MISSING", "WEBHOOK_SIGNATURE_INVALID", "PROVIDER_RESPONSE_INVALID", "CONNECTOR_SOURCE_NOT_FOUND"],
+};
+
+// A person decides which WhatsApp senders are customers. Approving creates
+// (or links) the CRM contact and, if asked, a client, after a preview and an
+// explicit confirmation. Rejecting records why (personal, employee,
+// subcontractor, supplier, other) and keeps the sender out of CRM for good,
+// until a person reopens it. Message text only ever suggests; it never decides.
+export const REVIEW_WHATSAPP_SENDER_ACTION: ActionContract = {
+  actionName: "review_whatsapp_sender",
+  purpose: "Classify a staged WhatsApp sender as a customer (then create or link its CRM contact and optionally a client, after confirmation) or as not a customer, or mark it for later review; inbound messages are kept either way.",
+  requiredPermission: "crm.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "external_contacts", "crm.communication_intakes", "crm.contacts", "crm.clients"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONNECTOR_SOURCE_NOT_FOUND", "WHATSAPP_SENDER_NOT_FOUND", "WHATSAPP_SENDER_INVALID_NUMBER", "WHATSAPP_SENDER_SUPPRESSED", "WHATSAPP_SENDER_CHANGED", "CLIENT_NOT_FOUND", "DUPLICATE_CONTACT_AMBIGUOUS", "DUPLICATE_CLIENT_POSSIBLE", "CONFIRMATION_REQUIRED"],
+};
+
+// The owner's phone through SMS Bridge (MarekDesignLeaf/sms-bridge-api): SMS the
+// owner synchronised to the bridge, WhatsApp and Messenger messages captured
+// from the phone's notifications (no history, no media), and the phone's
+// health. Read only; the bridge serves one configured company.
+export const READ_PHONE_MESSAGES_ACTION: ActionContract = {
+  actionName: "read_phone_messages",
+  purpose: "Read the owner phone's status, the SMS the owner synchronised to SMS Bridge, and WhatsApp/Messenger messages captured from the phone's notifications, for the one company the phone is configured for.",
+  requiredPermission: "connectors.read",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["sms_bridge.phone_messages", "sms_bridge.chat_messages", "sms_bridge.device_health"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "PROVIDER_UNAVAILABLE", "CONNECTOR_AUTHORIZATION_REQUIRED", "VALIDATION_FAILED"],
+};
+
+// What Meta last reported (sent, delivered, read, failed) for a message the
+// company's WhatsApp Business number sent, from Meta's verified status webhooks.
+// Read only; a message Meta has not reported on is said to be so.
+export const READ_WHATSAPP_DELIVERY_STATUS_ACTION: ActionContract = {
+  actionName: "read_whatsapp_delivery_status",
+  purpose: "Read the delivery status Meta reported for a WhatsApp message the company's WhatsApp Business number sent: sent, delivered, read or failed.",
+  requiredPermission: "connectors.read",
+  riskLevel: 1,
+  confirmationRequired: false,
+  dataSources: ["meta.whatsapp_status_webhook", "whatsapp_message_statuses"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "VALIDATION_FAILED"],
+};
+
+// An SMS from the owner's SIM, queued on the phone by SMS Bridge only after the
+// user reviewed the exact number and text and confirmed. One confirmation is
+// one bridge request id: it can never be sent twice; an unknown outcome is
+// reported, never retried by itself.
+export const SEND_PHONE_SMS_ACTION: ActionContract = {
+  actionName: "send_phone_sms",
+  purpose: "Send one SMS from the owner's phone to an explicit E.164 number through SMS Bridge, only after the user reviews the final number and text and confirms the external action.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "sms_bridge.messages"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "CONFIRMATION_REQUIRED", "VALIDATION_FAILED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE", "OUTCOME_UNKNOWN"],
+};
+
+// A reply in a WhatsApp or Messenger chat sent by the phone through that chat's
+// notification reply action (SMS Bridge listener), not through any WhatsApp
+// API: only to a chat with a captured notification, after preview and yes.
+export const REPLY_PHONE_CHAT_ACTION: ActionContract = {
+  actionName: "reply_phone_chat",
+  purpose: "Reply in a WhatsApp or Messenger chat through the owner phone's notification reply action (SMS Bridge), only to a chat with a captured notification and only after the user reviews the exact chat and text and confirms.",
+  requiredPermission: "connectors.manage",
+  riskLevel: 3,
+  confirmationRequired: true,
+  dataSources: ["user_input", "sms_bridge.chat_messages", "sms_bridge.device_actions"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "CONFIRMATION_REQUIRED", "VALIDATION_FAILED", "PHONE_CHAT_NOT_FOUND", "PROVIDER_UNAVAILABLE", "OUTCOME_UNKNOWN"],
+};
+
+// The owner's PC through the PC Control Plus relay, reading only: connection
+// status, page snapshots, page text and data, public web pages, and Windows
+// window/control snapshots, as the shared pc_engine catalogue defines them.
+export const READ_PC_ACTION: ActionContract = {
+  actionName: "read_pc",
+  purpose: "Read from the owner's PC through PC Control Plus: browser connection status, the current page's controls, text and data, public web pages, and Windows window and control snapshots, without changing anything.",
+  requiredPermission: "company.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["pc_control_plus.browser", "pc_control_plus.windows_ui", "public_web"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "PROVIDER_UNAVAILABLE", "PC_AGENT_OFFLINE", "PC_AGENT_BUSY", "VALIDATION_FAILED"],
+};
+
+// Acting on the owner's PC (browser navigation and steps, Windows UI steps)
+// through PC Control Plus, only after a preview and the user's yes here, and
+// then again only with the PC owner's local approval on the PC itself.
+export const OPERATE_PC_ACTION: ActionContract = {
+  actionName: "operate_pc",
+  purpose: "Operate the owner's PC through PC Control Plus (open a page, run browser or Windows UI steps, switch tabs) from the shared pc_engine catalogue, only after the user reviews the exact steps and confirms; the PC owner approves again on the PC.",
+  requiredPermission: "company.manage",
+  riskLevel: 4,
+  confirmationRequired: true,
+  dataSources: ["user_input", "pc_control_plus.browser", "pc_control_plus.windows_ui"],
+  possibleErrors: ["MISSING_PERMISSION", "CONNECTOR_NOT_CONFIGURED", "CONFIRMATION_REQUIRED", "VALIDATION_FAILED", "PC_AGENT_OFFLINE", "PC_AGENT_BUSY", "PC_OWNER_DENIED", "PROVIDER_UNAVAILABLE", "OUTCOME_UNKNOWN"],
 };
 
 export const SEND_WHATSAPP_MESSAGE_ACTION: ActionContract = {
@@ -1258,6 +1414,21 @@ export const ARCHIVE_CONTACT_ACTION: ActionContract = {
   confirmationRequired: true,
   dataSources: ["user_input", "crm.contacts", "crm.clients"],
   possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONTACT_NOT_FOUND", "CONFIRMATION_REQUIRED"],
+};
+
+// The contact counterpart of delete_client_permanently. A contact owns no
+// business records, so only the contact row goes: its client is kept, staged
+// connector records (Google or WhatsApp) are kept and unlinked and marked
+// deleted_from_crm so the sender is not imported again by itself, and
+// communication history is kept untouched.
+export const DELETE_CONTACT_PERMANENTLY_ACTION: ActionContract = {
+  actionName: "delete_contact_permanently",
+  purpose: "Permanently remove a contact after a fresh preview of its identity, client link and connector links and an explicit typed confirmation; its client, staged connector data and communication history are kept.",
+  requiredPermission: "crm.manage",
+  riskLevel: 5,
+  confirmationRequired: true,
+  dataSources: ["user_input", "crm.contacts", "crm.clients", "external_contacts", "crm.communication_intakes"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "CONTACT_NOT_FOUND", "CONFIRMATION_REQUIRED", "CONFIRMATION_TEXT_MISMATCH", "PREVIEW_STALE", "DELETION_BLOCKED", "SAFE_MODE_ACTIVE"],
 };
 
 // Document Registry — metadata only until an authorised file-storage

@@ -135,6 +135,10 @@ export interface WhatsAppStatusUpdate {
   status: string;
   recipientId: string | null;
   occurredAt: Date;
+  /** Meta's first error for a failed message, as Meta reported it. */
+  errorCode: string | null;
+  errorTitle: string | null;
+  phoneNumberId: string;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -201,7 +205,13 @@ export function parseWhatsAppWebhook(payload: unknown) {
         const id = stringValue(status?.id);
         const state = stringValue(status?.status);
         if (!id || !state) continue;
-        statuses.push({ id, status: state, recipientId: stringValue(status?.recipient_id), occurredAt: timestamp(status?.timestamp) });
+        const error = record(Array.isArray(status?.errors) ? status.errors[0] : undefined);
+        const code = error?.code;
+        statuses.push({
+          id, status: state, recipientId: stringValue(status?.recipient_id), occurredAt: timestamp(status?.timestamp),
+          errorCode: typeof code === "number" || typeof code === "string" ? String(code) : null,
+          errorTitle: stringValue(error?.title) ?? stringValue(error?.message), phoneNumberId,
+        });
       }
     }
   }

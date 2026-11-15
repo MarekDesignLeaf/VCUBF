@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import {
   CONTACT_CHANNELS,
@@ -19,6 +20,7 @@ import {
 } from "../lib/executionEngine.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
+import { assertNotInSafeModeLocked } from "../lib/safeMode.js";
 
 const contactFields = z.object({
   client_id: z.string().uuid().nullable().optional(),
@@ -274,7 +276,20 @@ export async function updateContact(user: AuthedUser, id: string, rawInput: unkn
   return ok(200, updated);
 }
 
-const archiveContactSchema = z.object({ confirmed: z.boolean().optional() });
+/**
+ * expected_revision, expected_display_name and expected_client_id (optional):
+ * the contact as the caller showed it for approval. With them, a confirmed
+ * archive happens only if the contact is still that revision, under that name
+ * and linked to that client (null: to none), compared under the row lock of
+ * the archive itself; otherwise CONTACT_CHANGED.
+ */
+const archiveContactSchema = z.object({
+  confirmed: z.boolean().optional(),
+  expected_revision: z.string().datetime().optional(),
+  expected_display_name: z.string().optional(),
+  expected_client_id: z.string().uuid().nullable().optional(),
+});
+class ContactChanged extends Error {}
 const pendingContactArchivePayloadSchema = z.object({ contactId: z.string().uuid(), displayName: z.string().min(1) });
 // The reviewed-action lifecycle (prepare → yes → claim once → execute →
 // resolve) lives in the Execution Engine; this service keeps the lookup, the
@@ -286,7 +301,12 @@ const CONTACT_ARCHIVE_REVIEW: ReviewedActionDefinition<z.infer<typeof pendingCon
   claimedStatus: "archiving",
 };
 
-export async function archiveContact(user: AuthedUser, id: string, rawInput: unknown): Promise<ServiceResult<unknown>> {
+export async function archiveContact(
+  user: AuthedUser,
+  id: string,
+  rawInput: unknown,
+  options: { safeModeLocked?: boolean } = {},
+): Promise<ServiceResult<unknown>> {
   if (!canManageContacts(user)) {
     await auditError(user, ARCHIVE_CONTACT_ACTION, { id, input: rawInput }, "MISSING_PERMISSION");
     return fail(403, "MISSING_PERMISSION", "CRM management permission is required to archive contacts.");
@@ -301,12 +321,29 @@ export async function archiveContact(user: AuthedUser, id: string, rawInput: unk
     await auditError(user, ARCHIVE_CONTACT_ACTION, { id }, "CONTACT_NOT_FOUND");
     return fail(404, "CONTACT_NOT_FOUND", "The active contact was not found.");
   }
-  const preview = { contactId: existing.id, displayName: existing.displayName, client: existing.client };
+  const preview = { contactId: existing.id, displayName: existing.displayName, client: existing.client, revision: existing.updatedAt.toISOString() };
   if (!parsed.data.confirmed) {
     await auditError(user, ARCHIVE_CONTACT_ACTION, { id }, "CONFIRMATION_REQUIRED");
     return fail(409, "CONFIRMATION_REQUIRED", "Confirm archiving this contact. Source and client links will be preserved.", { preview });
   }
-  const archived = await prisma.contact.update({ where: { id: existing.id }, data: { isActive: false }, include: contactInclude });
+  const { expected_revision: expectedRevision, expected_display_name: expectedName, expected_client_id: expectedClientId } = parsed.data;
+  let archived;
+  try {
+    archived = await prisma.$transaction(async (tx) => {
+      if (options.safeModeLocked) await assertNotInSafeModeLocked(tx, user.companyId);
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM contacts WHERE id = ${existing.id} AND company_id = ${user.companyId} FOR UPDATE`);
+      const current = await tx.contact.findFirst({ where: { id: existing.id, companyId: user.companyId, isActive: true } });
+      if (!current) throw new ContactChanged();
+      if (expectedRevision !== undefined && current.updatedAt.toISOString() !== expectedRevision) throw new ContactChanged();
+      if (expectedName !== undefined && current.displayName !== expectedName) throw new ContactChanged();
+      if (expectedClientId !== undefined && (current.clientId ?? null) !== expectedClientId) throw new ContactChanged();
+      return tx.contact.update({ where: { id: existing.id }, data: { isActive: false }, include: contactInclude });
+    });
+  } catch (error) {
+    if (!(error instanceof ContactChanged)) throw error;
+    await auditError(user, ARCHIVE_CONTACT_ACTION, { id }, "CONTACT_CHANGED");
+    return fail(409, "CONTACT_CHANGED", "The contact changed after it was shown. Review it again.");
+  }
   await recordAudit({
     companyId: user.companyId,
     userId: user.id,

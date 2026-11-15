@@ -1,0 +1,28 @@
+# MCP server framework
+fastmcp>=2.12.0
+
+# System information
+psutil>=5.9.0
+
+# Browser control (Playwright drives Edge/Chrome over CDP)
+playwright>=1.50.0
+
+# Windows apps through UI Automation (no screenshots)
+uiautomation>=2.0.20; sys_platform == "win32"
+
+# Keyboard / clipboard / coordinate fallback
+pyautogui>=0.9.54
+pyperclip>=1.8.2
+
+# Screenshots (off by default)
+mss>=9.0.1
+Pillow>=10.0.0
+
+# Configuration
+PyYAML>=6.0
+
+# Windows-specific
+pywin32>=306; sys_platform == "win32"
+
+# Utilities
+pathlib2>=2.3.7

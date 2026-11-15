@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { recordAudit } from "../lib/audit.js";
 import { CONVERT_LEAD_ACTION, CREATE_LEAD_ACTION, UPDATE_LEAD_ACTION } from "../lib/actionContracts.js";
 import { phoneNumberSchema } from "../lib/contactNormalization.js";
 import type { AuthedUser } from "../middleware/auth.js";
 import { fail, ok, type ServiceResult } from "./result.js";
+import { assertNotInSafeModeLocked } from "../lib/safeMode.js";
 
 export const createLeadSchema = z.object({
   name: z.string().min(1, "name is required"),
@@ -196,65 +198,94 @@ export async function updateLead(user: AuthedUser, leadId: string, rawInput: unk
 }
 
 // convert_lead_to_client — Action Contract driven.
-export async function convertLead(user: AuthedUser, leadId: string): Promise<ServiceResult<unknown>> {
-  const lead = await prisma.lead.findFirst({ where: { id: leadId, companyId: user.companyId } });
-  if (!lead) {
-    await recordAudit({
-      companyId: user.companyId,
-      userId: user.id,
-      actionName: CONVERT_LEAD_ACTION.actionName,
-      inputPayload: { leadId },
-      riskLevel: CONVERT_LEAD_ACTION.riskLevel,
-      confirmationRequired: CONVERT_LEAD_ACTION.confirmationRequired,
-      result: "error",
-      errorMessage: "LEAD_NOT_FOUND",
+//
+// One transaction under the lead's row lock: the client and the lead's
+// converted status are saved together or not at all, two conversions of one
+// lead cannot both create a client, and with options.expectedRevision (the
+// lead's updatedAt as the caller showed it for approval, e.g. the MCP
+// gateway's preview) a lead edited since is refused with LEAD_CHANGED instead
+// of being converted with details nobody approved. With options.expectedClient
+// (the client the approved preview linked to, or null for a new client) the
+// outcome itself is bound too: the matching client is locked and must still
+// be that client under that name, or the conversion is refused with
+// CONVERSION_CHANGED, since a client's e-mail can change without the lead.
+export async function convertLead(
+  user: AuthedUser,
+  leadId: string,
+  options: { expectedRevision?: string; expectedClient?: { id: string; displayName: string } | null; safeModeLocked?: boolean } = {},
+): Promise<ServiceResult<unknown>> {
+  const outcome = await prisma.$transaction(async (tx) => {
+    if (options.safeModeLocked) await assertNotInSafeModeLocked(tx, user.companyId);
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM leads WHERE id = ${leadId} AND company_id = ${user.companyId} FOR UPDATE`);
+    const lead = await tx.lead.findFirst({ where: { id: leadId, companyId: user.companyId } });
+    if (!lead) return { error: "LEAD_NOT_FOUND" as const };
+    if (lead.leadStatus === "converted" && lead.convertedClientId) {
+      return { error: "UNSUPPORTED_ACTION" as const, lead };
+    }
+    if (options.expectedRevision && lead.updatedAt.toISOString() !== options.expectedRevision) {
+      return { error: "LEAD_CHANGED" as const, lead };
+    }
+    const matched = lead.email
+      ? await tx.client.findFirst({ where: { companyId: user.companyId, emailPrimary: lead.email }, select: { id: true } })
+      : null;
+    if (matched) await tx.$queryRaw(Prisma.sql`SELECT id FROM clients WHERE id = ${matched.id} AND company_id = ${user.companyId} FOR UPDATE`);
+    // Read again under its lock: what is linked is what was just compared.
+    const existingClient = matched
+      ? await tx.client.findFirst({ where: { id: matched.id, companyId: user.companyId, ...(lead.email ? { emailPrimary: lead.email } : {}) } })
+      : null;
+    if (options.expectedClient !== undefined) {
+      const expected = options.expectedClient;
+      const same = expected === null
+        ? existingClient === null
+        : existingClient !== null && existingClient.id === expected.id && existingClient.displayName === expected.displayName;
+      if (!same) return { error: "CONVERSION_CHANGED" as const, lead };
+    }
+    const client =
+      existingClient ??
+      (await tx.client.create({
+        data: {
+          companyId: user.companyId,
+          displayName: lead.name,
+          emailPrimary: lead.email ?? undefined,
+          phonePrimary: lead.phone ?? undefined,
+          source: `lead:${lead.id}`,
+          createdBy: user.id,
+        },
+      }));
+    const updatedLead = await tx.lead.update({
+      where: { id: lead.id },
+      data: { leadStatus: "converted", convertedClientId: client.id },
     });
-    return fail(404, "LEAD_NOT_FOUND");
-  }
-
-  if (lead.leadStatus === "converted" && lead.convertedClientId) {
-    await recordAudit({
-      companyId: user.companyId,
-      userId: user.id,
-      actionName: CONVERT_LEAD_ACTION.actionName,
-      inputPayload: { leadId: lead.id },
-      riskLevel: CONVERT_LEAD_ACTION.riskLevel,
-      confirmationRequired: CONVERT_LEAD_ACTION.confirmationRequired,
-      result: "error",
-      errorMessage: "UNSUPPORTED_ACTION",
-    });
-    return fail(409, "UNSUPPORTED_ACTION", "This lead has already been converted.", {
-      clientId: lead.convertedClientId,
-    });
-  }
-
-  const existingClient = lead.email
-    ? await prisma.client.findFirst({ where: { companyId: user.companyId, emailPrimary: lead.email } })
-    : null;
-
-  const client =
-    existingClient ??
-    (await prisma.client.create({
-      data: {
-        companyId: user.companyId,
-        displayName: lead.name,
-        emailPrimary: lead.email ?? undefined,
-        phonePrimary: lead.phone ?? undefined,
-        source: `lead:${lead.id}`,
-        createdBy: user.id,
-      },
-    }));
-
-  const updatedLead = await prisma.lead.update({
-    where: { id: lead.id },
-    data: { leadStatus: "converted", convertedClientId: client.id },
+    return { lead: updatedLead, client };
   });
+
+  if ("error" in outcome && outcome.error) {
+    await recordAudit({
+      companyId: user.companyId,
+      userId: user.id,
+      actionName: CONVERT_LEAD_ACTION.actionName,
+      inputPayload: { leadId: outcome.error === "LEAD_NOT_FOUND" ? leadId : outcome.lead.id },
+      riskLevel: CONVERT_LEAD_ACTION.riskLevel,
+      confirmationRequired: CONVERT_LEAD_ACTION.confirmationRequired,
+      result: "error",
+      errorMessage: outcome.error,
+    });
+    if (outcome.error === "LEAD_NOT_FOUND") return fail(404, "LEAD_NOT_FOUND");
+    if (outcome.error === "LEAD_CHANGED") return fail(409, "LEAD_CHANGED", "The lead changed after it was shown. Review it again.");
+    if (outcome.error === "CONVERSION_CHANGED") {
+      return fail(409, "CONVERSION_CHANGED", "The client this lead would be linked to changed after it was shown. Review it again.");
+    }
+    return fail(409, "UNSUPPORTED_ACTION", "This lead has already been converted.", {
+      clientId: outcome.lead.convertedClientId,
+    });
+  }
+  const { lead: updatedLead, client } = outcome as { lead: Awaited<ReturnType<typeof prisma.lead.update>>; client: Awaited<ReturnType<typeof prisma.client.create>> };
 
   await recordAudit({
     companyId: user.companyId,
     userId: user.id,
     actionName: CONVERT_LEAD_ACTION.actionName,
-    inputPayload: { leadId: lead.id },
+    inputPayload: { leadId: updatedLead.id },
     dataAfter: { lead: updatedLead, client },
     riskLevel: CONVERT_LEAD_ACTION.riskLevel,
     confirmationRequired: CONVERT_LEAD_ACTION.confirmationRequired,

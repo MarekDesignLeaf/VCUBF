@@ -1,0 +1,15 @@
+{
+  "bootstrap_runner_sha256": "624663fca082592c443b49a6668a12df93bba8c077ca6fa16ac08582d615234b",
+  "files": {
+    "agent.py": "1e48c386605e11665dd9e86db3187075ffd96c120f60806613f15e7dd65aed27",
+    "browser_dom.py": "3f992ea9d3145ed15e78ea200f794a6170808a257da98dac95f9d3916ab7e0d4",
+    "desktop_goal.py": "522ac75ee2e6aeccf20d04d7524ef466be3879f10b53dc8ec548bcec955678be",
+    "pc_engine.py": "22c7c652641018e60191a0992360a3b2d0384f31e5174b8131e93d71ba95a666",
+    "web_goal.py": "1ca164c0683a5ba092eb7ec9c251cf349f6f5178c0309d59c1751dfb7c98acbc",
+    "windows_uia.py": "3c75bcb0e38af7f40c7f4e9c5d66577d092c3b253fc2df16a9b128e62ba7fa85"
+  },
+  "release_id": "acd5cc8478576232a5cbcafb32bcd2762034fd95",
+  "release_sequence": 43502895022,
+  "schema": "pcp.release.v2",
+  "signature_ed25519": "rU2GInrB9QR2pnuTWu46fQKzcyHG7+Cm1tErSx/ALfDUtjwNi06Or3K4IOfywwGAfoUPMCdF2c8zsVp/hRykCg=="
+}

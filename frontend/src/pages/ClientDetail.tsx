@@ -11,6 +11,7 @@ import {
   JOB_STATUS_LABELS,
   COMMUNICATION_CHANNEL_LABELS,
 } from "../api/client";
+import { PermanentDeletePanel } from "../components/PermanentDeletePanel";
 
 export function ClientDetail() {
   const { id } = useParams<{ id: string }>();
@@ -23,6 +24,7 @@ export function ClientDetail() {
   const [photos, setPhotos] = useState<PortfolioPhoto[]>([]);
   const [showEditForm, setShowEditForm] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [showPermanentDelete, setShowPermanentDelete] = useState(false);
 
   function loadClient() {
     if (!id) return;
@@ -58,6 +60,10 @@ export function ClientDetail() {
   if (error) return <div className="error-banner">{error}</div>;
   if (!client) return <p>Loading…</p>;
 
+  function returnToClients() {
+    navigate("/clients", { replace: true });
+  }
+
   async function archiveCurrentClient() {
     if (!id || !client) return;
     setError(null);
@@ -73,7 +79,7 @@ export function ClientDetail() {
       const preview = err.details?.preview as { preservedRecords?: Record<string, number> } | undefined;
       const recordCount = Object.values(preview?.preservedRecords ?? {}).reduce((sum, count) => sum + count, 0);
       const confirmed = window.confirm(
-        `Archive ${client.displayName}? The client will disappear from the active client list. ${recordCount} linked record${recordCount === 1 ? "" : "s"} will be preserved.`
+        `Archive ${client.displayName}? The client will disappear from the active client list but is not deleted. ${recordCount} linked record${recordCount === 1 ? "" : "s"} will be preserved.`
       );
       if (!confirmed) {
         setArchiving(false);
@@ -99,11 +105,22 @@ export function ClientDetail() {
           <button type="button" onClick={() => setShowEditForm((visible) => !visible)}>
             {showEditForm ? "Cancel editing" : "Edit client"}
           </button>
-          <button type="button" className="danger-button" disabled={archiving} onClick={() => void archiveCurrentClient()}>
-            {archiving ? "Archiving…" : "Delete / archive client"}
+          <button type="button" className="secondary" data-action="client-archive" disabled={archiving} onClick={() => void archiveCurrentClient()}>
+            {archiving ? "Archiving…" : "Archive client"}
+          </button>
+          <button type="button" className="danger-button" data-action="client-permanent-delete" onClick={() => setShowPermanentDelete((visible) => !visible)}>
+            Delete permanently…
           </button>
         </div>
       </div>
+      {showPermanentDelete && id ? (
+        <PermanentDeletePanel
+          load={() => api.clients.permanentDeletionPreview(id)}
+          remove={(confirmation, key) => api.clients.deletePermanently(id, confirmation, key)}
+          onDeleted={returnToClients}
+          onClose={() => setShowPermanentDelete(false)}
+        />
+      ) : null}
       {showEditForm && (
         <EditClientForm
           client={client}

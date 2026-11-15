@@ -1,9 +1,15 @@
 import { Router } from "express";
 import { z } from "zod";
-import { ARCHIVE_CONTACT_ACTION, CREATE_CONTACT_ACTION, UPDATE_CONTACT_ACTION } from "../../lib/actionContracts.js";
+import {
+  ARCHIVE_CONTACT_ACTION,
+  CREATE_CONTACT_ACTION,
+  DELETE_CONTACT_PERMANENTLY_ACTION,
+  UPDATE_CONTACT_ACTION,
+} from "../../lib/actionContracts.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import * as contactService from "../../services/contactService.js";
+import * as permanentDeletion from "../../services/crmPermanentDeletionService.js";
 
 export const contactsRouter = Router();
 contactsRouter.use(requireAuth);
@@ -42,8 +48,22 @@ contactsRouter.put("/:id", requirePermission(UPDATE_CONTACT_ACTION.requiredPermi
   res.status(result.httpStatus).json(result.data);
 });
 
+// DELETE /:id is, and stays, the confirmed ARCHIVE. Permanent deletion is
+// the separate /permanent-deletion action below.
 contactsRouter.delete("/:id", requirePermission(ARCHIVE_CONTACT_ACTION.requiredPermission), async (req, res) => {
   const result = await contactService.archiveContact(req.user!, req.params.id, req.body);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.status(result.httpStatus).json(result.data);
+});
+
+contactsRouter.get("/:id/permanent-deletion", requirePermission(DELETE_CONTACT_PERMANENTLY_ACTION.requiredPermission), async (req, res) => {
+  const result = await permanentDeletion.previewContactPermanentDeletion(req.user!, req.params.id);
+  if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
+  res.status(result.httpStatus).json(result.data);
+});
+
+contactsRouter.post("/:id/permanent-deletion", requirePermission(DELETE_CONTACT_PERMANENTLY_ACTION.requiredPermission), async (req, res) => {
+  const result = await permanentDeletion.deleteContactPermanently(req.user!, req.params.id, req.body);
   if (!result.ok) return res.status(result.httpStatus).json({ error: result.error, message: result.message, ...result.extra });
   res.status(result.httpStatus).json(result.data);
 });

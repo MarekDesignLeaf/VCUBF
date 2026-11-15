@@ -74,6 +74,7 @@ import {
   requestFingerprint,
 } from "./shadowAgent.js";
 import { AGENT_TOOL_CATALOGUE, TOOL_CATALOGUE_FINGERPRINT, TOOL_CATALOGUE_VERSION } from "./toolCatalogue.js";
+import { ordinalCompare } from "../lib/ordinalCompare.js";
 
 type Row = Record<string, any>;
 
@@ -150,7 +151,8 @@ function isApprovalTurn(intent: string) {
   return intent.startsWith("confirm_") || intent.startsWith("cancel_");
 }
 
-function isReadCommand(intent: ParsedCommand["intent"]) {
+/** A command that only reads: run straight away by the agent, and the only commands the read-only MCP gateway runs. */
+export function isReadCommand(intent: ParsedCommand["intent"]) {
   return COMMAND_POLICY[intent].mode === "read" && !READS_NOT_RUN.has(intent);
 }
 
@@ -183,7 +185,7 @@ function stableJson(value: unknown): string {
   if (value && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, item]) => item !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right));
+      .sort(([left], [right]) => ordinalCompare(left, right));
     return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(",")}}`;
   }
   return JSON.stringify(value);

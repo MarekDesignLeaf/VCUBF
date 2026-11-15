@@ -4,6 +4,7 @@ import type { ParsedCommand } from "./commandParser.js";
 import { SECRETARY_NAVIGATION_CATALOGUE } from "./navigationCatalogue.js";
 import { VOICE_PAGE_ROUTES, type VoicePage } from "./voiceNavigation.js";
 import { capabilityActionForExecutableAction, EMMA_DYNAMIC_COMMAND_ACTIONS, EMMA_EXECUTABLE_ACTIONS, EMMA_NON_DIRECT_ACTIONS } from "./emmaExecutableActionCatalogue.js";
+import { ordinalCompare } from "./ordinalCompare.js";
 
 export type EmmaCapabilityMode = "read" | "write" | "external" | "administration";
 export type EmmaCapabilityKind = "page" | "action" | "command";
@@ -142,7 +143,7 @@ function isActionContract(value: unknown): value is ActionContract {
 
 export const EMMA_ACTION_CONTRACTS = Object.values(actionContractModule)
   .filter(isActionContract)
-  .sort((left, right) => left.actionName.localeCompare(right.actionName));
+  .sort((left, right) => ordinalCompare(left.actionName, right.actionName));
 
 function humanize(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -154,7 +155,7 @@ function slug(value: string) {
 
 function actionCategory(action: ActionContract) {
   const name = action.actionName;
-  if (/gmail|whatsapp|google_|connector/.test(name)) return "connectors";
+  if (/gmail|whatsapp|google_|connector|phone|_pc$/.test(name)) return "connectors";
   if (/client|contact|lead/.test(name)) return "customers";
   if (/job_|task|capacity|schedule|overload/.test(name)) return "work";
   if (/quote|invoice|payment|service_catalogue|reference_activity/.test(name)) return "sales";
@@ -168,7 +169,11 @@ function actionCategory(action: ActionContract) {
 }
 
 function actionMode(action: ActionContract): EmmaCapabilityMode {
-  if (/gmail|whatsapp|google_|connector/.test(action.actionName)) return "external";
+  // A read of a connected device or provider (read_phone_messages, read_pc,
+  // read_whatsapp_delivery_status) changes nothing: the agent may run it at once.
+  if (/^read_/.test(action.actionName) && !action.confirmationRequired && action.riskLevel <= 2) return "read";
+  // A message from the owner's phone leaves the company like an e-mail does.
+  if (/gmail|whatsapp|google_|connector|phone/.test(action.actionName)) return "external";
   if (action.requiredPermission === "company.manage" || action.requiredPermission === "users.manage") return "administration";
   if (action.riskLevel === 0 || /^(get|list|find|detect|check|recall|export|analyze)_/.test(action.actionName)) return "read";
   return "write";
@@ -261,7 +266,7 @@ const commandCapabilities: EmmaCapability[] = (Object.entries(COMMAND_POLICY) as
   }));
 
 export const EMMA_CAPABILITIES = [...pageCapabilities, ...actionCapabilities, ...commandCapabilities]
-  .sort((left, right) => left.category.localeCompare(right.category) || left.kind.localeCompare(right.kind) || left.label.localeCompare(right.label));
+  .sort((left, right) => ordinalCompare(left.category, right.category) || ordinalCompare(left.kind, right.kind) || ordinalCompare(left.label, right.label));
 
 export const EMMA_PAGE_CAPABILITY_COUNT = pageCapabilities.length;
 export const EMMA_ACTION_CAPABILITY_COUNT = actionCapabilities.length;
