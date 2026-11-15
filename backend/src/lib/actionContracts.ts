@@ -45,6 +45,18 @@ export const CLEAR_VOICE_DEVICE_HISTORY_ACTION: ActionContract = {
   possibleErrors: ["MISSING_PERMISSION", "CONFIRMATION_REQUIRED", "SAFE_MODE_ACTIVE"],
 };
 
+// The company's name: what its quotes, invoices and messages carry. The page
+// saves it directly; said by voice it is read back first.
+export const UPDATE_COMPANY_PROFILE_ACTION: ActionContract = {
+  actionName: "update_company_profile",
+  purpose: "Rename the company — the name its quotes, invoices and outgoing messages carry.",
+  requiredPermission: "company.manage",
+  riskLevel: 2,
+  confirmationRequired: false,
+  dataSources: ["user_input", "company"],
+  possibleErrors: ["MISSING_PERMISSION", "VALIDATION_FAILED", "COMPANY_NOT_FOUND", "COMPANY_NAME_UNCHANGED"],
+};
+
 // A learned or hand-added spelling of the assistant's name or of a command.
 // Removed, it no longer corrects what is heard; it can be taught again.
 export const DELETE_VOICE_ALIAS_ACTION: ActionContract = {

@@ -768,3 +768,18 @@ describe("the speaker's own voice housekeeping", () => {
     assert.equal(parseTextCommand("smaž oznámení", "cs-CZ").intent, "prepare_delete_notifications");
   });
 });
+
+describe("renaming the company", () => {
+  const rename = (name: string) => ({ intent: "execute_action", entities: { action: "rename_company", parameters: { name } } });
+
+  it("takes the new name as said, keeping a legal form's final full stop", () => {
+    assert.deepEqual(parseTextCommand("Přejmenuj firmu na Zahrady Novák s.r.o.", "cs-CZ"), rename("Zahrady Novák s.r.o."));
+    assert.deepEqual(parseTextCommand("změň název firmy na „DesignLeaf Gardens“", "cs-CZ"), rename("DesignLeaf Gardens"));
+    assert.deepEqual(parseTextCommand("Rename the company to Marek DesignLeaf Ltd.", "en-GB"), rename("Marek DesignLeaf Ltd"));
+    assert.deepEqual(parseTextCommand("Zmień nazwę firmy na Ogrody Nowak sp. z o.o.", "pl-PL"), rename("Ogrody Nowak sp. z o.o."));
+  });
+
+  it("leaves renaming a client to the client command", () => {
+    assert.equal(parseTextCommand("přejmenuj klienta Novák na Dvořák", "cs-CZ").intent, "update_client");
+  });
+});

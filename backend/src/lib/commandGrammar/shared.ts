@@ -417,6 +417,25 @@ export function parseVoiceHousekeeping(text: string, words: VoiceHousekeepingWor
   return heard ? { intent: "execute_action", entities: { action: "remove_voice_alias", parameters: { heard } } } : undefined;
 }
 
+/**
+ * "přejmenuj firmu na Zahrady Novák s.r.o.": the voice action rename_company.
+ * The pattern is folded and captures the new name, which is cut from the
+ * sentence as said — capitals, accents and all. It is read back before it changes.
+ */
+export function parseRenameCompany(text: string, pattern: RegExp): Parsed<"execute_action"> | undefined {
+  const cleaned = withoutFinalPunctuation(text).normalize("NFC").replace(/\s+/g, " ").trim();
+  const said = fold(cleaned);
+  const match = new RegExp(pattern.source, "du").exec(said);
+  const at = match?.indices?.[1];
+  if (!at) return undefined;
+  const name = (said.length === cleaned.length ? cleaned.slice(at[0], at[1]) : match![1])
+    .replace(/^[\s"'“”„«»‘’]+|[\s"'“”„«»‘’]+$/gu, "")
+    .trim();
+  // The sentence's full stop also ends "s.r.o." — put it back on a legal form that needs it.
+  const legal = /(?:^|\s)(?:s\.r\.o|a\.s|v\.o\.s|k\.s|sp\. z o\.o)$/iu.test(name) ? `${name}.` : name;
+  return legal.length >= 2 ? { intent: "execute_action", entities: { action: "rename_company", parameters: { name: legal } } } : undefined;
+}
+
 /** "open calendar", "otevři kalendář": a verb of this language, then a page of the menu. */
 export function parseNavigation(text: string, verbs: string): Parsed<"navigate"> | undefined {
   const match = text.match(new RegExp(`^(?:${verbs})\\s+(.+)$`, "iu"));

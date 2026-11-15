@@ -11,10 +11,13 @@ import type { ParsedCommand } from "../commandParser.js";
 import { resolveNavigationSection } from "../navigationCatalogue.js";
 import {
   connectorTarget, extractContact, extractLabelled, fold, nameOnly, normalizeDictatedPhone, parseAgendaCommand,
-  parseEmailCommand, parseLanguageSwitch, parseNavigation, parseOpenRecord, parseSendDocument, parseVoiceHousekeeping, parseWhatsAppCommand, withoutFinalPunctuation,
+  parseEmailCommand, parseLanguageSwitch, parseNavigation, parseOpenRecord, parseRenameCompany, parseSendDocument, parseVoiceHousekeeping, parseWhatsAppCommand, withoutFinalPunctuation,
   type CommandGrammar, type OpenRecordWords, type Parsed, type SendDocumentWords, type VoiceHousekeepingWords,
 } from "./shared.js";
 // "clear my voice history", "forget the word Alfons". Folded.
+// "rename the company to …". Folded.
+const RENAME_COMPANY = /^(?:please\s+)?(?:rename\s+(?:the\s+|our\s+|my\s+)?(?:company|business)|change\s+(?:the\s+|our\s+|my\s+)?(?:company|business)\s+name)\s+to\s+(.+)$/u;
+
 const VOICE_HOUSEKEEPING: VoiceHousekeepingWords = {
   clearHistory: /^(?:please\s+)?(?:(?:clear|delete|erase|wipe)\s+(?:all\s+)?(?:(?:of\s+)?(?:my|our|the)\s+)?(?:saved\s+)?(?:(?:voice|conversation|chat)\s+)*history|(?:clear|delete|erase)\s+(?:all\s+)?(?:(?:of\s+)?(?:my|our|the)\s+)?(?:saved\s+)?conversations(?:\s+with\s+you)?)(?:\s+please)?$/u,
   forgetWord: /^(?:please\s+)?(?:forget|remove|delete)\s+(?:the\s+)?(?:learned\s+)?(?:word|alias)\s+(.+)$/u,
@@ -425,6 +428,7 @@ export const english: CommandGrammar = {
         today: /today/iu,
       })
       ?? parseVoiceHousekeeping(text, VOICE_HOUSEKEEPING)
+      ?? parseRenameCompany(text, RENAME_COMPANY)
       ?? notificationDeletion(text)
       ?? clientMutation(text)
       ?? leadMutation(text)
