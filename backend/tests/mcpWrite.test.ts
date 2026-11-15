@@ -13,7 +13,7 @@ import { confirmPendingEmmaAction } from "../src/services/emmaExecutableActionSe
 import { addPayment, changeInvoiceStatus } from "../src/services/invoiceService.js";
 import { convertLead } from "../src/services/leadService.js";
 import { archiveContact } from "../src/services/contactService.js";
-import { SafeModeActiveError } from "../src/lib/safeMode.js";
+import { lockSafeModeSwitch, SafeModeActiveError, whileNotInSafeMode } from "../src/lib/safeMode.js";
 import { resetDb, seedCompanyAndAdmin, TEST_COMPANY_ID } from "./setup.js";
 
 // MCP gateway write access — voice assistant master document 1.1a, step P2c.
@@ -791,11 +791,12 @@ describe("MCP gateway write access", () => {
     const invoice = await draftInvoice("MCP-STOP-1", [{ description: "Fencing", unit_price: 300 }]);
     const user = (await prisma.user.findUniqueOrThrow({ where: { email: "admin@test.local" } })) as unknown as AuthedUser;
     // The administrator's switch, exactly as company/routes.ts takes it: the
-    // company row FOR UPDATE, then the stop, committed a moment later.
+    // stop lock, the company row FOR UPDATE, then the stop, committed a moment later.
     let release!: () => void;
     let locked!: () => void;
     const lockHeld = new Promise<void>((resolve) => { locked = resolve; });
     const switching = prisma.$transaction(async (tx) => {
+      await lockSafeModeSwitch(tx, TEST_COMPANY_ID);
       await tx.$queryRawUnsafe(`SELECT "safe_mode_since" FROM "companies" WHERE "id" = '${TEST_COMPANY_ID}' FOR UPDATE`);
       await tx.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: new Date() } });
       locked();
@@ -829,6 +830,7 @@ describe("MCP gateway write access", () => {
     let locked!: () => void;
     const lockHeld = new Promise<void>((resolve) => { locked = resolve; });
     const switching = prisma.$transaction(async (tx) => {
+      await lockSafeModeSwitch(tx, TEST_COMPANY_ID);
       await tx.$queryRawUnsafe(`SELECT "safe_mode_since" FROM "companies" WHERE "id" = '${TEST_COMPANY_ID}' FOR UPDATE`);
       await tx.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: new Date() } });
       locked();
@@ -870,6 +872,7 @@ describe("MCP gateway write access", () => {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     // The administrator switches the stop on after the time limit has passed.
     const switching = prisma.$transaction(async (tx) => {
+      await lockSafeModeSwitch(tx, TEST_COMPANY_ID);
       await tx.$queryRawUnsafe(`SELECT "safe_mode_since" FROM "companies" WHERE "id" = '${TEST_COMPANY_ID}' FOR UPDATE`);
       await tx.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: new Date() } });
     }, { timeout: 20_000 });
@@ -886,6 +889,46 @@ describe("MCP gateway write access", () => {
     assert.ok(stoppedAt, "the stop went through");
     assert.equal(result(res).body.error, "WRITE_FAILED");
     assert.equal(await prisma.auditLog.count({ where: { actionName: "update_client", result: "success", dataAfter: { path: ["displayName"], equals: "Late Write Ltd" } } }), 0);
+    await prisma.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: null } });
+  });
+
+  it("cannot be held off by a stream of writes: the switch goes first, later writes wait for it", { timeout: 30_000 }, async () => {
+    // A change already under way holds the stop lock shared.
+    let releaseFirst!: () => void;
+    let firstHeld!: () => void;
+    const held = new Promise<void>((resolve) => { firstHeld = resolve; });
+    const first = whileNotInSafeMode(TEST_COMPANY_ID, async () => {
+      firstHeld();
+      await new Promise<void>((resolve) => { releaseFirst = resolve; });
+    });
+    await held;
+
+    // The administrator switches the stop on through the real route; it waits for that change.
+    const login = await request(app).post("/auth/login").send({ email: "admin@test.local", password: "Password123!" });
+    const order: string[] = [];
+    const switching = request(app).put("/company/safe-mode").set("Authorization", `Bearer ${login.body.token}`)
+      .send({ enabled: true, reason: "audit test" }).then((response) => { order.push("switch"); return response; });
+    await untilBlockedOnLock();
+
+    // A new write arrives while the switch waits. With the old row lock it went
+    // ahead of the switch; now it queues behind it and then sees the stop.
+    const before = await prisma.client.count();
+    const late = call(writeToken, "create_client", { idempotency_key: key(), client: { display_name: "Queue Jumper Ltd" } })
+      .then((response) => { order.push("write"); return response; });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.deepEqual(order, [], "both wait while the first change is under way");
+
+    releaseFirst();
+    await first;
+    const switched = await switching;
+    const refused = await late;
+    assert.equal(switched.status, 200, JSON.stringify(switched.body));
+    assert.equal(switched.body.enabled, true);
+    // The later write ran only after the stop had committed: refused, nothing saved.
+    // (Under the previous row lock it went first and its client was saved.)
+    assert.equal(refused.status, 423);
+    assert.equal(refused.body.error, "SAFE_MODE_ACTIVE");
+    assert.equal(await prisma.client.count(), before, "the later write saved nothing");
     await prisma.company.update({ where: { id: TEST_COMPANY_ID }, data: { safeModeSince: null } });
   });
 

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import { recordAudit } from "../../lib/audit.js";
+import { lockSafeModeSwitch } from "../../lib/safeMode.js";
 import { SET_COMPANY_AGENT_MODE_ACTION, SET_COMPANY_SAFE_MODE_ACTION } from "../../lib/actionContracts.js";
 import { agentModeState } from "../../agents/agentMode.js";
 import { requireAuth } from "../../middleware/auth.js";
@@ -76,6 +77,9 @@ companyRouter.put("/safe-mode", requirePermission(SET_COMPANY_SAFE_MODE_ACTION.r
   // switching at once are serialised, only a real change is written and
   // audited, and the audit records exactly the state each one changed.
   const outcome = await prisma.$transaction(async (tx) => {
+    // The stop lock first: changes already checked against the stop finish,
+    // changes arriving now wait until this switch has committed.
+    await lockSafeModeSwitch(tx, user.companyId);
     const rows = await tx.$queryRaw<Array<{ safe_mode_since: Date | null }>>`
       SELECT "safe_mode_since" FROM "companies" WHERE "id" = ${user.companyId} FOR UPDATE`;
     if (rows.length === 0) return null;
