@@ -7,7 +7,13 @@
  * only decides, per relay job, how Secretary offers it:
  *
  * - "read": runs at once under read_pc; it returns what the PC reports and
- *   leaves nothing running or queued behind on the PC.
+ *   leaves nothing running or queued behind on the PC. One read job is the
+ *   exception, stated in its limitation: read-only research
+ *   (web_research_start) starts a read-only task in a new tab of the owner's
+ *   Chrome. It changes nothing anywhere: the PC refuses every booking,
+ *   payment, sending, sign-in, personal data or deletion step, and the task
+ *   runs under the owner's one standing, revocable read-only research
+ *   permission granted on the PC itself (issue #81).
  * - "reviewed": a change on the PC, or a command that keeps running or waits
  *   in a queue on the PC (goals). It is never read-only: preview, the user's
  *   explicit yes through confirm_action, then one call; the PC asks its owner
@@ -26,8 +32,16 @@
  */
 
 export type PcRelayDecision =
-  | { kind: "read" }
-  | { kind: "reviewed"; reviewReason: "destructive" | "irreversible"; effect: string; protections?: string }
+  | { kind: "read"; limitation?: string }
+  | {
+    kind: "reviewed"; reviewReason: "destructive" | "irreversible"; effect: string; protections?: string;
+    /**
+     * A read-only request of this job is not previewed as a change: it is sent
+     * to this read tool instead (pc_web_goal_start with allow_changes false in
+     * the existing Chrome is pc_web_research_start, as on the PC itself).
+     */
+    readOnlyRoute?: { tool: string; when: (args: Record<string, unknown>) => boolean };
+  }
   | { kind: "not_offered"; reason: string };
 
 const SHELL = "Owner-local, pending review: runs an arbitrary command line on the PC. Secretary offers no unreviewed shell; named scripts the owner approved run with pc_run_approved_script.";
@@ -36,6 +50,7 @@ const BACKUP_PROFILE = "The PC first saves a backup copy of an existing file in 
 const BACKUP_WORKSPACE = "The PC first saves a backup copy in its backups folder, works only inside the PC Control Plus workspace, and asks its owner on the PC.";
 const IMAGES = "Captures an image of the screen or a camera. Secretary never controls the PC from images and does not take pictures of the owner's PC or room; read the screen as text with pc_browser_snapshot or pc_ui_snapshot.";
 const KEYS = "Sends keyboard input to the window in front on the PC; read it first with pc_ui_snapshot.";
+const RESEARCH = "Read-only: opens one new tab in the Google Chrome already open on the PC and reads public HTTPS pages from their DOM text; it fills search forms but the PC refuses any booking, payment, purchase, sending, sign-in, personal or card data and deletion. The first task asks the owner once on the PC (Yes = a standing read-only research permission on this PC, revocable with pc_web_research_trust_revoke); later tasks need no approval. Chrome's own Allow remote debugging prompt is Chrome's and is never answered for the owner. Poll pc_web_goal_status with the job_id. The step planner runs on the PC; if it fails (for example no API credits), the research tab stays open at the address given and pc_browser_read or pc_browser_extract read its results from the DOM, using no API credits: for flights pass a Google Flights address such as https://www.google.com/travel/flights?q=Flights%20from%20London%20to%20Prague%20on%202026-12-10.";
 const COORDINATES = "Acts at screen coordinates, the way screenshot-driven control does. PC control through Secretary works only from text state: use pc_ui_act (UI Automation refs) or pc_browser_act (page refs).";
 
 export const PC_RELAY_POLICY: Record<string, PcRelayDecision> = {
@@ -55,6 +70,8 @@ export const PC_RELAY_POLICY: Record<string, PcRelayDecision> = {
   ui_wait: { kind: "read" },
   web_goal_status: { kind: "read" },
   ui_goal_status: { kind: "read" },
+  web_research_trust_status: { kind: "read" },
+  web_research_start: { kind: "read", limitation: RESEARCH },
 
   // Changes, and commands that keep running or wait in the PC's queue.
   open_url: { kind: "reviewed", reviewReason: "irreversible", effect: "Opens the address in the PC's default browser." },
@@ -84,7 +101,18 @@ export const PC_RELAY_POLICY: Record<string, PcRelayDecision> = {
   web_press: { kind: "reviewed", reviewReason: "irreversible", effect: "Presses a key in the open web page; it can submit forms." },
   web_batch: { kind: "reviewed", reviewReason: "irreversible", effect: "Runs several steps in the open web page; with allow_changes it can submit forms." },
   ui_batch: { kind: "reviewed", reviewReason: "irreversible", effect: "Acts on controls of a Windows app window." },
-  web_goal_start: { kind: "reviewed", reviewReason: "irreversible", effect: "Starts a web task that keeps running on the PC until it finishes or is cancelled." },
+  web_goal_start: {
+    kind: "reviewed", reviewReason: "irreversible", effect: "Starts a web task that keeps running on the PC until it finishes or is cancelled.",
+    // The PC runs a read-only goal in the existing Chrome as read-only research; Secretary does the same.
+    readOnlyRoute: {
+      tool: "pc_web_research_start",
+      when: (args) => args.allow_changes === false && (args.browser_mode === undefined || args.browser_mode === null || args.browser_mode === "existing"),
+    },
+  },
+  web_research_trust_revoke: {
+    kind: "reviewed", reviewReason: "destructive",
+    effect: "Revokes the owner's standing read-only research permission on the PC; the next research task asks on the PC again. It only reduces access.",
+  },
   ui_goal_start: { kind: "reviewed", reviewReason: "irreversible", effect: "Starts a desktop task that keeps running on the PC until it finishes or is cancelled." },
   web_goal_cancel: { kind: "reviewed", reviewReason: "destructive", effect: "Cancels a running web task on the PC." },
   ui_goal_cancel: { kind: "reviewed", reviewReason: "destructive", effect: "Cancels a running desktop task on the PC." },

@@ -551,8 +551,9 @@ export const PC_READ_TOOLS: DeviceReadTool[] = [
       },
     };
   }),
-  ...relayTools("read").map(({ tool, schema, fields }): DeviceReadTool => {
+  ...relayTools("read").map(({ tool, decision, schema, fields }): DeviceReadTool => {
     const validator = z.object(fields).strict();
+    const read = decision as Extract<PcRelayDecision, { kind: "read" }>;
     return {
       name: tool.name,
       title: `PC: ${tool.relay_tool.replace(/_/g, " ")}`,
@@ -560,7 +561,7 @@ export const PC_READ_TOOLS: DeviceReadTool[] = [
       inputSchema: schema,
       contract: READ_PC_ACTION,
       available: pcAvailable,
-      limitations: PC_LIMITS,
+      limitations: [...PC_LIMITS, ...(read.limitation ? [read.limitation] : []), ...loopLimitation(tool.relay_tool)],
       run: async (user, args) => {
         const parsed = parse(validator, args);
         return parsed.ok ? pc.callPcRelay(user, tool.relay_tool, parsed.data, { mayHaveEffect: false }) : parsed;
@@ -588,7 +589,7 @@ export function decideRelayJob(job: string, policy: Record<string, PcRelayDecisi
   if (decision.kind === "not_offered") return decision;
   const loop = Object.values(loops).find((entry) => entry.jobs.includes(job));
   // A job that runs a control loop on the PC (an AI deciding step after step) needs the attestation.
-  if (/_goal_/.test(job) && !loop) {
+  if (/_goal_|_research_start$/.test(job) && !loop) {
     return { kind: "not_offered", reason: "This PC task runs a control loop that is not attested to work from text state only; PC control through Secretary never uses screenshots." };
   }
   if (loop && !loop.screenshot_free) {
@@ -604,6 +605,12 @@ export function relayDecision(job: string): PcRelayDecision {
 /** The text state a relay job's control loop works from ("dom" or "uia"), when it runs one. */
 function loopState(job: string): string | undefined {
   return Object.values(PCP_RELAY_CATALOGUE.control_loops as unknown as Record<string, ControlLoop>).find((entry) => entry.jobs.includes(job))?.state;
+}
+
+/** How a relay job's control loop decides its steps, for its limitations. */
+function loopLimitation(job: string): string[] {
+  const state = loopState(job);
+  return state ? [`Its control loop decides each step from ${state === "dom" ? "the page's DOM text" : "Windows UI Automation text"}, checked from the PC Control Plus source to take no screenshots.`] : [];
 }
 
 /** The relay's argument schema as a strict validator; an unknown schema shape fails when this module loads. */
@@ -686,10 +693,17 @@ function pcWriteTools(): WriteToolDefinition[] {
       available: pcAvailable,
       limitations: [...PC_LIMITS, "If the PC does not answer, the outcome is kept as unknown and the step is never repeated by itself.",
         ...(reviewed.protections ? [reviewed.protections] : []),
-        ...(loopState(tool.relay_tool) ? [`Its control loop decides each step from ${loopState(tool.relay_tool) === "dom" ? "the page's DOM text" : "Windows UI Automation text"}, checked from the PC Control Plus source to take no screenshots.`] : [])],
+        ...(reviewed.readOnlyRoute ? [`A read-only request (allow_changes false in the existing Chrome) is not a change: it is answered with USE_READ_ONLY_TOOL and runs with ${reviewed.readOnlyRoute.tool}, without a confirmation.`] : []),
+        ...loopLimitation(tool.relay_tool)],
       fields,
       preview: async (user, a) => {
         if (!pcAvailable(user)) return fail(409, "CONNECTOR_NOT_CONFIGURED", "The owner's PC (PC Control Plus) is not set up for this company.");
+        if (reviewed.readOnlyRoute?.when(a)) {
+          const route = reviewed.readOnlyRoute.tool;
+          return fail(409, "USE_READ_ONLY_TOOL",
+            `A read-only task is not previewed as a change: call ${route} with the same url and goal. It runs at once, read-only, under the owner's standing research permission on the PC.`,
+            { use_tool: route, arguments: { url: a.url, goal: a.goal } });
+        }
         return ok(200, {
           pc_tool: tool.relay_tool,
           arguments: previewArguments(a),

@@ -130,3 +130,20 @@ class Snapshot(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RelayJobIds(unittest.TestCase):
+    """Issue #81: the relay registers most tools with its own @_tool() decorator."""
+
+    def test_both_decorators(self):
+        source = (
+            "@_tool()\nasync def pc_web_research_start(url: str, goal: str) -> dict:\n"
+            "    return await remote_call('web_research_start', {'url': url, 'goal': goal})\n\n"
+            "@mcp.tool(annotations=READS)\nasync def pc_web_dom() -> dict:\n"
+            "    return await remote_call('web_dom', {})\n"
+        )
+        self.assertEqual(importer.relay_job_ids(source),
+                         {"pc_web_research_start": "web_research_start", "pc_web_dom": "web_dom"})
+
+    def test_research_runs_in_the_attested_dom_loop(self):
+        self.assertIn("web_research_start", importer.CONTROL_LOOPS["web_goal"]["jobs"])

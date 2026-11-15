@@ -80,7 +80,7 @@ def agent_diagnostics():
         'pending_commands': len(in_flight_jobs),
     }
 
-ALLOWED = frozenset({'system_info', 'list_directory', 'read_text', 'search_files', 'screenshot', 'write_workspace_text', 'delete_workspace_file', 'open_url', 'desktop_click', 'desktop_type', 'desktop_hotkey', 'desktop_scroll', 'desktop_drag', 'desktop_focus_window', 'desktop_batch', 'run_approved_script', 'audit_tail', 'write_file', 'delete_file', 'make_directory', 'move_file', 'run_command', 'camera_list', 'camera_photo', 'camera_video', 'web_open', 'web_attach_existing', 'web_tabs_list', 'web_tab_select', 'web_list_fields', 'web_fill', 'web_click', 'web_screenshot', 'web_close', 'web_type', 'web_press', 'approvals_list', 'approvals_reset', 'permission_status', 'permission_set', 'monitors_list', 'web_goal_start', 'web_goal_status', 'web_goal_cancel', 'web_dom', 'web_batch', 'ui_windows', 'ui_tree', 'ui_batch', 'ui_wait', 'ui_goal_start', 'ui_goal_status', 'ui_goal_cancel'})
+ALLOWED = frozenset({'system_info', 'list_directory', 'read_text', 'search_files', 'screenshot', 'write_workspace_text', 'delete_workspace_file', 'open_url', 'desktop_click', 'desktop_type', 'desktop_hotkey', 'desktop_scroll', 'desktop_drag', 'desktop_focus_window', 'desktop_batch', 'run_approved_script', 'audit_tail', 'write_file', 'delete_file', 'make_directory', 'move_file', 'run_command', 'camera_list', 'camera_photo', 'camera_video', 'web_open', 'web_attach_existing', 'web_tabs_list', 'web_tab_select', 'web_list_fields', 'web_fill', 'web_click', 'web_screenshot', 'web_close', 'web_type', 'web_press', 'approvals_list', 'approvals_reset', 'permission_status', 'permission_set', 'monitors_list', 'web_goal_start', 'web_goal_status', 'web_goal_cancel', 'web_dom', 'web_batch', 'ui_windows', 'ui_tree', 'ui_batch', 'ui_wait', 'ui_goal_start', 'ui_goal_status', 'ui_goal_cancel', 'web_research_start', 'web_research_trust_status', 'web_research_trust_revoke'})
 # PCP_V2_TOOLS
 # The shared engine's tools (pc_engine.TOOLS, the same catalogue the Claude
 # plugin exposes) reach the agent as "engine_<name>".
@@ -247,23 +247,70 @@ async def remote_call(tool: str, args: dict):
     finally:
         pending.pop(jid, None)
 
-@mcp.tool()
+# Issue #17: a tool without annotations is, by the MCP defaults, a destructive
+# open-world write, so ChatGPT asked for a chat confirmation even to attach to
+# Chrome or poll a read-only goal. Every hand-written tool therefore states its
+# real effect. READS change nothing; LOCAL changes only this PC's session state
+# reversibly; DESTRUCTIVE may overwrite, delete, run, type, click or submit.
+READS = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+LOCAL = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
+WEB = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True)
+DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True)
+# Read-only research: it sends search queries to public sites in a new tab of
+# the owner's Chrome but cannot book, pay, send, sign in, type personal data or
+# delete (enforced on the PC by browser_dom's read-only rules), publishes
+# nothing and acts on no account, so it is a read for the owner's data.
+RESEARCH = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
+
+TOOL_ANNOTATIONS = {
+    'pc_status': READS, 'pc_system_info': READS, 'pc_list_directory': READS, 'pc_read_text': READS,
+    'pc_search_files': READS, 'pc_screenshot': READS, 'pc_monitors_list': READS, 'pc_audit_tail': READS,
+    'pc_camera_list': READS, 'pc_web_tabs_list': READS, 'pc_web_list_fields': READS, 'pc_web_dom': READS,
+    'pc_web_screenshot': READS, 'pc_web_goal_status': READS, 'pc_ui_windows': READS, 'pc_ui_tree': READS,
+    'pc_ui_wait': READS, 'pc_ui_goal_status': READS, 'pc_permission_status': READS, 'pc_approvals_list': READS,
+    'pc_web_research_trust_status': READS,
+    # Attaching connects to the Chrome the owner opened; it opens, navigates and closes nothing.
+    'pc_web_attach_existing': READS,
+    'pc_web_research_start': RESEARCH,
+    'pc_web_goal_cancel': LOCAL, 'pc_ui_goal_cancel': LOCAL, 'pc_web_close': LOCAL, 'pc_web_tab_select': LOCAL,
+    'pc_desktop_focus_window': LOCAL, 'pc_make_directory': LOCAL, 'pc_camera_photo': LOCAL,
+    'pc_camera_video': LOCAL, 'pc_approvals_reset': LOCAL, 'pc_web_research_trust_revoke': LOCAL,
+    'pc_open_url': WEB, 'pc_web_open': WEB,
+    'pc_write_workspace_text': DESTRUCTIVE, 'pc_delete_workspace_file': DESTRUCTIVE, 'pc_desktop_click': DESTRUCTIVE,
+    'pc_desktop_scroll': DESTRUCTIVE, 'pc_desktop_drag': DESTRUCTIVE, 'pc_desktop_batch': DESTRUCTIVE,
+    'pc_desktop_type': DESTRUCTIVE, 'pc_desktop_hotkey': DESTRUCTIVE, 'pc_run_approved_script': DESTRUCTIVE,
+    'pc_write_file': DESTRUCTIVE, 'pc_delete_file': DESTRUCTIVE, 'pc_move_file': DESTRUCTIVE,
+    'pc_run_command': DESTRUCTIVE, 'pc_web_fill': DESTRUCTIVE, 'pc_web_click': DESTRUCTIVE,
+    'pc_web_type': DESTRUCTIVE, 'pc_web_press': DESTRUCTIVE, 'pc_web_batch': DESTRUCTIVE,
+    'pc_ui_batch': DESTRUCTIVE, 'pc_ui_goal_start': DESTRUCTIVE, 'pc_web_goal_start': DESTRUCTIVE,
+    'pc_permission_set': DESTRUCTIVE,
+}
+
+
+def _tool():
+    """mcp.tool() with the annotations TOOL_ANNOTATIONS states for the function's name."""
+    def register(fn):
+        return mcp.tool(annotations=TOOL_ANNOTATIONS[fn.__name__])(fn)
+    return register
+
+
+@_tool()
 async def pc_status() -> dict:
     return agent_diagnostics()
 
-@mcp.tool()
+@_tool()
 async def pc_system_info() -> dict:
     return await remote_call('system_info', {})
 
-@mcp.tool()
+@_tool()
 async def pc_list_directory(path: str, limit: int = 100) -> list:
     return await remote_call('list_directory', {'path': path, 'limit': limit})
 
-@mcp.tool()
+@_tool()
 async def pc_read_text(path: str, max_bytes: int = 50000) -> str:
     return await remote_call('read_text', {'path': path, 'max_bytes': max_bytes})
 
-@mcp.tool()
+@_tool()
 async def pc_search_files(path: str, pattern: str, limit: int = 100) -> list[str]:
     return await remote_call('search_files', {'path': path, 'pattern': pattern, 'limit': limit})
 
@@ -289,59 +336,59 @@ def compact_screenshot(result: dict) -> dict:
             'width': image.width, 'height': image.height}
 
 
-@mcp.tool()
+@_tool()
 async def pc_screenshot(monitor: int = 1) -> dict:
     """Capture one monitor as PNG (default: first screen). Pass monitor=0 for all screens together. Only for a picture the user explicitly asked for: never to find, click, read or check anything, never as a fallback when a text read cannot see something, and nothing acts on what it shows."""
     result = await remote_call('screenshot', {'monitor': monitor})
     return await asyncio.to_thread(compact_screenshot, result)
 
-@mcp.tool()
+@_tool()
 async def pc_monitors_list() -> list:
     """List connected monitors (index, position and size); index 0 is the combined virtual screen of all monitors."""
     return await remote_call('monitors_list', {})
 
-@mcp.tool()
+@_tool()
 async def pc_write_workspace_text(path: str, text: str) -> dict:
     """Write a small UTF-8 text file within PCP_WRITE_ROOT after local approval; back up existing file."""
     return await remote_call('write_workspace_text', {'path':path,'text':text})
 
-@mcp.tool()
+@_tool()
 async def pc_delete_workspace_file(path: str) -> dict:
     """Delete a regular file in PCP_WRITE_ROOT after local approval, preserving a backup."""
     return await remote_call('delete_workspace_file', {'path':path})
 
-@mcp.tool()
+@_tool()
 async def pc_open_url(url: str) -> dict:
     """Open an HTTP(S) URL in the Windows default browser after local approval."""
     return await remote_call('open_url', {'url':url})
 
-@mcp.tool()
+@_tool()
 async def pc_desktop_click(x: int, y: int, button: str = 'left', clicks: int = 1) -> dict:
     """Click the Windows desktop, including right/double click, after local approval. Only at coordinates the user gave, for a control UI Automation cannot reach; never at coordinates read from a screenshot."""
     return await remote_call('desktop_click',
                              {'x': x, 'y': y, 'button': button, 'clicks': clicks})
 
 
-@mcp.tool()
+@_tool()
 async def pc_desktop_scroll(steps: int, x: int | None = None, y: int | None = None) -> dict:
     """Scroll the mouse wheel; positive steps up, negative down. Optional cursor position. Only at coordinates the user gave, for a control UI Automation cannot reach; never at coordinates read from a screenshot."""
     return await remote_call('desktop_scroll', {'steps': steps, 'x': x, 'y': y})
 
 
-@mcp.tool()
+@_tool()
 async def pc_desktop_drag(x1: int, y1: int, x2: int, y2: int,
                           duration_seconds: float = 0.5) -> dict:
     """Drag with the left mouse button between physical screen coordinates. Only at coordinates the user gave, for a control UI Automation cannot reach; never at coordinates read from a screenshot."""
     return await remote_call('desktop_drag', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2,
                                               'duration_seconds': duration_seconds})
 
-@mcp.tool()
+@_tool()
 async def pc_desktop_focus_window(handle: int) -> dict:
     """Activate a visible top-level Windows application before keyboard operations."""
     return await remote_call('desktop_focus_window', {'handle': handle})
 
 
-@mcp.tool()
+@_tool()
 async def pc_desktop_batch(actions: list[dict]) -> dict:
     """Run 1-16 keyboard/mouse actions in a single network trip and one owner approval.
 
@@ -350,7 +397,7 @@ async def pc_desktop_batch(actions: list[dict]) -> dict:
     """
     return await remote_call('desktop_batch', {'actions': actions})
 
-@mcp.tool()
+@_tool()
 async def pc_desktop_type(text: str, method: str = 'auto', delay_ms: int = 20) -> dict:
     """Enter Unicode text (diacritics, symbols, emoji; newline = Enter) into the focused Windows app.
 
@@ -361,22 +408,22 @@ async def pc_desktop_type(text: str, method: str = 'auto', delay_ms: int = 20) -
     """
     return await remote_call('desktop_type', {'text': text, 'method': method, 'delay_ms': delay_ms})
 
-@mcp.tool()
+@_tool()
 async def pc_desktop_hotkey(keys: list[str]) -> dict:
     """Press an allowlisted keyboard shortcut after local approval."""
     return await remote_call('desktop_hotkey', {'keys':keys})
 
-@mcp.tool()
+@_tool()
 async def pc_run_approved_script(name: str) -> dict:
     """Run a preinstalled script by name from PCP_SCRIPTS_ROOT after local approval."""
     return await remote_call('run_approved_script', {'name':name})
 
-@mcp.tool()
+@_tool()
 async def pc_audit_tail(limit: int = 30) -> list:
     """Read recent PC Control Plus action audit events."""
     return await remote_call('audit_tail', {'limit':limit})
 
-@mcp.tool()
+@_tool()
 async def pc_write_file(path: str, text: str = '', content_base64: str = '', create_dirs: bool = False) -> dict:
     """Create or overwrite a file anywhere in the allowed roots after local approval; backs up any existing file. Pass text or content_base64 (binary), up to 2 MB."""
     args = {'path': path, 'create_dirs': create_dirs}
@@ -386,22 +433,22 @@ async def pc_write_file(path: str, text: str = '', content_base64: str = '', cre
         args['text'] = text
     return await remote_call('write_file', args)
 
-@mcp.tool()
+@_tool()
 async def pc_delete_file(path: str) -> dict:
     """Delete a regular file anywhere in the allowed roots after local approval, preserving a backup."""
     return await remote_call('delete_file', {'path': path})
 
-@mcp.tool()
+@_tool()
 async def pc_make_directory(path: str) -> dict:
     """Create a directory (with parents) anywhere in the allowed roots after local approval."""
     return await remote_call('make_directory', {'path': path})
 
-@mcp.tool()
+@_tool()
 async def pc_move_file(src: str, dst: str) -> dict:
     """Move or rename a file within the allowed roots after local approval; backs up an existing destination."""
     return await remote_call('move_file', {'src': src, 'dst': dst})
 
-@mcp.tool()
+@_tool()
 async def pc_run_command(command: str = '', argv: list[str] | None = None, cwd: str = '', wait: bool = True, timeout: int = 20) -> dict:
     """Run a program or shell command on the PC after local approval; audited. Pass argv for a direct program launch or command for a shell line. wait=False launches without waiting."""
     args = {'wait': wait, 'timeout': timeout}
@@ -413,17 +460,17 @@ async def pc_run_command(command: str = '', argv: list[str] | None = None, cwd: 
         args['command'] = command
     return await remote_call('run_command', args)
 
-@mcp.tool()
+@_tool()
 async def pc_camera_list() -> list:
     """List the PC's available camera (video input) device names."""
     return await remote_call('camera_list', {})
 
-@mcp.tool()
+@_tool()
 async def pc_camera_photo(device: str = '') -> dict:
     """Capture one photo from the PC camera after local approval; returns PNG base64 and the saved path. Optional device name from pc_camera_list. Only for a picture the user explicitly asked for: never to find, click, read or check anything, never as a fallback when a text read cannot see something, and nothing acts on what it shows."""
     return await remote_call('camera_photo', {'device': device} if device else {})
 
-@mcp.tool()
+@_tool()
 async def pc_camera_video(seconds: int = 5, device: str = '') -> dict:
     """Record a short video (1 to 60 s) from the PC camera after local approval; saves it locally and returns the path and size. Optional device name from pc_camera_list. Only for a recording the user explicitly asked for: never to find, click, read or check anything, and nothing acts on what it shows."""
     args = {'seconds': seconds}
@@ -431,40 +478,40 @@ async def pc_camera_video(seconds: int = 5, device: str = '') -> dict:
         args['device'] = device
     return await remote_call('camera_video', args)
 
-@mcp.tool()
+@_tool()
 async def pc_web_open(url: str) -> dict:
     """Open a URL in a controlled browser on the PC after local approval; returns the page title and URL."""
     return await remote_call('web_open', {'url': url})
 
-@mcp.tool()
+@_tool()
 async def pc_web_attach_existing() -> dict:
-    """Attach to an owner-approved local CDP Chrome/Edge session, without navigating any tab."""
+    """Attach to an owner-approved local CDP Google Chrome session (Edge only as an explicit opt-in), without navigating any tab."""
     return await remote_call('web_attach_existing', {})
 
 
-@mcp.tool()
+@_tool()
 async def pc_web_tabs_list() -> dict:
     """Enumerate tabs in the controlled browser session, without query strings."""
     return await remote_call('web_tabs_list', {})
 
 
-@mcp.tool()
+@_tool()
 async def pc_web_tab_select(index: int) -> dict:
     """Select an existing controlled browser tab after local owner approval."""
     return await remote_call('web_tab_select', {'index': index})
 
 
-@mcp.tool()
+@_tool()
 async def pc_web_list_fields() -> list:
     """List the form fields and buttons on the current browser page (name, id, type, label)."""
     return await remote_call('web_list_fields', {})
 
-@mcp.tool()
+@_tool()
 async def pc_web_fill(fields: list) -> dict:
     """Fill form fields on the current page after local approval. Each item is {selector or name, value}."""
     return await remote_call('web_fill', {'fields': fields})
 
-@mcp.tool()
+@_tool()
 async def pc_web_click(selector: str = '', text: str = '') -> dict:
     """Click an element on the current page after local approval. Give a CSS selector, or the visible button/link text."""
     a = {}
@@ -474,7 +521,7 @@ async def pc_web_click(selector: str = '', text: str = '') -> dict:
         a['selector'] = selector
     return await remote_call('web_click', a)
 
-@mcp.tool()
+@_tool()
 async def pc_web_type(text: str, selector: str = '', submit: bool = False) -> dict:
     """Type text on the current page after local approval. With a selector it types into that field, otherwise into the focused element; submit=True presses Enter after."""
     a = {'text': text, 'submit': submit}
@@ -482,96 +529,124 @@ async def pc_web_type(text: str, selector: str = '', submit: bool = False) -> di
         a['selector'] = selector
     return await remote_call('web_type', a)
 
-@mcp.tool()
+@_tool()
 async def pc_web_press(key: str) -> dict:
     """Press a keyboard key in the browser (for example Enter, Tab, Escape) after local approval."""
     return await remote_call('web_press', {'key': key})
 
-@mcp.tool()
+@_tool()
 async def pc_web_screenshot() -> dict:
     """Capture a PNG of the current browser page. Only for a picture the user explicitly asked for: never to find, click, read or check anything, never as a fallback when a text read cannot see something, and nothing acts on what it shows."""
     return await remote_call('web_screenshot', {})
 
-@mcp.tool()
+@_tool()
 async def pc_web_dom() -> dict:
     """Read rendered DOM, stripped HTML and visible controls, without screenshots."""
     return await remote_call('web_dom', {})
 
-@mcp.tool()
+@_tool()
 async def pc_web_batch(actions: list[dict], allow_changes: bool = False) -> dict:
     """Execute up to six structured DOM actions in one relay roundtrip. Writes require local approval."""
     return await remote_call('web_batch', {'actions': actions, 'allow_changes': allow_changes})
 
-@mcp.tool()
+@_tool()
 async def pc_ui_windows() -> list:
     """Enumerate top-level Windows applications by title, PID and handle without screenshots."""
     return await remote_call('ui_windows', {})
 
-@mcp.tool()
+@_tool()
 async def pc_ui_tree(handle: int, depth: int = 4, limit: int = 140) -> dict:
     """Inspect a native Windows window using its accessibility/UIA tree."""
     return await remote_call('ui_tree', {'handle': handle, 'depth': depth, 'limit': limit})
 
-@mcp.tool()
+@_tool()
 async def pc_ui_wait(handle: int, name: str = '', control_type: str = '', timeout: float = 10) -> dict:
     """Wait locally for a named UIA control or control type; do not poll screenshots."""
     return await remote_call('ui_wait', {'handle': handle, 'name': name,
                                         'control_type': control_type, 'timeout': timeout})
 
-@mcp.tool()
+@_tool()
 async def pc_ui_batch(handle: int, actions: list[dict]) -> dict:
     """Execute 1-8 native UIA pattern actions in a batch after owner approval."""
     return await remote_call('ui_batch', {'handle': handle, 'actions': actions})
 
-@mcp.tool()
+@_tool()
 async def pc_ui_goal_start(goal: str) -> dict:
     """Start autonomous Windows application work after one approval for the whole goal. Each step is decided from UI Automation text, never from screenshots."""
     return await remote_call('ui_goal_start', {'goal': goal})
 
-@mcp.tool()
+@_tool()
 async def pc_ui_goal_status(job_id: str) -> dict:
     """Read progress of an autonomous native Windows goal."""
     return await remote_call('ui_goal_status', {'job_id': job_id})
 
-@mcp.tool()
+@_tool()
 async def pc_ui_goal_cancel(job_id: str) -> dict:
     """Cancel an autonomous native Windows goal."""
     return await remote_call('ui_goal_cancel', {'job_id': job_id})
 
-@mcp.tool()
+@_tool()
 async def pc_web_goal_start(url: str, goal: str, allow_changes: bool = True,
                             browser_mode: str = 'existing') -> dict:
-    """DOM-only automation: each step is decided from the page's DOM text, never from screenshots. Default: attach to an existing CDP-enabled Edge/Chrome
-    tab without opening, focusing or closing windows. Explicit 'isolated' mode
-    starts a dedicated browser. One owner approval covers the named task.
+    """DOM-only automation: each step is decided from the page's DOM text, never from screenshots. Default: attach to an existing CDP-enabled Google Chrome
+    tab (Microsoft Edge only as an explicit opt-in) without opening, focusing or
+    closing windows. Explicit 'isolated' mode starts a dedicated browser. One
+    owner approval covers the named task.
     """
     return await remote_call('web_goal_start', {
         'url': url, 'goal': goal, 'allow_changes': allow_changes,
         'browser_mode': browser_mode,
     })
 
-@mcp.tool()
+@_tool()
 async def pc_web_goal_status(job_id: str) -> dict:
     """Retrieve a browser goal's step trace and structured result. Poll until completed or failed."""
     return await remote_call('web_goal_status', {'job_id': job_id})
 
-@mcp.tool()
+@_tool()
 async def pc_web_goal_cancel(job_id: str) -> dict:
     """Request cancellation of a browser goal running on Windows."""
     return await remote_call('web_goal_cancel', {'job_id': job_id})
 
-@mcp.tool()
+@_tool()
+async def pc_web_research_start(url: str, goal: str) -> dict:
+    """READ-ONLY web research in the owner's Google Chrome, decided from the page DOM, never from screenshots.
+
+    Opens ONE new tab in the Chrome already open (its other tabs are not touched), navigates public HTTPS
+    sites, fills search forms (places, dates, passengers, baggage, filters), sorts and reads results, and
+    returns verified findings. It cannot book, reserve, pay, buy, send, sign in, enter personal, contact or
+    card data, or delete: such a step is refused on the PC. Covered by the owner's standing read-only
+    research permission on the PC (granted once there, revocable), so no per-step approval. Use this for
+    searching and comparing (flights, car hire, prices); use pc_web_goal_start only for changes.
+    Poll pc_web_goal_status(job_id) until completed, stopped or failed.
+    """
+    return await remote_call('web_research_start', {'url': url, 'goal': goal})
+
+
+@_tool()
+async def pc_web_research_trust_status() -> dict:
+    """Read whether the owner granted standing permission for read-only Chrome research on this PC, its scope and how to revoke it."""
+    return await remote_call('web_research_trust_status', {})
+
+
+@_tool()
+async def pc_web_research_trust_revoke() -> dict:
+    """Revoke the standing read-only Chrome research permission; the next research task asks on the PC again. Only reduces access."""
+    return await remote_call('web_research_trust_revoke', {})
+
+
+@_tool()
 async def pc_web_close() -> dict:
     """Close the controlled browser on the PC."""
     return await remote_call('web_close', {})
 
-@mcp.tool()
+@_tool()
 async def pc_permission_status() -> dict:
     """Read the device owner's locally configured computer-control permission profile."""
     return await remote_call('permission_status', {})
 
 
-@mcp.tool()
+@_tool()
 async def pc_permission_set(profile: str) -> dict:
     """Request a permission-profile change; ALWAYS requires direct Windows owner approval.
 
@@ -581,12 +656,12 @@ async def pc_permission_set(profile: str) -> dict:
     return await remote_call('permission_set', {'profile': profile})
 
 
-@mcp.tool()
+@_tool()
 async def pc_approvals_list() -> list:
     """List action types the owner has chosen to stop being prompted for (remembered local approvals)."""
     return await remote_call('approvals_list', {})
 
-@mcp.tool()
+@_tool()
 async def pc_approvals_reset() -> dict:
     """Clear all remembered approvals so every sensitive action prompts again on the PC."""
     return await remote_call('approvals_reset', {})
@@ -630,7 +705,7 @@ for _spec in pc_engine.TOOLS.values():
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
 async def pc_browser_connection_status() -> dict:
-    """Read-only: whether the Chrome or Edge already open on the PC allows remote debugging for PC Control Plus, and how to switch it on (chrome://inspect or edge://inspect, #remote-debugging). Starts, restarts or closes nothing; never returns the browser's debugging identifier."""
+    """Read-only: whether the Google Chrome already open on the PC allows remote debugging for PC Control Plus, and how to switch it on (chrome://inspect/#remote-debugging). Chrome is the default; Microsoft Edge is used only when PCP_BROWSER=edge is set. Starts, restarts or closes nothing; never returns the browser's debugging identifier."""
     return await remote_call('browser_connection_status', {})
 
 
@@ -654,12 +729,15 @@ def _instructions():
         'PC Control Plus: audited control of the owner\'s Windows PC and browser. Sensitive actions ask the owner '
         'on the PC itself; tell the user what you are about to do.\n\n'
         + pc_engine.fast_path('pc_')
-        + '\n\nThe browser tools attach to the Chrome or Edge the owner already has open (remote debugging switched on '
-        'at chrome://inspect or edge://inspect, #remote-debugging; check with pc_browser_connection_status) without '
+        + '\n\nThe browser tools attach to the Google Chrome the owner already has open (remote debugging switched on '
+        'at chrome://inspect/#remote-debugging; check with pc_browser_connection_status). Chrome is the default and a '
+        'running Edge is never used in its place; Edge is an explicit opt-in (PCP_BROWSER=edge). They attach without '
         'opening, closing or clearing its tabs. They reach only public HTTPS addresses: every navigation and redirect '
         'is checked before it is sent. pc_browser_open navigates the current tab and asks the owner first. '
-        'For whole tasks with one approval use '
-        'pc_web_goal_start / pc_ui_goal_start.\n\n'
+        'For searching, comparing and reading websites use pc_web_research_start: read-only, in a new tab of the '
+        'owner\'s Chrome, covered by the owner\'s standing permission (no per-step approval); poll '
+        'pc_web_goal_status. It never books, pays, sends, signs in or types personal data. For whole tasks that '
+        'change something, with one approval, use pc_web_goal_start / pc_ui_goal_start.\n\n'
         'Control works only from text state (page DOM, UI Automation). Never take a screenshot to find, click, read '
         'or check anything, never fall back to one when a text read cannot see something, and never act at '
         'coordinates read from an image. pc_screenshot, pc_web_screenshot and the camera tools only capture a picture '

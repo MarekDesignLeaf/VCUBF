@@ -24,22 +24,28 @@ export const PCP_RELAY_CATALOGUE = {
       "jobs": [
         "web_goal_start",
         "web_goal_status",
-        "web_goal_cancel"
+        "web_goal_cancel",
+        "web_research_start"
       ],
       "modules": {
-        "browser_dom.py": "26c8811f54c2eb644236dfab757c501c9ebdf1c344a39d4a28da75186d29af72",
-        "web_goal.py": "f7f5ec64ebc7b856977077f8d6a3d6e64e6b61060fc302436e972011cfd5e088"
+        "browser_dom.py": "3f992ea9d3145ed15e78ea200f794a6170808a257da98dac95f9d3916ab7e0d4",
+        "web_goal.py": "1ca164c0683a5ba092eb7ec9c251cf349f6f5178c0309d59c1751dfb7c98acbc"
       },
       "screenshot_free": true,
       "state": "dom"
     }
   },
   "engine_version": "1.1.2",
-  "relay_sha256": "c0be38f4aab77b9ea09b3d44db63a1aafa59d510323fa41dec95f6ae064ab896",
+  "relay_sha256": "83680e446916c74b58a9a187665ae55a5f4c14308aef1e322e7ddf2d80b18934",
   "source": "MarekDesignLeaf/pc-control-plus remote/relay.py",
   "tools": [
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "List action types the owner has chosen to stop being prompted for (remembered local approvals).",
       "input_schema": {
         "properties": {},
@@ -50,7 +56,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "approvals_list"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
       "description": "Clear all remembered approvals so every sensitive action prompts again on the PC.",
       "input_schema": {
         "properties": {},
@@ -61,7 +71,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "approvals_reset"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Read recent PC Control Plus action audit events.",
       "input_schema": {
         "properties": {
@@ -78,7 +93,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "audit_tail"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "List the PC's available camera (video input) device names.",
       "input_schema": {
         "properties": {},
@@ -89,7 +109,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "camera_list"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
       "description": "Capture one photo from the PC camera after local approval; returns PNG base64 and the saved path. Optional device name from pc_camera_list. Only for a picture the user explicitly asked for: never to find, click, read or check anything, never as a fallback when a text read cannot see something, and nothing acts on what it shows.",
       "input_schema": {
         "properties": {
@@ -106,7 +130,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "camera_photo"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
       "description": "Record a short video (1 to 60 s) from the PC camera after local approval; saves it locally and returns the path and size. Optional device name from pc_camera_list. Only for a recording the user explicitly asked for: never to find, click, read or check anything, and nothing acts on what it shows.",
       "input_schema": {
         "properties": {
@@ -128,7 +156,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "camera_video"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Delete a regular file anywhere in the allowed roots after local approval, preserving a backup.",
       "input_schema": {
         "properties": {
@@ -147,7 +179,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "delete_file"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Delete a regular file in PCP_WRITE_ROOT after local approval, preserving a backup.",
       "input_schema": {
         "properties": {
@@ -166,7 +202,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "delete_workspace_file"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Run 1-16 keyboard/mouse actions in a single network trip and one owner approval.\n\nEach entry is {tool: desktop_click|desktop_type|desktop_hotkey|desktop_scroll|desktop_drag,\n               args: {...}}. Not transactional; do not replay on partial failure. Clicks, scrolls and drags only at coordinates the user gave, for a control UI Automation cannot reach; never at coordinates read from a screenshot.",
       "input_schema": {
         "properties": {
@@ -189,7 +229,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "desktop_batch"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Click the Windows desktop, including right/double click, after local approval. Only at coordinates the user gave, for a control UI Automation cannot reach; never at coordinates read from a screenshot.",
       "input_schema": {
         "properties": {
@@ -223,7 +267,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "desktop_click"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Drag with the left mouse button between physical screen coordinates. Only at coordinates the user gave, for a control UI Automation cannot reach; never at coordinates read from a screenshot.",
       "input_schema": {
         "properties": {
@@ -262,7 +310,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "desktop_drag"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
       "description": "Activate a visible top-level Windows application before keyboard operations.",
       "input_schema": {
         "properties": {
@@ -281,7 +333,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "desktop_focus_window"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Press an allowlisted keyboard shortcut after local approval.",
       "input_schema": {
         "properties": {
@@ -303,7 +359,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "desktop_hotkey"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Scroll the mouse wheel; positive steps up, negative down. Optional cursor position. Only at coordinates the user gave, for a control UI Automation cannot reach; never at coordinates read from a screenshot.",
       "input_schema": {
         "properties": {
@@ -346,7 +406,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "desktop_scroll"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Enter Unicode text (diacritics, symbols, emoji; newline = Enter) into the focused Windows app.\n\nmethod 'auto' types short text key by key (20 ms per character, the minimum modern WinUI apps\nsuch as Windows 11 Notepad accept) and pastes longer text through the clipboard, restoring the\nprevious clipboard afterwards. 'keys' always types (use where paste is blocked, e.g. password\nfields); 'paste' always pastes. Up to 10000 characters.",
       "input_schema": {
         "properties": {
@@ -375,7 +439,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "desktop_type"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "",
       "input_schema": {
         "properties": {
@@ -399,7 +468,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "list_directory"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
       "description": "Create a directory (with parents) anywhere in the allowed roots after local approval.",
       "input_schema": {
         "properties": {
@@ -418,7 +491,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "make_directory"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "List connected monitors (index, position and size); index 0 is the combined virtual screen of all monitors.",
       "input_schema": {
         "properties": {},
@@ -429,7 +507,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "monitors_list"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Move or rename a file within the allowed roots after local approval; backs up an existing destination.",
       "input_schema": {
         "properties": {
@@ -453,7 +535,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "move_file"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Open an HTTP(S) URL in the Windows default browser after local approval.",
       "input_schema": {
         "properties": {
@@ -472,7 +558,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "open_url"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Request a permission-profile change; ALWAYS requires direct Windows owner approval.\n\nProfiles: read_only, standard, advanced, administrator. Administrator\nadditionally requires actual Windows process elevation; UAC is never bypassed.",
       "input_schema": {
         "properties": {
@@ -491,7 +581,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "permission_set"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Read the device owner's locally configured computer-control permission profile.",
       "input_schema": {
         "properties": {},
@@ -502,7 +597,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "permission_status"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "",
       "input_schema": {
         "properties": {
@@ -526,7 +626,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "read_text"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Run a preinstalled script by name from PCP_SCRIPTS_ROOT after local approval.",
       "input_schema": {
         "properties": {
@@ -545,7 +649,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "run_approved_script"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Run a program or shell command on the PC after local approval; audited. Pass argv for a direct program launch or command for a shell line. wait=False launches without waiting.",
       "input_schema": {
         "properties": {
@@ -592,7 +700,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "run_command"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Capture one monitor as PNG (default: first screen). Pass monitor=0 for all screens together. Only for a picture the user explicitly asked for: never to find, click, read or check anything, never as a fallback when a text read cannot see something, and nothing acts on what it shows.",
       "input_schema": {
         "properties": {
@@ -609,7 +722,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "screenshot"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "",
       "input_schema": {
         "properties": {
@@ -638,7 +756,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "search_files"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "",
       "input_schema": {
         "properties": {},
@@ -649,7 +772,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "system_info"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Execute 1-8 native UIA pattern actions in a batch after owner approval.",
       "input_schema": {
         "properties": {
@@ -677,7 +804,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "ui_batch"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
       "description": "Cancel an autonomous native Windows goal.",
       "input_schema": {
         "properties": {
@@ -696,7 +827,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "ui_goal_cancel"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Start autonomous Windows application work after one approval for the whole goal. Each step is decided from UI Automation text, never from screenshots.",
       "input_schema": {
         "properties": {
@@ -715,7 +850,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "ui_goal_start"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Read progress of an autonomous native Windows goal.",
       "input_schema": {
         "properties": {
@@ -734,7 +874,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "ui_goal_status"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Inspect a native Windows window using its accessibility/UIA tree.",
       "input_schema": {
         "properties": {
@@ -763,7 +908,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "ui_tree"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Wait locally for a named UIA control or control type; do not poll screenshots.",
       "input_schema": {
         "properties": {
@@ -797,7 +947,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "ui_wait"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Enumerate top-level Windows applications by title, PID and handle without screenshots.",
       "input_schema": {
         "properties": {},
@@ -808,8 +963,13 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "ui_windows"
     },
     {
-      "annotations": {},
-      "description": "Attach to an owner-approved local CDP Chrome/Edge session, without navigating any tab.",
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Attach to an owner-approved local CDP Google Chrome session (Edge only as an explicit opt-in), without navigating any tab.",
       "input_schema": {
         "properties": {},
         "title": "pc_web_attach_existingArguments",
@@ -819,7 +979,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_attach_existing"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Execute up to six structured DOM actions in one relay roundtrip. Writes require local approval.",
       "input_schema": {
         "properties": {
@@ -847,7 +1011,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_batch"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Click an element on the current page after local approval. Give a CSS selector, or the visible button/link text.",
       "input_schema": {
         "properties": {
@@ -869,7 +1037,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_click"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
       "description": "Close the controlled browser on the PC.",
       "input_schema": {
         "properties": {},
@@ -880,7 +1052,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_close"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Read rendered DOM, stripped HTML and visible controls, without screenshots.",
       "input_schema": {
         "properties": {},
@@ -891,7 +1068,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_dom"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Fill form fields on the current page after local approval. Each item is {selector or name, value}.",
       "input_schema": {
         "properties": {
@@ -911,7 +1092,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_fill"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
       "description": "Request cancellation of a browser goal running on Windows.",
       "input_schema": {
         "properties": {
@@ -930,8 +1115,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_goal_cancel"
     },
     {
-      "annotations": {},
-      "description": "DOM-only automation: each step is decided from the page's DOM text, never from screenshots. Default: attach to an existing CDP-enabled Edge/Chrome\ntab without opening, focusing or closing windows. Explicit 'isolated' mode\nstarts a dedicated browser. One owner approval covers the named task.",
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "DOM-only automation: each step is decided from the page's DOM text, never from screenshots. Default: attach to an existing CDP-enabled Google Chrome\ntab (Microsoft Edge only as an explicit opt-in) without opening, focusing or\nclosing windows. Explicit 'isolated' mode starts a dedicated browser. One\nowner approval covers the named task.",
       "input_schema": {
         "properties": {
           "allow_changes": {
@@ -964,7 +1153,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_goal_start"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Retrieve a browser goal's step trace and structured result. Poll until completed or failed.",
       "input_schema": {
         "properties": {
@@ -983,7 +1177,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_goal_status"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "List the form fields and buttons on the current browser page (name, id, type, label).",
       "input_schema": {
         "properties": {},
@@ -994,7 +1193,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_list_fields"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Open a URL in a controlled browser on the PC after local approval; returns the page title and URL.",
       "input_schema": {
         "properties": {
@@ -1013,7 +1216,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_open"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Press a keyboard key in the browser (for example Enter, Tab, Escape) after local approval.",
       "input_schema": {
         "properties": {
@@ -1032,7 +1239,71 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_press"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "READ-ONLY web research in the owner's Google Chrome, decided from the page DOM, never from screenshots.\n\nOpens ONE new tab in the Chrome already open (its other tabs are not touched), navigates public HTTPS\nsites, fills search forms (places, dates, passengers, baggage, filters), sorts and reads results, and\nreturns verified findings. It cannot book, reserve, pay, buy, send, sign in, enter personal, contact or\ncard data, or delete: such a step is refused on the PC. Covered by the owner's standing read-only\nresearch permission on the PC (granted once there, revocable), so no per-step approval. Use this for\nsearching and comparing (flights, car hire, prices); use pc_web_goal_start only for changes.\nPoll pc_web_goal_status(job_id) until completed, stopped or failed.",
+      "input_schema": {
+        "properties": {
+          "goal": {
+            "title": "Goal",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "goal"
+        ],
+        "title": "pc_web_research_startArguments",
+        "type": "object"
+      },
+      "name": "pc_web_research_start",
+      "relay_tool": "web_research_start"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Revoke the standing read-only Chrome research permission; the next research task asks on the PC again. Only reduces access.",
+      "input_schema": {
+        "properties": {},
+        "title": "pc_web_research_trust_revokeArguments",
+        "type": "object"
+      },
+      "name": "pc_web_research_trust_revoke",
+      "relay_tool": "web_research_trust_revoke"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read whether the owner granted standing permission for read-only Chrome research on this PC, its scope and how to revoke it.",
+      "input_schema": {
+        "properties": {},
+        "title": "pc_web_research_trust_statusArguments",
+        "type": "object"
+      },
+      "name": "pc_web_research_trust_status",
+      "relay_tool": "web_research_trust_status"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Capture a PNG of the current browser page. Only for a picture the user explicitly asked for: never to find, click, read or check anything, never as a fallback when a text read cannot see something, and nothing acts on what it shows.",
       "input_schema": {
         "properties": {},
@@ -1043,7 +1314,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_screenshot"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
       "description": "Select an existing controlled browser tab after local owner approval.",
       "input_schema": {
         "properties": {
@@ -1062,7 +1337,12 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_tab_select"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Enumerate tabs in the controlled browser session, without query strings.",
       "input_schema": {
         "properties": {},
@@ -1073,7 +1353,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_tabs_list"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Type text on the current page after local approval. With a selector it types into that field, otherwise into the focused element; submit=True presses Enter after.",
       "input_schema": {
         "properties": {
@@ -1102,7 +1386,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "web_type"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Create or overwrite a file anywhere in the allowed roots after local approval; backs up any existing file. Pass text or content_base64 (binary), up to 2 MB.",
       "input_schema": {
         "properties": {
@@ -1136,7 +1424,11 @@ export const PCP_RELAY_CATALOGUE = {
       "relay_tool": "write_file"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
       "description": "Write a small UTF-8 text file within PCP_WRITE_ROOT after local approval; back up existing file.",
       "input_schema": {
         "properties": {
@@ -1161,21 +1453,21 @@ export const PCP_RELAY_CATALOGUE = {
     }
   ],
   "upstream": {
-    "commit": "dabf4c4809586785254c4874230329c21474f977",
+    "commit": "d239f511986f05f8a982955f9f0f0cf71596dd17",
     "ref": "signed-release",
-    "release_id": "5aa76306494ca21537597525b1c1b0a7a846122f",
-    "release_manifest_sha256": "862d587606a6c4f6908125bcbd41180194c7285a6af344da4034a1f7235ea7f8",
-    "release_sequence": 42585227083,
+    "release_id": "acd5cc8478576232a5cbcafb32bcd2762034fd95",
+    "release_manifest_sha256": "27a5b68c8ed8f7debe15e5ef0c118416bda46e1e7302e3beeb8cb179b8de5a4f",
+    "release_sequence": 43502895022,
     "repository": "MarekDesignLeaf/pc-control-plus",
     "signed_files": {
-      "agent.py": "cbd56d752fd21b27e6f586b9de9253e1b149af544c72b048afcaf1b111307a4b",
-      "browser_dom.py": "26c8811f54c2eb644236dfab757c501c9ebdf1c344a39d4a28da75186d29af72",
+      "agent.py": "1e48c386605e11665dd9e86db3187075ffd96c120f60806613f15e7dd65aed27",
+      "browser_dom.py": "3f992ea9d3145ed15e78ea200f794a6170808a257da98dac95f9d3916ab7e0d4",
       "desktop_goal.py": "522ac75ee2e6aeccf20d04d7524ef466be3879f10b53dc8ec548bcec955678be",
       "pc_engine.py": "22c7c652641018e60191a0992360a3b2d0384f31e5174b8131e93d71ba95a666",
-      "web_goal.py": "f7f5ec64ebc7b856977077f8d6a3d6e64e6b61060fc302436e972011cfd5e088",
+      "web_goal.py": "1ca164c0683a5ba092eb7ec9c251cf349f6f5178c0309d59c1751dfb7c98acbc",
       "windows_uia.py": "3c75bcb0e38af7f40c7f4e9c5d66577d092c3b253fc2df16a9b128e62ba7fa85"
     },
-    "snapshot_sha256": "b1e1ec129a142b674cbfb54db273c69de55399c53bcad67778d272d15c6a00f4",
-    "tree": "ac2dab7b80961e01763b8d25b698211125167336"
+    "snapshot_sha256": "b7b8d621d1adf08ba0169ccb02d9242fd8142017ad501ee0aa672af60d4e828d",
+    "tree": "ab9914ea348d148ea80c3ba980257ccdb68f80d4"
   }
 } as const;
