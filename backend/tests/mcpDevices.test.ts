@@ -535,6 +535,59 @@ describe("MCP: the owner's phone (SMS Bridge) and PC (PC Control Plus)", () => {
     assert.equal(sent.args.goal, "Find the opening hours");
   });
 
+  it("runs read-only Chrome research at once, routes a read-only goal to it and keeps revoking previewed (issue #81)", async () => {
+    const owner = await describeTools(writeToken);
+    const research = owner.find((entry) => entry.name === "pc_web_research_start")!;
+    assert.ok(research, "pc_web_research_start is offered");
+    assert.equal(research.access, "read");
+    assert.equal(research.readOnly, true);
+    assert.equal(research.riskClass, "read");
+    assert.equal(research.confirmation, "none");
+    assert.ok(research.limitations.some((line: string) => /standing read-only research permission/.test(line)), "the standing PC permission is stated");
+    assert.ok(research.limitations.some((line: string) => /pc_browser_read/.test(line) && /no API credits/.test(line)), "the no-credit fallback is stated");
+    assert.ok(research.limitations.some((line: string) => /DOM text/.test(line)), "its loop decides from the DOM");
+    const status = owner.find((entry) => entry.name === "pc_web_research_trust_status")!;
+    assert.equal(status.readOnly, true);
+    const revoke = owner.find((entry) => entry.name === "pc_web_research_trust_revoke")!;
+    assert.equal(revoke.readOnly, false);
+    assert.equal(revoke.confirmation, "preview_then_confirm");
+
+    const described = result(await call(writeToken, "describe_capabilities", { tool: "pc_web_research_start" })).body;
+    assert.equal(JSON.stringify(described).includes("UNKNOWN_TOOL"), false, JSON.stringify(described).slice(0, 400));
+
+    const listing = (await rpc(writeToken, { jsonrpc: "2.0", id: 3, method: "tools/list" })).body.result.tools as Json[];
+    const listed = listing.find((entry) => entry.name === "pc_web_research_start")!;
+    assert.equal(listed.annotations.readOnlyHint, true);
+    assert.equal(listed.annotations.destructiveHint, false);
+
+    // Read-only research runs at once, on a read-only connection too, and reaches the PC as web_research_start.
+    const args = { url: "https://www.google.com/travel/flights?q=Flights%20from%20London%20to%20Prague", goal: "Cheapest direct flight, read only" };
+    const started = result(await call(readToken, "pc_web_research_start", args));
+    assert.equal(started.isError, false, JSON.stringify(started.body));
+    assert.deepEqual(posts(relay, "/v1/call")[0].body, { tool: "web_research_start", args });
+    const trust = result(await call(readToken, "pc_web_research_trust_status", {}));
+    assert.equal(trust.isError, false, JSON.stringify(trust.body));
+    assert.equal(posts(relay, "/v1/call")[1].body.tool, "web_research_trust_status");
+
+    // A read-only pc_web_goal_start is not previewed as an irreversible change: it is sent to research.
+    const routed = result(await call(writeToken, "pc_web_goal_start", { ...args, allow_changes: false, browser_mode: "existing" }));
+    assert.equal(routed.isError, true);
+    assert.equal(routed.body.error, "USE_READ_ONLY_TOOL", JSON.stringify(routed.body));
+    assert.match(JSON.stringify(routed.body), /pc_web_research_start/);
+    assert.equal(posts(relay, "/v1/call").length, 2, "the routed goal sends nothing to the PC");
+    // A goal that may change something still needs its preview and the yes.
+    const changing = result(await call(writeToken, "pc_web_goal_start", { ...args, allow_changes: true }));
+    assert.equal(changing.body.status, "confirmation_required");
+    const isolated = result(await call(writeToken, "pc_web_goal_start", { ...args, allow_changes: false, browser_mode: "isolated" }));
+    assert.equal(isolated.body.status, "confirmation_required", "a goal outside the owner's Chrome is not research");
+
+    // Revoking reaches the PC only after its preview and the yes.
+    const { prepared, confirmed } = await prepareAndConfirm(writeToken, "pc_web_research_trust_revoke", {});
+    assert.equal(prepared.body.preview.pc_tool, "web_research_trust_revoke");
+    assert.equal(confirmed.isError, false, JSON.stringify(confirmed.body));
+    assert.equal(posts(relay, "/v1/call").at(-1)!.body.tool, "web_research_trust_revoke");
+  });
+
   it("sends through the official WhatsApp Business API only after the yes, inside the 24-hour window, and keeps an unanswered send unknown", async () => {
     const env = { WHATSAPP_GRAPH_API_VERSION: "v21.0", WHATSAPP_PHONE_NUMBER_ID: "123456789", WHATSAPP_ACCESS_TOKEN: "test-whatsapp-token-0123456789",
       WHATSAPP_BUSINESS_ACCOUNT_ID: "987654321", WHATSAPP_WEBHOOK_VERIFY_TOKEN: "test-verify-token", META_APP_SECRET: "test-app-secret" };

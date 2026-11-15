@@ -78,7 +78,9 @@ RELAY_LOCAL = {"pc_status", "pc_capabilities", "pc_browser_connection_status"}
 # only when its whole loop works from text state (DOM, UI Automation) and
 # never from screenshots: the check below reads those modules' source.
 CONTROL_LOOPS = {
-    "web_goal": {"jobs": ["web_goal_start", "web_goal_status", "web_goal_cancel"], "state": "dom",
+    # web_research_start runs the same DOM loop (web_goal.start_goal(research=True)),
+    # read-only, in a new tab of the owner's Chrome.
+    "web_goal": {"jobs": ["web_goal_start", "web_goal_status", "web_goal_cancel", "web_research_start"], "state": "dom",
                  "modules": ["web_goal.py", "browser_dom.py"]},
     "ui_goal": {"jobs": ["ui_goal_start", "ui_goal_status", "ui_goal_cancel"], "state": "uia",
                 "modules": ["desktop_goal.py", "windows_uia.py"]},
@@ -146,7 +148,9 @@ def load_relay(pcp: Path):
 def relay_job_ids(source: str) -> dict[str, str]:
     """pc_<name> -> the job tool its body sends with remote_call('<job>', ...)."""
     ids: dict[str, str] = {}
-    blocks = re.split(r"\n(?=@mcp\.tool)", source)
+    # The relay registers its tools with @mcp.tool(...) or with its own @_tool()
+    # (mcp.tool with the annotations TOOL_ANNOTATIONS states for the name).
+    blocks = re.split(r"\n(?=@(?:mcp\.tool|_tool)\b)", source)
     for block in blocks:
         name = re.search(r"async def (pc_\w+)\(", block)
         job = re.search(r"remote_call\('([a-z_]+)'", block)

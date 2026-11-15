@@ -58,8 +58,38 @@ DOM_JS = r"""() => {
     controls, incomplete: html.length > 28000
   };
 }"""
-_RISK = re.compile(r"\b(pay|purchase|buy|delete|remove|publish|send|submit|checkout|"
-                   r"confirm booking|place order|transfer|unsubscribe|cancel subscription)\b", re.I)
+_RISK = re.compile(r"\b(pay|payment|purchase|buy|delete|remove|publish|send|submit|checkout|check out|"
+                   r"confirm|book|booking now|reserve|reservation|place order|order now|transfer|"
+                   r"unsubscribe|cancel subscription|subscribe|donate|sign in|signin|log in|login|"
+                   r"sign up|signup|register|create account|add to (?:cart|basket|bag|trip)|"
+                   r"continue to (?:payment|checkout)|proceed to (?:payment|checkout)|"
+                   r"post|share|upload|save changes)\b", re.I)
+# Read-only research may press a search form's own button: these labels only
+# ask the site to show results. Anything _RISK matches is refused regardless.
+_SEARCH_SUBMIT = re.compile(r"^\W*(search|find|show|see|view|filter|apply|apply filters?|sort|update|refresh|"
+                            r"explore|compare|go|done|ok|close|load more|show more|more results|"
+                            r"search (?:flights?|cars?|car hire|hotels?|trains?|buses|rentals?)|"
+                            r"find (?:flights?|cars?|hotels?)|show (?:flights?|results|cars?|deals))\W*$", re.I)
+# Read-only research never types personal, contact, login or payment data.
+_SENSITIVE_FIELD = re.compile(r"(e-?mail|phone|mobile|\btel\b|card|cvv|cvc|security code|expir|passport|iban|"
+                              r"sort code|account|password|passcode|\bpin\b|otp|one[- ]time|verification|"
+                              r"birth|surname|first name|last name|full name|given name|family name|"
+                              r"street|address|post ?code|zip|national id|licen[cs]e number)", re.I)
+_SENSITIVE_AUTOCOMPLETE = re.compile(r"^(cc-|email|tel|name|given-name|family-name|additional-name|street-address|"
+                                     r"address-|postal-code|bday|one-time-code|current-password|new-password|username)", re.I)
+_SENSITIVE_TYPES = frozenset({"email", "tel", "password", "hidden", "file"})
+
+
+def sensitive_field(locator, typ):
+    """True when a field may hold personal, contact, login or payment data."""
+    if typ in _SENSITIVE_TYPES:
+        return True
+    autocomplete = (locator.get_attribute("autocomplete") or "").strip()
+    if autocomplete and _SENSITIVE_AUTOCOMPLETE.search(autocomplete):
+        return True
+    described = " ".join(filter(None, (locator.get_attribute(name) for name in
+                                       ("name", "id", "aria-label", "placeholder", "title"))))
+    return bool(_SENSITIVE_FIELD.search(described))
 
 
 def safe_url(url):
@@ -131,8 +161,17 @@ def execute(page, actions, allow_changes=False, cancel=None):
                     raise ValueError("Page changed; chosen element no longer matches the snapshot")
             label = (expected or locator.get_attribute("aria-label") or
                      locator.inner_text(timeout=500) or "").strip()
-            if not allow_changes and (typ == "submit" or _RISK.search(label)):
-                raise PermissionError("A state-changing action needs explicit approval: " + label[:120])
+            if not allow_changes:
+                # Read-only research: searching, filtering and sorting are
+                # fine; booking, paying, sending, signing in or typing
+                # personal data stop the task and wait for the owner.
+                if _RISK.search(label):
+                    raise PermissionError("A state-changing action needs explicit approval: " + label[:120])
+                if typ == "submit" and not _SEARCH_SUBMIT.match(label):
+                    raise PermissionError("A state-changing action needs explicit approval: " + label[:120])
+                if kind == "fill" and sensitive_field(locator, typ):
+                    raise PermissionError("Read-only research does not enter personal, contact, login or payment "
+                                          "data: " + label[:120])
             if kind == "click":
                 locator.click(timeout=8000)
             elif kind == "fill":

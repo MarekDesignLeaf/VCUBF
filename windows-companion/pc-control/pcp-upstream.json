@@ -2,8 +2,8 @@
   "comment": "The signed PC Control Plus release Secretary's relay catalogue is imported from, vendored in pcp-upstream/. Change it only with import_pcp_catalogue.py --refresh, which rewrites the snapshot, this pin and the catalogue together; CI checks all three.",
   "repository": "MarekDesignLeaf/pc-control-plus",
   "ref": "signed-release",
-  "commit": "dabf4c4809586785254c4874230329c21474f977",
-  "tree": "ac2dab7b80961e01763b8d25b698211125167336",
-  "release_id": "5aa76306494ca21537597525b1c1b0a7a846122f",
+  "commit": "d239f511986f05f8a982955f9f0f0cf71596dd17",
+  "tree": "ab9914ea348d148ea80c3ba980257ccdb68f80d4",
+  "release_id": "acd5cc8478576232a5cbcafb32bcd2762034fd95",
   "release_public_key_b64": "2eFLetx/SzGfn5h1UTWGS/8YqHEVCgmhjat5jwg6Zrs="
 }

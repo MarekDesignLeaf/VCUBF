@@ -163,6 +163,34 @@ limitations and the `initialize` instructions state the rule.
   listed twice.
 - The relay catalogue is imported from the pinned signed release `1b4dc2d`.
 
+### Revision `2026-11-09.popup-recovery`
+
+Shared engine 1.1.2 and its signed upstream snapshot; tool names and policy metadata
+unchanged (same fingerprint as `2026-11-09.full-device-scope`).
+
+### Revision `2026-11-15.chrome-research` (issue #81)
+
+- The relay catalogue is imported from the pinned signed release `acd5cc8` (commit
+  `d239f51` of `signed-release`). The importer reads tools registered with the relay's
+  `@_tool()` decorator as well as `@mcp.tool`, and attests `web_research_start` as part
+  of the screenshot-free DOM loop (`web_goal.py`, `browser_dom.py`).
+- `pc_web_research_start`: read-only research in a new tab of the owner's Chrome. Read
+  access, `readOnlyHint: true`, no preview, also on a read-only connection. The PC refuses
+  booking, payment, sending, sign-in, personal data and deletion, and runs it under the
+  owner's one standing, revocable read-only research permission (asked once on the PC).
+  Chrome's own remote-debugging prompt is never answered for the owner.
+- `pc_web_research_trust_status` (read) and `pc_web_research_trust_revoke` (previewed,
+  only reduces access).
+- `pc_web_goal_start` with `allow_changes: false` in the existing Chrome is not previewed
+  as an irreversible change: it answers `USE_READ_ONLY_TOOL` naming
+  `pc_web_research_start`, as the PC itself runs such a goal as research. Every other
+  goal stays previewed and irreversible.
+- No-credit fallback: when the PC's step planner fails (for example its OpenAI key has no
+  credits), the research tab stays open at the given address and `pc_browser_read` or
+  `pc_browser_extract` read its results from the DOM. For flights, a Google Flights
+  natural-language address (`https://www.google.com/travel/flights?q=...`). Paid API
+  billing is the owner's decision; Secretary never starts a payment or a booking.
+
 ## Safety unchanged
 
 Tenant isolation, OAuth scopes, account permissions, administrator switches, audit,

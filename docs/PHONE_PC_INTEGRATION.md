@@ -153,8 +153,8 @@ python windows-companion/pc-control/server/import_pcp_catalogue.py --refresh --p
 `--refresh` reads the checkout's HEAD from git objects, not from the working tree. It
 writes the snapshot, the pin and the catalogue together, and only after the new snapshot
 passes every check; a failure changes nothing. A new release key is given explicitly
-with `--public-key-b64`. Today the pin is release `5aa7630` (`signed-release`
-`dabf4c4`, tree `ac2dab7`), shared engine1.1.2.
+with `--public-key-b64`. Today the pin is release `acd5cc8` (`signed-release`
+`d239f51`, tree `ab9914e`), shared engine 1.1.2 (issue #81: read-only Chrome research).
 
 Secretary's decision per relay tool is `backend/src/modules/mcp/pcRelayPolicy.ts`;
 `tests/mcpDevices.test.ts` fails when a relay tool has no decision or a decision names
@@ -162,8 +162,8 @@ no tool:
 
 | Decision | Tools | How it runs |
 | --- | --- | --- |
-| read | `system_info`, `monitors_list`, `list_directory`, `read_text`, `search_files`, `audit_tail`, `approvals_list`, `permission_status`, `web_tabs_list`, `web_list_fields`, `web_dom`, `ui_tree`, `ui_wait`, `web_goal_status`, `ui_goal_status` | at once under `read_pc`; leaves nothing running or queued |
-| reviewed | `write_file` (text or base64; the preview shows binary content by size and SHA-256), `write_workspace_text`, `make_directory`, `move_file`, **`delete_file`, `delete_workspace_file`** (the PC first saves a backup copy, refuses paths outside its profile or workspace), **`run_approved_script`** (only a `name.ps1`/`name.py` from the owner's approved-scripts folder, no shell, 12 s), keyboard input to the window in front (`desktop_type`, `desktop_hotkey`, `desktop_focus_window`), `open_url`, `web_*` steps, `ui_batch`, `web_goal_start` / `ui_goal_start` (they keep running on the PC) and their cancel | preview (with the PC's protections) → yes → one call, `operate_pc`; never read-only; the PC asks its owner again |
+| read | `system_info`, `monitors_list`, `list_directory`, `read_text`, `search_files`, `audit_tail`, `approvals_list`, `permission_status`, `web_tabs_list`, `web_list_fields`, `web_dom`, `ui_tree`, `ui_wait`, `web_goal_status`, `ui_goal_status`, `web_research_trust_status`; **`web_research_start`** (read-only research in a new tab of the owner's Chrome, under the owner's one standing, revocable research permission on the PC) | at once under `read_pc`; leaves nothing running or queued, except research's read-only task, which the PC keeps read-only |
+| reviewed | `write_file` (text or base64; the preview shows binary content by size and SHA-256), `write_workspace_text`, `make_directory`, `move_file`, **`delete_file`, `delete_workspace_file`** (the PC first saves a backup copy, refuses paths outside its profile or workspace), **`run_approved_script`** (only a `name.ps1`/`name.py` from the owner's approved-scripts folder, no shell, 12 s), keyboard input to the window in front (`desktop_type`, `desktop_hotkey`, `desktop_focus_window`), `open_url`, `web_*` steps, `ui_batch`, `web_goal_start` / `ui_goal_start` (they keep running on the PC; a `web_goal_start` with `allow_changes: false` in the existing Chrome answers `USE_READ_ONLY_TOOL` and runs as `web_research_start`) and their cancel, `web_research_trust_revoke` (only reduces access) | preview (with the PC's protections) → yes → one call, `operate_pc`; never read-only; the PC asks its owner again |
 | not offered | owner-local, pending review: `run_command` (an unreviewed shell), `permission_set`, `approvals_reset` (the PC's own safety settings); by the text-state rule: `desktop_click`, `desktop_drag`, `desktop_scroll`, `desktop_batch` (screen coordinates), `screenshot`, `web_screenshot`, `camera_*` (images never drive automation); `web_close`; the relay's `ui_windows` (the engine's is offered) | listed in `describe_capabilities.notOffered` with the reason; refused before any request |
 
 This is not every PC function: the shell, the PC's safety switches, coordinate input
