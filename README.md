@@ -31,7 +31,7 @@ docs/               User guide, connector engine, production architecture, voice
 
 ## Current snapshot (source inventory, 19 September 2026)
 
-- **Backend**: 34 mounted route groups, 53 Prisma models, 151 Action Contracts,
+- **Backend**: 37 mounted route groups, 56 Prisma models, 162 Action Contracts,
   and 9 fixed permissions. Counts describe source structure, not release acceptance.
 - **Voice**: the Windows v2 runtime includes listener heartbeat, pause/resume controls,
   transcript rejection before interpretation, bounded speech output, interruption handling,
@@ -58,6 +58,48 @@ docs/               User guide, connector engine, production architecture, voice
   do not. No figure is estimated or forecast, and no currency is spoken because the
   company record does not hold one. CRM read permission and company capability policy
   apply. The backend supplies every spoken figure.
+- **Archive vs permanent deletion**: archiving a client or contact (the existing
+  `DELETE /crm/clients/:id` and `DELETE /crm/contacts/:id`, voice and MCP `archive_*`)
+  stays the reversible soft-delete. Permanent deletion is a separate UI-only action
+  (`GET|POST /crm/{clients|contacts}/:id/permanent-deletion`): an exact preview with
+  dependency counts and a digest, the record's name typed back, a re-check under the row
+  lock and the emergency-stop lock, and one audit entry committed with the delete. A client
+  with any job, quote, invoice, payment, communication, task, photo, document, contact,
+  converted lead or merge history is refused; nothing cascades. Voice cannot delete
+  permanently. An MCP client approved for `secretary.write` can delete a **contact**
+  permanently with `delete_contact_permanently` (preview, the user's explicit yes, and the
+  exact name typed by the user passed to `confirm_action`; issue #74); client deletion stays
+  in the web UI.
+- **WhatsApp sender review**: inbound WhatsApp messages are always kept, but a sender no
+  longer becomes a CRM contact by itself. Senders wait on the Connectors page, with their
+  messages and a work-related signal that is only an inference from message text; a person
+  approves a real customer (contact, optionally client, after a preview and confirmation)
+  or rejects them as personal, employee, subcontractor, supplier or other. Rejected senders
+  and senders whose contact was deleted permanently are never imported again unless a
+  person reopens them. Existing CRM contacts are not changed by this. The same review is
+  available through the MCP gateway without a web session (issue #74):
+  `list_whatsapp_senders`, `get_whatsapp_sender`, and with `secretary.write` and
+  `crm.manage` the previewed `approve_whatsapp_sender`, `reject_whatsapp_sender`,
+  `reopen_whatsapp_sender` and `defer_whatsapp_sender`.
+- **Explainable WhatsApp conversation triage**: the attention feed groups unresolved
+  intakes into one item per connector conversation and classifies work relevance separately
+  from whether a new action appears necessary. It uses at most the latest 12 messages over
+  21 days, the exact normalized sender number within that connector, the current human
+  sender label, and — only for an exactly linked CRM client — real open jobs, quotes,
+  invoices and tasks. An exact open lead phone can support review but never auto-approves a
+  sender. English/Czech request, scope, visit, site-access, materials/dimensions,
+  delivery/order, payment and repair language is combined with recent-topic and short-reply
+  context. A recorded outgoing Secretary reply, an explicitly resolved latest intake, or
+  completion/thanks is not treated as a fresh action. Known customers may still write
+  personal messages; known suppliers, subcontractors and employees may still have relevant
+  work messages without becoming customer leads. Each emitted item exposes stable reason
+  codes, relevance, action need and confidence. Human personal/exclusion labels take
+  precedence and remain reversible through sender review. Provider attachment type and a
+  real caption are only supporting metadata: a bare image/document never implies its
+  contents. There is no OCR, full WhatsApp history, group-participant model, safely linked
+  calendar-event evidence or learned correction model yet; business-account status,
+  time/weekend, urgency, emoji and friendly wording never decide by themselves. No triage
+  result sends, deletes, imports or resolves anything.
 - **WhatsApp replies**: “Odpověz Honzovi na WhatsApp, že přijedeme v pondělí” answers
   that sender's latest received message (or “last” for the newest from anyone). The
   recipient is always the message's sender, never a spoken number; the reply quotes the
@@ -109,7 +151,7 @@ docs/               User guide, connector engine, production architecture, voice
 - **Committed business features**: Gmail PDF delivery, opt-in daily email digest,
   client unmerge, configurable notification thresholds and invoice/payment KPIs.
   Provider delivery requires separate integration acceptance; mocked sends are not live sends.
-- **Tests**: 103 test files, including database integration tests and checks that only
+- **Tests**: 113 test files, including database integration tests and checks that only
   read source files. `tests/docsDrift.test.ts` checks the counts in this section.
   See `docs/VOICE_RELEASE_2026-09-19.md` for validation scope and outstanding gates.
 - **Runtime**: local testing uses Node 22 x64 with the Windows x64 Prisma engine.
@@ -894,6 +936,104 @@ that revision; the suite has since grown to 73 suites (see Current snapshot).
 Frontend: `npm run lint` and `npm run build` verified working with no warnings. The auth
 provider, context state and `useAuth` hook live in separate modules so Fast Refresh can
 identify the component-only provider module correctly.
+
+### MCP gateway (`POST /mcp`, off by default; writing behind its own switch)
+
+One Model Context Protocol endpoint for external AI clients (ChatGPT first, Claude second),
+stateless Streamable HTTP with JSON answers (`initialize`, `ping`, `tools/list`, `tools/call`).
+Every connection reads: the catalogue tools whose mode is read and that need no
+confirmation, plus `run_read_command`, which runs a canonical parser command only when the
+parser classifies it as a read. Every call goes through the caller's identity, the
+emergency stop, the user's permissions and the administrator's capability switches, and is
+audited as `mcp_read_tool` with the tool name, the result and a keyed fingerprint of the
+arguments. The path answers 404 unless `MCP_GATEWAY_ENABLED=true`.
+
+Writing (step P2c, `backend/src/modules/mcp/writeTools.ts`) is a second switch,
+`MCP_WRITE_ENABLED=true`, off by default, and needs an access token the person approved for
+`secretary.write`. The write tools are named, one per Action Contract, and call the owning
+service with its own schema; records are named by id only. Direct, each with a required
+`idempotency_key` (the first call runs, a repeat gets the first answer, the same key with
+other arguments is refused; a call that fails after the change has started is kept as
+`OUTCOME_UNKNOWN` and never run again with that key, because a service may already have
+saved its record; these keys live in a reserved `mcp:` namespace that no `Idempotency-Key`
+header may use, so the HTTP guard can never claim, expire or delete them; each direct write
+runs in one transaction that holds the company row FOR SHARE, and every query of the owning
+service joins it (an ambient transaction in `backend/src/db.ts`), so the write and its
+audit entry commit before any emergency stop can, or are rolled back, including when the
+transaction outlives its time limit): `create_client`, `update_client`, `create_contact`,
+`update_contact`, `create_lead`, `update_lead` (including its status), `create_job`,
+`change_job_status`, `assign_job`, `create_task`, `update_task` (including its status),
+`create_quote`, `update_quote`, `change_quote_status`, `create_invoice_draft`,
+`update_invoice_draft`. Previewed first and run only by `confirm_action` with the returned
+`confirmation_id` (same user, same OAuth connection, ten minutes, newest preview only,
+once, and only if the preview computed again at that moment is identical; an invoice
+preview is the whole document, every line, dates, notes, payments, totals and revision, and
+the status change is made under a row lock only for that revision; a preview too large
+to hand back whole is refused as `PREVIEW_TOO_LARGE` before any confirmation exists;
+archiving runs only for the approved revision, name and client link, compared under the
+row lock of the archive; the emergency stop is checked again just before the change and
+inside the owning service's transaction, serialised with the switch, and a stop closes
+the review):
+`archive_client`, `archive_contact` (destructive), `convert_lead` (irreversible),
+`change_invoice_status` to issued or void (financial), `approve_whatsapp_sender`,
+`reject_whatsapp_sender`, `reopen_whatsapp_sender` and `defer_whatsapp_sender`
+(classification; the sender's revision is bound and re-checked by
+the owning service), `delete_contact_permanently` (permanent; `confirm_action` must also
+carry `confirm_display_name`, the contact's exact name typed by the user; a missing or wrong
+name consumes nothing; the service then re-checks the preview digest under the contact's
+row lock and the emergency-stop lock); `cancel_action` withdraws one. The
+preview queue is its own (`mcp_write_review`), so Alfonzo's spoken yes cannot confirm it.
+Nothing is e-mailed or published through the gateway. The only messages it can send are
+an SMS from the owner's phone (`send_phone_sms`), a reply to a phone chat notification
+(`reply_phone_chat`, not the WhatsApp Business API), both through SMS Bridge, and a
+message or reply from the company's WhatsApp Business number
+(`send_whatsapp_business_message`, `reply_whatsapp_business_message`, existing connector,
+24-hour window), all previewed, confirmed and sent at most once per confirmation; an unknown outcome is never retried by
+itself (`get_outbound_message_status`, `resubmit_phone_message`). The owner's PC is
+reachable only through PC Control Plus catalogue tools (`pc_*`, generated from the
+shared engine and the relay pinned to a signed release; changes previewed; no unreviewed
+shell, camera, screenshots or screen coordinates). These tools are listed only for the
+company named by `SMS_BRIDGE_COMPANY_ID` / `PCP_COMPANY_ID`
+(`docs/PHONE_PC_INTEGRATION.md`); Secretary's own assistant and agent use the same
+contracts. The only deletion of a CRM record is `delete_contact_permanently`; the owner's
+PC files are deleted only by previewed PC steps the PC backs up and approves again;
+recording payments, deleting clients and sending quotes or
+invoices are not exposed. WhatsApp sender review reads (`list_whatsapp_senders`,
+`get_whatsapp_sender`) are open to every connection with `crm.read` and the
+administrator's switch for reading WhatsApp messages. Every connection also sees
+`describe_capabilities`, which reads no company records, writes nothing (not even an
+audit entry) and returns machine-readable metadata for every tool the server has, including
+those the connection cannot see and why (scope, permission, administrator switch,
+confirmation, risk class, side effects, limitations); the `initialize` instructions end
+with a summary generated from the same catalogue as `tools/list`, naming every tool. The
+catalogue is fingerprinted in the append-only `MCP_TOOLSET_FINGERPRINTS` ledger, so any tool
+change fails CI until a new revision is appended (`docs/MCP_CAPABILITY_METADATA.md`). `initialize` reports
+`serverInfo.version` as `<catalogue version>+<MCP_TOOLSET_REVISION>`, so a client can see
+that its stored tool list is stale; ChatGPT must refresh (or disconnect and reconnect) the
+connector to see new tools, and a connection approved read-only must be approved again
+with writing to see any write tool. See `docs/MCP_SENDER_REVIEW_ACCEPTANCE.md`. A read token calling a write tool gets
+HTTP 403 with `WWW-Authenticate: Bearer error="insufficient_scope"`; the owner's own Bearer
+token stays read only. Each write is audited as `mcp_write_tool` (tool, phase, OAuth
+client, fingerprint, never the record) and by the owning service under its own contract.
+
+ChatGPT and Claude connect through OAuth 2.1 (`backend/src/modules/mcp/oauth.ts`):
+discovery at `/.well-known/oauth-protected-resource[/mcp]` and
+`/.well-known/oauth-authorization-server`, Dynamic Client Registration at
+`/oauth/register` (public clients only), authorization code with PKCE S256 at
+`/oauth/authorize` and `/oauth/token` with refresh tokens rotated on every use. The person
+approves with their Secretary e-mail and password; `secretary.read` is always granted, and
+`secretary.write` is offered only while writing is switched on and granted only with its
+own ticked box and button (audited as `authorize_mcp_client` with the requested and granted
+scopes). A refresh can narrow a grant but never widen it, so a connection approved for
+reading must be approved again to write, and a connection refreshed while writing is
+switched off continues read only. Codes and refresh tokens are stored as hashes
+(`McpOAuthClient`, `McpOAuthGrant`); access tokens are one-hour, purpose-restricted JWTs
+bound to the `/mcp` resource that every other route refuses. A replayed code or refresh
+token revokes the chain; a password change ends every connection. The issuer is
+`MCP_PUBLIC_URL`, or the request origin when unset. Covered by `tests/mcpGateway.test.ts`,
+`tests/mcpOAuth.test.ts`, `tests/mcpWrite.test.ts`, `tests/mcpSenderReview.test.ts` and
+`tests/mcpCapabilities.test.ts`; no
+live ChatGPT or Claude connection has been accepted, for reading or writing.
 
 ## What's deliberately NOT here yet
 
