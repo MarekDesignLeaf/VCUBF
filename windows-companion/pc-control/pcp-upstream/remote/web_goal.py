@@ -79,6 +79,21 @@ def _openai_key():
     return ""
 
 
+KEYLESS = (
+    "Autonomous browser goals need a step planner, and no OpenAI API key is set on this PC "
+    "(PCP_OPENAI_API_KEY or OPENAI_API_KEY in the Windows user environment; never in a chat). "
+    "Nothing was asked or done. Without a key, work in the browser step by step: pc_browser_tabs, "
+    "pc_browser_snapshot, pc_browser_act and pc_browser_read (the chat assistant plans each step "
+    "from the page DOM; no API key and no credits are used)."
+)
+
+
+def require_planner():
+    """Raise before any approval when no planner can run on this PC."""
+    if not _openai_key():
+        raise RuntimeError(KEYLESS)
+
+
 _RESEARCH_RULES = (
     " READ-ONLY RESEARCH MODE: you may navigate public sites, type places, dates and passenger counts into "
     "search forms, choose options, filter, sort and press the site's Search/Show/Filter buttons, then read the "
@@ -130,7 +145,7 @@ def _decide(goal, snapshot, history, allow_changes, research=False):
     return json.loads(payload["choices"][0]["message"]["content"])
 
 
-def _planner_error(exc):
+def _planner_error(exc, surface="browser"):
     """A clear reason when the local OpenAI planner refuses, without the key or request."""
     try:
         detail = json.loads(exc.read() or b"{}").get("error", {})
@@ -138,9 +153,11 @@ def _planner_error(exc):
         detail = {}
     code = str(detail.get("code") or detail.get("type") or "")[:60]
     if exc.code == 429 and code in ("insufficient_quota", "credit_balance_exhausted"):
-        return ("The browser goal's planner (the OpenAI API key on this PC) has no credits left "
+        done = ("Nothing was done in the browser beyond opening the tab." if surface == "browser"
+                else "Nothing was done on the desktop.")
+        return (f"The {surface} goal's planner (the OpenAI API key on this PC) has no credits left "
                 f"({code}). Add credits at https://platform.openai.com/settings/organization/billing/ "
-                "or set another key in PCP_OPENAI_API_KEY. Nothing was done in the browser beyond opening the tab.")
+                "or set another key in PCP_OPENAI_API_KEY. " + done)
     if exc.code == 401:
         return "The OpenAI API key on this PC was refused (401). Set a valid PCP_OPENAI_API_KEY."
     return f"The OpenAI planner returned HTTP {exc.code}" + (f" ({code})" if code else "") + "."

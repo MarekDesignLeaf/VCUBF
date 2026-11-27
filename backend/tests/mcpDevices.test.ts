@@ -543,7 +543,7 @@ describe("MCP: the owner's phone (SMS Bridge) and PC (PC Control Plus)", () => {
     assert.equal(research.readOnly, true);
     assert.equal(research.riskClass, "read");
     assert.equal(research.confirmation, "none");
-    assert.ok(research.limitations.some((line: string) => /standing read-only research permission/.test(line)), "the standing PC permission is stated");
+    assert.ok(research.limitations.some((line: string) => /all future read-only research on this PC/.test(line) && /revocable/.test(line)), "the standing, revocable PC permission is stated");
     assert.ok(research.limitations.some((line: string) => /pc_browser_read/.test(line) && /no API credits/.test(line)), "the no-credit fallback is stated");
     assert.ok(research.limitations.some((line: string) => /DOM text/.test(line)), "its loop decides from the DOM");
     const status = owner.find((entry) => entry.name === "pc_web_research_trust_status")!;

@@ -17,7 +17,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from pydantic import BaseModel, Field
-from mcp.types import ToolAnnotations
+from mcp.types import ToolAnnotations, AudioContent, EmbeddedResource, BlobResourceContents, TextContent
 from oauth import LOGIN_PAGE, OwnerProvider
 import pc_engine
 
@@ -56,6 +56,99 @@ last_heartbeat = 0.0
 in_flight_jobs = {}  # Jobs delivered to Windows, awaiting results.
 AGENT_GRACE_SECONDS = 90
 IN_FLIGHT_GRACE_SECONDS = 180
+# The Windows agent runs one command at a time. A call that arrives while
+# another runs waits its turn (first come, first served) for up to this long,
+# instead of failing with "agent busy".
+QUEUE_WAIT_SECONDS = float(os.environ.get('PCP_QUEUE_WAIT_SECONDS', '45'))
+RESULT_WAIT_SECONDS = 75
+# Jobs whose caller gave up before the agent picked them up: never delivered,
+# so a retry can never run the same step twice.
+withdrawn_jobs = set()
+_turn_locks = {}
+
+
+class AgentUnavailable(RuntimeError):
+    """The PC is offline or still busy: nothing was sent to it, safe to retry."""
+
+    def __init__(self, message, status=503):
+        super().__init__(message)
+        self.status = status
+
+
+class OutcomeUnknown(RuntimeError):
+    """Delivered to the PC, no answer in time: it may have run; it is never repeated automatically."""
+
+
+def _turn_lock():
+    """One command at a time on the PC, in arrival order (a lock per running event loop)."""
+    loop = asyncio.get_running_loop()
+    lock = _turn_locks.get(loop)
+    if lock is None:
+        _turn_locks.clear()
+        lock = _turn_locks[loop] = asyncio.Lock()
+    return lock
+
+
+async def _wait_until_idle(deadline):
+    """Wait while a command delivered earlier (its caller already gone) still runs on the PC."""
+    while True:
+        online, busy = agent_presence()
+        if not online:
+            raise AgentUnavailable('Windows agent offline; nothing was sent. Check the PC and pc_status.', 503)
+        if not busy:
+            return
+        if time.monotonic() >= deadline:
+            started = min(in_flight_jobs.values(), default=time.monotonic())
+            raise AgentUnavailable(
+                'The PC is still finishing an earlier command (running for %d s, for example waiting for an '
+                'approval on the PC). Nothing was sent; try again shortly.' % (time.monotonic() - started), 409)
+        await asyncio.sleep(0.2)
+
+
+async def submit(tool: str, args: dict):
+    """Run one command on the PC and return the agent's result, queued behind earlier commands.
+
+    Raises AgentUnavailable when nothing was sent (offline, or still busy after
+    QUEUE_WAIT_SECONDS), OutcomeUnknown when the PC got the command but did not
+    answer in time. A command whose caller gives up before the PC picked it up
+    is withdrawn and never runs later.
+    """
+    deadline = time.monotonic() + QUEUE_WAIT_SECONDS
+    lock = _turn_lock()
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=QUEUE_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        raise AgentUnavailable('The PC is still working on earlier commands; nothing was sent. Try again shortly.', 409) from None
+    jid = None
+    try:
+        await _wait_until_idle(deadline)
+        jid = str(uuid.uuid4())
+        future = asyncio.get_running_loop().create_future()
+        pending[jid] = future
+        try:
+            queue.put_nowait({'id': jid, 'tool': tool, 'args': args})
+        except asyncio.QueueFull:
+            raise AgentUnavailable('Relay queue full; nothing was sent.', 429) from None
+        try:
+            return await asyncio.wait_for(future, timeout=RESULT_WAIT_SECONDS)
+        except asyncio.TimeoutError:
+            # wait_for has already cancelled the future; only delivery to the PC matters.
+            if jid not in in_flight_jobs:
+                withdrawn_jobs.add(jid)
+                raise AgentUnavailable('The PC did not pick up the command in time; it was withdrawn and will not '
+                                       'run. Safe to try again.', 504) from None
+            raise OutcomeUnknown('The PC got the command but did not answer within %d s; it may still be running '
+                                 'there. It is not repeated automatically: check its result (for example with a '
+                                 'read) before trying again.' % RESULT_WAIT_SECONDS) from None
+    except asyncio.CancelledError:
+        # The caller disconnected: a command the PC has not picked up is withdrawn.
+        if jid is not None and jid not in in_flight_jobs:
+            withdrawn_jobs.add(jid)
+        raise
+    finally:
+        if jid is not None:
+            pending.pop(jid, None)
+        lock.release()
 
 
 def agent_presence():
@@ -80,12 +173,28 @@ def agent_diagnostics():
         'pending_commands': len(in_flight_jobs),
     }
 
-ALLOWED = frozenset({'system_info', 'list_directory', 'read_text', 'search_files', 'screenshot', 'write_workspace_text', 'delete_workspace_file', 'open_url', 'desktop_click', 'desktop_type', 'desktop_hotkey', 'desktop_scroll', 'desktop_drag', 'desktop_focus_window', 'desktop_batch', 'run_approved_script', 'audit_tail', 'write_file', 'delete_file', 'make_directory', 'move_file', 'run_command', 'camera_list', 'camera_photo', 'camera_video', 'web_open', 'web_attach_existing', 'web_tabs_list', 'web_tab_select', 'web_list_fields', 'web_fill', 'web_click', 'web_screenshot', 'web_close', 'web_type', 'web_press', 'approvals_list', 'approvals_reset', 'permission_status', 'permission_set', 'monitors_list', 'web_goal_start', 'web_goal_status', 'web_goal_cancel', 'web_dom', 'web_batch', 'ui_windows', 'ui_tree', 'ui_batch', 'ui_wait', 'ui_goal_start', 'ui_goal_status', 'ui_goal_cancel', 'web_research_start', 'web_research_trust_status', 'web_research_trust_revoke'})
+ALLOWED = frozenset({'system_info', 'list_directory', 'read_text', 'search_files', 'screenshot', 'write_workspace_text', 'delete_workspace_file', 'open_url', 'desktop_click', 'desktop_type', 'desktop_hotkey', 'desktop_scroll', 'desktop_drag', 'desktop_focus_window', 'desktop_batch', 'run_approved_script', 'audit_tail', 'write_file', 'delete_file', 'make_directory', 'move_file', 'run_command', 'camera_list', 'camera_photo', 'camera_video', 'web_open', 'web_attach_existing', 'web_tabs_list', 'web_tab_select', 'web_list_fields', 'web_fill', 'web_click', 'web_screenshot', 'web_close', 'web_type', 'web_press', 'approvals_list', 'approvals_reset', 'approvals_revoke', 'permission_status', 'permission_set', 'monitors_list', 'web_goal_start', 'web_goal_status', 'web_goal_cancel', 'web_dom', 'web_batch', 'ui_windows', 'ui_tree', 'ui_batch', 'ui_wait', 'ui_goal_start', 'ui_goal_status', 'ui_goal_cancel', 'web_research_start', 'web_research_trust_status', 'web_research_trust_revoke'})
 # PCP_V2_TOOLS
 # The shared engine's tools (pc_engine.TOOLS, the same catalogue the Claude
 # plugin exposes) reach the agent as "engine_<name>".
 ENGINE_TOOL_IDS = frozenset('engine_' + name for name in pc_engine.TOOLS)
-ALLOWED = ALLOWED | ENGINE_TOOL_IDS | {'browser_connection_status'}
+ALLOWED = ALLOWED | ENGINE_TOOL_IDS | {'browser_connection_status', 'download_file', 'export_whatsapp_chat'}
+
+# Enforce the same owner rule at the public relay boundary; do not queue a
+# forbidden action or ask the PC to approve it. Agent enforces it independently.
+DISABLED_BLIND_CONTROL_TOOLS = frozenset({
+    'screenshot', 'web_screenshot',
+    'desktop_click', 'desktop_scroll', 'desktop_drag', 'desktop_batch',
+    'desktop_focus_window', 'desktop_type', 'desktop_hotkey',
+})
+
+
+def require_semantic_control(tool: str) -> None:
+    if tool in DISABLED_BLIND_CONTROL_TOOLS or tool.endswith('_screenshot'):
+        raise PermissionError(
+            'Owner policy: screenshots and blind desktop input are disabled. '
+            'Use browser DOM or Windows UI Automation instead.'
+        )
 
 class Job(BaseModel):
     tool: str
@@ -164,38 +273,39 @@ def health():
 @app.post('/v1/call')
 async def call(job: Job, authorization: str | None = Header(None)):
     authenticate(authorization, CLIENT_TOKEN)
+    try:
+        require_semantic_control(job.tool)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     if job.tool not in ALLOWED:
         raise HTTPException(403, 'Tool not enabled')
-    online, busy = agent_presence()
-    if not online:
-        raise HTTPException(503, 'Agent offline')
-    if busy:
-        raise HTTPException(409, 'Windows agent busy processing a previous command')
-    jid = str(uuid.uuid4())
-    future = asyncio.get_running_loop().create_future()
-    pending[jid] = future
     try:
-        queue.put_nowait({'id': jid, 'tool': job.tool, 'args': job.args})
-        return await asyncio.wait_for(future, timeout=75)
-    except asyncio.QueueFull:
-        raise HTTPException(429, 'Queue full')
-    except asyncio.TimeoutError:
-        raise HTTPException(504, 'Agent timeout')
-    finally:
-        pending.pop(jid, None)
+        return await submit(job.tool, job.args)
+    except AgentUnavailable as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    except OutcomeUnknown as exc:
+        raise HTTPException(504, str(exc)) from None
 
 @app.get('/v1/agent/next')
 async def next_job(authorization: str | None = Header(None)):
     global last_seen
     authenticate(authorization, AGENT_TOKEN)
     last_seen = time.monotonic()
-    try:
-        job = await asyncio.wait_for(queue.get(), timeout=15)
+    give_up = time.monotonic() + 15
+    while True:
+        remaining = give_up - time.monotonic()
+        if remaining <= 0:
+            return {'id': None}
+        try:
+            job = await asyncio.wait_for(queue.get(), timeout=remaining)
+        except asyncio.TimeoutError:
+            return {'id': None}
+        if job.get('id') in withdrawn_jobs:
+            withdrawn_jobs.discard(job['id'])  # its caller gave up before delivery: never run it
+            continue
         if job.get('id'):
             in_flight_jobs[job['id']] = time.monotonic()
         return job
-    except asyncio.TimeoutError:
-        return {'id': None}
 
 @app.post('/v1/agent/heartbeat')
 async def heartbeat(authorization: str | None = Header(None)):
@@ -228,24 +338,13 @@ mcp = FastMCP('PC Control Plus', stateless_http=True, json_response=True,
                       enabled=True, valid_scopes=SCOPES, default_scopes=SCOPES)))
 
 async def remote_call(tool: str, args: dict):
+    require_semantic_control(tool)
     if tool not in ALLOWED:
         raise ValueError('Unsupported tool')
-    online, busy = agent_presence()
-    if not online:
-        raise RuntimeError('Windows agent offline')
-    if busy:
-        raise RuntimeError('Windows agent busy processing a previous command')
-    jid = str(uuid.uuid4())
-    future = asyncio.get_running_loop().create_future()
-    pending[jid] = future
-    try:
-        queue.put_nowait({'id': jid, 'tool': tool, 'args': args})
-        result = await asyncio.wait_for(future, timeout=75)
-        if not result['ok']:
-            raise RuntimeError(result.get('error') or 'Agent error')
-        return result['data']
-    finally:
-        pending.pop(jid, None)
+    result = await submit(tool, args)
+    if not result['ok']:
+        raise RuntimeError(result.get('error') or 'The PC reported an error without a message')
+    return result['data']
 
 # Issue #17: a tool without annotations is, by the MCP defaults, a destructive
 # open-world write, so ChatGPT asked for a chat confirmation even to attach to
@@ -274,7 +373,8 @@ TOOL_ANNOTATIONS = {
     'pc_web_research_start': RESEARCH,
     'pc_web_goal_cancel': LOCAL, 'pc_ui_goal_cancel': LOCAL, 'pc_web_close': LOCAL, 'pc_web_tab_select': LOCAL,
     'pc_desktop_focus_window': LOCAL, 'pc_make_directory': LOCAL, 'pc_camera_photo': LOCAL,
-    'pc_camera_video': LOCAL, 'pc_approvals_reset': LOCAL, 'pc_web_research_trust_revoke': LOCAL,
+    'pc_camera_video': LOCAL, 'pc_approvals_reset': LOCAL, 'pc_approvals_revoke': LOCAL, 'pc_web_research_trust_revoke': LOCAL,
+    'pc_download_file': LOCAL, 'pc_export_whatsapp_chat': LOCAL,
     'pc_open_url': WEB, 'pc_web_open': WEB,
     'pc_write_workspace_text': DESTRUCTIVE, 'pc_delete_workspace_file': DESTRUCTIVE, 'pc_desktop_click': DESTRUCTIVE,
     'pc_desktop_scroll': DESTRUCTIVE, 'pc_desktop_drag': DESTRUCTIVE, 'pc_desktop_batch': DESTRUCTIVE,
@@ -309,6 +409,49 @@ async def pc_list_directory(path: str, limit: int = 100) -> list:
 @_tool()
 async def pc_read_text(path: str, max_bytes: int = 50000) -> str:
     return await remote_call('read_text', {'path': path, 'max_bytes': max_bytes})
+
+@_tool()
+async def pc_export_whatsapp_chat(contact: str, max_messages: int = 100, max_audio_files: int = 10) -> dict:
+    """Export currently rendered messages and available voice blobs from the exact
+    already-open WhatsApp Web chat. The first export for an exact contact requires
+    one local standing approval on that PC; later exports of the same contact do not
+    re-prompt until remembered approvals are reset. Returns local manifest and audio
+    paths for pc_download_file. Not a complete history; requires a logged-in
+    WhatsApp Web tab and the requested chat already open."""
+    if not contact.strip() or len(contact) > 150 or any(ord(c) < 32 for c in contact):
+        raise ValueError('Invalid exact contact name')
+    if not 1 <= max_messages <= 500 or not 0 <= max_audio_files <= 20:
+        raise ValueError('Invalid export limits')
+    return await remote_call('export_whatsapp_chat', {
+        'contact': contact.strip(), 'max_messages': max_messages,
+        'max_audio_files': max_audio_files})
+
+@mcp.tool(annotations=TOOL_ANNOTATIONS['pc_download_file'], structured_output=False)
+async def pc_download_file(path: str, max_bytes: int = 2_000_000) -> list[TextContent | AudioContent | EmbeddedResource]:
+    """Export an exact file from allowed roots. Files inside a WhatsApp export
+    created under an active exact-chat standing approval inherit that approval;
+    unrelated files still require fresh local owner approval. Returns original bytes
+    as native MCP audio (when supported) or embedded binary resource, not a public
+    URL. Client media ingestion must be verified."""
+    if not 1 <= max_bytes <= 8_000_000:
+        raise ValueError('Invalid transfer size limit')
+    payload = await remote_call('download_file', {'path': path, 'max_bytes': max_bytes})
+    encoded = payload['base64']
+    if len(encoded) > 4 * ((max_bytes + 2) // 3):
+        raise ValueError('Oversize transfer')
+    data = base64.b64decode(encoded, validate=True)
+    if len(data) > max_bytes or len(data) != payload['size']:
+        raise ValueError('Transfer size mismatch')
+    digest = hashlib.sha256(data).hexdigest()
+    if not secrets.compare_digest(digest, payload['sha256']):
+        raise ValueError('Transfer integrity mismatch')
+    mime = payload['mime']
+    metadata = TextContent(type='text', text=json.dumps({
+        'name': payload['name'], 'size': len(data), 'mime': mime, 'sha256': digest}))
+    if mime.startswith('audio/'):
+        return [metadata, AudioContent(type='audio', data=encoded, mimeType=mime)]
+    return [metadata, EmbeddedResource(type='resource', resource=BlobResourceContents(
+        uri='pcp-file://sha256/' + digest, mimeType=mime, blob=encoded))]
 
 @_tool()
 async def pc_search_files(path: str, pattern: str, limit: int = 100) -> list[str]:
@@ -660,6 +803,11 @@ async def pc_permission_set(profile: str) -> dict:
 async def pc_approvals_list() -> list:
     """List action types the owner has chosen to stop being prompted for (remembered local approvals)."""
     return await remote_call('approvals_list', {})
+
+@_tool()
+async def pc_approvals_revoke(action: str) -> dict:
+    """Withdraw ONE remembered approval (name from pc_approvals_list). Only reduces trust; granting is local only."""
+    return await remote_call('approvals_revoke', {'action': action})
 
 @_tool()
 async def pc_approvals_reset() -> dict:

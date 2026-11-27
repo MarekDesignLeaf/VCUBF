@@ -191,6 +191,22 @@ unchanged (same fingerprint as `2026-11-09.full-device-scope`).
   natural-language address (`https://www.google.com/travel/flights?q=...`). Paid API
   billing is the owner's decision; Secretary never starts a payment or a booking.
 
+### Revision `2026-11-27.single-consent-dialog`
+
+- The relay catalogue is imported from the pinned signed release `9025b03` (commit
+  `0a7d409` of `signed-release`).
+- `pc_approvals_revoke` (previewed; only reduces access) is added. `pc_download_file` and
+  `pc_export_whatsapp_chat` arrive in the catalogue and are listed in `notOffered` with their
+  reasons; `desktop_focus_window` moves from previewed to `notOffered` because the PC refuses it
+  by the owner's text-state policy.
+- The wording of the consent layers changes in the PC tool descriptions and the research
+  policy: the PC shows its owner one dialog (this operation only, all future operations, deny)
+  and Secretary's own preview stays Secretary's layer. No tool name or argument schema of an
+  existing tool changed.
+- The endpoint is unchanged and no existing tool's argument schema changed; clients that cache
+  tool lists still need a refresh or reconnect to see the added tool and the new wording, and
+  that refresh cannot be forced from the server.
+
 ## Safety unchanged
 
 Tenant isolation, OAuth scopes, account permissions, administrator switches, audit,

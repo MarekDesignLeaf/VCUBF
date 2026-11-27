@@ -16,8 +16,18 @@
  *   permission granted on the PC itself (issue #81).
  * - "reviewed": a change on the PC, or a command that keeps running or waits
  *   in a queue on the PC (goals). It is never read-only: preview, the user's
- *   explicit yes through confirm_action, then one call; the PC asks its owner
- *   again for every sensitive step.
+ *   explicit yes through confirm_action, then one call. The PC shows its
+ *   owner ONE dialog with three choices (this operation only, all future
+ *   operations, deny); a type the owner allowed for all future operations
+ *   is not asked again, except irreversible or sensitive types (delete, run
+ *   command or script, sensitive reads, camera, send, publish, pay, website
+ *   changes, autonomous tasks), which the PC always asks one by one.
+ *
+ * Consent layers, stated once. (1) Secretary: who in the company may operate
+ * the PC (permission, audit, and the user's yes for a reviewed step). (2) The
+ * PC owner's dialog on the PC itself; it cannot be answered remotely.
+ * (3) Platform consents that nothing here can or should answer: Windows UAC,
+ * Chrome's Allow remote debugging, a website's sign in, 2FA and payment pages.
  * - "not_offered": visible in describe_capabilities with the reason, never
  *   callable through Secretary.
  *
@@ -50,7 +60,7 @@ const BACKUP_PROFILE = "The PC first saves a backup copy of an existing file in 
 const BACKUP_WORKSPACE = "The PC first saves a backup copy in its backups folder, works only inside the PC Control Plus workspace, and asks its owner on the PC.";
 const IMAGES = "Captures an image of the screen or a camera. Secretary never controls the PC from images and does not take pictures of the owner's PC or room; read the screen as text with pc_browser_snapshot or pc_ui_snapshot.";
 const KEYS = "Sends keyboard input to the window in front on the PC; read it first with pc_ui_snapshot.";
-const RESEARCH = "Read-only: opens one new tab in the Google Chrome already open on the PC and reads public HTTPS pages from their DOM text; it fills search forms but the PC refuses any booking, payment, purchase, sending, sign-in, personal or card data and deletion. The first task asks the owner once on the PC (Yes = a standing read-only research permission on this PC, revocable with pc_web_research_trust_revoke); later tasks need no approval. Chrome's own Allow remote debugging prompt is Chrome's and is never answered for the owner. Poll pc_web_goal_status with the job_id. The step planner runs on the PC; if it fails (for example no API credits), the research tab stays open at the address given and pc_browser_read or pc_browser_extract read its results from the DOM, using no API credits: for flights pass a Google Flights address such as https://www.google.com/travel/flights?q=Flights%20from%20London%20to%20Prague%20on%202026-12-10.";
+const RESEARCH = "Read-only: opens one new tab in the Google Chrome already open on the PC and reads public HTTPS pages from their DOM text; it fills search forms but the PC refuses any booking, payment, purchase, sending, sign-in, personal or card data and deletion. The first task shows the owner one dialog on the PC (this task only, all future read-only research on this PC, or deny; the standing permission is revocable with pc_web_research_trust_revoke); later tasks need no approval once the owner allowed all future research. Chrome's own Allow remote debugging prompt is Chrome's and is never answered for the owner. Poll pc_web_goal_status with the job_id. The step planner runs on the PC; if it fails (for example no API credits), the research tab stays open at the address given and pc_browser_read or pc_browser_extract read its results from the DOM, using no API credits: for flights pass a Google Flights address such as https://www.google.com/travel/flights?q=Flights%20from%20London%20to%20Prague%20on%202026-12-10.";
 const COORDINATES = "Acts at screen coordinates, the way screenshot-driven control does. PC control through Secretary works only from text state: use pc_ui_act (UI Automation refs) or pc_browser_act (page refs).";
 
 export const PC_RELAY_POLICY: Record<string, PcRelayDecision> = {
@@ -91,10 +101,7 @@ export const PC_RELAY_POLICY: Record<string, PcRelayDecision> = {
   move_file: { kind: "reviewed", reviewReason: "irreversible", effect: "Moves or renames a file or folder on the PC." },
   desktop_type: { kind: "reviewed", reviewReason: "irreversible", effect: KEYS },
   desktop_hotkey: { kind: "reviewed", reviewReason: "irreversible", effect: KEYS },
-  desktop_focus_window: { kind: "reviewed", reviewReason: "destructive", effect: "Brings a window to the front on the PC." },
   web_open: { kind: "reviewed", reviewReason: "irreversible", effect: "Navigates the PC Control Plus browser to the address." },
-  web_attach_existing: { kind: "reviewed", reviewReason: "destructive", effect: "Attaches PC Control Plus to the Chrome or Edge already open on the PC." },
-  web_tab_select: { kind: "reviewed", reviewReason: "destructive", effect: "Switches the browser tab PC Control Plus works in." },
   web_fill: { kind: "reviewed", reviewReason: "irreversible", effect: "Fills fields of the open web page." },
   web_click: { kind: "reviewed", reviewReason: "irreversible", effect: "Clicks in the open web page; it can submit forms." },
   web_type: { kind: "reviewed", reviewReason: "irreversible", effect: "Types into the open web page; it can submit forms." },
@@ -109,19 +116,23 @@ export const PC_RELAY_POLICY: Record<string, PcRelayDecision> = {
       when: (args) => args.allow_changes === false && (args.browser_mode === undefined || args.browser_mode === null || args.browser_mode === "existing"),
     },
   },
-  web_research_trust_revoke: {
-    kind: "reviewed", reviewReason: "destructive",
-    effect: "Revokes the owner's standing read-only research permission on the PC; the next research task asks on the PC again. It only reduces access.",
-  },
   ui_goal_start: { kind: "reviewed", reviewReason: "irreversible", effect: "Starts a desktop task that keeps running on the PC until it finishes or is cancelled." },
-  web_goal_cancel: { kind: "reviewed", reviewReason: "destructive", effect: "Cancels a running web task on the PC." },
-  ui_goal_cancel: { kind: "reviewed", reviewReason: "destructive", effect: "Cancels a running desktop task on the PC." },
+
+  // Steps that only move focus, stop work or reduce access. They stay previewed: running them without Secretary's
+  // yes needs an execution path that is not a database transaction (see docs/PHONE_PC_INTEGRATION.md, consent layers).
+  web_attach_existing: { kind: "reviewed", reviewReason: "destructive", effect: "Attaches PC Control Plus to the Chrome or Edge already open on the PC (Chrome's own Allow remote debugging prompt stays Chrome's)." },
+  web_tab_select: { kind: "reviewed", reviewReason: "destructive", effect: "Switches the browser tab PC Control Plus works in." },
+  web_goal_cancel: { kind: "reviewed", reviewReason: "destructive", effect: "Cancels a running web task on the PC; it only stops work." },
+  ui_goal_cancel: { kind: "reviewed", reviewReason: "destructive", effect: "Cancels a running desktop task on the PC; it only stops work." },
+  web_research_trust_revoke: { kind: "reviewed", reviewReason: "destructive", effect: "Revokes the owner's standing read-only research permission on the PC; it only reduces access." },
+  approvals_revoke: { kind: "reviewed", reviewReason: "destructive", effect: "Withdraws one remembered approval on the PC (named by pc_approvals_list); it only reduces access, and granting stays on the PC." },
 
   // Never through Secretary.
   run_command: { kind: "not_offered", reason: SHELL },
   permission_set: { kind: "not_offered", reason: PC_SAFETY },
   approvals_reset: { kind: "not_offered", reason: PC_SAFETY },
   desktop_click: { kind: "not_offered", reason: COORDINATES },
+  desktop_focus_window: { kind: "not_offered", reason: "The PC refuses this step by the owner's policy against blind desktop input, so offering it would only fail. Windows are listed by pc_ui_windows and operated by pc_ui_snapshot and pc_ui_act." },
   desktop_drag: { kind: "not_offered", reason: COORDINATES },
   desktop_scroll: { kind: "not_offered", reason: COORDINATES },
   desktop_batch: { kind: "not_offered", reason: COORDINATES },
@@ -131,5 +142,7 @@ export const PC_RELAY_POLICY: Record<string, PcRelayDecision> = {
   camera_photo: { kind: "not_offered", reason: IMAGES },
   camera_video: { kind: "not_offered", reason: IMAGES },
   ui_windows: { kind: "not_offered", reason: "The same windows are listed by pc_ui_windows (the shared engine's tool), whose handles work in pc_ui_snapshot and pc_ui_act." },
+  download_file: { kind: "not_offered", reason: "Copies a file's original bytes off the PC as a binary MCP resource. Secretary's PC bridge carries text results only, and a copy of a PC file in Secretary would have no CRM record, permission or retention rule yet. Text files are read with pc_read_text." },
+  export_whatsapp_chat: { kind: "not_offered", reason: "Exports a private chat of the owner's personal WhatsApp Web, including messages of third parties, outside the CRM and the official WhatsApp Business connector. Secretary handles customer messages only through the connector, with their record and consent." },
   web_close: { kind: "not_offered", reason: "Ends the PC's own browser session; a matter for the PC itself, not offered through Secretary." },
 };
