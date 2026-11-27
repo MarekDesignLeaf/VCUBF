@@ -281,7 +281,7 @@ export async function operatePc(user: AuthedUser, params: Params, confirmed: boo
   if (!preview.ok) return preview;
   if (!confirmed) {
     return confirmationRequired(
-      `Review the step on the owner's PC. It runs only after a yes, and the PC asks its owner again. ${tool.sideEffects}`,
+      `Review the step on the owner's PC. It runs only after a yes; the PC shows its owner one dialog (this operation only, all future operations, or deny) unless the owner already allowed that type for all future operations; irreversible or sensitive types are always asked one by one. ${tool.sideEffects}`,
       preview.data,
       { tool: tool.name, arguments: args.data },
     );
@@ -312,7 +312,7 @@ export async function listPcTools(user: AuthedUser, params: Params): Promise<Ser
   return ok(200, {
     rule: PC_TEXT_STATE_RULE,
     read_with: "read_pc {tool, arguments}",
-    change_with: "operate_pc {tool, arguments}: previewed, then a yes; the PC asks its owner again",
+    change_with: "operate_pc {tool, arguments}: previewed, then a yes; the PC shows its owner one three choice dialog unless the type is already allowed",
     reads: PC_READ_TOOLS.map((tool) => ({ tool: tool.name, description: tool.description, arguments: tool.inputSchema })),
     steps: [...(pcSteps ??= pcReviewedToolsByName()).values()].map((tool) => {
       const schema = zodToJsonSchema(z.object(tool.fields).strict(), { $refStrategy: "none" }) as Record<string, unknown>;

@@ -60,6 +60,15 @@ class Snapshot(unittest.TestCase):
         self.assertEqual(release["release_id"], pin["release_id"])
         self.assertEqual(sorted(path.name for path in (self.snapshot / "remote").iterdir()), sorted(importer.SNAPSHOT_FILES))
 
+    def test_the_engine_in_the_pinned_signed_release_is_this_repositorys_engine(self):
+        """pc_engine.py has one canonical source (this repository); the signed PC Control Plus release must carry the same bytes."""
+        manifest = json.loads((self.snapshot / "remote" / "release-manifest.json").read_text(encoding="utf-8"))
+        canonical = hashlib.sha256((_env.SERVER / "pc_engine.py").read_bytes()).hexdigest()
+        record = json.loads((_env.SERVER / "pc_engine.release.json").read_text(encoding="utf-8"))
+        self.assertEqual(record["sha256"], canonical, "the engine release record names the engine")
+        self.assertEqual(manifest["files"]["pc_engine.py"], canonical,
+                         "the pinned signed PC Control Plus release runs a different engine: run sync_pc_engine.py there, release, then refresh the pin here")
+
     def test_refuses_a_changed_relay_even_though_the_manifest_does_not_sign_it(self):
         self.assertNotIn("relay.py", json.loads((self.snapshot / "remote" / "release-manifest.json").read_text())["files"])
         relay = self.snapshot / "remote" / "relay.py"

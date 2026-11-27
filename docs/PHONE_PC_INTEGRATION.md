@@ -153,8 +153,9 @@ python windows-companion/pc-control/server/import_pcp_catalogue.py --refresh --p
 `--refresh` reads the checkout's HEAD from git objects, not from the working tree. It
 writes the snapshot, the pin and the catalogue together, and only after the new snapshot
 passes every check; a failure changes nothing. A new release key is given explicitly
-with `--public-key-b64`. Today the pin is release `acd5cc8` (`signed-release`
-`d239f51`, tree `ab9914e`), shared engine 1.1.2 (issue #81: read-only Chrome research).
+with `--public-key-b64`. Today the pin is release `9025b03` (`signed-release` `0a7d409`, tree `a501a98`), shared engine 1.1.2: the PC's single three-choice owner dialog, a serialised relay queue and keyless planner errors.
+
+**One engine, one source.** `pc_engine.py` is canonical in this repository (`windows-companion/pc-control/server`); pc-control-plus carries a copy made by its `scripts/sync_pc_engine.py`. `tests/test_pcp_snapshot.py` fails when the engine in the pinned signed release is not byte-identical to the canonical one, so Claude and ChatGPT cannot run different engines on different days without CI saying so. Order of a change: engine here, sync there, signed release, then refresh the pin here and deploy Secretary after the relay is live (`RELEASE.md` in pc-control-plus is the single procedure).
 
 Secretary's decision per relay tool is `backend/src/modules/mcp/pcRelayPolicy.ts`;
 `tests/mcpDevices.test.ts` fails when a relay tool has no decision or a decision names
@@ -163,8 +164,8 @@ no tool:
 | Decision | Tools | How it runs |
 | --- | --- | --- |
 | read | `system_info`, `monitors_list`, `list_directory`, `read_text`, `search_files`, `audit_tail`, `approvals_list`, `permission_status`, `web_tabs_list`, `web_list_fields`, `web_dom`, `ui_tree`, `ui_wait`, `web_goal_status`, `ui_goal_status`, `web_research_trust_status`; **`web_research_start`** (read-only research in a new tab of the owner's Chrome, under the owner's one standing, revocable research permission on the PC) | at once under `read_pc`; leaves nothing running or queued, except research's read-only task, which the PC keeps read-only |
-| reviewed | `write_file` (text or base64; the preview shows binary content by size and SHA-256), `write_workspace_text`, `make_directory`, `move_file`, **`delete_file`, `delete_workspace_file`** (the PC first saves a backup copy, refuses paths outside its profile or workspace), **`run_approved_script`** (only a `name.ps1`/`name.py` from the owner's approved-scripts folder, no shell, 12 s), keyboard input to the window in front (`desktop_type`, `desktop_hotkey`, `desktop_focus_window`), `open_url`, `web_*` steps, `ui_batch`, `web_goal_start` / `ui_goal_start` (they keep running on the PC; a `web_goal_start` with `allow_changes: false` in the existing Chrome answers `USE_READ_ONLY_TOOL` and runs as `web_research_start`) and their cancel, `web_research_trust_revoke` (only reduces access) | preview (with the PC's protections) → yes → one call, `operate_pc`; never read-only; the PC asks its owner again |
-| not offered | owner-local, pending review: `run_command` (an unreviewed shell), `permission_set`, `approvals_reset` (the PC's own safety settings); by the text-state rule: `desktop_click`, `desktop_drag`, `desktop_scroll`, `desktop_batch` (screen coordinates), `screenshot`, `web_screenshot`, `camera_*` (images never drive automation); `web_close`; the relay's `ui_windows` (the engine's is offered) | listed in `describe_capabilities.notOffered` with the reason; refused before any request |
+| reviewed | `write_file` (text or base64; the preview shows binary content by size and SHA-256), `write_workspace_text`, `make_directory`, `move_file`, **`delete_file`, `delete_workspace_file`** (the PC first saves a backup copy, refuses paths outside its profile or workspace), **`run_approved_script`** (only a `name.ps1`/`name.py` from the owner's approved-scripts folder, no shell, 12 s), keyboard input to the window in front (`desktop_type`, `desktop_hotkey`), `open_url`, `web_*` steps, `ui_batch`, `web_goal_start` / `ui_goal_start` (they keep running on the PC; a `web_goal_start` with `allow_changes: false` in the existing Chrome answers `USE_READ_ONLY_TOOL` and runs as `web_research_start`) and their cancel, and the steps that only reduce access or move focus: `web_attach_existing`, `web_tab_select`, `web_research_trust_revoke`, `approvals_revoke` (they stay previewed until Secretary has an execution path that is not a database transaction) | preview (with the PC's protections) → yes → one call, `operate_pc`; never read-only; the PC asks its owner again |
+| not offered | owner-local, pending review: `run_command` (an unreviewed shell), `permission_set`, `approvals_reset` (the PC's own safety settings); by the text-state rule: `desktop_click`, `desktop_drag`, `desktop_scroll`, `desktop_batch` (screen coordinates), `desktop_focus_window` (the PC refuses it by the owner's policy against blind desktop input; windows are operated with `pc_ui_windows`, `pc_ui_snapshot`, `pc_ui_act`); `download_file` (copies original file bytes off the PC as a binary resource; Secretary's bridge carries text, and such a copy has no CRM record or retention rule) and `export_whatsapp_chat` (private chats of the owner's personal WhatsApp Web outside the CRM and the official WhatsApp Business connector), `screenshot`, `web_screenshot`, `camera_*` (images never drive automation); `web_close`; the relay's `ui_windows` (the engine's is offered) | listed in `describe_capabilities.notOffered` with the reason; refused before any request |
 
 This is not every PC function: the shell, the PC's safety switches, coordinate input
 and image capture stay on the PC, each with its reason, until reviewed.
@@ -181,6 +182,14 @@ no attestation, is not offered, whatever the policy says (`decideRelayJob`, test
 
 Arguments are checked against the relay's own schema, strictly. The approval on the PC itself stays in force
 for every sensitive step.
+
+**Consent layers, stated once (no second prompt on top of the PC's own).**
+
+1. Secretary: who in the company may operate the PC (permission, audit, emergency stop) and, for a reviewed step, the user's yes through `confirm_action`. This is Secretary's own layer, not a second copy of the PC's dialog.
+2. The PC owner's dialog on the PC itself: ONE dialog per operation with exactly three choices (this operation only, all future operations, deny). A type of operation the owner allowed for all future operations is not asked again; the grant is stored on the PC (`allow.json`, with the time and device in `allow-details.json`), survives release updates, is listed by `pc_approvals_list` and withdrawn with `pc_approvals_revoke`. Irreversible or sensitive types (delete, run a command or script, sensitive reads, camera, sending, publishing, paying, website changes, autonomous tasks) never offer the standing choice and are asked one by one. The dialog cannot be answered remotely: a timeout means deny.
+3. Platform consents that nothing here answers or bypasses: Windows UAC, Chrome's own Allow remote debugging prompt, a website's sign in, 2FA, payment and consent pages.
+
+A read tool runs at once under `read_pc` and still meets layers 2 and 3 where the PC requires them. A reviewed tool meets all three. The PC relay serialises commands: a second command waits in a bounded queue (45 s) instead of failing as busy; a command that was delivered but not answered is reported as an unknown outcome and never repeated.
 
 ### Single owner, server-side tokens
 

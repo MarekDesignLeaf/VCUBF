@@ -13,7 +13,7 @@ export const PCP_RELAY_CATALOGUE = {
         "ui_goal_cancel"
       ],
       "modules": {
-        "desktop_goal.py": "522ac75ee2e6aeccf20d04d7524ef466be3879f10b53dc8ec548bcec955678be",
+        "desktop_goal.py": "1ac9a14ebc8e2908847232368c17b47e7051dd4f9512c6e72976348f7fcc4148",
         "windows_uia.py": "3c75bcb0e38af7f40c7f4e9c5d66577d092c3b253fc2df16a9b128e62ba7fa85"
       },
       "screenshot_free": true,
@@ -29,14 +29,14 @@ export const PCP_RELAY_CATALOGUE = {
       ],
       "modules": {
         "browser_dom.py": "3f992ea9d3145ed15e78ea200f794a6170808a257da98dac95f9d3916ab7e0d4",
-        "web_goal.py": "1ca164c0683a5ba092eb7ec9c251cf349f6f5178c0309d59c1751dfb7c98acbc"
+        "web_goal.py": "dd80e842545b07e55783522f7d83dc1fc3dde68ab33c85f3a08e5d132bb79fd6"
       },
       "screenshot_free": true,
       "state": "dom"
     }
   },
   "engine_version": "1.1.2",
-  "relay_sha256": "83680e446916c74b58a9a187665ae55a5f4c14308aef1e322e7ddf2d80b18934",
+  "relay_sha256": "dbb534400f9309b698aeefaf319340ec92c00679f99b60eef09ea8e1a6117933",
   "source": "MarekDesignLeaf/pc-control-plus remote/relay.py",
   "tools": [
     {
@@ -69,6 +69,29 @@ export const PCP_RELAY_CATALOGUE = {
       },
       "name": "pc_approvals_reset",
       "relay_tool": "approvals_reset"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Withdraw ONE remembered approval (name from pc_approvals_list). Only reduces trust; granting is local only.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "pc_approvals_revokeArguments",
+        "type": "object"
+      },
+      "name": "pc_approvals_revoke",
+      "relay_tool": "approvals_revoke"
     },
     {
       "annotations": {
@@ -437,6 +460,67 @@ export const PCP_RELAY_CATALOGUE = {
       },
       "name": "pc_desktop_type",
       "relay_tool": "desktop_type"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Export an exact file from allowed roots. Files inside a WhatsApp export\ncreated under an active exact-chat standing approval inherit that approval;\nunrelated files still require fresh local owner approval. Returns original bytes\nas native MCP audio (when supported) or embedded binary resource, not a public\nURL. Client media ingestion must be verified.",
+      "input_schema": {
+        "properties": {
+          "max_bytes": {
+            "default": 2000000,
+            "title": "Max Bytes",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "pc_download_fileArguments",
+        "type": "object"
+      },
+      "name": "pc_download_file",
+      "relay_tool": "download_file"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Export currently rendered messages and available voice blobs from the exact\nalready-open WhatsApp Web chat. The first export for an exact contact requires\none local standing approval on that PC; later exports of the same contact do not\nre-prompt until remembered approvals are reset. Returns local manifest and audio\npaths for pc_download_file. Not a complete history; requires a logged-in\nWhatsApp Web tab and the requested chat already open.",
+      "input_schema": {
+        "properties": {
+          "contact": {
+            "title": "Contact",
+            "type": "string"
+          },
+          "max_audio_files": {
+            "default": 10,
+            "title": "Max Audio Files",
+            "type": "integer"
+          },
+          "max_messages": {
+            "default": 100,
+            "title": "Max Messages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "contact"
+        ],
+        "title": "pc_export_whatsapp_chatArguments",
+        "type": "object"
+      },
+      "name": "pc_export_whatsapp_chat",
+      "relay_tool": "export_whatsapp_chat"
     },
     {
       "annotations": {
@@ -1453,21 +1537,21 @@ export const PCP_RELAY_CATALOGUE = {
     }
   ],
   "upstream": {
-    "commit": "d239f511986f05f8a982955f9f0f0cf71596dd17",
+    "commit": "0a7d4098c1e12833679a649478d09677e021fd0d",
     "ref": "signed-release",
-    "release_id": "acd5cc8478576232a5cbcafb32bcd2762034fd95",
-    "release_manifest_sha256": "27a5b68c8ed8f7debe15e5ef0c118416bda46e1e7302e3beeb8cb179b8de5a4f",
-    "release_sequence": 43502895022,
+    "release_id": "9025b033de097ca2b7d52e0ecd1edf99a2b4833f",
+    "release_manifest_sha256": "b3bdce5f9a5e074a2434507d9d195fb038235262415c408eb078699baef13ad5",
+    "release_sequence": 46065273209,
     "repository": "MarekDesignLeaf/pc-control-plus",
     "signed_files": {
-      "agent.py": "1e48c386605e11665dd9e86db3187075ffd96c120f60806613f15e7dd65aed27",
+      "agent.py": "e8cf63bed0fa2333bbd18eb48b64012f0868c3dddda82d4eba7b2e58bc66a272",
       "browser_dom.py": "3f992ea9d3145ed15e78ea200f794a6170808a257da98dac95f9d3916ab7e0d4",
-      "desktop_goal.py": "522ac75ee2e6aeccf20d04d7524ef466be3879f10b53dc8ec548bcec955678be",
+      "desktop_goal.py": "1ac9a14ebc8e2908847232368c17b47e7051dd4f9512c6e72976348f7fcc4148",
       "pc_engine.py": "22c7c652641018e60191a0992360a3b2d0384f31e5174b8131e93d71ba95a666",
-      "web_goal.py": "1ca164c0683a5ba092eb7ec9c251cf349f6f5178c0309d59c1751dfb7c98acbc",
+      "web_goal.py": "dd80e842545b07e55783522f7d83dc1fc3dde68ab33c85f3a08e5d132bb79fd6",
       "windows_uia.py": "3c75bcb0e38af7f40c7f4e9c5d66577d092c3b253fc2df16a9b128e62ba7fa85"
     },
-    "snapshot_sha256": "b7b8d621d1adf08ba0169ccb02d9242fd8142017ad501ee0aa672af60d4e828d",
-    "tree": "ab9914ea348d148ea80c3ba980257ccdb68f80d4"
+    "snapshot_sha256": "da344592cbb49dc3654437689e73c8d79fcd79a3639716b96e4699fcc6dc8c83",
+    "tree": "a501a984d40781b8a1fd2fac4c8768ba5ac476b3"
   }
 } as const;

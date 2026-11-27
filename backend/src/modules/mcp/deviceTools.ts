@@ -684,7 +684,7 @@ function pcWriteTools(): WriteToolDefinition[] {
     return {
       name: tool.name,
       title: `PC: ${tool.relay_tool.replace(/_/g, " ")} (preview first)`,
-      description: `${tool.description}\n\nOn the owner's PC through PC Control Plus. The first call returns the exact step and a confirmation_id; nothing runs until confirm_action after the user's explicit yes, and the PC then asks its owner again for every sensitive step.`,
+      description: `${tool.description}\n\nOn the owner's PC through PC Control Plus. The first call returns the exact step and a confirmation_id; nothing runs until confirm_action after the user's explicit yes, and then the PC shows its owner one dialog (this operation only, all future operations, or deny) unless the owner already allowed that type for all future operations; irreversible or sensitive types are always asked one by one.`,
       contract: OPERATE_PC_ACTION,
       sideEffects: `After confirmation and the PC owner's approval: ${reviewed.effect}`,
       kind: "reviewed",
@@ -721,7 +721,7 @@ function pcEngineWriteTools(): WriteToolDefinition[] {
   return engineTools.filter((tool) => !tool.read_only).map((tool): WriteToolDefinition => ({
     name: `pc_${tool.name}`,
     title: `PC: ${tool.name.replace(/_/g, " ")} (preview first)`,
-    description: `${text(tool.summary)}\n\nOn the owner's PC through PC Control Plus. The first call returns the exact step and a confirmation_id; nothing runs until confirm_action after the user's explicit yes, and the PC then asks its owner again. Use when: ${text(tool.use_when)}`,
+    description: `${text(tool.summary)}\n\nOn the owner's PC through PC Control Plus. The first call returns the exact step and a confirmation_id; nothing runs until confirm_action after the user's explicit yes, and then the PC shows its owner one dialog (this operation only, all future operations, or deny) unless the owner already allowed that type for all future operations; irreversible or sensitive types are always asked one by one. Use when: ${text(tool.use_when)}`,
     contract: OPERATE_PC_ACTION,
     sideEffects: tool.destructive
       ? "After confirmation and the PC owner's approval, the previewed step runs on the PC; it can navigate, submit forms or change data on websites or in Windows apps."

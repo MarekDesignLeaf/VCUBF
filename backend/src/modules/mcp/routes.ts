@@ -110,6 +110,11 @@ export const MCP_TOOLSET_FINGERPRINTS = {
   // (pc_web_research_start, read, no preview, under the PC's standing permission), pc_web_research_trust_status
   // (read) and pc_web_research_trust_revoke (previewed); a read-only pc_web_goal_start is routed to research.
   "2026-11-15.chrome-research": "f57f0c059750bb80f59a31643184470a90c75b8c53b243331f4b8d1be57fe2f6",
+  // PC Control Plus signed release 9025b03 (0a7d409): the PC shows ONE three-choice dialog (this operation only,
+  // all future operations, deny) with revocable remembered approvals; pc_approvals_revoke (previewed);
+  // pc_download_file and pc_export_whatsapp_chat arrive in the catalogue and are not offered; wording of the
+  // consent layers in the PC tool descriptions and in the research policy.
+  "2026-11-27.single-consent-dialog": "5c77e6152f44b5783d5fc0abb9f8c92af0d68d9815c511807e9aa06fdf338dc8",
 } as const satisfies Record<string, string>;
 const toolsetLedger = Object.entries(MCP_TOOLSET_FINGERPRINTS);
 export const MCP_TOOLSET_REVISION = toolsetLedger[toolsetLedger.length - 1][0];
@@ -128,8 +133,8 @@ export { mcpGatewayEnabled };
  */
 const PC_RESEARCH_POLICY =
   "For searching, comparing and reading websites in the owner's Chrome (flights, car hire, prices) use " +
-  "pc_web_research_start and poll pc_web_goal_status: it is read-only, needs no preview, and the PC asks its owner only " +
-  "the first time (a standing permission, revocable); never use pc_web_goal_start for a read-only task. If the research " +
+  "pc_web_research_start and poll pc_web_goal_status: it is read-only, needs no preview, and the PC shows its owner one dialog only " +
+  "the first time (this task only, all future research, or deny; revocable); never use pc_web_goal_start for a read-only task. If the research " +
   "fails (for example the PC's step planner has no API credits), read the research tab it left open with " +
   "pc_browser_read or pc_browser_extract, which use no API credits; never start a payment or a booking.";
 
