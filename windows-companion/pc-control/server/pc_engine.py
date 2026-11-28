@@ -1566,6 +1566,9 @@ class EngineSettings:
     mode: str = "auto"
     # A CDP http:// or ws:// endpoint, or a callable returning one (resolved on first use).
     cdp_endpoint: str | Callable[[], str] = "http://127.0.0.1:9222"
+    # Attaching to an owner-opened Chrome may trigger Chrome's own consent dialog.
+    # Hosts can raise this without slowing the "auto" fallback or launching a browser.
+    cdp_connect_timeout_ms: int = 12000
     channel: str = "msedge"
     executable_path: str = ""
     profile_dir: str = ""
@@ -1656,7 +1659,9 @@ class BrowserSession:
         try:
             if settings.mode in ("auto", "cdp"):
                 try:
-                    self._browser = self._pw.chromium.connect_over_cdp(settings.endpoint(), timeout=2500 if settings.mode == "auto" else 12000)
+                    self._browser = self._pw.chromium.connect_over_cdp(
+                        settings.endpoint(),
+                        timeout=2500 if settings.mode == "auto" else settings.cdp_connect_timeout_ms)
                     self.context = self._browser.contexts[0] if self._browser.contexts else self._browser.new_context()
                     self.mode = "cdp"
                 except Exception as exc:
